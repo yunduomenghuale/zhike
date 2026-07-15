@@ -2,6 +2,7 @@ import os
 import tempfile
 
 from rest_framework.decorators import action
+from django.db.models.deletion import ProtectedError
 from django.db.models import Max
 
 from apps.ai.services import generate_catalog_from_plan, generate_scripts_for_video
@@ -54,6 +55,18 @@ class CatalogViewSet(BaseModelViewSet):
         if course_id:
             qs = qs.filter(course_id=course_id)
         return qs
+
+    def destroy(self, request, *args, **kwargs):
+        catalog = self.get_object()
+        try:
+            self.perform_destroy(catalog)
+        except ProtectedError:
+            return api_response(
+                message="该章节下仍有题目，请先将题目移动到其他章节",
+                code=400,
+                status=400,
+            )
+        return api_response(message="删除成功")
 
     @action(detail=True, methods=["post"], url_path="generate-script", permission_classes=[IsTeacher])
     def generate_script(self, request, pk=None):

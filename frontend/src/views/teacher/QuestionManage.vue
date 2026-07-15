@@ -3,8 +3,11 @@
     <el-card shadow="never" class="data-card q-card">
       <div class="q-toolbar">
         <div class="q-toolbar-left">
-          <el-select v-if="!inCourseWorkspace" v-model="courseId" size="large" class="q-filter-select q-course-select" popper-class="q-filter-popper" placeholder="选择课程" style="width: 220px" @change="() => { load(); loadCatalogs() }">
+          <el-select v-if="!inCourseWorkspace" v-model="courseId" size="large" class="q-filter-select q-course-select" popper-class="q-filter-popper" placeholder="选择课程" style="width: 220px" @change="handleCourseChange">
             <el-option v-for="c in courses" :key="c.id" :label="c.name" :value="c.id" />
+          </el-select>
+          <el-select v-model="filterCatalog" size="large" class="q-filter-select" popper-class="q-filter-popper" placeholder="章节" clearable style="width: 170px" @change="load">
+            <el-option v-for="c in flatCatalogs" :key="c.id" :label="c.label" :value="c.id" />
           </el-select>
           <el-select v-model="filterType" size="large" class="q-filter-select" popper-class="q-filter-popper" placeholder="题型" clearable style="width: 130px" @change="load">
             <el-option v-for="t in qtypes" :key="t.value" :label="t.label" :value="t.value" />
@@ -43,6 +46,7 @@
                 <div class="q-stem">{{ row.stem }}</div>
                 <div class="q-meta">
                   <el-tag size="small" :type="difficultyTag(row.difficulty)" effect="light" round>{{ row.difficulty_display }}</el-tag>
+                  <el-tag size="small" effect="plain" round>{{ row.catalog_title }}</el-tag>
                   <span class="q-score">{{ row.score }} 分</span>
                   <el-tag size="small" :type="statusTag(row.status)" effect="light" round>{{ row.status_display }}</el-tag>
                   <el-tag size="small" :type="row.source === 'ai' ? 'primary' : 'info'" effect="plain" round>
@@ -76,7 +80,7 @@
     </el-card>
 
     <!-- 新建/编辑题目 -->
-    <el-dialog v-model="editVisible" width="680px" align-center :show-close="false" class="question-form-dialog">
+    <el-dialog v-model="editVisible" width="760px" align-center :show-close="false" class="question-form-dialog">
       <template #header>
         <div class="creation-dialog-header">
           <span class="creation-dialog-icon question-create-icon"><el-icon><EditPen /></el-icon></span>
@@ -89,11 +93,18 @@
       </template>
 
       <el-form :model="form" label-position="top" class="question-creation-form">
-        <el-form-item label="题型" class="question-type-field">
-          <el-select v-model="form.qtype" style="width: 200px" @change="onTypeChange">
-            <el-option v-for="t in qtypes" :key="t.value" :label="t.label" :value="t.value" />
-          </el-select>
-        </el-form-item>
+        <div class="form-row">
+          <el-form-item label="题型" class="question-type-field">
+            <el-select v-model="form.qtype" style="width: 160px" @change="onTypeChange">
+              <el-option v-for="t in qtypes" :key="t.value" :label="t.label" :value="t.value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="所属章节（必选）" class="form-row-grow">
+            <el-select v-model="form.catalog" placeholder="请选择题目所属章节" style="width: 100%">
+              <el-option v-for="c in flatCatalogs" :key="c.id" :label="c.label" :value="c.id" />
+            </el-select>
+          </el-form-item>
+        </div>
         <el-form-item label="题干">
           <el-input v-model="form.stem" type="textarea" :rows="2" placeholder="请输入题干" />
         </el-form-item>
@@ -185,7 +196,7 @@
 
       <el-form label-position="top" class="ai-form">
         <el-form-item label="章节">
-          <el-select v-model="ai.catalog" placeholder="选择章节（基于其 PPT 出题）" clearable style="width: 100%">
+          <el-select v-model="ai.catalog" placeholder="选择章节（基于其 PPT 出题）" style="width: 100%">
             <el-option v-for="c in flatCatalogs" :key="c.id" :label="c.label" :value="c.id" />
           </el-select>
         </el-form-item>
@@ -236,6 +247,7 @@ const rows = ref([])
 const loading = ref(false)
 const filterType = ref('')
 const filterStatus = ref('')
+const filterCatalog = ref(null)
 const search = ref(String(route.query.search || ''))
 const total = ref(0)
 const page = ref(1)
@@ -281,12 +293,20 @@ async function loadCatalogs() {
   flatCatalogs.value = flat
 }
 
+function handleCourseChange() {
+  filterCatalog.value = null
+  page.value = 1
+  loadCatalogs()
+  load()
+}
+
 async function load() {
   if (!courseId.value) return
   loading.value = true
   try {
     const data = await listQuestions({
       course: courseId.value, qtype: filterType.value || undefined,
+      catalog: filterCatalog.value || undefined,
       status: filterStatus.value || undefined, search: search.value || undefined, page: page.value,
     })
     rows.value = data.results ?? data
@@ -303,7 +323,7 @@ const form = reactive({})
 
 function blankForm() {
   return {
-    id: null, qtype: 'single', stem: '',
+    id: null, catalog: null, qtype: 'single', stem: '',
     options: [{ key: 'A', text: '' }, { key: 'B', text: '' }, { key: 'C', text: '' }, { key: 'D', text: '' }],
     answerKey: '', answerKeys: [], blanks: [''],
     analysis: '', score: 5, difficulty: 'medium',
@@ -311,9 +331,11 @@ function blankForm() {
 }
 
 function openEdit(row) {
+  if (!row && !flatCatalogs.value.length) return ElMessage.warning('请先在课程目录中创建章节')
   Object.assign(form, blankForm())
   if (row) {
     form.id = row.id
+    form.catalog = row.catalog
     form.qtype = row.qtype
     form.stem = row.stem
     form.options = (row.options && row.options.length) ? JSON.parse(JSON.stringify(row.options)) : form.options
@@ -363,8 +385,9 @@ function buildOptions() {
 
 async function save() {
   if (!form.stem) return ElMessage.warning('请填写题干')
+  if (!form.catalog) return ElMessage.warning('请选择题目所属章节')
   const payload = {
-    course: courseId.value, qtype: form.qtype, stem: form.stem,
+    course: courseId.value, catalog: form.catalog, qtype: form.qtype, stem: form.stem,
     options: buildOptions(), answer: buildAnswer(), analysis: form.analysis,
     score: form.score, difficulty: form.difficulty,
   }
@@ -413,12 +436,14 @@ const aiVisible = ref(false)
 const aiLoading = ref(false)
 const ai = reactive({ qtype: 'single', count: 5, catalog: null })
 function openAi() {
+  if (!flatCatalogs.value.length) return ElMessage.warning('请先在课程目录中创建章节')
   ai.qtype = 'single'
   ai.count = 5
   ai.catalog = null
   aiVisible.value = true
 }
 async function doGenerate() {
+  if (!ai.catalog) return ElMessage.warning('请选择题目所属章节')
   aiLoading.value = true
   try {
     const res = await generateQuestions({
@@ -582,21 +607,21 @@ watch(
 .creation-dialog-header {
   display: flex;
   align-items: center;
-  gap: 13px;
-  min-height: 86px;
-  padding: 22px 24px 18px;
+  gap: 12px;
+  min-height: 66px;
+  padding: 15px 22px 13px;
   border-bottom: 1px solid rgba(226, 232, 240, 0.88);
   background: linear-gradient(135deg, rgba(239, 246, 255, 0.96), rgba(255, 255, 255, 0.98) 58%);
 }
 
 .creation-dialog-icon {
-  width: 44px;
-  height: 44px;
+  width: 38px;
+  height: 38px;
   display: grid;
-  flex: 0 0 44px;
+  flex: 0 0 38px;
   place-items: center;
-  border-radius: 14px;
-  font-size: 21px;
+  border-radius: 12px;
+  font-size: 18px;
 }
 
 .question-create-icon {
@@ -618,15 +643,15 @@ watch(
 
 .creation-dialog-title {
   color: #0f172a;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 760;
   line-height: 1.25;
 }
 
 .creation-dialog-subtitle {
-  margin-top: 4px;
+  margin-top: 3px;
   color: #94a3b8;
-  font-size: 13px;
+  font-size: 12.5px;
   line-height: 1.3;
 }
 
@@ -642,12 +667,25 @@ watch(
 }
 
 .question-creation-form {
-  padding: 22px 24px 26px;
+  max-height: calc(100vh - 200px);
+  padding: 16px 22px 18px;
+  overflow-y: auto;
+}
+
+/* 题型 + 章节 并排一行，压缩纵向高度 */
+.form-row {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.form-row-grow {
+  flex: 1;
+  min-width: 200px;
 }
 
 .question-creation-form :deep(.el-form-item),
 .ai-form :deep(.el-form-item) {
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .question-creation-form :deep(.el-form-item__label),
@@ -666,8 +704,8 @@ watch(
 .ai-form :deep(.el-input__wrapper),
 .ai-form :deep(.el-select__wrapper),
 .ai-form :deep(.el-input-number) {
-  min-height: 42px;
-  border-radius: 11px;
+  min-height: 38px;
+  border-radius: 10px;
   background: #f8fbff;
   box-shadow: inset 0 0 0 1px #dbe5f2;
 }
@@ -687,14 +725,15 @@ watch(
 }
 
 .question-type-field {
-  width: 200px;
+  width: 160px;
+  flex: 0 0 160px;
 }
 
 .creation-dialog-footer {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
-  padding: 16px 24px 20px;
+  padding: 12px 22px 16px;
   border-top: 1px solid rgba(226, 232, 240, 0.88);
   background: rgba(248, 250, 252, 0.8);
 }

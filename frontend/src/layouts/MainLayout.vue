@@ -348,7 +348,7 @@ function onCommand(cmd) {
   position: relative;
   /* 与下方内容区（.main）使用同一背景变量，融为一体、无分割线 */
   background: var(--el-bg-color-page);
-  height: 64px;
+  height: 52px;
   padding: 0 24px;
 }
 
@@ -682,7 +682,7 @@ function onCommand(cmd) {
 .app-page::before {
   content: "";
   position: absolute;
-  inset: 64px auto 0 0;
+  inset: 60px auto 0 0;
   width: min(56vw, 820px);
   background:
     linear-gradient(118deg, rgba(255, 255, 255, 0.92) 0%, rgba(219, 234, 254, 0.58) 30%, transparent 58%);
@@ -702,7 +702,7 @@ function onCommand(cmd) {
 }
 
 .app-topbar {
-  height: 64px;
+  height: 52px;
   position: relative;
   z-index: 3;
   padding: 0 30px;
@@ -741,11 +741,11 @@ function onCommand(cmd) {
 .app-stage {
   position: relative;
   z-index: 1;
-  height: calc(100vh - 64px);
+  height: calc(100vh - 52px);
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
   gap: 24px;
-  padding: 34px 38px 40px;
+  padding: 26px 38px 30px;
   box-sizing: border-box;
 }
 
@@ -919,7 +919,7 @@ function onCommand(cmd) {
 
   .app-main-panel {
     height: auto;
-    min-height: calc(100vh - 190px);
+    min-height: calc(100vh - 178px);
   }
 }
 

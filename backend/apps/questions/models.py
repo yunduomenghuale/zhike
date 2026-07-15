@@ -36,7 +36,7 @@ class Question(BaseModel):
 
     course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="questions", verbose_name="课程")
     catalog = models.ForeignKey(
-        Catalog, null=True, blank=True, on_delete=models.SET_NULL, related_name="questions", verbose_name="章节"
+        Catalog, on_delete=models.PROTECT, related_name="questions", verbose_name="章节"
     )
     qtype = models.CharField("题型", max_length=16, choices=QType.choices)
     stem = models.TextField("题干")

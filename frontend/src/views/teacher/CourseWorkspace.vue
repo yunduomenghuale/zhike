@@ -113,7 +113,7 @@ watch(activeTab, updatePageTitle)
 .course-page::before {
   content: "";
   position: absolute;
-  inset: 72px auto 0 0;
+  inset: 60px auto 0 0;
   width: min(56vw, 820px);
   background:
     linear-gradient(118deg, rgba(255, 255, 255, 0.92) 0%, rgba(219, 234, 254, 0.58) 30%, transparent 58%);
@@ -133,7 +133,7 @@ watch(activeTab, updatePageTitle)
 }
 
 .course-topbar {
-  height: 64px;
+  height: 52px;
   position: relative;
   z-index: 2;
   padding: 0 30px;
@@ -199,16 +199,15 @@ watch(activeTab, updatePageTitle)
 .course-stage {
   position: relative;
   z-index: 1;
-  min-height: calc(100vh - 64px);
+  height: calc(100vh - 52px);
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
   gap: 24px;
-  padding: 34px 38px 40px;
+  padding: 26px 38px 30px;
 }
 
 .course-rail {
-  align-self: start;
-  min-height: calc(100vh - 138px);
+  height: 100%;
   border: 1px solid rgba(37, 99, 235, 0.1);
   border-radius: 30px;
   background: rgba(255, 255, 255, 0.86);
@@ -342,7 +341,9 @@ watch(activeTab, updatePageTitle)
 
 .course-main-panel {
   min-width: 0;
-  min-height: calc(100vh - 138px);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
   border: 1px solid rgba(37, 99, 235, 0.1);
   border-radius: 30px;
   background: rgba(255, 255, 255, 0.82);
@@ -354,6 +355,9 @@ watch(activeTab, updatePageTitle)
 }
 
 .course-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   background: transparent;
 }
 
@@ -375,12 +379,22 @@ watch(activeTab, updatePageTitle)
 
 @media (max-width: 1024px) {
   .course-stage {
+    height: auto;
     grid-template-columns: 1fr;
     padding: 22px;
   }
 
   .course-rail {
-    min-height: auto;
+    height: auto;
+  }
+
+  .course-main-panel {
+    display: block;
+    overflow: visible;
+  }
+
+  .course-content {
+    overflow: visible;
   }
 
   .course-cover {

@@ -2,7 +2,7 @@ import request from './request'
 
 export const listHomeworks = (params) => request.get('/homeworks/', { params })
 export const createHomework = (data) => request.post('/homeworks/', data)
-export const updateHomework = (id, data) => request.put(`/homeworks/${id}/`, data)
+export const updateHomework = (id, data) => request.patch(`/homeworks/${id}/`, data)
 export const deleteHomework = (id) => request.delete(`/homeworks/${id}/`)
 
 export const listSubmissions = (params) => request.get('/homework-submissions/', { params })

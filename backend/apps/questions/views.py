@@ -5,6 +5,7 @@ from apps.ai.services import generate_questions
 from apps.common.permissions import IsStudent, IsTeacher, IsTeacherOrReadOnly
 from apps.common.response import api_response
 from apps.common.viewsets import BaseModelViewSet
+from apps.courses.models import Catalog
 
 from .grading import grade_objective
 from .models import AnswerRecord, Question
@@ -79,6 +80,11 @@ class QuestionViewSet(BaseModelViewSet):
         """
         course_id = request.data.get("course")
         catalog_id = request.data.get("catalog")
+        if not catalog_id:
+            return api_response(message="请先选择题目所属章节", code=400, status=400)
+        catalog = Catalog.objects.filter(id=catalog_id, course_id=course_id).first()
+        if not catalog:
+            return api_response(message="所选章节不属于当前课程", code=400, status=400)
         count = int(request.data.get("count", 5))
         qtype = request.data.get("qtype", "single")
         objective = request.data.get("objective", "")
@@ -90,7 +96,7 @@ class QuestionViewSet(BaseModelViewSet):
         for d in drafts:
             q = Question.objects.create(
                 course_id=course_id,
-                catalog_id=catalog_id,
+                catalog=catalog,
                 qtype=d.get("qtype", qtype),
                 stem=d.get("stem", ""),
                 options=d.get("options", []),
