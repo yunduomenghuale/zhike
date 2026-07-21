@@ -9,6 +9,7 @@ api_patterns = [
     path("auth/", include("apps.users.urls")),
     path("ai/", include("apps.ai.urls")),
     path("analytics/", include("apps.analytics.urls")),
+    path("admin-panel/", include("apps.platform_admin.urls")),
     # 各业务模块 router 直接挂在 /api/ 根下（resource 名即完整路径）
     path("", include("apps.courses.urls")),
     path("", include("apps.classroom.urls")),

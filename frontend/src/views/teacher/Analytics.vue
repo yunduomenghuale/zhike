@@ -1,97 +1,148 @@
 <template>
   <div class="page-container analytics-page">
-    <div class="page-header">
-      <div>
-        <div class="page-title">学习统计</div>
-        <div class="page-subtitle">查看班级学习进度、成绩与学习预警</div>
+    <!-- 工具栏：左侧班级筛选，右侧功能按钮 -->
+    <div class="an-toolbar">
+      <div class="an-toolbar-left">
+        <el-select v-model="classId" class="module-select" placeholder="选择班级" popper-class="module-select-popper" style="width: 280px" @change="onClassChange">
+          <el-option v-for="c in classes" :key="c.id" :label="`${classCourseNames(c)} / ${c.name}`" :value="c.id" />
+        </el-select>
       </div>
-      <el-select v-model="classId" class="module-select" placeholder="选择班级" style="width: 280px" @change="load">
-        <el-option v-for="c in classes" :key="c.id" :label="`${classCourseNames(c)} / ${c.name}`" :value="c.id" />
-      </el-select>
+      <div class="an-toolbar-actions">
+        <el-button class="an-primary-btn" type="primary" :icon="MagicStick" :loading="aiLoading" :disabled="!classId" @click="generateReport">
+          {{ aiReport ? '重新生成报告' : '生成分析报告' }}
+        </el-button>
+      </div>
     </div>
 
     <el-empty v-if="!classId" description="请先选择班级" />
 
     <template v-else>
-      <!-- 汇总卡片 -->
-      <el-row :gutter="16" class="stat-row">
-        <el-col :xs="12" :sm="8" :lg="showWarn ? 4 : 6" v-for="card in summaryCards" :key="card.label">
-          <div class="stat-card">
-            <div class="stat-icon" :class="card.color">
-              <el-icon :size="24"><component :is="card.icon" /></el-icon>
+      <!-- AI 学情分析报告（生成后展示） -->
+      <div v-if="aiLoading || aiReport" class="ai-card" :class="{ 'is-loading': aiLoading }">
+        <div v-if="aiLoading" class="ai-body">
+          <div class="ai-loading-tip">
+            <el-icon class="is-loading" :size="15"><Loading /></el-icon>
+            AI 正在分析班级数据，请稍候…
+          </div>
+          <el-skeleton :rows="4" animated />
+        </div>
+        <template v-else>
+          <div class="ai-head">
+            <span class="ai-head-icon">
+              <el-icon :size="15"><MagicStick /></el-icon>
+            </span>
+            <span class="ai-head-title">AI 学情分析</span>
+            <span class="ai-head-time">生成于 {{ fmtDateTime(aiGeneratedAt) }}</span>
+          </div>
+          <div class="ai-body ai-md" v-html="renderMd(aiReport)"></div>
+        </template>
+      </div>
+
+      <!-- 学生卡片列表 -->
+      <TableSkeleton v-if="loading" :cols="6" />
+      <el-empty v-else-if="!students.length" description="班级暂无学生" />
+      <div v-else class="stu-list animate-list">
+        <div v-for="row in students" :key="row.student_id" class="stu-card" @click="goDetail(row)">
+          <div class="stu-main">
+            <div class="stu-left">
+              <span class="stu-avatar" :style="{ background: avatarBg(row.name) }">
+                {{ row.name.charAt(0) }}
+              </span>
+              <div class="stu-id">
+                <div class="stu-name">{{ row.name }}</div>
+                <div class="stu-last">最近学习：{{ fmtRelative(row.last_active) }}</div>
+              </div>
             </div>
-            <div>
-              <div class="stat-title">{{ card.label }}</div>
-              <div class="stat-value">{{ card.value }}</div>
+
+            <div class="stu-metrics">
+              <div class="metric metric-practice">
+                <span class="metric-label">
+                  <span class="metric-ico blue"><el-icon :size="13"><Notebook /></el-icon></span>
+                  章节练习
+                </span>
+                <template v-if="row.practice_total">
+                  <div class="metric-practice-line">
+                    <span class="metric-text">{{ row.practice_correct }}/{{ row.practice_total }} 题</span>
+                    <span class="metric-acc" :style="{ color: accColor(row.accuracy) }">{{ row.accuracy }}%</span>
+                  </div>
+                  <el-progress
+                    :percentage="row.accuracy"
+                    :stroke-width="6"
+                    :color="accColor(row.accuracy)"
+                    :show-text="false"
+                    class="metric-bar"
+                  />
+                </template>
+                <span v-else class="metric-none">未做练习</span>
+              </div>
+              <div class="metric">
+                <span class="metric-label">
+                  <span class="metric-ico purple"><el-icon :size="13"><Files /></el-icon></span>
+                  作业
+                </span>
+                <strong class="metric-value" :class="{ warn: row.homework_submitted < row.homework_total }">
+                  {{ row.homework_submitted }}/{{ row.homework_total }}
+                </strong>
+              </div>
+              <div class="metric">
+                <span class="metric-label">
+                  <span class="metric-ico orange"><el-icon :size="13"><Medal /></el-icon></span>
+                  考试
+                </span>
+                <strong class="metric-value">
+                  {{ row.exam_taken }}/{{ row.exam_total }}
+                  <span v-if="row.avg_exam_score !== null" class="metric-score">· 均分 {{ row.avg_exam_score }}</span>
+                </strong>
+              </div>
+            </div>
+
+            <div class="stu-warnings">
+              <el-tag v-for="w in row.warnings" :key="w" type="danger" size="small" effect="light" round class="warn-pulse">{{ w }}</el-tag>
+              <el-tag v-if="!row.warnings.length" type="success" size="small" effect="light" round>正常</el-tag>
             </div>
           </div>
-        </el-col>
-      </el-row>
 
-      <!-- 学生明细 -->
-      <el-card shadow="never" class="data-card">
-        <TableSkeleton v-if="loading" :cols="6" />
-        <el-table v-else :data="students" class="module-table" stripe>
-          <el-table-column prop="name" label="学生" width="110" fixed />
-          <el-table-column label="章节练习" min-width="150">
-            <template #default="{ row }">
-              <span v-if="row.practice_total">
-                {{ row.practice_correct }}/{{ row.practice_total }} 题
-                <el-tag size="small" :type="accType(row.accuracy)" effect="light" style="margin-left: 6px">
-                  正确率 {{ row.accuracy }}%
-                </el-tag>
-              </span>
-              <span v-else class="muted">未做练习</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="作业" width="110" align="center">
-            <template #default="{ row }">
-              <span :class="{ warn: row.homework_submitted < row.homework_total }">
-                {{ row.homework_submitted }}/{{ row.homework_total }}
-              </span>
-            </template>
-          </el-table-column>
-          <el-table-column label="考试" width="150" align="center">
-            <template #default="{ row }">
-              {{ row.exam_taken }}/{{ row.exam_total }}
-              <el-tag v-if="row.avg_exam_score !== null" size="small" effect="plain" style="margin-left: 6px">
-                均分 {{ row.avg_exam_score }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="最近学习" width="170">
-            <template #default="{ row }">{{ row.last_active ? fmtDate(row.last_active) : '—' }}</template>
-          </el-table-column>
-          <el-table-column label="预警" min-width="180">
-            <template #default="{ row }">
-              <el-tag v-for="w in row.warnings" :key="w" type="danger" size="small" effect="light" round style="margin: 2px 4px 2px 0">
-                {{ w }}
-              </el-tag>
-              <el-tag v-if="!row.warnings.length" type="success" size="small" effect="light" round>正常</el-tag>
-            </template>
-          </el-table-column>
-        </el-table>
-        <el-empty v-if="!loading && !students.length" description="班级暂无学生" />
-      </el-card>
+          <div v-if="aiComments[row.student_id]" class="stu-ai">
+            <el-icon :size="13" class="stu-ai-icon"><MagicStick /></el-icon>
+            <span>{{ aiComments[row.student_id] }}</span>
+          </div>
+          <div v-else-if="aiLoading" class="stu-ai muted">AI 简评生成中…</div>
+        </div>
+      </div>
     </template>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
-import { User, TrendCharts, Medal, Files, Warning } from '@element-plus/icons-vue'
+import { useRoute, useRouter } from 'vue-router'
+import { MagicStick, Loading, Notebook, Files, Medal } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+import MarkdownIt from 'markdown-it'
 import { listClasses } from '@/api/classroom'
-import { getClassStats } from '@/api/analytics'
+import { getClassStats, generateClassAiReport } from '@/api/analytics'
+
+const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
 
 const classes = ref([])
 const classId = ref(null)
 const loading = ref(false)
-const summary = ref({})
 const students = ref([])
+const aiLoading = ref(false)
+const aiReport = ref('')
+const aiComments = ref({})
+const aiGeneratedAt = ref(null)
 const route = useRoute()
+const router = useRouter()
 const fixedCourseId = computed(() => Number(route.params.id) || null)
-const showWarn = computed(() => (summary.value.warning_count ?? 0) > 0)
+
+function goDetail(row) {
+  router.push({
+    name: 'class-student-detail',
+    params: { classId: classId.value, studentId: row.student_id },
+    query: activeCourseId() ? { course: activeCourseId() } : {},
+  })
+}
 
 function classCourseNames(item) {
   return item.course_names?.join('、') || item.course_name || '未关联课程'
@@ -102,22 +153,46 @@ function activeCourseId() {
   return fixedCourseId.value || classroom?.course || null
 }
 
-const summaryCards = computed(() => [
-  { label: '学生人数', value: summary.value.student_count ?? 0, icon: 'User', color: 'blue' },
-  { label: '平均正确率', value: summary.value.avg_accuracy != null ? summary.value.avg_accuracy + '%' : '—', icon: 'TrendCharts', color: 'green' },
-  { label: '平均考试分', value: summary.value.avg_exam_score ?? '—', icon: 'Medal', color: 'orange' },
-  { label: '作业提交率', value: summary.value.homework_rate != null ? summary.value.homework_rate + '%' : '—', icon: 'Files', color: 'purple' },
-  { label: '预警人数', value: summary.value.warning_count ?? 0, icon: 'Warning', color: 'red' },
-])
-
-function accType(a) {
-  if (a == null) return 'info'
-  if (a >= 80) return 'success'
-  if (a >= 60) return 'warning'
-  return 'danger'
+const AVATAR_COLORS = ['#2563eb', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4', '#f97316']
+function avatarBg(name) {
+  let hash = 0
+  for (const ch of name || '') hash = (hash * 31 + ch.codePointAt(0)) >>> 0
+  const color = AVATAR_COLORS[hash % AVATAR_COLORS.length]
+  return `linear-gradient(135deg, ${color} 0%, ${color}cc 100%)`
 }
-function fmtDate(t) {
-  return new Date(t).toLocaleString()
+
+function accColor(a) {
+  if (a == null) return '#94a3b8'
+  if (a >= 80) return '#10b981'
+  if (a >= 60) return '#f59e0b'
+  return '#ef4444'
+}
+
+function fmtRelative(t) {
+  if (!t) return '—'
+  const d = new Date(t)
+  const now = new Date()
+  const startOf = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate())
+  const days = Math.round((startOf(now) - startOf(d)) / 86400000)
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  if (days <= 0) return `今天 ${hm}`
+  if (days === 1) return `昨天 ${hm}`
+  if (days < 30) return `${days} 天前`
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`
+}
+
+function fmtDateTime(t) {
+  return t ? new Date(t).toLocaleString() : ''
+}
+
+function renderMd(text) {
+  return md.render(text || '')
+}
+
+function resetAi() {
+  aiReport.value = ''
+  aiComments.value = {}
+  aiGeneratedAt.value = null
 }
 
 async function loadClasses() {
@@ -131,19 +206,37 @@ async function loadClasses() {
     load()
   } else {
     classId.value = null
-    summary.value = {}
     students.value = []
   }
 }
+
 async function load() {
   if (!classId.value) return
   loading.value = true
   try {
     const data = await getClassStats(classId.value, { course: activeCourseId() })
-    summary.value = data.summary
     students.value = data.students
   } finally {
     loading.value = false
+  }
+}
+
+function onClassChange() {
+  resetAi()
+  load()
+}
+
+async function generateReport() {
+  if (!classId.value || aiLoading.value) return
+  aiLoading.value = true
+  try {
+    const data = await generateClassAiReport(classId.value, { course: activeCourseId() })
+    aiReport.value = data.report || ''
+    aiComments.value = data.comments || {}
+    aiGeneratedAt.value = data.generated_at
+    if (!aiReport.value) ElMessage.warning('AI 暂未生成有效内容，请重试')
+  } finally {
+    aiLoading.value = false
   }
 }
 
@@ -151,79 +244,335 @@ onMounted(loadClasses)
 </script>
 
 <style scoped>
-.analytics-page :deep(.data-card) { padding: 0; }
-.analytics-page :deep(.page-header) {
-  min-height: 58px;
-  margin-bottom: 18px;
-  padding-bottom: 18px;
-  border-bottom: 1px solid rgba(226, 232, 240, 0.82);
-}
-.module-select :deep(.el-select__wrapper) {
-  min-height: 42px;
-  border-radius: 12px;
-  background: #f8fbff;
-  box-shadow: inset 0 0 0 1px #dbe5f2;
-}
-.module-select :deep(.el-select__wrapper.is-focused) {
-  background: #fff;
-  box-shadow: inset 0 0 0 1px #60a5fa, 0 0 0 3px rgba(96, 165, 250, 0.12);
-}
-.stat-row {
-  margin-bottom: 24px;
-}
-.stat-card {
-  min-height: 94px;
-  border: 1px solid rgba(37, 99, 235, 0.08);
-  border-radius: 16px;
-  padding: 18px;
-  background: rgba(255, 255, 255, 0.82);
-  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.07);
+/* 工具栏（与知识库页一致：左右分布，无分隔线） */
+.an-toolbar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-bottom: 4px;
+  margin-bottom: 16px;
 }
-.stat-icon {
-  width: 46px;
-  height: 46px;
-  border-radius: 14px;
+.an-toolbar-left,
+.an-toolbar-actions {
   display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.an-primary-btn {
+  height: 40px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 12px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.an-primary-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(37, 99, 235, 0.2);
+}
+
+/* ===== AI 学情分析报告 ===== */
+.ai-card {
+  position: relative;
+  margin-bottom: 16px;
+  padding: 1.5px;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(120deg, #60a5fa 0%, #a78bfa 45%, #f0abfc 75%, #60a5fa 100%);
+  background-size: 300% 100%;
+  box-shadow: 0 14px 34px rgba(99, 102, 241, 0.14);
+  animation: ai-border-flow 6s linear infinite;
+}
+.ai-card.is-loading {
+  animation: ai-border-flow 2.4s linear infinite, ai-breathe 1.8s ease-in-out infinite;
+}
+@keyframes ai-border-flow {
+  from { background-position: 0% 0; }
+  to { background-position: 300% 0; }
+}
+@keyframes ai-breathe {
+  0%, 100% { box-shadow: 0 14px 34px rgba(99, 102, 241, 0.14); }
+  50% { box-shadow: 0 16px 42px rgba(99, 102, 241, 0.34); }
+}
+.ai-card::before {
+  content: '';
+  position: absolute;
+  inset: 1.5px;
+  border-radius: calc(var(--radius-lg) - 1.5px);
+  background: rgba(255, 255, 255, 0.94);
+}
+.ai-card > * {
+  position: relative;
+}
+.ai-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 14px 20px 0;
+}
+.ai-head-icon {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  color: #fff;
+  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+}
+.ai-head-title {
+  font-size: 15px;
+  font-weight: 750;
+  background: linear-gradient(90deg, #2563eb, #7c3aed);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.ai-head-time {
+  margin-left: auto;
+  color: var(--gray-400);
+  font-size: 12px;
+}
+.ai-body {
+  padding: 10px 20px 16px;
+}
+.ai-loading-tip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--primary-600);
+}
+.ai-md {
+  font-size: 14px;
+  line-height: 1.85;
+  color: var(--gray-700);
+}
+.ai-md :deep(h2) {
+  margin: 12px 0 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--gray-900);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ai-md :deep(h2)::before {
+  content: '';
+  width: 4px;
+  height: 15px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #3b82f6, #8b5cf6);
+}
+.ai-md :deep(h2:first-child) { margin-top: 2px; }
+.ai-md :deep(p) { margin: 0 0 8px; }
+.ai-md :deep(ul), .ai-md :deep(ol) { margin: 0 0 8px; padding-left: 20px; }
+.ai-md :deep(strong) { color: var(--gray-900); }
+
+/* ===== 学生卡片列表（与知识库资料行一致） ===== */
+.stu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.stu-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(37, 99, 235, 0.09);
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(248, 251, 255, 0.9));
+  box-shadow: 0 8px 22px rgba(37, 99, 235, 0.06);
+  cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+.stu-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: linear-gradient(180deg, #3b82f6, #8b5cf6);
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+.stu-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(96, 165, 250, 0.45);
+  box-shadow: 0 14px 32px rgba(37, 99, 235, 0.12);
+}
+.stu-card:hover::before {
+  opacity: 1;
+}
+.stu-main {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 14px 18px;
+}
+.stu-left {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-width: 0;
+  flex: 0 0 220px;
+}
+.stu-avatar {
+  width: 42px;
+  height: 42px;
+  display: flex;
+  flex: 0 0 42px;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
-}
-.stat-icon.blue { background: #eff6ff; color: #2563eb; }
-.stat-icon.green { background: #ecfdf5; color: #10b981; }
-.stat-icon.orange { background: #fff7ed; color: #f59e0b; }
-.stat-icon.purple { background: #f5f3ff; color: #8b5cf6; }
-.stat-icon.red { background: #fef2f2; color: #ef4444; }
-.stat-title { font-size: 13px; color: #64748b; font-weight: 650; }
-.stat-value { margin-top: 3px; font-size: 23px; font-weight: 800; color: #0f172a; }
-.module-table {
-  --el-table-border-color: transparent;
-  --el-table-header-bg-color: transparent;
-  --el-table-tr-bg-color: transparent;
-  --el-table-row-hover-bg-color: transparent;
-  background: transparent;
-}
-.module-table :deep(.el-table__inner-wrapper::before) { display: none; }
-.module-table :deep(th.el-table__cell) {
-  padding: 0 14px 10px;
-  border-bottom: 0;
-  color: #94a3b8;
-  font-size: 12px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 16px;
   font-weight: 700;
-  background: transparent;
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.14);
+  transition: transform 0.18s ease;
 }
-.module-table :deep(td.el-table__cell) {
-  padding: 17px 14px;
-  border-bottom: 10px solid transparent;
-  color: #334155;
-  background: rgba(255, 255, 255, 0.8);
+.stu-card:hover .stu-avatar {
+  transform: scale(1.05);
 }
-.module-table :deep(.el-table__body tr:hover > td.el-table__cell) { background: #fff; }
-.module-table :deep(.el-table__body tr > td.el-table__cell:first-child) { border-top-left-radius: 15px; border-bottom-left-radius: 15px; }
-.module-table :deep(.el-table__body tr > td.el-table__cell:last-child) { border-top-right-radius: 15px; border-bottom-right-radius: 15px; }
-.muted { color: var(--el-text-color-placeholder); }
-.warn { color: #f56c6c; font-weight: 600; }
+.stu-name {
+  color: var(--gray-900);
+  font-size: 15px;
+  font-weight: 650;
+}
+.stu-last {
+  margin-top: 3px;
+  color: var(--gray-400);
+  font-size: 12px;
+}
+.stu-metrics {
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  flex: 1;
+  min-width: 0;
+}
+.metric {
+  display: grid;
+  gap: 5px;
+  flex: 1;
+  min-width: 74px;
+}
+.metric-practice {
+  flex: 1.8;
+  min-width: 150px;
+}
+.metric-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--gray-400);
+  font-size: 12px;
+}
+.metric-ico {
+  width: 22px;
+  height: 22px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 7px;
+}
+.metric-ico.blue {
+  color: var(--primary-600);
+  background: var(--primary-50);
+}
+.metric-ico.purple {
+  color: #8b5cf6;
+  background: #f5f3ff;
+}
+.metric-ico.orange {
+  color: var(--warning);
+  background: #fff7ed;
+}
+.metric-value {
+  color: var(--gray-800);
+  font-size: 14.5px;
+  font-weight: 700;
+}
+.metric-value.warn {
+  color: var(--danger);
+}
+.metric-score {
+  margin-left: 4px;
+  color: var(--primary-600);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.metric-practice-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.metric-text {
+  color: var(--gray-700);
+  font-size: 13px;
+}
+.metric-acc {
+  font-size: 13px;
+  font-weight: 700;
+}
+.metric-bar {
+  width: 100%;
+}
+.metric-bar :deep(.el-progress-bar__outer) {
+  background: var(--gray-100);
+}
+.metric-none {
+  color: var(--gray-300);
+  font-size: 13px;
+}
+.stu-warnings {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 220px;
+}
+
+/* AI 简评条 */
+.stu-ai {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 18px;
+  padding: 10px 14px 12px;
+  border-top: 1px dashed var(--gray-200);
+  color: var(--gray-600);
+  font-size: 13px;
+  line-height: 1.65;
+}
+.stu-ai-icon {
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: #8b5cf6;
+}
+.stu-ai.muted {
+  color: var(--gray-400);
+}
+
+@media (max-width: 900px) {
+  .stu-main {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .stu-left {
+    flex-basis: auto;
+  }
+  .stu-metrics {
+    flex-wrap: wrap;
+    gap: 14px 22px;
+  }
+  .stu-warnings {
+    justify-content: flex-start;
+    max-width: none;
+  }
+}
 </style>

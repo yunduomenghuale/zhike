@@ -16,6 +16,17 @@ class IsStudent(BasePermission):
         return bool(request.user and request.user.is_authenticated and request.user.is_student)
 
 
+class IsPlatformAdmin(BasePermission):
+    message = "仅平台管理员可操作"
+
+    def has_permission(self, request, view):
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and (request.user.role == "admin" or request.user.is_superuser)
+        )
+
+
 class IsTeacherOrReadOnly(BasePermission):
     """教师可写，其余登录用户只读。"""
 

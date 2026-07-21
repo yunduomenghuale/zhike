@@ -2,7 +2,7 @@
   <main class="layout app-page">
     <header class="header app-topbar">
       <button type="button" class="app-brand" @click="router.push('/dashboard')">
-        <span class="brand-orbit" aria-hidden="true"></span>
+        <img class="brand-mark" src="/smart-course-logo.svg" alt="" aria-hidden="true" />
         <span>智课平台</span>
       </button>
 
@@ -31,18 +31,21 @@
           <el-icon><component :is="isDark ? Sunny : Moon" /></el-icon>
         </button>
 
-        <el-dropdown @command="onCommand" trigger="click">
+        <el-dropdown @command="onCommand" trigger="click" popper-class="user-menu-popper">
           <div class="user">
-            <el-avatar :size="34" :icon="UserFilled" class="user-avatar" />
+            <el-avatar :size="32" :src="profile?.avatar || ''" :icon="UserFilled" class="user-avatar" />
             <div class="user-info">
-              <div class="user-name">{{ profile?.real_name || profile?.username || '用户' }}</div>
-              <div class="user-role">{{ profile?.role_display }}</div>
+              <div class="user-name">{{ profile?.username || '用户' }}</div>
+              <div class="user-role"><span class="role-badge">{{ profile?.role_display }}</span></div>
             </div>
-            <el-icon><ArrowDown /></el-icon>
+            <el-icon class="user-caret"><ArrowDown /></el-icon>
           </div>
           <template #dropdown>
             <el-dropdown-menu>
-              <el-dropdown-item command="logout">
+              <el-dropdown-item command="profile">
+                <el-icon><UserFilled /></el-icon> 个人中心
+              </el-dropdown-item>
+              <el-dropdown-item command="logout" class="logout-item">
                 <el-icon><SwitchButton /></el-icon> 退出登录
               </el-dropdown-item>
             </el-dropdown-menu>
@@ -53,12 +56,12 @@
 
     <div class="app-stage">
       <aside class="aside app-rail">
-        <button type="button" class="space-cover" @click="router.push('/dashboard')">
+        <button type="button" class="space-cover" @click="router.push('/profile')">
           <span class="space-visual">
             <el-icon><HomeFilled /></el-icon>
           </span>
           <span class="space-title">个人空间</span>
-          <span class="space-user">{{ profile?.real_name || profile?.username || '智课用户' }}</span>
+          <span class="space-user">{{ profile?.username || '智课用户' }}</span>
         </button>
 
         <div class="menu-wrap">
@@ -69,15 +72,16 @@
             </el-menu-item>
 
             <template v-for="group in menuGroups" :key="group.title">
-              <el-menu-item
-                v-for="item in group.items"
-                :key="item.index"
-                :index="item.index"
-              >
+              <el-menu-item v-for="item in group.items" :key="item.index" :index="item.index">
                 <el-icon><component :is="item.icon" /></el-icon>
                 <span>{{ item.label }}</span>
               </el-menu-item>
             </template>
+
+            <el-menu-item index="/profile">
+              <el-icon><UserFilled /></el-icon>
+              <span>个人中心</span>
+            </el-menu-item>
           </el-menu>
         </div>
 
@@ -110,6 +114,8 @@ import {
   HomeFilled, Reading, School, Collection, EditPen, Document,
   VideoPlay, ChatDotRound, ArrowDown, UserFilled, Search, SwitchButton, Sunny,
   Bell, FullScreen, Moon, Notebook,
+  DataAnalysis,
+  Setting,
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
@@ -118,7 +124,10 @@ const userStore = useUserStore()
 const { profile } = storeToRefs(userStore)
 const searchKeyword = ref('')
 let searchTimer = null
-const searchableRoutes = new Set(['courses', 'course-catalog', 'course-chapters', 'questions', 'course-questions'])
+const searchableRoutes = new Set([
+  'courses', 'course-catalog', 'course-chapters', 'questions', 'course-questions',
+  'my-classes', 'learning', 'qa', 'student-homework', 'student-exams', 'wrong-book',
+])
 
 const searchPlaceholderMap = {
   courses: '按课程名称搜索',
@@ -131,6 +140,11 @@ const searchPlaceholderMap = {
   homework: '搜索作业',
   exams: '搜索考试',
   learning: '搜索课程',
+  'my-classes': '搜索班级或课程',
+  qa: '搜索问答记录',
+  'student-homework': '搜索作业',
+  'student-exams': '搜索考试',
+  'wrong-book': '搜索题干或解析',
 }
 
 const searchPlaceholder = computed(() => (
@@ -188,6 +202,19 @@ function onBell() {
 }
 
 const menuGroups = computed(() => {
+  if (profile.value?.role === 'admin') {
+    return [
+      {
+        title: '管理端',
+        items: [
+          { index: '/admin/overview', label: '管理概览', icon: 'DataAnalysis' },
+          { index: '/admin/users', label: '用户管理', icon: 'UserFilled' },
+          { index: '/admin/teaching', label: '教学监管', icon: 'Reading' },
+          { index: '/admin/ai-settings', label: '大模型配置', icon: 'Setting' },
+        ],
+      },
+    ]
+  }
   const isTeacher = profile.value?.role === 'teacher'
   if (isTeacher) {
     return [
@@ -204,12 +231,7 @@ const menuGroups = computed(() => {
     {
       title: '学生端',
       items: [
-        { index: '/student/my-classes', label: '我的班级', icon: 'School' },
-        { index: '/student/learning', label: '课程学习', icon: 'VideoPlay' },
-        { index: '/student/qa', label: '知识库提问', icon: 'ChatDotRound' },
-        { index: '/student/homework', label: '我的作业', icon: 'Notebook' },
-        { index: '/student/exams', label: '我的考试', icon: 'Document' },
-        { index: '/student/wrong', label: '错题本', icon: 'Collection' },
+        { index: '/student/my-classes', label: '我的课程', icon: 'Reading' },
       ],
     },
   ]
@@ -220,6 +242,10 @@ onMounted(() => {
 })
 
 function onCommand(cmd) {
+  if (cmd === 'profile') {
+    router.push('/profile')
+    return
+  }
   if (cmd === 'logout') {
     userStore.logout()
     router.push('/login')
@@ -428,36 +454,59 @@ function onCommand(cmd) {
   align-items: center;
   gap: 10px;
   cursor: pointer;
-  padding: 6px 10px;
-  border-radius: 10px;
-  transition: background 0.2s ease;
+  padding: 5px 12px 5px 6px;
+  border: 1px solid rgba(219, 229, 242, 0.9);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.06);
+  transition: all 0.18s ease;
 }
 
 .user:hover {
-  background: var(--el-fill-color);
+  border-color: rgba(96, 165, 250, 0.5);
+  background: #fff;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.12);
+  transform: translateY(-1px);
 }
 
 .user-avatar {
   background: linear-gradient(135deg, #2563eb, #4f46e5);
   color: #fff;
   flex-shrink: 0;
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(96, 165, 250, 0.35);
 }
 
 .user-info {
   display: flex;
   flex-direction: column;
+  gap: 2px;
   line-height: 1.2;
 }
 
 .user-name {
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 650;
   color: var(--el-text-color-primary);
 }
 
 .user-role {
+  display: flex;
   font-size: 12px;
   color: #64748b;
+}
+
+.role-badge {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.user-caret {
+  font-size: 12px;
+  color: #94a3b8;
 }
 
 .main {
@@ -639,15 +688,64 @@ function onCommand(cmd) {
 
 .icon-btn {
   color: #64748b;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(219, 229, 242, 0.9);
   box-shadow:
-    inset 0 1px 1px rgba(255, 255, 255, 0.78),
-    inset 0 -1px 2px rgba(37, 99, 235, 0.05);
+    0 4px 10px rgba(37, 99, 235, 0.06),
+    inset 0 1px 1px rgba(255, 255, 255, 0.9);
+  transition: all 0.18s ease;
 }
 
 .icon-btn:hover,
 .user:hover {
-  background: rgba(219, 234, 254, 0.72);
   color: #2563eb;
+}
+
+.icon-btn:hover {
+  border-color: rgba(96, 165, 250, 0.5);
+  background: #fff;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.12);
+  transform: translateY(-1px);
+}
+
+.head-badge :deep(.el-badge__content.is-dot) {
+  box-shadow: 0 0 0 2px #fff;
+  animation: badge-pulse 2s ease-out infinite;
+}
+
+@keyframes badge-pulse {
+  0% { box-shadow: 0 0 0 2px #fff, 0 0 0 2px rgba(239, 68, 68, 0.45); }
+  70% { box-shadow: 0 0 0 2px #fff, 0 0 0 8px rgba(239, 68, 68, 0); }
+  100% { box-shadow: 0 0 0 2px #fff, 0 0 0 2px rgba(239, 68, 68, 0); }
+}
+
+/* 用户下拉菜单 */
+:global(.user-menu-popper.el-popper) {
+  overflow: hidden;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 12px !important;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.14) !important;
+}
+
+:global(.user-menu-popper .el-dropdown-menu) {
+  padding: 6px;
+}
+
+:global(.user-menu-popper .el-dropdown-menu__item) {
+  padding: 9px 16px;
+  border-radius: 8px;
+  color: #475569;
+  font-weight: 600;
+}
+
+:global(.user-menu-popper .el-dropdown-menu__item:hover) {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+:global(.user-menu-popper .el-dropdown-menu__item.logout-item:hover) {
+  background: #fef2f2;
+  color: #ef4444;
 }
 
 .user-avatar {
@@ -727,15 +825,11 @@ function onCommand(cmd) {
   cursor: pointer;
 }
 
-.brand-orbit {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  display: inline-block;
-  background:
-    radial-gradient(circle at 50% 50%, #fff 0 26%, transparent 27%),
-    conic-gradient(from 0deg, #2563eb, #60a5fa, #2563eb);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+.brand-mark {
+  width: 25px;
+  height: 25px;
+  display: block;
+  flex: 0 0 auto;
 }
 
 .app-stage {

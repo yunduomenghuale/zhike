@@ -3,16 +3,16 @@
     <el-card shadow="never" class="data-card q-card">
       <div class="q-toolbar">
         <div class="q-toolbar-left">
-          <el-select v-if="!inCourseWorkspace" v-model="courseId" size="large" class="q-filter-select q-course-select" popper-class="q-filter-popper" placeholder="选择课程" style="width: 220px" @change="handleCourseChange">
+          <el-select v-if="!inCourseWorkspace" v-model="courseId" size="large" class="module-select" popper-class="module-select-popper" placeholder="选择课程" style="width: 220px" @change="handleCourseChange">
             <el-option v-for="c in courses" :key="c.id" :label="c.name" :value="c.id" />
           </el-select>
-          <el-select v-model="filterCatalog" size="large" class="q-filter-select" popper-class="q-filter-popper" placeholder="章节" clearable style="width: 170px" @change="load">
+          <el-select v-model="filterCatalog" size="large" class="module-select" popper-class="module-select-popper" placeholder="章节" clearable style="width: 170px" @change="load">
             <el-option v-for="c in flatCatalogs" :key="c.id" :label="c.label" :value="c.id" />
           </el-select>
-          <el-select v-model="filterType" size="large" class="q-filter-select" popper-class="q-filter-popper" placeholder="题型" clearable style="width: 130px" @change="load">
+          <el-select v-model="filterType" size="large" class="module-select" popper-class="module-select-popper" placeholder="题型" clearable style="width: 130px" @change="load">
             <el-option v-for="t in qtypes" :key="t.value" :label="t.label" :value="t.value" />
           </el-select>
-          <el-select v-model="filterStatus" size="large" class="q-filter-select" popper-class="q-filter-popper" placeholder="状态" clearable style="width: 130px" @change="load">
+          <el-select v-model="filterStatus" size="large" class="module-select" popper-class="module-select-popper" placeholder="状态" clearable style="width: 130px" @change="load">
             <el-option label="草稿" value="draft" />
             <el-option label="已发布" value="published" />
             <el-option label="停用" value="disabled" />
@@ -38,7 +38,7 @@
             <div class="empty-tip">点击右上角「新建题目」或「AI 生成」开始建题</div>
           </template>
         </el-empty>
-        <div v-else class="q-list">
+        <div v-else class="q-list animate-list">
           <div v-for="row in rows" :key="row.id" class="q-row">
             <div class="q-row-left">
               <span class="q-type-badge" :class="'qt-' + row.qtype">{{ row.qtype_display }}</span>
@@ -95,12 +95,12 @@
       <el-form :model="form" label-position="top" class="question-creation-form">
         <div class="form-row">
           <el-form-item label="题型" class="question-type-field">
-            <el-select v-model="form.qtype" style="width: 160px" @change="onTypeChange">
+            <el-select v-model="form.qtype" class="module-select" popper-class="module-select-popper" style="width: 160px" @change="onTypeChange">
               <el-option v-for="t in qtypes" :key="t.value" :label="t.label" :value="t.value" />
             </el-select>
           </el-form-item>
           <el-form-item label="所属章节（必选）" class="form-row-grow">
-            <el-select v-model="form.catalog" placeholder="请选择题目所属章节" style="width: 100%">
+            <el-select v-model="form.catalog" class="module-select" popper-class="module-select-popper" placeholder="请选择题目所属章节" style="width: 100%">
               <el-option v-for="c in flatCatalogs" :key="c.id" :label="c.label" :value="c.id" />
             </el-select>
           </el-form-item>
@@ -152,7 +152,7 @@
         </el-form-item>
         <el-form-item label="分值/难度">
           <el-input-number v-model="form.score" :min="1" :max="100" />
-          <el-select v-model="form.difficulty" style="width: 120px; margin-left: 12px">
+          <el-select v-model="form.difficulty" class="module-select" popper-class="module-select-popper" style="width: 120px; margin-left: 12px">
             <el-option label="简单" value="easy" />
             <el-option label="中等" value="medium" />
             <el-option label="困难" value="hard" />
@@ -196,12 +196,12 @@
 
       <el-form label-position="top" class="ai-form">
         <el-form-item label="章节">
-          <el-select v-model="ai.catalog" placeholder="选择章节（基于其 PPT 出题）" style="width: 100%">
+          <el-select v-model="ai.catalog" class="module-select" popper-class="module-select-popper" placeholder="选择章节（基于其 PPT 出题）" style="width: 100%">
             <el-option v-for="c in flatCatalogs" :key="c.id" :label="c.label" :value="c.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="题型">
-          <el-select v-model="ai.qtype" style="width: 200px">
+          <el-select v-model="ai.qtype" class="module-select" popper-class="module-select-popper" style="width: 200px">
             <el-option v-for="t in qtypes" :key="t.value" :label="t.label" :value="t.value" />
           </el-select>
         </el-form-item>
@@ -408,9 +408,16 @@ async function save() {
 }
 
 async function setStatus(row, status) {
-  await updateQuestion(row.id, { status })
+  const updated = await updateQuestion(row.id, { status })
   ElMessage.success(status === 'published' ? '已发布' : '已停用')
-  load()
+  if (filterStatus.value && filterStatus.value !== status) {
+    rows.value = rows.value.filter((item) => item.id !== row.id)
+    total.value = Math.max(0, total.value - 1)
+    return
+  }
+  rows.value = rows.value.map((item) => (
+    item.id === row.id ? { ...item, ...(updated || {}), status } : item
+  ))
 }
 function openDelete(row) {
   deleteTarget.value = row
@@ -450,7 +457,12 @@ async function doGenerate() {
       course: courseId.value, catalog: ai.catalog, count: ai.count,
       qtype: ai.qtype,
     })
-    ElMessage.success(`已生成 ${res.length} 道草稿题目，请审核后发布`)
+    const generatedCount = Array.isArray(res) ? res.length : 0
+    if (generatedCount > 0) {
+      ElMessage.success(`已生成 ${generatedCount} 道草稿题目，请审核后发布`)
+    } else {
+      ElMessage.warning('AI 未返回可用题目，请调整章节资料或题型后重试')
+    }
     aiVisible.value = false
     load()
   } finally {
@@ -501,76 +513,6 @@ watch(
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-}
-
-.q-filter-select :deep(.el-select__wrapper) {
-  min-height: 40px;
-  padding: 0 12px;
-  border-radius: 12px;
-  background: rgba(248, 251, 255, 0.92);
-  box-shadow: inset 0 0 0 1px #dbe5f2, 0 4px 12px rgba(37, 99, 235, 0.035);
-  transition: background-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
-}
-
-.q-filter-select:hover :deep(.el-select__wrapper) {
-  background: #fff;
-  box-shadow: inset 0 0 0 1px #bfdbfe, 0 6px 16px rgba(37, 99, 235, 0.07);
-}
-
-.q-filter-select :deep(.el-select__wrapper.is-focused) {
-  background: #fff;
-  box-shadow: inset 0 0 0 1px var(--primary-500), 0 0 0 3px rgba(59, 130, 246, 0.11);
-}
-
-.q-filter-select :deep(.el-select__placeholder),
-.q-filter-select :deep(.el-select__selected-item) {
-  color: #64748b;
-  font-weight: 600;
-}
-
-.q-filter-select :deep(.el-select__caret) {
-  color: #94a3b8;
-  font-size: 15px;
-}
-
-:global(.q-filter-popper.el-popper) {
-  overflow: hidden;
-  padding: 6px;
-  border: 1px solid rgba(191, 219, 254, 0.85);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.98);
-  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.13), 0 0 0 4px rgba(219, 234, 254, 0.28);
-}
-
-:global(.q-filter-popper .el-popper__arrow) {
-  display: none;
-}
-
-:global(.q-filter-popper .el-select-dropdown__list) {
-  padding: 0;
-}
-
-:global(.q-filter-popper .el-select-dropdown__item) {
-  height: 38px;
-  margin: 1px 0;
-  padding: 0 12px;
-  border-radius: 9px;
-  color: #475569;
-  font-weight: 600;
-  line-height: 38px;
-  transition: background-color 0.16s ease, color 0.16s ease;
-}
-
-:global(.q-filter-popper .el-select-dropdown__item.hover),
-:global(.q-filter-popper .el-select-dropdown__item:hover) {
-  background: #eff6ff;
-  color: var(--primary-600);
-}
-
-:global(.q-filter-popper .el-select-dropdown__item.is-selected) {
-  background: #dbeafe;
-  color: var(--primary-700);
-  font-weight: 700;
 }
 
 .question-form-dialog :deep(.el-dialog),

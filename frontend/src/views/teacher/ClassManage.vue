@@ -6,7 +6,7 @@
 
     <TableSkeleton v-if="loading" :cols="4" />
 
-    <div v-else-if="rows.length" class="class-list">
+    <div v-else-if="rows.length" class="class-list animate-list">
       <article v-for="row in rows" :key="row.id" class="class-row">
         <div class="class-primary">
           <span class="class-icon">
@@ -98,26 +98,55 @@
     </el-dialog>
 
     <!-- 学生名单 -->
-    <el-drawer v-model="studentsVisible" :title="`${currentClass?.name} · 学生名单`" size="46%">
-      <div class="add-bar">
-        <el-input v-model="addName" placeholder="输入学生用户名手动添加" :prefix-icon="User" @keyup.enter="doAddStudent" />
-        <el-button type="primary" :loading="adding" @click="doAddStudent">添加</el-button>
+    <el-drawer v-model="studentsVisible" size="560px" :show-close="false" class="student-drawer">
+      <template #header>
+        <div class="stu-drawer-header">
+          <span class="stu-drawer-icon">
+            <el-icon><User /></el-icon>
+          </span>
+          <div class="stu-drawer-heading">
+            <div class="stu-drawer-title">{{ currentClass?.name }} · 学生名单</div>
+            <div class="stu-drawer-subtitle">共 {{ students.length }} 名学生</div>
+          </div>
+          <el-button text circle class="creation-dialog-close" :icon="Close" @click="studentsVisible = false" />
+        </div>
+      </template>
+
+      <div class="stu-drawer-body">
+        <div class="invite-banner">
+          <div class="invite-banner-text">
+            <div class="invite-banner-label">班级邀请码</div>
+            <div class="invite-banner-tip">学生可在「我的班级」输入邀请码自助加入</div>
+          </div>
+          <span class="invite-chip">
+            <span class="invite-chip-label">邀请码</span>
+            <code>{{ currentClass?.invite_code }}</code>
+          </span>
+        </div>
+
+        <div class="add-bar">
+          <el-input v-model="addName" placeholder="输入学生用户名手动添加" :prefix-icon="User" @keyup.enter="doAddStudent" />
+          <el-button type="primary" :loading="adding" @click="doAddStudent">添加</el-button>
+        </div>
+
+        <div v-loading="studentsLoading" class="stu-list animate-list">
+          <div v-for="stu in students" :key="stu.id" class="stu-row" @click="openDetail(stu)">
+            <span class="stu-avatar" :style="{ background: avatarBg(stu.student_name || stu.username) }">
+              {{ (stu.student_name || stu.username || '?').charAt(0) }}
+            </span>
+            <div class="stu-info">
+              <div class="stu-name">{{ stu.student_name || stu.username }}</div>
+              <div class="stu-username">{{ stu.username }}</div>
+            </div>
+            <div class="stu-joined">
+              <div class="stu-joined-label">加入时间</div>
+              <div class="stu-joined-value">{{ fmtJoined(stu.joined_at) }}</div>
+            </div>
+            <el-button link type="danger" :icon="Delete" class="stu-remove" @click.stop="openDelete(stu, 'student')">移除</el-button>
+          </div>
+          <el-empty v-if="!studentsLoading && !students.length" description="暂无学生，用邀请码或上方手动添加" />
+        </div>
       </div>
-      <el-alert type="info" :closable="false" style="margin-bottom: 12px"
-        :title="`邀请码：${currentClass?.invite_code} —— 学生也可在「我的班级」输入邀请码自助加入`" />
-      <el-table :data="students" v-loading="studentsLoading" stripe>
-        <el-table-column prop="student_name" label="姓名" width="120" />
-        <el-table-column prop="username" label="用户名" min-width="120" />
-        <el-table-column label="加入时间" min-width="160">
-          <template #default="{ row }">{{ row.joined_at ? new Date(row.joined_at).toLocaleString() : '-' }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="90" align="center">
-          <template #default="{ row }">
-            <el-button link type="danger" :icon="Delete" @click="openDelete(row, 'student')">移除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      <el-empty v-if="!studentsLoading && !students.length" description="暂无学生，用邀请码或上方手动添加" />
     </el-drawer>
 
     <DeleteConfirmDialog
@@ -138,7 +167,8 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { Plus, Delete, EditPen, User, Refresh, School, Close } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
@@ -241,6 +271,20 @@ const currentClass = ref(null)
 const addName = ref('')
 const adding = ref(false)
 
+const AVATAR_COLORS = ['#2563eb', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4', '#f97316']
+function avatarBg(name) {
+  let hash = 0
+  for (const ch of name || '') hash = (hash * 31 + ch.codePointAt(0)) >>> 0
+  const color = AVATAR_COLORS[hash % AVATAR_COLORS.length]
+  return `linear-gradient(135deg, ${color} 0%, ${color}cc 100%)`
+}
+function fmtJoined(t) {
+  if (!t) return '-'
+  const d = new Date(t)
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 async function openStudents(row) {
   currentClass.value = row
   studentsVisible.value = true
@@ -268,6 +312,26 @@ async function doAddStudent() {
   } finally {
     adding.value = false
   }
+}
+
+// ---- 学生详情（跳转完整页面） ----
+const router = useRouter()
+
+const courseOptions = computed(() => {
+  const ids = currentClass.value?.courses?.length
+    ? currentClass.value.courses
+    : (currentClass.value?.course ? [currentClass.value.course] : [])
+  const names = currentClass.value?.course_names || []
+  return ids.map((id, i) => ({ id, name: names[i] || currentClass.value?.course_name || `课程 ${id}` }))
+})
+
+function openDetail(stu) {
+  const course = courseOptions.value[0]?.id
+  router.push({
+    name: 'class-student-detail',
+    params: { classId: currentClass.value.id, studentId: stu.student },
+    query: course ? { course } : {},
+  })
 }
 onMounted(() => { loadCourses(); load() })
 </script>
@@ -619,10 +683,221 @@ onMounted(() => { loadCourses(); load() })
   box-shadow: 0 9px 18px rgba(37, 99, 235, 0.22);
 }
 
+/* ===== 学生名单抽屉 ===== */
+:global(.student-drawer.el-drawer) {
+  border-radius: 20px 0 0 20px;
+  box-shadow: -18px 0 54px rgba(15, 23, 42, 0.16);
+}
+
+:global(.student-drawer .el-drawer__header) {
+  margin: 0;
+  padding: 0;
+}
+
+:global(.student-drawer .el-drawer__body) {
+  padding: 0;
+  background: #f7f9fc;
+}
+
+.stu-drawer-header {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-height: 86px;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.88);
+  background: linear-gradient(135deg, rgba(239, 246, 255, 0.96), rgba(255, 255, 255, 0.98) 58%);
+}
+
+.stu-drawer-icon {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  flex: 0 0 44px;
+  place-items: center;
+  border-radius: 14px;
+  background: #e8f4ff;
+  color: var(--primary-600);
+  font-size: 21px;
+  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.11);
+}
+
+.stu-drawer-heading {
+  min-width: 0;
+  flex: 1;
+}
+
+.stu-drawer-title {
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 18px;
+  font-weight: 760;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stu-drawer-subtitle {
+  margin-top: 3px;
+  color: #94a3b8;
+  font-size: 12.5px;
+}
+
+.stu-drawer-body {
+  padding: 18px 22px 24px;
+}
+
+.invite-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+  padding: 13px 16px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #eff6ff, #f5f3ff);
+  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.16);
+}
+
+.invite-banner-label {
+  color: var(--primary-700);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.invite-banner-tip {
+  margin-top: 2px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.invite-banner .invite-chip {
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.85);
+}
+
 .add-bar {
   display: flex;
   gap: 10px;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
+}
+
+.add-bar :deep(.el-input__wrapper) {
+  min-height: 42px;
+  border-radius: 11px;
+  background: #fff;
+  box-shadow: inset 0 0 0 1px #dbe5f2;
+  transition: box-shadow 0.2s ease;
+}
+
+.add-bar :deep(.el-input__wrapper:hover) {
+  box-shadow: inset 0 0 0 1px #bfdbfe;
+}
+
+.add-bar :deep(.el-input__wrapper.is-focus) {
+  box-shadow: inset 0 0 0 1px var(--primary-500), 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+
+.add-bar :deep(.el-button) {
+  height: 42px;
+  padding: 0 18px;
+  border-radius: 11px;
+  box-shadow: 0 9px 18px rgba(37, 99, 235, 0.2);
+}
+
+.stu-list {
+  display: grid;
+  gap: 10px;
+  min-height: 140px;
+  align-content: start;
+}
+
+.stu-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(37, 99, 235, 0.06);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.05);
+  cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.stu-row:hover {
+  transform: translateY(-1px);
+  border-color: rgba(96, 165, 250, 0.4);
+  box-shadow: 0 10px 22px rgba(37, 99, 235, 0.09);
+}
+
+.stu-avatar {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  flex: 0 0 36px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.14);
+}
+
+.stu-info {
+  min-width: 0;
+  flex: 1;
+}
+
+.stu-name {
+  overflow: hidden;
+  color: #1e293b;
+  font-size: 14px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stu-username {
+  overflow: hidden;
+  margin-top: 1px;
+  color: #94a3b8;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stu-joined {
+  flex-shrink: 0;
+  margin-right: 4px;
+  text-align: right;
+}
+
+.stu-joined-label {
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.stu-joined-value {
+  margin-top: 1px;
+  color: #475569;
+  font-size: 12.5px;
+}
+
+.stu-remove {
+  flex-shrink: 0;
+}
+
+@media (max-width: 640px) {
+  :global(.student-drawer.el-drawer) {
+    width: 100% !important;
+    border-radius: 0;
+  }
+
+  .stu-joined {
+    display: none;
+  }
 }
 
 @media (max-width: 1280px) {

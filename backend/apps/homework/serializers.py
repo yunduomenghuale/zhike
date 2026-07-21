@@ -1,6 +1,7 @@
 from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
+from django.utils import timezone
 from rest_framework import serializers
 
 from apps.courses.models import Course
@@ -53,7 +54,7 @@ class HomeworkSerializer(serializers.ModelSerializer):
         model = Homework
         fields = [
             "id", "course", "classroom", "title", "description", "attachment",
-            "mode", "mode_display", "deadline", "total_score", "status", "status_display",
+            "mode", "mode_display", "start_time", "deadline", "total_score", "status", "status_display",
             "questions", "question_items", "question_count", "submission_count", "created_at",
         ]
 
@@ -74,6 +75,22 @@ class HomeworkSerializer(serializers.ModelSerializer):
             if course.teacher_id != user.id or (classroom and classroom.teacher_id != user.id):
                 raise serializers.ValidationError("只能为自己负责的课程和班级创建作业")
 
+        start_time = attrs.get("start_time", getattr(self.instance, "start_time", None))
+        deadline = attrs.get("deadline", getattr(self.instance, "deadline", None))
+        now = timezone.now()
+
+        def field_changed(name, value):
+            if not self.instance:
+                return True
+            return getattr(self.instance, name, None) != value
+
+        if "start_time" in attrs and start_time and start_time < now and field_changed("start_time", start_time):
+            raise serializers.ValidationError({"start_time": "开始时间不能早于当前时间"})
+        if "deadline" in attrs and deadline and deadline < now and field_changed("deadline", deadline):
+            raise serializers.ValidationError({"deadline": "截止时间不能早于当前时间"})
+        if start_time and deadline and deadline <= start_time:
+            raise serializers.ValidationError({"deadline": "截止时间必须晚于开始时间"})
+
         mode = attrs.get("mode", getattr(self.instance, "mode", Homework.Mode.ATTACHMENT))
         status = attrs.get("status", getattr(self.instance, "status", Homework.Status.DRAFT))
         items = attrs.get("question_items")
@@ -86,8 +103,6 @@ class HomeworkSerializer(serializers.ModelSerializer):
             frozen_fields = {"course", "classroom", "mode"}
             if items is not None or any(name in attrs for name in frozen_fields):
                 raise serializers.ValidationError("作业发布后不能修改模式或题目")
-            if status == Homework.Status.DRAFT:
-                raise serializers.ValidationError({"status": "已发布作业不能退回草稿"})
 
         normalized = []
         if items is not None:
@@ -176,6 +191,10 @@ class HomeworkSerializer(serializers.ModelSerializer):
         has_items = "question_items" in validated_data
         items = validated_data.pop("question_items", None)
         requested_status = validated_data.pop("status", instance.status)
+        if has_items and instance.submissions.exists():
+            raise serializers.ValidationError(
+                {"question_items": "已有学生提交，不能修改题目；可调整标题、说明或截止时间"}
+            )
         instance = super().update(instance, validated_data)
         if has_items:
             self._replace_questions(instance, items)

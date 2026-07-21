@@ -32,7 +32,8 @@
 │   │   ├── questions/       # 题库、答题记录
 │   │   ├── homework/        # 作业、作业提交
 │   │   ├── exams/           # 试卷、考试、答卷、操作日志
-│   │   └── ai/              # AI Provider 抽象（LLM / Embedding / TTS）
+│   │   ├── ai/              # AI Provider 抽象（LLM / Embedding / TTS）
+│   │   └── platform_admin/  # 平台管理端（概览、用户、教学监管）
 │   ├── manage.py
 │   └── requirements.txt
 ├── frontend/                # Vue 3 前端
@@ -56,13 +57,14 @@ py -3.13 -m venv .venv
 pip install -r requirements.txt
 copy .env.example .env           # 按需填写大模型 API Key，默认 AI_PROVIDER=mock
 python manage.py migrate
-python manage.py createsuperuser # 可选，用于 Django Admin
-python manage.py runserver
+python manage.py createsuperuser # 创建平台超级管理员，同时可登录 Django Admin
+python manage.py runserver 127.0.0.1:8005
 ```
 
-- API 根路径：`http://127.0.0.1:8000/api/`
-- API 文档：`http://127.0.0.1:8000/api/docs/`
-- Django Admin：`http://127.0.0.1:8000/admin/`
+- API 根路径：`http://127.0.0.1:8005/api/`
+- API 文档：`http://127.0.0.1:8005/api/docs/`
+- Django Admin：`http://127.0.0.1:8005/admin/`
+- 平台管理端：超级管理员登录前端后，可通过左侧导航进入管理概览、用户管理和教学监管
 
 ### 前端
 

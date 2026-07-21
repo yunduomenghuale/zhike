@@ -7,6 +7,19 @@ def api_response(data=None, message="ok", code=0, status=200):
     return Response({"code": code, "message": message, "data": data}, status=status)
 
 
+def _format_error_detail(detail):
+    if isinstance(detail, dict):
+        parts = []
+        for field, value in detail.items():
+            msg = _format_error_detail(value)
+            if msg:
+                parts.append(f"{field}: {msg}")
+        return "；".join(parts)
+    if isinstance(detail, list):
+        return "，".join(str(item) for item in detail)
+    return str(detail) if detail is not None else ""
+
+
 def custom_exception_handler(exc, context):
     """把 DRF 默认异常包装成统一结构。"""
     response = exception_handler(exc, context)
@@ -18,7 +31,7 @@ def custom_exception_handler(exc, context):
         message = detail["detail"]
         payload = None
     else:
-        message = "请求错误"
+        message = _format_error_detail(detail) or "请求错误"
         payload = detail
 
     response.data = {

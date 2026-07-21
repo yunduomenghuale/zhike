@@ -80,6 +80,11 @@ class ExamSubmissionViewSet(BaseModelViewSet):
         """学生开始考试，分配试卷（需求 S-E-02）。"""
         exam_id = request.data.get("exam")
         exam = Exam.objects.get(id=exam_id)
+        now = timezone.now()
+        if exam.start_at and now < exam.start_at:
+            return api_response(message="考试尚未开始", code=400, status=400)
+        if exam.end_at and now > exam.end_at:
+            return api_response(message="考试已结束", code=400, status=400)
         # per_student_paper：优先取学生专属卷，否则取共用卷
         paper = (
             exam.papers.filter(student=request.user).first()
@@ -88,10 +93,10 @@ class ExamSubmissionViewSet(BaseModelViewSet):
         sub, _ = ExamSubmission.objects.get_or_create(
             exam=exam,
             student=request.user,
-            defaults={"paper": paper, "started_at": timezone.now(), "status": ExamSubmission.Status.IN_PROGRESS},
+            defaults={"paper": paper, "started_at": now, "status": ExamSubmission.Status.IN_PROGRESS},
         )
         if sub.started_at is None:
-            sub.started_at = timezone.now()
+            sub.started_at = now
             sub.status = ExamSubmission.Status.IN_PROGRESS
             sub.paper = paper
             sub.save(update_fields=["started_at", "status", "paper", "updated_at"])

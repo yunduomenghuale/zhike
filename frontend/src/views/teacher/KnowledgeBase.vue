@@ -43,7 +43,7 @@
             <div class="empty-tip">点击右上角「上传教辅资料」开始构建知识库</div>
           </template>
         </el-empty>
-        <div v-else class="kb-list">
+        <div v-else class="kb-list animate-list">
           <div v-for="m in materials" :key="m.id" class="kb-row">
             <div class="kb-row-left">
               <span class="kb-file-icon" :class="'ext-' + (m.file_type || 'file')">

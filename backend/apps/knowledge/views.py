@@ -18,6 +18,21 @@ def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
+# 图片问题允许的最大 base64 长度（约 4MB 原图）
+_MAX_IMAGE_B64_LEN = 5_600_000
+
+
+def _validate_image(value):
+    """校验可选的 base64 图片（data URL）。返回 (image_b64 或 None, 错误信息或 None)。"""
+    if not value:
+        return None, None
+    if not isinstance(value, str) or not value.startswith("data:image/"):
+        return None, "图片格式不正确"
+    if len(value) > _MAX_IMAGE_B64_LEN:
+        return None, "图片过大，请压缩后再试"
+    return value, None
+
+
 class MaterialViewSet(BaseModelViewSet):
     serializer_class = MaterialSerializer
     permission_classes = [IsTeacherOrReadOnly]
@@ -76,11 +91,16 @@ class QARecordViewSet(BaseModelViewSet):
         question = request.data.get("question", "").strip()
         if not question:
             return api_response(message="问题不能为空", code=400, status=400)
+        image_b64, error = _validate_image(request.data.get("image"))
+        if error:
+            return api_response(message=error, code=400, status=400)
 
-        answer, cited = knowledge_qa(course_id=course_id, question=question)
+        answer, cited = knowledge_qa(course_id=course_id, question=question, image_b64=image_b64)
         record = QARecord.objects.create(
             course_id=course_id,
             classroom_id=classroom_id,
+            catalog_id=request.data.get("catalog"),
+            session=str(request.data.get("session") or "")[:64],
             student=request.user,
             question=question,
             answer=answer,
@@ -98,16 +118,20 @@ class QARecordViewSet(BaseModelViewSet):
         course_id = request.data.get("course")
         classroom_id = request.data.get("classroom")
         catalog_id = request.data.get("catalog")
+        session = str(request.data.get("session") or "")[:64]
         question = (request.data.get("question") or "").strip()
         if not question:
             return api_response(message="问题不能为空", code=400, status=400)
+        image_b64, error = _validate_image(request.data.get("image"))
+        if error:
+            return api_response(message=error, code=400, status=400)
         user = request.user
 
         def event_stream():
             full, cited = [], []
             try:
                 for evt in knowledge_qa_stream(
-                    course_id=course_id, question=question, catalog_id=catalog_id
+                    course_id=course_id, question=question, catalog_id=catalog_id, image_b64=image_b64
                 ):
                     if evt["type"] == "meta":
                         cited = evt["cited"]
@@ -122,6 +146,8 @@ class QARecordViewSet(BaseModelViewSet):
                 QARecord.objects.create(
                     course_id=course_id,
                     classroom_id=classroom_id,
+                    catalog_id=catalog_id,
+                    session=session,
                     student=user,
                     question=question,
                     answer=answer,

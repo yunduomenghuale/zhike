@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="logo-title logo-desc">
+  <title id="logo-title">智课平台 Logo</title>
+  <desc id="logo-desc">由字母 Z 与 K 融合而成的蓝色智慧课程标志</desc>
+  <defs>
+    <linearGradient id="logo-deep" x1="10" y1="14" x2="38" y2="50" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1D4ED8"/>
+      <stop offset="1" stop-color="#2563EB"/>
+    </linearGradient>
+    <linearGradient id="logo-bright" x1="20" y1="48" x2="50" y2="12" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#60A5FA"/>
+    </linearGradient>
+  </defs>
+  <path d="M10 15h27L13 49h25" fill="none" stroke="url(#logo-deep)" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M21 46C30 37 40 27 47 18" fill="none" stroke="url(#logo-bright)" stroke-width="8" stroke-linecap="round"/>
+  <path d="M40 37l12 12" fill="none" stroke="url(#logo-deep)" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="50" cy="9.5" r="4.5" fill="#3B82F6"/>
+</svg>

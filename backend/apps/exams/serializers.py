@@ -19,8 +19,12 @@ class ExamSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         classroom = attrs.get("classroom", getattr(self.instance, "classroom", None))
         course = attrs.get("course", getattr(self.instance, "course", None))
+        start_at = attrs.get("start_at", getattr(self.instance, "start_at", None))
+        end_at = attrs.get("end_at", getattr(self.instance, "end_at", None))
         if classroom and course and not classroom.courses.filter(id=course.id).exists():
             raise serializers.ValidationError({"course": "该课程未关联到所选班级"})
+        if start_at and end_at and end_at <= start_at:
+            raise serializers.ValidationError({"end_at": "结束时间必须晚于开始时间"})
         return attrs
 
 

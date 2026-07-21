@@ -32,6 +32,11 @@ class HomeworkViewSet(BaseModelViewSet):
             qs = qs.filter(classroom__teacher=user)
         return qs.distinct()
 
+    def perform_destroy(self, instance):
+        # HomeworkAnswer 对题目为 PROTECT 外键，先清理各题作答记录再删除作业
+        HomeworkAnswer.objects.filter(homework_question__homework=instance).delete()
+        super().perform_destroy(instance)
+
 
 class HomeworkSubmissionViewSet(BaseModelViewSet):
     serializer_class = HomeworkSubmissionSerializer
@@ -60,6 +65,8 @@ class HomeworkSubmissionViewSet(BaseModelViewSet):
         homework = serializer.validated_data["homework"]
         if homework.status != Homework.Status.PUBLISHED:
             raise ValidationError({"homework": "作业尚未发布"})
+        if homework.start_time and timezone.now() < homework.start_time:
+            raise ValidationError({"homework": "作业尚未开始"})
         if not homework.classroom.students.filter(student=request.user).exists():
             raise PermissionDenied("你不在该作业所属班级中")
 

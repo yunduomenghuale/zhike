@@ -50,7 +50,7 @@ class OpenAICompatProvider(BaseAIProvider):
                     f"{self.base_url}/chat/completions",
                     headers=self._headers(),
                     json=payload,
-                    timeout=kwargs.get("timeout", 90),
+                    timeout=kwargs.get("timeout", 180),
                 )
                 resp.raise_for_status()
                 return resp.json()["choices"][0]["message"]["content"]

@@ -15,7 +15,7 @@ class User(AbstractUser):
 
     role = models.CharField("角色", max_length=16, choices=Role.choices, default=Role.STUDENT)
     real_name = models.CharField("姓名", max_length=64, blank=True)
-    phone = models.CharField("手机号", max_length=20, blank=True)
+    phone = models.CharField("手机号", max_length=20, blank=True, null=True, unique=True)
     avatar = models.CharField("头像", max_length=500, blank=True)
 
     class Meta:

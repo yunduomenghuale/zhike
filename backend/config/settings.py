@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     "apps.exams",
     "apps.ai",
     "apps.analytics",
+    "apps.platform_admin",
 ]
 
 MIDDLEWARE = [

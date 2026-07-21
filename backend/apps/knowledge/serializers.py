@@ -28,7 +28,7 @@ class QARecordSerializer(serializers.ModelSerializer):
     class Meta:
         model = QARecord
         fields = [
-            "id", "course", "classroom", "student", "student_name",
+            "id", "course", "classroom", "catalog", "session", "student", "student_name",
             "question", "answer", "cited_chunks", "created_at",
         ]
         read_only_fields = ["student", "answer", "cited_chunks"]

@@ -2,7 +2,7 @@
   <div class="page-container">
     <div class="course-board">
       <TableSkeleton v-if="loading" :cols="3" />
-      <div v-else class="course-grid">
+      <div v-else class="course-grid animate-list">
         <button type="button" class="course-add-card" @click="openDialog()">
           <span class="add-icon">
             <el-icon><Plus /></el-icon>

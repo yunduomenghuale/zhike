@@ -29,6 +29,7 @@ class Homework(BaseModel):
     description = models.TextField("说明", blank=True)
     attachment = models.FileField("附件", upload_to="homework/", null=True, blank=True)
     mode = models.CharField("作业模式", max_length=16, choices=Mode.choices, default=Mode.ATTACHMENT)
+    start_time = models.DateTimeField("开始时间", null=True, blank=True)
     deadline = models.DateTimeField("截止时间", null=True, blank=True)
     total_score = models.DecimalField("分值", max_digits=6, decimal_places=1, default=100)
     status = models.CharField("状态", max_length=16, choices=Status.choices, default=Status.DRAFT)

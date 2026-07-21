@@ -4,7 +4,7 @@ import router from '@/router'
 
 const request = axios.create({
   baseURL: '/api',
-  timeout: 60000,
+  timeout: 180000,
 })
 
 // 请求拦截：附带 JWT

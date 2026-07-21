@@ -1,6 +1,11 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { login as loginApi, getMe } from '@/api/auth'
+import {
+  getMe,
+  login as loginApi,
+  updateMe,
+  uploadAvatar,
+} from '@/api/auth'
 
 export const useUserStore = defineStore('user', () => {
   const token = ref(localStorage.getItem('access_token') || '')
@@ -20,6 +25,16 @@ export const useUserStore = defineStore('user', () => {
     return profile.value
   }
 
+  async function updateProfile(payload) {
+    profile.value = await updateMe(payload)
+    return profile.value
+  }
+
+  async function updateAvatar(file) {
+    profile.value = await uploadAvatar(file)
+    return profile.value
+  }
+
   function logout() {
     token.value = ''
     profile.value = null
@@ -30,5 +45,15 @@ export const useUserStore = defineStore('user', () => {
   const isTeacher = () => profile.value?.role === 'teacher'
   const isStudent = () => profile.value?.role === 'student'
 
-  return { token, profile, login, fetchProfile, logout, isTeacher, isStudent }
+  return {
+    token,
+    profile,
+    login,
+    fetchProfile,
+    updateProfile,
+    updateAvatar,
+    logout,
+    isTeacher,
+    isStudent,
+  }
 })

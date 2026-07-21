@@ -438,6 +438,8 @@ QA_SYSTEM_PROMPT = (
     "你是课程 AI 助教，语气自然、友好、有条理。"
     "请优先依据下面提供的「课程资料」（课件 PPT、讲解稿、知识库片段）回答学生的问题，答案要简明、分点清晰。"
     "如果课程资料里没有相关内容，可以结合你的通识知识作答，但要提醒学生这部分未在本课程资料中出现。"
+    "如果学生的问题或图片与本课程明显无关，不要展开详细解答，只需简要说明它与本课程无关，"
+    "并友好地引导学生围绕本课程内容提问。"
     "遇到寒暄、问候或与课程无关的闲聊，友好、简短地回应即可，不要生硬地拒答。"
 )
 
@@ -514,7 +516,7 @@ def _gather_course_context(
     return context, cited
 
 
-def knowledge_qa(course_id: int, question: str, catalog_id=None) -> tuple[str, list[dict]]:
+def knowledge_qa(course_id: int, question: str, catalog_id=None, image_b64: str | None = None) -> tuple[str, list[dict]]:
     provider = get_provider()
     context, cited = _gather_course_context(course_id, question, catalog_id=catalog_id)
     user_content = (
@@ -524,12 +526,22 @@ def knowledge_qa(course_id: int, question: str, catalog_id=None) -> tuple[str, l
     )
     messages = [
         {"role": "system", "content": QA_SYSTEM_PROMPT},
-        {"role": "user", "content": user_content},
+        {"role": "user", "content": _qa_user_content(user_content, image_b64)},
     ]
     return provider.chat(messages), cited
 
 
-def knowledge_qa_stream(course_id: int, question: str, catalog_id=None):
+def _qa_user_content(text: str, image_b64: str | None):
+    """构造问答 user 消息体；带图片时使用 OpenAI 多模态 content 结构。"""
+    if not image_b64:
+        return text
+    return [
+        {"type": "text", "text": text},
+        {"type": "image_url", "image_url": {"url": image_b64}},
+    ]
+
+
+def knowledge_qa_stream(course_id: int, question: str, catalog_id=None, image_b64: str | None = None):
     """知识库问答的流式版本（需求 S-K-01/02/04）。
 
     先产出一条 {"type":"meta","cited":[...]} 事件（引用片段），
@@ -547,7 +559,7 @@ def knowledge_qa_stream(course_id: int, question: str, catalog_id=None):
     )
     messages = [
         {"role": "system", "content": QA_SYSTEM_PROMPT},
-        {"role": "user", "content": user_content},
+        {"role": "user", "content": _qa_user_content(user_content, image_b64)},
     ]
     for piece in provider.chat_stream(messages):
         if piece:
@@ -618,3 +630,92 @@ def auto_grade_homework(content: str, reference: str, rubric: str) -> dict:
         {"role": "user", "content": f"评分标准：{rubric}\n参考答案：{reference}\n学生作业：{content}"},
     ]
     return _safe_json(provider.chat(messages), default={"score": None, "comment": provider.chat(messages)})
+
+
+# ---------------------------------------------------------------------------
+# 班级学情分析（需求 T-L-04 延伸）：整体报告 + 逐学生简评
+# ---------------------------------------------------------------------------
+def analyze_class_stats(stats: dict) -> dict:
+    """基于班级学习统计数据生成 AI 学情分析。
+
+    返回 {"overview": <markdown 报告>, "student_comments": [{"student_id", "comment"}]}。
+    解析失败时兜底为 {"overview": 原始文本, "student_comments": []}。
+    """
+    from django.utils import timezone
+
+    provider = get_provider()
+    now = timezone.now()
+    summary = stats.get("summary", {})
+
+    # 课程内容上下文：章节 / 作业 / 考试名称，让简评落到具体课程内容上
+    from apps.courses.models import Catalog
+    from apps.exams.models import Exam
+    from apps.homework.models import Homework
+
+    course_id = stats.get("course_id")
+    chapters = list(
+        Catalog.objects.filter(course_id=course_id, parent__isnull=True, is_published=True)
+        .order_by("order", "id")
+        .values_list("title", flat=True)
+    )
+    hw_titles = list(
+        Homework.objects.filter(course_id=course_id, status="published")
+        .order_by("id")
+        .values_list("title", flat=True)
+    )
+    exam_names = list(
+        Exam.objects.filter(course_id=course_id, status__in=["published", "finished"])
+        .order_by("id")
+        .values_list("name", flat=True)
+    )
+
+    students_brief = []
+    for row in stats.get("students", []):
+        last_active = row.get("last_active")
+        inactive_days = (now - last_active).days if last_active else None
+        students_brief.append({
+            "student_id": row.get("student_id"),
+            "姓名": row.get("name"),
+            "练习正确率%": row.get("accuracy"),
+            "练习题量": row.get("practice_total"),
+            "作业提交": f"{row.get('homework_submitted')}/{row.get('homework_total')}",
+            "缺交作业": row.get("homework_missing") or [],
+            "考试参加": f"{row.get('exam_taken')}/{row.get('exam_total')}",
+            "缺考考试": row.get("exam_missing") or [],
+            "考试均分": row.get("avg_exam_score"),
+            "未学习天数": inactive_days if inactive_days is not None else "从未",
+            "预警": row.get("warnings") or [],
+        })
+
+    user_prompt = (
+        "请根据以下班级学习统计数据生成学情分析。\n"
+        "严格只输出 JSON（不要任何解释文字、不要 Markdown 代码块），格式：\n"
+        '{"overview": "<markdown 报告>", "student_comments": [{"student_id": 数字, "comment": "..."}]}\n'
+        "要求：\n"
+        "1. overview 为 markdown 文本，含「## 整体学情」「## 需重点关注的学生」「## 教学建议」三个小节，"
+        "总计 200~350 字，数据引用要准确，语言自然、像写给授课教师的周报。\n"
+        "2. student_comments 覆盖每一名学生，comment 不超过 50 字。\n"
+        "3. 简评是写给授课教师参考的，一律用第三人称描述该学生（如「该生」「其」），"
+        "先概括表现、再给出教师可采取的行动建议（如「建议提醒其…」「可安排…」），"
+        "严禁以对学生喊话的第二人称口吻（「你/加油/等着你」等）。\n"
+        "4. 简评必须紧密结合本课程内容：建议要落到具体章节（用章节名称）或具体作业/考试（用其名称），"
+        "缺交作业或缺考时直接点名对应任务名称；禁止「好好学习、巩固基础」这类放之四海皆准的空泛评语。\n"
+        "5. student_id 必须与输入数据中的 student_id 完全一致。\n\n"
+        f"课程：{stats.get('course_name')}　班级：{stats.get('class_name')}\n"
+        f"课程章节：{json.dumps(chapters, ensure_ascii=False)}\n"
+        f"课程作业：{json.dumps(hw_titles, ensure_ascii=False)}\n"
+        f"课程考试：{json.dumps(exam_names, ensure_ascii=False)}\n"
+        f"班级汇总：{json.dumps(summary, ensure_ascii=False)}\n"
+        f"学生明细：{json.dumps(students_brief, ensure_ascii=False)}"
+    )
+    messages = [
+        {"role": "system", "content": "你是高校教学质量分析助手，擅长从学习数据中提炼可执行的教学建议，只输出规范的 JSON。"},
+        {"role": "user", "content": user_prompt},
+    ]
+    raw = provider.chat(messages)
+    result = _safe_json(raw, default=None)
+    if not isinstance(result, dict) or "overview" not in result:
+        return {"overview": raw, "student_comments": []}
+    if not isinstance(result.get("student_comments"), list):
+        result["student_comments"] = []
+    return result

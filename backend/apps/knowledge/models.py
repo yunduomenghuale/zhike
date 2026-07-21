@@ -69,6 +69,12 @@ class QARecord(BaseModel):
     classroom = models.ForeignKey(
         "classroom.ClassRoom", null=True, blank=True, on_delete=models.SET_NULL, verbose_name="班级"
     )
+    # 提问时的章节上下文（章节面板内提问）；为空表示课程级问答页提出的
+    catalog = models.ForeignKey(
+        "courses.Catalog", null=True, blank=True, on_delete=models.SET_NULL, verbose_name="章节"
+    )
+    # 会话分组标识（前端生成的 uuid）；同一次连续对话共享一个标识
+    session = models.CharField("会话标识", max_length=64, default="", db_index=True)
     student = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="qa_records", verbose_name="学生"
     )

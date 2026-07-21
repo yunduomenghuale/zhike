@@ -12,8 +12,10 @@
             <el-icon><Document /></el-icon>
           </div>
           <div class="full-lecture-title-copy">
-            <div class="full-lecture-kicker">{{ courseName }}</div>
-            <h1>完整讲解</h1>
+            <div class="full-lecture-title-line">
+              <h1>完整讲解</h1>
+              <span class="full-lecture-kicker">{{ courseName }}</span>
+            </div>
             <p>{{ videoNode?.title }}</p>
           </div>
         </div>
@@ -149,36 +151,50 @@
                 class="chat-row"
                 :class="m.role"
               >
-                <div class="chat-avatar">
-                  <el-icon><component :is="m.role === 'user' ? User : MagicStick" /></el-icon>
-                </div>
-                <div class="chat-bubble">
+                <div class="chat-bubble" :class="{ bare: m.imageOnly }">
                   <span v-if="m.streaming && !m.content" class="chat-typing"><i></i><i></i><i></i></span>
                   <div
                     v-else-if="m.role === 'assistant'"
                     class="chat-text chat-md"
                     v-html="renderMd(m.content + (m.streaming ? ' ▍' : ''))"
                   ></div>
-                  <div v-else class="chat-text">{{ m.content }}</div>
+                  <div v-else class="chat-text">
+                    <img v-if="m.image" :src="m.image" class="q-image" alt="提问图片" />
+                    <template v-if="!m.imageOnly">{{ m.content }}</template>
+                  </div>
                 </div>
               </div>
             </div>
 
             <div class="chat-input">
+              <div v-if="chatImage" class="chat-image-preview">
+                <img :src="chatImage" alt="待发送图片" />
+                <button class="preview-remove" title="移除图片" @click="chatImage = ''">
+                  <el-icon :size="11"><Close /></el-icon>
+                </button>
+              </div>
               <textarea
                 ref="chatTextareaRef"
                 v-model="chatInput"
                 class="chat-textarea"
                 rows="1"
-                placeholder="就本课程知识库提问…"
+                placeholder="就本课程知识库提问…（Enter 发送）"
                 @input="autoGrowInput"
                 @keydown.enter.exact.prevent="askChat()"
               ></textarea>
-              <button
-                class="chat-send"
-                :disabled="chatLoading || !chatInput.trim()"
-                @click="askChat()"
-              ><el-icon><Promotion /></el-icon></button>
+              <div class="chat-input-bar">
+                <input ref="chatFileRef" type="file" accept="image/*" hidden @change="onPickChatImage" />
+                <button class="chat-tool" title="提交图片提问" @click="chatFileRef?.click()">
+                  <el-icon :size="15"><Picture /></el-icon>
+                  图片
+                </button>
+                <button
+                  class="chat-send"
+                  title="发送"
+                  :disabled="chatLoading || (!chatInput.trim() && !chatImage)"
+                  @click="askChat()"
+                ><el-icon><Promotion /></el-icon></button>
+              </div>
             </div>
           </div>
 
@@ -814,7 +830,7 @@
 <script setup>
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ArrowLeft, ArrowRight, Plus, Edit, Delete, Upload, MagicStick, Folder, Document, Microphone, Headset, UploadFilled, VideoPlay, VideoPause, ChatDotRound, Close, Promotion, User, Loading, Right } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowRight, Plus, Edit, Delete, Upload, MagicStick, Folder, Document, Microphone, Headset, UploadFilled, VideoPlay, VideoPause, ChatDotRound, Close, Promotion, Picture, Loading, Right } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
 import {
@@ -925,9 +941,9 @@ async function save() {
   if (!form.title) return ElMessage.warning('请填写标题')
   saving.value = true
   try {
-    const payload = { course: courseId, parent: form.parent, title: form.title, order: form.order, intro: form.intro }
-    if (form.id) await updateCatalog(form.id, payload)
-    else await createCatalog(payload)
+      const payload = { course: courseId, parent: form.parent, title: form.title, order: form.order, intro: form.intro }
+      if (form.id) await updateCatalog(form.id, payload)
+      else await createCatalog({ ...payload, is_published: true })
     ElMessage.success('已保存')
     editVisible.value = false
     loadTree()
@@ -1031,7 +1047,7 @@ async function importPlan() {
   try {
     for (let order = 0; order < chapters.length; order += 1) {
       const chapter = chapters[order]
-      await createCatalog({ course: courseId, parent: null, title: chapter.title, order })
+        await createCatalog({ course: courseId, parent: null, title: chapter.title, order, is_published: true })
     }
     ElMessage.success('目录已保存')
     planVisible.value = false
@@ -1217,6 +1233,40 @@ const dockVisible = ref(false)
 const dockTab = ref('chat')
 const chatMessages = ref([])
 const chatInput = ref('')
+const chatImage = ref('')
+const chatFileRef = ref(null)
+const chatSessionId = crypto.randomUUID()
+
+function onPickChatImage(e) {
+  const file = e.target.files?.[0]
+  e.target.value = ''
+  if (!file) return
+  if (!file.type.startsWith('image/')) return ElMessage.warning('请选择图片文件')
+  if (file.size > 6 * 1024 * 1024) return ElMessage.warning('图片不能超过 6MB')
+  const reader = new FileReader()
+  reader.onload = () => {
+    const img = new Image()
+    img.onload = () => {
+      const max = 1024
+      let { width, height } = img
+      if (Math.max(width, height) > max) {
+        const scale = max / Math.max(width, height)
+        width = Math.round(width * scale)
+        height = Math.round(height * scale)
+      }
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height)
+      // PNG 保留原格式（避免透明背景转 JPEG 变黑），其余统一 JPEG 压缩
+      chatImage.value = file.type === 'image/png'
+        ? canvas.toDataURL('image/png')
+        : canvas.toDataURL('image/jpeg', 0.85)
+    }
+    img.src = reader.result
+  }
+  reader.readAsDataURL(file)
+}
 const chatLoading = ref(false)
 const chatScrollRef = ref(null)
 const scriptDockListRef = ref(null)
@@ -1293,9 +1343,12 @@ function autoGrowInput() {
 
 async function askChat(preset) {
   const q = (preset ?? chatInput.value).trim()
-  if (!q || chatLoading.value) return
-  chatMessages.value.push({ role: 'user', content: q })
+  const img = chatImage.value
+  if ((!q && !img) || chatLoading.value) return
+  const text = q || '请描述并解读这张图片'
+  chatMessages.value.push({ role: 'user', content: text, image: img, imageOnly: !q })
   chatInput.value = ''
+  chatImage.value = ''
   nextTick(autoGrowInput)
   chatLoading.value = true
   // 预置一条空的助教消息，流式往里追加
@@ -1309,7 +1362,7 @@ async function askChat(preset) {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ course: courseId, catalog: videoNode.value?.id, question: q }),
+      body: JSON.stringify({ course: courseId, catalog: videoNode.value?.id, question: text, session: chatSessionId, ...(img ? { image: img } : {}) }),
     })
     if (!resp.ok || !resp.body) throw new Error('bad response')
 
@@ -1664,6 +1717,21 @@ onMounted(() => { loadCourseName(); loadTree() })
   background: transparent;
 }
 
+/* 章节行入场交错浮现（el-tree 深层节点） */
+.catalog-tree :deep(.el-tree-node) {
+  animation: row-enter 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.catalog-tree :deep(.el-tree-node:nth-child(1)) { animation-delay: 0.02s; }
+.catalog-tree :deep(.el-tree-node:nth-child(2)) { animation-delay: 0.06s; }
+.catalog-tree :deep(.el-tree-node:nth-child(3)) { animation-delay: 0.1s; }
+.catalog-tree :deep(.el-tree-node:nth-child(4)) { animation-delay: 0.14s; }
+.catalog-tree :deep(.el-tree-node:nth-child(5)) { animation-delay: 0.18s; }
+.catalog-tree :deep(.el-tree-node:nth-child(6)) { animation-delay: 0.22s; }
+.catalog-tree :deep(.el-tree-node:nth-child(7)) { animation-delay: 0.26s; }
+.catalog-tree :deep(.el-tree-node:nth-child(8)) { animation-delay: 0.3s; }
+.catalog-tree :deep(.el-tree-node:nth-child(9)) { animation-delay: 0.34s; }
+.catalog-tree :deep(.el-tree-node:nth-child(n + 10)) { animation-delay: 0.38s; }
+
 .tree-node {
   flex: 1;
   display: grid;
@@ -1908,9 +1976,9 @@ html.dark .tree-node {
   padding: 0;
   overflow: hidden;
   border: 1px solid rgba(191, 219, 254, 0.72);
-  border-radius: 18px;
+  border-radius: 22px;
   background: #fff;
-  box-shadow: 0 28px 70px rgba(30, 64, 175, 0.18), 0 8px 22px rgba(15, 23, 42, 0.09);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18), 0 0 0 8px rgba(219, 234, 254, 0.18);
 }
 
 :global(.chapter-form-dialog.el-dialog .el-dialog__header),
@@ -1932,27 +2000,28 @@ html.dark .tree-node {
 .creation-dialog-header {
   display: flex;
   align-items: center;
-  gap: 13px;
-  min-height: 86px;
-  padding: 22px 24px 18px;
-  border-bottom: 1px solid rgba(226, 232, 240, 0.88);
-  background: linear-gradient(135deg, rgba(239, 246, 255, 0.96), rgba(255, 255, 255, 0.98) 58%);
+  gap: 14px;
+  min-height: 84px;
+  padding: 20px 24px 18px;
+  border-bottom: 1px solid #edf2f8;
+  background: linear-gradient(135deg, #f8fbff 0%, #ffffff 62%);
 }
 
 .creation-dialog-icon {
-  width: 44px;
-  height: 44px;
+  width: 46px;
+  height: 46px;
   display: grid;
-  flex: 0 0 44px;
+  flex: 0 0 46px;
   place-items: center;
-  border-radius: 14px;
-  color: var(--primary-600);
+  border: 1px solid #dbeafe;
+  border-radius: 15px;
+  color: #2563eb;
   font-size: 21px;
+  background: #eff6ff;
 }
 
 .chapter-create-icon {
-  background: #eaf2ff;
-  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.11);
+  box-shadow: 0 10px 22px rgba(37, 99, 235, 0.08);
 }
 
 .creation-dialog-heading {
@@ -1963,7 +2032,7 @@ html.dark .tree-node {
 .creation-dialog-title {
   color: #0f172a;
   font-size: 20px;
-  font-weight: 760;
+  font-weight: 850;
   line-height: 1.25;
 }
 
@@ -1978,19 +2047,19 @@ html.dark .tree-node {
 }
 
 .creation-dialog-close {
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   color: #94a3b8;
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 .creation-dialog-close:hover {
-  color: #475569;
-  background: rgba(226, 232, 240, 0.7);
+  color: #2563eb;
+  background: #eff6ff;
 }
 
 .chapter-creation-form {
-  padding: 22px 24px 24px;
+  padding: 22px 24px 26px;
 }
 
 .chapter-form-grid {
@@ -2009,10 +2078,10 @@ html.dark .tree-node {
 
 .creation-form :deep(.el-form-item__label) {
   height: auto;
-  padding: 0 0 7px;
+  padding: 0 0 8px;
   color: #475569;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 780;
   line-height: 1.2;
 }
 
@@ -2024,7 +2093,7 @@ html.dark .tree-node {
 .creation-form :deep(.el-input__wrapper),
 .creation-form :deep(.el-input-number .el-input__wrapper) {
   min-height: 44px;
-  border-radius: 11px;
+  border-radius: 13px;
   background: #f8fbff;
   box-shadow: inset 0 0 0 1px #dbe5f2;
   transition: box-shadow 0.2s ease, background-color 0.2s ease;
@@ -2046,7 +2115,7 @@ html.dark .tree-node {
   min-height: 104px !important;
   padding: 12px 13px;
   border: 1px solid #dbe5f2;
-  border-radius: 11px;
+  border-radius: 13px;
   background: #f8fbff;
   box-shadow: none;
   transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
@@ -2064,44 +2133,52 @@ html.dark .tree-node {
 }
 
 .catalog-body {
-  padding: 22px 24px 20px;
+  padding: 22px 24px 24px;
 }
 
 .mode-switch {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
-  padding: 4px;
   margin-bottom: 18px;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
-  background: var(--el-fill-color-lighter);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .mode-option {
-  height: 42px;
-  border: 0;
-  border-radius: 6px;
+  height: 46px;
+  border: 1px solid #dbe5f2;
+  border-radius: 13px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 7px;
-  background: transparent;
-  color: var(--el-text-color-secondary);
+  background: #f8fbff;
+  color: #64748b;
   font-size: 14px;
+  font-weight: 780;
   cursor: pointer;
-  transition: background-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+  transition: border-color 0.18s ease, background-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.mode-option:hover {
+  border-color: #bfdbfe;
+  background: #fff;
+  color: #2563eb;
 }
 
 .mode-option.active {
-  background: #fff;
-  color: var(--el-color-primary);
-  box-shadow: var(--shadow-xs);
-  font-weight: 600;
+  border-color: transparent;
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: #fff;
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.22);
+  transform: translateY(-1px);
 }
 
 .catalog-section {
-  min-height: 250px;
+  min-height: 252px;
 }
 
 .course-upload :deep(.el-upload) {
@@ -2110,10 +2187,10 @@ html.dark .tree-node {
 
 .course-upload :deep(.el-upload-dragger) {
   width: 100%;
-  height: 188px;
-  border-radius: 8px;
-  border: 1px dashed var(--el-color-primary-light-3);
-  background: linear-gradient(180deg, #ffffff 0%, var(--el-color-primary-light-9) 100%);
+  height: 196px;
+  border: 1px dashed #bfdbfe;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2121,8 +2198,9 @@ html.dark .tree-node {
 }
 
 .course-upload :deep(.el-upload-dragger:hover) {
-  border-color: var(--el-color-primary);
-  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.08);
+  border-color: #3b82f6;
+  background: #fff;
+  box-shadow: 0 14px 32px rgba(37, 99, 235, 0.1);
 }
 
 .upload-inner {
@@ -2132,26 +2210,26 @@ html.dark .tree-node {
 }
 
 .upload-mark {
-  width: 48px;
-  height: 48px;
-  border-radius: 8px;
+  width: 52px;
+  height: 52px;
+  border-radius: 15px;
   display: grid;
   place-items: center;
-  background: #fff;
-  color: var(--el-color-primary);
+  background: linear-gradient(135deg, #60a5fa 0%, #2563eb 100%);
+  color: #fff;
   font-size: 26px;
-  box-shadow: var(--shadow-sm);
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.2);
 }
 
 .upload-main {
   font-size: 16px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
+  font-weight: 800;
+  color: #0f172a;
 }
 
 .upload-sub {
   font-size: 13px;
-  color: var(--el-text-color-secondary);
+  color: #94a3b8;
 }
 
 .file-status {
@@ -2159,19 +2237,21 @@ html.dark .tree-node {
   align-items: center;
   gap: 10px;
   margin-top: 14px;
-  padding: 12px;
-  background: var(--el-fill-color-light);
-  border-radius: 8px;
+  padding: 12px 13px;
+  border: 1px solid #e2ebf7;
+  border-radius: 14px;
+  background: #f8fbff;
 }
 
 .file-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 6px;
+  width: 36px;
+  height: 36px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
   display: grid;
   place-items: center;
   background: #fff;
-  color: var(--el-color-primary);
+  color: #2563eb;
   flex-shrink: 0;
 }
 
@@ -2184,8 +2264,8 @@ html.dark .tree-node {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--el-text-color-primary);
-  font-weight: 600;
+  color: #0f172a;
+  font-weight: 760;
 }
 
 .file-note {
@@ -2199,8 +2279,8 @@ html.dark .tree-node {
   padding: 14px 16px;
   max-height: 220px;
   overflow-y: auto;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
+  border: 1px solid #e2ebf7;
+  border-radius: 14px;
   background: #fff;
 }
 
@@ -2213,8 +2293,8 @@ html.dark .tree-node {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 8px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
+  font-weight: 800;
+  color: #0f172a;
 }
 
 .outline-preview ul {
@@ -2226,9 +2306,9 @@ html.dark .tree-node {
 
 .manual-panel {
   padding: 16px;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 10px;
-  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  border: 1px solid #e2ebf7;
+  border-radius: 16px;
+  background: rgba(248, 251, 255, 0.82);
 }
 
 .manual-head {
@@ -2241,8 +2321,8 @@ html.dark .tree-node {
 
 .manual-title {
   font-size: 15px;
-  font-weight: 700;
-  color: var(--el-text-color-primary);
+  font-weight: 820;
+  color: #0f172a;
 }
 
 .manual-list {
@@ -2256,36 +2336,39 @@ html.dark .tree-node {
   align-items: center;
   gap: 10px;
   padding: 10px;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
+  border: 1px solid #e2ebf7;
+  border-radius: 13px;
   background: #fff;
   transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
 }
 
 .manual-chapter:focus-within {
-  border-color: var(--el-color-primary-light-5);
-  box-shadow: 0 8px 22px rgba(64, 158, 255, 0.1);
+  border-color: #bfdbfe;
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.09);
 }
 
 .manual-index {
   width: 30px;
   height: 30px;
-  border-radius: 8px;
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
   display: grid;
   place-items: center;
-  color: var(--el-color-primary);
-  background: var(--el-color-primary-light-9);
-  font-weight: 700;
+  color: #2563eb;
+  background: #eff6ff;
+  font-weight: 820;
   font-size: 13px;
 }
 
 .manual-input :deep(.el-input__wrapper) {
-  box-shadow: none;
-  background: var(--el-fill-color-lighter);
+  min-height: 40px;
+  border-radius: 11px;
+  background: #f8fbff;
+  box-shadow: inset 0 0 0 1px transparent;
 }
 
 .manual-input :deep(.el-input__wrapper.is-focus) {
-  box-shadow: 0 0 0 1px var(--el-color-primary) inset;
+  box-shadow: inset 0 0 0 1px #3b82f6, 0 0 0 3px rgba(59, 130, 246, 0.12);
   background: #fff;
 }
 
@@ -2297,21 +2380,21 @@ html.dark .tree-node {
   width: 100%;
   height: 44px;
   margin-top: 12px;
-  border: 1px dashed var(--el-color-primary-light-5);
-  border-radius: 8px;
+  border: 1px dashed #bfdbfe;
+  border-radius: 12px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  background: var(--el-color-primary-light-9);
-  color: var(--el-color-primary);
-  font-weight: 600;
+  background: #eff6ff;
+  color: #2563eb;
+  font-weight: 780;
   cursor: pointer;
   transition: border-color 0.18s ease, background-color 0.18s ease, transform 0.18s ease;
 }
 
 .manual-add-card:hover {
-  border-color: var(--el-color-primary);
+  border-color: #3b82f6;
   background: #fff;
   transform: translateY(-1px);
 }
@@ -2320,19 +2403,22 @@ html.dark .tree-node {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
-  padding: 16px 24px 20px;
-  border-top: 1px solid rgba(226, 232, 240, 0.88);
-  background: rgba(248, 250, 252, 0.8);
+  padding: 16px 24px 18px;
+  border-top: 1px solid #edf2f8;
+  background: #f8fbff;
 }
 
 .creation-dialog-footer :deep(.el-button) {
-  height: 40px;
+  height: 38px;
   padding: 0 17px;
-  border-radius: 10px;
+  border-radius: 11px;
+  font-weight: 760;
 }
 
 .creation-dialog-footer :deep(.el-button--primary) {
-  box-shadow: 0 9px 18px rgba(37, 99, 235, 0.22);
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  border-color: transparent;
+  box-shadow: 0 10px 20px rgba(37, 99, 235, 0.24);
 }
 
 @media (max-width: 640px) {
@@ -2617,57 +2703,68 @@ html.dark .tree-node {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 18px;
+  gap: 14px;
   min-width: 0;
-  padding: 18px 28px;
+  padding: 12px 26px;
   border-bottom: 1px solid rgba(37, 99, 235, 0.1);
-  background: rgba(255, 255, 255, 0.76);
-  box-shadow: 0 14px 34px rgba(37, 99, 235, 0.08);
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.07);
   backdrop-filter: blur(20px) saturate(1.14);
 }
 
 .full-lecture-title-wrap {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
   min-width: 0;
 }
 
 .full-lecture-icon {
-  width: 48px;
-  height: 48px;
+  width: 30px;
+  height: 30px;
   flex: 0 0 auto;
   display: grid;
   place-items: center;
-  border-radius: 14px;
+  border-radius: 9px;
   color: #2563eb;
-  background: linear-gradient(145deg, #eff6ff, #ffffff);
+  background: rgba(239, 246, 255, 0.9);
   box-shadow:
-    10px 10px 22px rgba(148, 163, 184, 0.18),
-    -10px -10px 22px rgba(255, 255, 255, 0.9),
-    inset 0 1px 0 rgba(255, 255, 255, 0.9);
-  font-size: 22px;
+    inset 0 0 0 1px rgba(96, 165, 250, 0.18),
+    0 4px 10px rgba(37, 99, 235, 0.06);
+  font-size: 16px;
 }
 
 .full-lecture-title-copy {
   min-width: 0;
 }
 
+.full-lecture-title-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
 .full-lecture-kicker {
-  max-width: 46vw;
+  max-width: 34vw;
   overflow: hidden;
+  padding: 3px 9px;
+  border: 1px solid #dbeafe;
+  border-radius: 999px;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   color: #64748b;
+  background: rgba(248, 251, 255, 0.9);
 }
 
 .full-lecture-title-copy h1 {
-  margin: 2px 0 0;
-  font-size: 24px;
+  margin: 0;
+  font-size: 21px;
   line-height: 1.2;
   color: #0f172a;
+  white-space: nowrap;
 }
 
 .full-lecture-title-copy p {
@@ -2676,7 +2773,7 @@ html.dark .tree-node {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 14px;
+  font-size: 13px;
   color: #64748b;
 }
 
@@ -2684,31 +2781,32 @@ html.dark .tree-node {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
 }
 
 .full-lecture-stats {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
-  padding: 8px 10px;
+  padding: 6px 10px;
   border: 1px solid rgba(37, 99, 235, 0.08);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.74);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.86);
   color: #64748b;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .full-lecture-stats strong {
   color: #2563eb;
-  font-size: 18px;
+  font-size: 16px;
 }
 
 .full-lecture-soft-btn {
-  height: 38px;
+  height: 36px;
+  padding: 0 15px;
   border-radius: 999px;
   border-color: rgba(37, 99, 235, 0.12);
   background: rgba(255, 255, 255, 0.78);
@@ -2941,48 +3039,31 @@ html.dark .tree-node {
 
 .chat-row {
   display: flex;
-  gap: 10px;
   align-items: flex-start;
 }
 .chat-row.user {
-  flex-direction: row-reverse;
-}
-.chat-avatar {
-  flex: 0 0 30px;
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  border-radius: 10px;
-  font-size: 15px;
-  color: #2563eb;
-  background: linear-gradient(145deg, #eff6ff, #ffffff);
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.14);
-}
-.chat-row.user .chat-avatar {
-  color: #fff;
-  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  justify-content: flex-end;
 }
 .chat-bubble {
-  max-width: 82%;
-  padding: 10px 13px;
-  border-radius: 14px;
+  max-width: 100%;
+  padding: 2px 0;
   font-size: 13.5px;
-  line-height: 1.62;
+  line-height: 1.75;
 }
 .chat-row.assistant .chat-bubble {
-  max-width: 80%;
-  border: 1px solid rgba(37, 99, 235, 0.1);
-  border-top-left-radius: 4px;
-  background: rgba(255, 255, 255, 0.92);
   color: #1e293b;
-  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.08);
 }
 .chat-row.user .chat-bubble {
-  border-top-right-radius: 4px;
-  background: linear-gradient(135deg, #3b82f6, #2563eb);
-  color: #fff;
-  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.22);
+  max-width: 86%;
+  padding: 9px 14px;
+  border-radius: 16px;
+  border-bottom-right-radius: 6px;
+  background: #f1f3f5;
+  color: #334155;
+}
+.chat-row.user .chat-bubble.bare {
+  padding: 0;
+  background: transparent;
 }
 .chat-text {
   white-space: pre-wrap;
@@ -3141,25 +3222,25 @@ html.dark .tree-node {
 
 .chat-input {
   display: flex;
-  align-items: flex-end;
-  gap: 8px;
+  flex-direction: column;
+  gap: 4px;
   margin: 0 14px 14px;
-  padding: 8px 8px 8px 14px;
-  border: 1px solid rgba(37, 99, 235, 0.16);
+  padding: 10px 10px 8px 14px;
+  border: 1px solid #dbe5f2;
   border-radius: 18px;
   background: #fff;
   box-shadow: 0 10px 26px rgba(37, 99, 235, 0.1);
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
 }
 .chat-input:focus-within {
-  border-color: rgba(37, 99, 235, 0.5);
-  box-shadow: 0 12px 30px rgba(37, 99, 235, 0.18);
+  border-color: var(--primary-500, #3b82f6);
+  box-shadow: 0 12px 30px rgba(37, 99, 235, 0.14), 0 0 0 3px rgba(59, 130, 246, 0.12);
 }
 .chat-textarea {
   flex: 1;
   min-height: 24px;
   max-height: 120px;
-  padding: 6px 0;
+  padding: 2px 0;
   border: 0;
   background: transparent;
   color: #1e293b;
@@ -3173,18 +3254,76 @@ html.dark .tree-node {
 .chat-textarea::placeholder {
   color: #94a3b8;
 }
-.chat-send {
-  flex: 0 0 40px;
-  width: 40px;
-  height: 40px;
-  align-self: flex-end;
+.chat-input-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.chat-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  border-radius: 999px;
+  background: rgba(248, 251, 255, 0.9);
+  color: #2563eb;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+.chat-tool:hover {
+  border-color: #3b82f6;
+  background: #eff6ff;
+}
+.chat-image-preview {
+  position: relative;
+  width: 64px;
+  margin-bottom: 6px;
+}
+.chat-image-preview img {
+  width: 64px;
+  height: 64px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  object-fit: cover;
+}
+.preview-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 13px;
+  border-radius: 50%;
+  background: #475569;
+  color: #fff;
+  cursor: pointer;
+}
+.preview-remove:hover {
+  background: #ef4444;
+}
+.q-image {
+  display: block;
+  max-width: 220px;
+  max-height: 150px;
+  margin-bottom: 6px;
+  border-radius: 10px;
+}
+.chat-send {
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
   background: linear-gradient(135deg, #3b82f6, #2563eb);
   color: #fff;
-  font-size: 18px;
+  font-size: 15px;
   cursor: pointer;
   box-shadow: 0 6px 16px rgba(37, 99, 235, 0.3);
   transition: transform 0.15s ease, box-shadow 0.2s ease;

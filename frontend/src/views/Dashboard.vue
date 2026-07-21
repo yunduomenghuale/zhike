@@ -48,12 +48,13 @@ import { useRouter } from 'vue-router'
 import { useUserStore } from '@/store/user'
 import {
   HomeFilled, Reading, School, Collection, EditPen, Notebook,
-  Document, TrendCharts, VideoPlay, ChatDotRound,
+  Document, TrendCharts, VideoPlay, ChatDotRound, UserFilled, DataAnalysis, Setting,
 } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const userStore = useUserStore()
 const isStudent = computed(() => userStore.profile?.role === 'student')
+const isAdmin = computed(() => userStore.profile?.role === 'admin')
 
 const orbitOffset = ref(0)
 const paused = ref(false)
@@ -96,7 +97,18 @@ const studentFeatures = [
   { label: '错题本', desc: '复盘错题记录', path: '/student/wrong', icon: Collection, color: '#f59e0b', bg: '#fff7ed' },
 ]
 
-const baseCards = computed(() => (isStudent.value ? studentFeatures : teacherFeatures))
+const adminFeatures = [
+  { label: '管理概览', desc: '查看平台运行数据', path: '/admin/overview', icon: DataAnalysis, color: '#2563eb', bg: '#eff6ff' },
+  { label: '用户管理', desc: '维护教师与学生账号', path: '/admin/users', icon: UserFilled, color: '#8b5cf6', bg: '#f5f3ff' },
+  { label: '教学监管', desc: '监管课程与班级状态', path: '/admin/teaching', icon: Reading, color: '#10b981', bg: '#ecfdf5' },
+  { label: '大模型配置', desc: '配置模型并测试连接', path: '/admin/ai-settings', icon: Setting, color: '#0ea5e9', bg: '#f0f9ff' },
+  { label: '个人中心', desc: '维护管理员账号资料', path: '/profile', icon: HomeFilled, color: '#f59e0b', bg: '#fff7ed' },
+]
+
+const baseCards = computed(() => {
+  if (isAdmin.value) return adminFeatures
+  return isStudent.value ? studentFeatures : teacherFeatures
+})
 const cardsPerHelix = computed(() => baseCards.value.length * repeatCount)
 
 const helixCards = computed(() => {

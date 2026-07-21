@@ -5,6 +5,10 @@
       <!-- 左侧：登录表单 -->
       <div class="form-box login">
         <el-form :model="form" @submit.prevent>
+          <div class="login-brand">
+            <img src="/smart-course-logo.svg" alt="" aria-hidden="true" />
+            <span>智课平台</span>
+          </div>
           <h2>登录账号</h2>
           <p class="form-desc">欢迎回到智能课程教学平台</p>
 
@@ -12,7 +16,7 @@
             <el-input
               v-model="form.username"
               :prefix-icon="User"
-              placeholder="请输入用户名"
+              placeholder="请输入用户名或手机号"
               size="large"
             />
           </el-form-item>
@@ -45,6 +49,10 @@
       <!-- 右侧：注册表单 -->
       <div class="form-box register">
         <el-form :model="form" @submit.prevent>
+          <div class="login-brand">
+            <img src="/smart-course-logo.svg" alt="" aria-hidden="true" />
+            <span>智课平台</span>
+          </div>
           <h2>注册账号</h2>
           <p class="form-desc">创建账号开始使用平台</p>
 
@@ -58,6 +66,10 @@
 
           <el-form-item class="input-box">
             <el-input v-model="form.real_name" placeholder="请输入姓名" size="large" />
+          </el-form-item>
+
+          <el-form-item class="input-box">
+            <el-input v-model="form.phone" placeholder="请输入手机号" maxlength="20" size="large" />
           </el-form-item>
 
           <el-form-item class="input-box role-box">
@@ -156,6 +168,7 @@ const form = reactive({
   username: '',
   password: '',
   real_name: '',
+  phone: '',
   role: 'teacher',
 })
 
@@ -164,16 +177,25 @@ function toggleForm() {
   form.username = ''
   form.password = ''
   form.real_name = ''
+  form.phone = ''
   form.role = 'teacher'
 }
 
 async function submit() {
   if (!form.username || !form.password) {
-    ElMessage.warning('请填写用户名和密码')
+    ElMessage.warning('请填写用户名或手机号和密码')
     return
   }
   if (isRegister.value && !form.real_name) {
     ElMessage.warning('请填写姓名')
+    return
+  }
+  if (isRegister.value && !/^\+?\d{6,20}$/.test(form.phone.replace(/[ -]/g, ''))) {
+    ElMessage.warning('请填写正确的手机号')
+    return
+  }
+  if (isRegister.value && form.password.length < 6) {
+    ElMessage.warning('密码至少 6 位')
     return
   }
 
@@ -206,7 +228,7 @@ async function submit() {
   position: relative;
   z-index: 1;
   width: 1000px;
-  min-height: 620px;
+  min-height: 700px;
   background: #fff;
   border-radius: 36px;
   box-shadow: 0 24px 80px rgba(37, 99, 235, 0.18);
@@ -251,6 +273,22 @@ async function submit() {
 form {
   width: 100%;
   max-width: 380px;
+}
+
+.login-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+  color: #0f172a;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.login-brand img {
+  width: 34px;
+  height: 34px;
+  display: block;
 }
 
 h2 {

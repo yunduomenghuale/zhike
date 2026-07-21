@@ -30,7 +30,12 @@ class CatalogSerializer(serializers.ModelSerializer):
         ]
 
     def get_children(self, obj):
-        return CatalogSerializer(obj.children.all(), many=True).data
+        children = obj.children.all()
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if user and user.is_authenticated and user.is_student:
+            children = children.filter(is_published=True)
+        return CatalogSerializer(children, many=True, context=self.context).data
 
 
 class PPTResourceSerializer(serializers.ModelSerializer):

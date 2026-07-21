@@ -10,6 +10,7 @@
 run_out.txt
 run_err.txt
 *.log
+frontend/dev_*.txt
 
 # ===== 密钥 / 环境变量（兜底，切勿上传）=====
 .env
@@ -21,6 +22,8 @@ run_err.txt
 __pycache__/
 *.py[cod]
 *.sqlite3
+backend/backups/
+backend/seed_learning_stats.py
 backend/media/
 staticfiles/
 
@@ -28,3 +31,6 @@ staticfiles/
 node_modules/
 dist/
 *.local
+
+# ===== 设计过程稿（正式 Logo 使用 public/smart-course-logo.svg） =====
+frontend/src/assets/brand/*.png
