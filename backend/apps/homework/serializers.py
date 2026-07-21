@@ -1,4 +1,5 @@
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 
 from django.db import transaction
 from django.utils import timezone
@@ -57,6 +58,14 @@ class HomeworkSerializer(serializers.ModelSerializer):
             "mode", "mode_display", "start_time", "deadline", "total_score", "status", "status_display",
             "questions", "question_items", "question_count", "submission_count", "created_at",
         ]
+
+    def validate_attachment(self, value):
+        allowed = {".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".txt", ".zip", ".rar"}
+        if Path(value.name).suffix.lower() not in allowed:
+            raise serializers.ValidationError("仅支持 PDF、Office 文档、TXT 或压缩包")
+        if value.size > 20 * 1024 * 1024:
+            raise serializers.ValidationError("附件大小不能超过 20MB")
+        return value
 
     def validate(self, attrs):
         classroom = attrs.get("classroom", getattr(self.instance, "classroom", None))

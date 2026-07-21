@@ -159,17 +159,29 @@
               <div class="hw-card-head"><el-icon><EditPen /></el-icon>{{ form.mode === 'attachment' ? '作业附件' : '题目选择' }}</div>
               <div v-if="form.mode === 'attachment'" class="attachment-panel">
                 <el-upload
+                  ref="homeworkUploadRef"
                   class="attachment-uploader"
                   drag
                   :auto-upload="false"
                   :limit="1"
+                  accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.zip,.rar"
                   :on-change="onHomeworkFile"
                   :on-remove="() => { homeworkFile = null }"
                 >
                   <el-icon class="attachment-upload-icon"><Document /></el-icon>
                   <div class="attachment-upload-title">拖拽文件到此处，或点击选择</div>
-                  <div class="attachment-upload-tip">可上传作业说明、参考资料或模板文件</div>
+                  <div class="attachment-upload-tip">支持 PDF、Word、PPT、Excel、TXT 与压缩包，最大 20MB</div>
                 </el-upload>
+                <a
+                  v-if="currentAttachment && !homeworkFile"
+                  class="existing-attachment"
+                  :href="currentAttachment"
+                  target="_blank"
+                  rel="noopener"
+                >
+                  <el-icon><Document /></el-icon>
+                  <span>查看已上传附件</span>
+                </a>
               </div>
               <div v-else class="question-builder">
                 <el-alert
@@ -447,6 +459,8 @@ const isFrozen = computed(() => Boolean(form.id) && form.status !== 'draft')
 const selectedQuestions = ref([])
 const selectedTotal = computed(() => selectedQuestions.value.reduce((sum, item) => sum + Number(item.score || 0), 0))
 const homeworkFile = ref(null)
+const homeworkUploadRef = ref(null)
+const currentAttachment = ref('')
 const catalogOptions = ref([])
 const questionOptions = ref([])
 const questionLoading = ref(false)
@@ -624,7 +638,22 @@ function moveQuestion(index, offset) {
 }
 
 function onHomeworkFile(file) {
+  const name = String(file.name || '').toLowerCase()
+  const allowed = ['.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx', '.txt', '.zip', '.rar']
+  if (!allowed.some((ext) => name.endsWith(ext))) {
+    homeworkFile.value = null
+    homeworkUploadRef.value?.clearFiles()
+    ElMessage.warning('不支持该文件格式，请上传 PDF、Office 文档、TXT 或压缩包')
+    return
+  }
+  if (Number(file.size || 0) > 20 * 1024 * 1024) {
+    homeworkFile.value = null
+    homeworkUploadRef.value?.clearFiles()
+    ElMessage.warning('附件大小不能超过 20MB')
+    return
+  }
   homeworkFile.value = file.raw
+  currentAttachment.value = ''
 }
 
 function openEdit(row) {
@@ -641,6 +670,7 @@ function openEdit(row) {
     status: row?.status || 'draft',
   })
   homeworkFile.value = null
+  currentAttachment.value = row?.attachment || ''
   selectedQuestions.value = (row?.questions || []).map((item) => ({
     question: item.question,
     stem: item.snapshot?.stem || '题目快照',
@@ -2095,6 +2125,23 @@ html.dark .hw-card-head {
 .attachment-upload-icon { color: #3b82f6; font-size: 42px; }
 .attachment-upload-title { margin-top: 15px; color: #334155; font-size: 15px; font-weight: 750; }
 .attachment-upload-tip { margin-top: 7px; color: #94a3b8; font-size: 13px; }
+.existing-attachment {
+  width: min(520px, 86%);
+  margin-top: 12px;
+  padding: 12px 16px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  color: #2563eb;
+  background: #f8fbff;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+.existing-attachment:hover { border-color: #93c5fd; background: #eff6ff; }
 @media (max-width: 1180px) {
   .creation-form-grid { grid-template-columns: 320px minmax(0, 1fr); gap: 16px; }
   .hw-card { padding: 20px; }
