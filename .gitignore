@@ -9,6 +9,7 @@
 # ===== 运行日志 =====
 run_out.txt
 run_err.txt
+smoke_*.py
 *.log
 frontend/dev_*.txt
 
