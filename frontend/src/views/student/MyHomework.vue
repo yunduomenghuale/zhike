@@ -32,6 +32,41 @@
             <div class="assignment-description">{{ current.description }}</div>
           </div>
 
+          <section v-if="current?.attachment" class="assignment-resource">
+            <div class="resource-heading">
+              <div>
+                <div class="section-kicker">作业资料</div>
+                <div class="resource-title">教师附件</div>
+              </div>
+              <div class="resource-actions">
+                <a
+                  class="resource-action"
+                  :href="current.attachment"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <el-icon><View /></el-icon>打开文件
+                </a>
+                <a class="resource-action primary" :href="current.attachment" download>
+                  <el-icon><Download /></el-icon>下载附件
+                </a>
+              </div>
+            </div>
+            <div class="resource-file">
+              <span class="resource-file-icon"><el-icon><Document /></el-icon></span>
+              <div>
+                <strong>{{ teacherAttachmentName }}</strong>
+                <span>{{ isTeacherAttachmentPdf ? 'PDF 文档，可在下方直接预览' : '教师提供的作业文件' }}</span>
+              </div>
+            </div>
+            <iframe
+              v-if="isTeacherAttachmentPdf"
+              class="resource-preview"
+              :src="current.attachment"
+              title="作业附件 PDF 预览"
+            ></iframe>
+          </section>
+
           <template v-if="detailMode === 'submit'">
             <div v-if="current?.mode === 'questions'" class="homework-question-list">
               <div v-for="(item, index) in current.questions" :key="item.id" class="homework-question-card">
@@ -170,7 +205,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowLeft, Check, Clock, View } from '@element-plus/icons-vue'
+import { ArrowLeft, Check, Clock, Document, Download, View } from '@element-plus/icons-vue'
 import { listHomeworks, listSubmissions, submitHomework } from '@/api/homework'
 
 const route = useRoute()
@@ -231,6 +266,16 @@ const submitting = ref(false)
 const current = ref(null)
 const submitForm = reactive({ content: '', answers: {} })
 const submitFile = ref(null)
+const teacherAttachmentName = computed(() => {
+  const url = String(current.value?.attachment || '')
+  const rawName = url.split('/').pop()?.split('?')[0] || '作业附件'
+  try {
+    return decodeURIComponent(rawName)
+  } catch {
+    return rawName
+  }
+})
+const isTeacherAttachmentPdf = computed(() => teacherAttachmentName.value.toLowerCase().endsWith('.pdf'))
 const questionTotal = computed(() => current.value?.questions?.length || 0)
 const answeredCount = computed(() => (current.value?.questions || []).filter((item) => {
   const answer = submitForm.answers[item.id] || {}
@@ -494,6 +539,7 @@ onMounted(load)
 }
 
 .assignment-brief,
+.assignment-resource,
 .attachment-answer,
 .view-block,
 .teacher-comment,
@@ -524,6 +570,125 @@ onMounted(load)
   color: #526076;
   font-size: 13.5px;
   line-height: 1.75;
+}
+
+.assignment-resource {
+  margin-top: 20px;
+  padding: 18px;
+  border: 1px solid #dbeafe;
+  border-radius: 16px;
+  background: linear-gradient(145deg, #f8fbff, #fff 64%);
+  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.05);
+}
+
+.resource-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.resource-heading .section-kicker {
+  margin-bottom: 3px;
+}
+
+.resource-title {
+  color: #0f172a;
+  font-size: 16px;
+  font-weight: 750;
+}
+
+.resource-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.resource-action {
+  min-height: 36px;
+  padding: 0 13px;
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #2563eb;
+  background: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+  transition: border-color 0.16s ease, background-color 0.16s ease, transform 0.16s ease;
+}
+
+.resource-action:hover {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  transform: translateY(-1px);
+}
+
+.resource-action.primary {
+  border-color: #2563eb;
+  color: #fff;
+  background: #2563eb;
+}
+
+.resource-action.primary:hover {
+  border-color: #1d4ed8;
+  background: #1d4ed8;
+}
+
+.resource-file {
+  margin-top: 14px;
+  padding: 13px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.resource-file-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: #2563eb;
+  background: #eff6ff;
+  font-size: 20px;
+}
+
+.resource-file > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.resource-file strong {
+  overflow: hidden;
+  color: #334155;
+  font-size: 13.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resource-file span:not(.resource-file-icon) {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.resource-preview {
+  width: 100%;
+  height: min(52vh, 520px);
+  min-height: 360px;
+  margin-top: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  display: block;
+  background: #f8fafc;
 }
 
 .view-block {
@@ -836,6 +1001,7 @@ onMounted(load)
   }
 
   .assignment-brief,
+  .assignment-resource,
   .attachment-answer,
   .view-block,
   .teacher-comment,
@@ -867,6 +1033,24 @@ onMounted(load)
   .upload-section {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .resource-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .resource-actions {
+    width: 100%;
+  }
+
+  .resource-action {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .resource-preview {
+    min-height: 440px;
   }
 
   .workspace-footer {
