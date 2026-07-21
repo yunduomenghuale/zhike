@@ -59,10 +59,17 @@
                 <span>{{ isTeacherAttachmentPdf ? 'PDF 文档，可在下方直接预览' : '教师提供的作业文件' }}</span>
               </div>
             </div>
+            <div v-if="isTeacherAttachmentPdf && pdfPreviewLoading" class="resource-preview-state">
+              <el-icon class="is-loading"><Loading /></el-icon>
+              <span>正在加载 PDF 预览…</span>
+            </div>
+            <div v-else-if="isTeacherAttachmentPdf && pdfPreviewError" class="resource-preview-state is-error">
+              <span>在线预览加载失败，请使用右上角“打开文件”或“下载附件”。</span>
+            </div>
             <iframe
-              v-if="isTeacherAttachmentPdf"
+              v-else-if="isTeacherAttachmentPdf && pdfPreviewUrl"
               class="resource-preview"
-              :src="current.attachment"
+              :src="pdfPreviewUrl"
               title="作业附件 PDF 预览"
             ></iframe>
           </section>
@@ -202,10 +209,10 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowLeft, Check, Clock, Document, Download, View } from '@element-plus/icons-vue'
+import { ArrowLeft, Check, Clock, Document, Download, Loading, View } from '@element-plus/icons-vue'
 import { listHomeworks, listSubmissions, submitHomework } from '@/api/homework'
 
 const route = useRoute()
@@ -276,6 +283,10 @@ const teacherAttachmentName = computed(() => {
   }
 })
 const isTeacherAttachmentPdf = computed(() => teacherAttachmentName.value.toLowerCase().endsWith('.pdf'))
+const pdfPreviewUrl = ref('')
+const pdfPreviewLoading = ref(false)
+const pdfPreviewError = ref(false)
+let pdfPreviewRequestId = 0
 const questionTotal = computed(() => current.value?.questions?.length || 0)
 const answeredCount = computed(() => (current.value?.questions || []).filter((item) => {
   const answer = submitForm.answers[item.id] || {}
@@ -365,12 +376,61 @@ function formatAnswer(answer) {
   return JSON.stringify(answer)
 }
 
+function releasePdfPreview() {
+  if (pdfPreviewUrl.value) {
+    URL.revokeObjectURL(pdfPreviewUrl.value)
+    pdfPreviewUrl.value = ''
+  }
+}
+
+function mediaProxyUrl(url) {
+  try {
+    const parsed = new URL(url, window.location.origin)
+    if (parsed.pathname.startsWith('/media/')) return `${parsed.pathname}${parsed.search}`
+  } catch {
+    // 保留原地址作为兜底
+  }
+  return url
+}
+
+async function loadPdfPreview(url, isPdf) {
+  const requestId = ++pdfPreviewRequestId
+  releasePdfPreview()
+  pdfPreviewLoading.value = false
+  pdfPreviewError.value = false
+  if (!url || !isPdf) return
+
+  pdfPreviewLoading.value = true
+  try {
+    const response = await fetch(mediaProxyUrl(url))
+    if (!response.ok) throw new Error(`PDF 请求失败：${response.status}`)
+    const blob = await response.blob()
+    if (requestId !== pdfPreviewRequestId) return
+    pdfPreviewUrl.value = URL.createObjectURL(blob.type === 'application/pdf'
+      ? blob
+      : new Blob([blob], { type: 'application/pdf' }))
+  } catch {
+    if (requestId === pdfPreviewRequestId) pdfPreviewError.value = true
+  } finally {
+    if (requestId === pdfPreviewRequestId) pdfPreviewLoading.value = false
+  }
+}
+
+watch(
+  [() => current.value?.attachment, isTeacherAttachmentPdf],
+  ([url, isPdf]) => loadPdfPreview(url, isPdf),
+)
+
 watch(fixedCourseId, () => {
   closeWorkspace()
   load()
 })
 
 onMounted(load)
+onBeforeUnmount(() => {
+  pdfPreviewRequestId += 1
+  releasePdfPreview()
+})
 </script>
 
 <style scoped>
@@ -689,6 +749,31 @@ onMounted(load)
   border-radius: 12px;
   display: block;
   background: #f8fafc;
+}
+
+.resource-preview-state {
+  min-height: 180px;
+  margin-top: 14px;
+  border: 1px dashed #bfdbfe;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  color: #64748b;
+  background: #f8fbff;
+  font-size: 13px;
+}
+
+.resource-preview-state .el-icon {
+  color: #2563eb;
+  font-size: 20px;
+}
+
+.resource-preview-state.is-error {
+  border-color: #fed7aa;
+  color: #9a3412;
+  background: #fff7ed;
 }
 
 .view-block {
