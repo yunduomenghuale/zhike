@@ -9,3 +9,7 @@ export const listSubmissions = (params) => request.get('/homework-submissions/',
 export const submitHomework = (data) => request.post('/homework-submissions/', data)
 export const gradeSubmission = (id, data) =>
   request.post(`/homework-submissions/${id}/grade/`, data)
+export const releaseSubmission = (id) =>
+  request.post(`/homework-submissions/${id}/release/`)
+export const releaseAllSubmissions = (homeworkId) =>
+  request.post('/homework-submissions/release-all/', { homework: homeworkId })

@@ -12,12 +12,12 @@
         @pointercancel="handlePointerUp"
       >
         <div class="helix_collection">
-          <div class="helix_list">
+          <div class="helix_list" ref="helixList">
             <div
               v-for="(item, index) in helixCards"
               :key="item.key"
               class="helix_item"
-              :style="getHelixStyle(item, index)"
+              :data-index="index"
             >
               <button
                 class="helix_card"
@@ -56,9 +56,9 @@ const userStore = useUserStore()
 const isStudent = computed(() => userStore.profile?.role === 'student')
 const isAdmin = computed(() => userStore.profile?.role === 'admin')
 
-const orbitOffset = ref(0)
 const paused = ref(false)
 const helixWrap = ref(null)
+const helixList = ref(null)
 const stageWidth = ref(1280)
 const stageHeight = ref(820)
 const repeatCount = 2
@@ -71,6 +71,8 @@ const backFade = 0.76
 const backBlur = 0.32
 let frameId = 0
 let lastFrame = 0
+// 动画状态用普通变量：每帧更新不触发 Vue 响应式渲染，直接写 DOM
+let orbitOffset = 0
 let velocity = -0.16
 let isDragging = false
 let lastPointerY = 0
@@ -134,43 +136,57 @@ function wrapAround(value, size) {
 
 function centeredPosition(order) {
   const count = cardsPerHelix.value || 1
-  return wrapAround(order - orbitOffset.value + count / 2, count) - count / 2
+  return wrapAround(order - orbitOffset + count / 2, count) - count / 2
 }
 
-function getHelixStyle(item) {
-  const relative = centeredPosition(item.order)
-  const phase = item.helix * Math.PI
-  const angle = relative * rotationAngle + phase
-  const cos = Math.cos(angle)
-  const sin = Math.sin(angle)
-  const backAmount = (1 - cos) / 2
-  const verticalFade = Math.max(0, 1 - Math.abs(relative) / (cardsPerHelix.value * 0.43))
-  const frontAmount = (cos + 1) / 2
+// 每帧直接写 DOM style，跳过 Vue 渲染管线（视觉效果与原实现完全一致）；
+// 仅 zIndex / pointerEvents 做变化检测，避免无意义写入
+function applyHelixStyles() {
+  const list = helixList.value
+  if (!list) return
+  const items = list.children
+  const cards = helixCards.value
+  for (let i = 0; i < cards.length; i += 1) {
+    const el = items[i]
+    if (!el) continue
+    const item = cards[i]
+    const relative = centeredPosition(item.order)
+    const phase = item.helix * Math.PI
+    const angle = relative * rotationAngle + phase
+    const cos = Math.cos(angle)
+    const sin = Math.sin(angle)
+    const backAmount = (1 - cos) / 2
+    const verticalFade = Math.max(0, 1 - Math.abs(relative) / (cardsPerHelix.value * 0.43))
+    const frontAmount = (cos + 1) / 2
 
-  const x = sin * orbitDepth.value
-  const z = (cos - 1) * orbitDepth.value
-  const y = relative * cardGap.value
-  const scale = minScale + frontAmount * 0.28
-  const opacity = Math.max(0.12, verticalFade * (1 - backAmount * backFade))
-  const blur = Math.pow(backAmount, 2) * backBlur
-  const recede = Math.min(0.82, backAmount * 0.7 + (1 - verticalFade) * 0.32)
-  const contentOpacity = frontAmount > 0.5 && verticalFade > 0.38 ? 1 : 0
-  const clickable = frontAmount > 0.24 && verticalFade > 0.24
-  const zIndex = Math.round((frontAmount * 1000) + (verticalFade * 100))
+    const x = sin * orbitDepth.value
+    const z = (cos - 1) * orbitDepth.value
+    const y = relative * cardGap.value
+    const scale = minScale + frontAmount * 0.28
+    const opacity = Math.max(0.12, verticalFade * (1 - backAmount * backFade))
+    const blur = Math.pow(backAmount, 2) * backBlur
+    const recede = Math.min(0.82, backAmount * 0.7 + (1 - verticalFade) * 0.32)
+    const clickable = frontAmount > 0.24 && verticalFade > 0.24
+    const zIndex = Math.round((frontAmount * 1000) + (verticalFade * 100))
 
-  return {
-    transform: [
+    el.style.transform = [
       'translate(-50%, -50%)',
       `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, ${z.toFixed(1)}px)`,
       `rotateY(${(angle * 180 / Math.PI).toFixed(1)}deg)`,
       `scale(${scale.toFixed(3)})`,
-    ].join(' '),
-    opacity: opacity.toFixed(3),
-    filter: `blur(${blur.toFixed(3)}em)`,
-    zIndex,
-    pointerEvents: clickable ? 'auto' : 'none',
-    '--recede': recede.toFixed(3),
-    '--content-opacity': contentOpacity,
+    ].join(' ')
+    el.style.opacity = opacity.toFixed(3)
+    el.style.filter = `blur(${blur.toFixed(3)}em)`
+    el.style.setProperty('--recede', recede.toFixed(3))
+
+    if (el._zIndex !== zIndex) {
+      el._zIndex = zIndex
+      el.style.zIndex = zIndex
+    }
+    if (el._clickable !== clickable) {
+      el._clickable = clickable
+      el.style.pointerEvents = clickable ? 'auto' : 'none'
+    }
   }
 }
 
@@ -217,7 +233,8 @@ function tick(now) {
   const easing = Math.min(1, delta / 900)
 
   velocity += (autoVelocity - velocity) * easing
-  orbitOffset.value = wrapAround(orbitOffset.value + velocity * delta / 1000, count)
+  orbitOffset = wrapAround(orbitOffset + velocity * delta / 1000, count)
+  applyHelixStyles()
   frameId = window.requestAnimationFrame(tick)
 }
 
@@ -230,9 +247,13 @@ onMounted(() => {
   }
 
   updateStageSize()
-  resizeObserver = new ResizeObserver(updateStageSize)
+  resizeObserver = new ResizeObserver(() => {
+    updateStageSize()
+    applyHelixStyles()
+  })
   resizeObserver.observe(helixWrap.value)
 
+  applyHelixStyles()
   if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
   frameId = window.requestAnimationFrame(tick)
 })
@@ -319,7 +340,7 @@ onBeforeUnmount(() => {
   top: 50%;
   left: 50%;
   transform-style: preserve-3d;
-  will-change: transform, filter, opacity;
+  will-change: transform, opacity;
 }
 
 .helix_card {
@@ -346,7 +367,6 @@ onBeforeUnmount(() => {
   text-align: left;
   transform-style: preserve-3d;
   backface-visibility: hidden;
-  backdrop-filter: blur(18px) saturate(1.12);
 }
 
 .helix_card::after {

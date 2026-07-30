@@ -2,7 +2,7 @@ import os
 
 from rest_framework import serializers
 
-from .models import Catalog, Course, PPTResource, TeachingVideo
+from .models import Catalog, Course, PPTResource, TeachingVideo, VideoWatchProgress
 
 
 class CourseSerializer(serializers.ModelSerializer):
@@ -68,3 +68,19 @@ class TeachingVideoSerializer(serializers.ModelSerializer):
             "audio_url", "subtitle_url", "video_url",
             "gen_status", "gen_status_display", "is_published", "published_at",
         ]
+
+
+class VideoWatchProgressSerializer(serializers.ModelSerializer):
+    student_name = serializers.CharField(source="student.real_name", read_only=True)
+    catalog = serializers.IntegerField(source="video.catalog_id", read_only=True)
+    catalog_title = serializers.CharField(source="video.catalog.title", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = VideoWatchProgress
+        fields = [
+            "id", "student", "student_name", "video", "catalog", "catalog_title",
+            "last_page", "last_position", "watch_seconds",
+            "status", "status_display", "updated_at",
+        ]
+        read_only_fields = ["student", "watch_seconds", "status"]

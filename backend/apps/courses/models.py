@@ -127,3 +127,45 @@ class TeachingVideo(BaseModel):
 
     def __str__(self):
         return f"{self.catalog.title} 视频"
+
+
+class VideoWatchProgress(BaseModel):
+    """学生视频（PPT+配音连播）学习进度（需求 S-V-03）。
+
+    记录当前学习到的页码、页内音频位置、累计学习时长与完成状态，
+    前端据此实现断点续播，教师据此查看学习进度。
+    """
+
+    class Status(models.TextChoices):
+        NOT_STARTED = "not_started", "未开始"
+        IN_PROGRESS = "in_progress", "学习中"
+        COMPLETED = "completed", "已完成"
+
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="video_progress",
+        verbose_name="学生",
+    )
+    video = models.ForeignKey(
+        TeachingVideo,
+        on_delete=models.CASCADE,
+        related_name="watch_progress",
+        verbose_name="教学视频",
+    )
+    last_page = models.IntegerField("当前页索引", default=0)
+    last_position = models.FloatField("页内播放位置(秒)", default=0)
+    watch_seconds = models.IntegerField("累计学习时长(秒)", default=0)
+    status = models.CharField(
+        "学习状态", max_length=16, choices=Status.choices, default=Status.IN_PROGRESS
+    )
+
+    class Meta:
+        verbose_name = "视频学习进度"
+        verbose_name_plural = verbose_name
+        constraints = [
+            models.UniqueConstraint(fields=["student", "video"], name="unique_student_video_progress")
+        ]
+
+    def __str__(self):
+        return f"{self.student} - {self.video} 进度"

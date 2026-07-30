@@ -281,24 +281,81 @@
 
     <!-- 监控 -->
     <el-drawer v-model="monitorVisible" title="考试监控" size="52%">
+      <div class="monitor-toolbar">
+        <el-button type="primary" :loading="releasing" @click="doReleaseAll">统一出分（发布全部成绩）</el-button>
+        <span class="text-muted">发布后学生才可见分数与解析；含主观题的答卷需先完成批改</span>
+      </div>
       <el-table :data="monitorRows" v-loading="monitorLoading" stripe>
-        <el-table-column prop="student_name" label="学生" width="120" />
-        <el-table-column label="状态" width="110" align="center">
+        <el-table-column prop="student_name" label="学生" width="110" />
+        <el-table-column label="状态" width="100" align="center">
           <template #default="{ row }"><el-tag effect="light" round>{{ row.status_display }}</el-tag></template>
         </el-table-column>
-        <el-table-column prop="objective_score" label="客观题分" width="100" align="center" />
-        <el-table-column prop="total_score" label="总分" width="90" align="center" />
-        <el-table-column label="异常" width="90" align="center">
+        <el-table-column prop="objective_score" label="客观题分" width="90" align="center" />
+        <el-table-column prop="total_score" label="总分" width="80" align="center" />
+        <el-table-column label="异常" width="80" align="center">
           <template #default="{ row }">
             <el-tag v-if="row.abnormal" type="danger" size="small" effect="light" round>异常</el-tag>
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="submitted_at" label="提交时间" min-width="160">
+        <el-table-column label="成绩" width="90" align="center">
+          <template #default="{ row }">
+            <el-tag v-if="row.score_released" type="success" size="small" effect="light" round>已发布</el-tag>
+            <span v-else class="text-muted">未发布</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="150" align="center">
+          <template #default="{ row }">
+            <el-button
+              v-if="row.has_subjective && (row.status === 'submitted' || row.status === 'timeout')"
+              link type="primary" @click="openGrading(row)"
+            >批改</el-button>
+            <el-button
+              v-if="(row.status === 'submitted' || row.status === 'timeout') && !row.score_released"
+              link type="success" @click="doReleaseOne(row)"
+            >发布</el-button>
+          </template>
+        </el-table-column>
+        <el-table-column prop="submitted_at" label="提交时间" min-width="150">
           <template #default="{ row }">{{ row.submitted_at ? new Date(row.submitted_at).toLocaleString() : '-' }}</template>
         </el-table-column>
       </el-table>
     </el-drawer>
+
+    <!-- 主观题批改 -->
+    <el-dialog v-model="gradingVisible" title="主观题批改" width="720px" :close-on-click-modal="false">
+      <div v-loading="gradingLoading">
+        <div v-if="gradingSub" class="grading-head">
+          <span>学生：<strong>{{ gradingSub.student_name }}</strong></span>
+          <span>客观题得分：<strong>{{ gradingSub.objective_score ?? 0 }}</strong></span>
+        </div>
+        <el-empty v-if="!gradingQuestions.length" description="该试卷没有主观题" :image-size="80" />
+        <div v-for="(q, i) in gradingQuestions" :key="q.question_id" class="grading-item">
+          <div class="grading-stem">{{ i + 1 }}. {{ q.stem }}（{{ q.score }} 分）</div>
+          <div class="grading-answer">
+            <div class="grading-label">学生答案</div>
+            <div class="grading-answer-text">{{ q.student_answer?.text || '（未作答）' }}</div>
+          </div>
+          <div v-if="q.reference_answer?.text" class="grading-ref">
+            <div class="grading-label">参考答案</div>
+            <div class="grading-answer-text">{{ q.reference_answer.text }}</div>
+          </div>
+          <div class="grading-score-row">
+            <span>得分</span>
+            <el-input-number
+              v-model="gradingScores[q.question_id]"
+              :min="0" :max="Number(q.score)" :step="0.5"
+              controls-position="right"
+            />
+            <span class="text-muted">/ {{ q.score }} 分</span>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="gradingVisible = false">取消</el-button>
+        <el-button type="primary" :loading="gradingSaving" @click="doGrade">保存批改</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -311,7 +368,7 @@ import {
 import { ElMessage } from 'element-plus'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
 import { listClasses } from '@/api/classroom'
-import { listExams, createExam, updateExam, deleteExam, composePaper, monitorExam } from '@/api/exam'
+import { listExams, createExam, updateExam, deleteExam, composePaper, monitorExam, releaseExamScores, examGradingDetail, gradeExamSubmission, releaseExamScore } from '@/api/exam'
 import { listCatalogs } from '@/api/course'
 import { listQuestions, createQuestion } from '@/api/question'
 
@@ -674,7 +731,10 @@ async function doCompose() {
 const monitorVisible = ref(false)
 const monitorLoading = ref(false)
 const monitorRows = ref([])
+const monitorExamRow = ref(null)
+const releasing = ref(false)
 async function openMonitor(row) {
+  monitorExamRow.value = row
   monitorVisible.value = true
   monitorLoading.value = true
   try {
@@ -684,10 +744,142 @@ async function openMonitor(row) {
   }
 }
 
+// 统一出分：发布本场考试全部已批改答卷
+async function doReleaseAll() {
+  if (!monitorExamRow.value) return
+  releasing.value = true
+  try {
+    const res = await releaseExamScores(monitorExamRow.value.id)
+    if (res.skipped?.length) {
+      ElMessage.warning(`已发布 ${res.released} 份成绩，以下学生因主观题未批改被跳过：${res.skipped.join('、')}`)
+    } else {
+      ElMessage.success(`已发布 ${res.released} 份成绩`)
+    }
+    monitorRows.value = await monitorExam(monitorExamRow.value.id)
+  } finally {
+    releasing.value = false
+  }
+}
+
+// 发布单个学生成绩
+async function doReleaseOne(row) {
+  try {
+    await releaseExamScore(row.id)
+    ElMessage.success('成绩已发布')
+    monitorRows.value = await monitorExam(monitorExamRow.value.id)
+  } catch {
+    // 错误信息由拦截器提示
+  }
+}
+
+// ---- 主观题批改 ----
+const gradingVisible = ref(false)
+const gradingLoading = ref(false)
+const gradingSaving = ref(false)
+const gradingSub = ref(null)
+const gradingQuestions = ref([])
+const gradingScores = reactive({})
+
+async function openGrading(row) {
+  gradingVisible.value = true
+  gradingLoading.value = true
+  gradingSub.value = null
+  gradingQuestions.value = []
+  try {
+    const data = await examGradingDetail(row.id)
+    gradingSub.value = data.submission
+    gradingQuestions.value = data.subjective_questions || []
+    Object.keys(gradingScores).forEach((k) => delete gradingScores[k])
+    gradingQuestions.value.forEach((q) => {
+      const saved = data.subjective_scores?.[String(q.question_id)]
+      gradingScores[q.question_id] = saved != null ? Number(saved) : null
+    })
+  } finally {
+    gradingLoading.value = false
+  }
+}
+
+async function doGrade() {
+  if (!gradingSub.value) return
+  gradingSaving.value = true
+  try {
+    // 未填写的题目不上报，后端支持分批批改
+    const scores = {}
+    Object.entries(gradingScores).forEach(([qid, v]) => {
+      if (v !== null && v !== undefined && v !== '') scores[qid] = v
+    })
+    await gradeExamSubmission(gradingSub.value.id, { scores })
+    ElMessage.success('批改已保存')
+    gradingVisible.value = false
+    monitorRows.value = await monitorExam(monitorExamRow.value.id)
+  } catch {
+    // 错误信息由拦截器提示
+  } finally {
+    gradingSaving.value = false
+  }
+}
+
 onMounted(loadClasses)
 </script>
 
 <style scoped>
+.monitor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.grading-head {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 14px;
+  color: #475569;
+}
+
+.grading-item {
+  margin-bottom: 14px;
+  padding: 14px;
+  border: 1px solid #e5eaf3;
+  border-radius: 12px;
+}
+
+.grading-stem {
+  margin-bottom: 10px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.grading-label {
+  margin-bottom: 4px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.grading-answer-text {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #334155;
+  white-space: pre-wrap;
+  line-height: 1.7;
+}
+
+.grading-ref {
+  margin-top: 8px;
+}
+
+.grading-ref .grading-answer-text {
+  background: #eff6ff;
+}
+
+.grading-score-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
 .exam-page :deep(.data-card) {
   padding: 0;
   overflow: visible;

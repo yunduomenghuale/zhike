@@ -7,6 +7,12 @@ export const updateExam = (id, data) => request.put(`/exams/${id}/`, data)
 export const deleteExam = (id) => request.delete(`/exams/${id}/`)
 export const composePaper = (id, data) => request.post(`/exams/${id}/compose/`, data)
 export const monitorExam = (id) => request.get(`/exams/${id}/monitor/`)
+export const releaseExamScores = (id) => request.post(`/exams/${id}/release-scores/`)
+// 教师批改与发布
+export const examGradingDetail = (subId) => request.get(`/exam-submissions/${subId}/grading-detail/`)
+export const gradeExamSubmission = (subId, data) =>
+  request.post(`/exam-submissions/${subId}/grade/`, data)
+export const releaseExamScore = (subId) => request.post(`/exam-submissions/${subId}/release/`)
 
 // ===== 学生 =====
 export const startExam = (exam) => request.post('/exam-submissions/start/', { exam })

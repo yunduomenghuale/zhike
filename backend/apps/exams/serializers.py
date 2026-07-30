@@ -37,15 +37,44 @@ class PaperSerializer(serializers.ModelSerializer):
 class ExamSubmissionSerializer(serializers.ModelSerializer):
     student_name = serializers.CharField(source="student.real_name", read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
+    objective_score = serializers.SerializerMethodField()
+    total_score = serializers.SerializerMethodField()
+    has_subjective = serializers.SerializerMethodField()
 
     class Meta:
         model = ExamSubmission
         fields = [
             "id", "exam", "paper", "student", "student_name", "answers",
             "started_at", "submitted_at", "objective_score", "total_score",
+            "subjective_scores", "score_released", "has_subjective",
             "status", "status_display", "abnormal",
         ]
-        read_only_fields = ["student", "objective_score", "total_score"]
+        read_only_fields = ["student", "objective_score", "total_score", "subjective_scores", "score_released"]
+
+    def _score_visible(self, obj):
+        """学生视角下成绩未发布时不可见分数（统一出分，需求 T-E-04）。"""
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if user and user.is_authenticated and user.is_student:
+            return obj.score_released
+        return True
+
+    def get_objective_score(self, obj):
+        return obj.objective_score if self._score_visible(obj) else None
+
+    def get_total_score(self, obj):
+        return obj.total_score if self._score_visible(obj) else None
+
+    def get_has_subjective(self, obj):
+        """试卷中是否含主观题（决定是否需要教师批改）。"""
+        items = obj.paper.question_items if obj.paper else []
+        if not items:
+            return False
+        from apps.questions.models import Question
+        qtypes = Question.objects.filter(
+            id__in=[i["question_id"] for i in items]
+        ).values_list("qtype", flat=True)
+        return Question.QType.SHORT in set(qtypes)
 
 
 class ExamLogSerializer(serializers.ModelSerializer):

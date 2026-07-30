@@ -218,6 +218,8 @@ class HomeworkSerializer(serializers.ModelSerializer):
 class HomeworkAnswerSerializer(serializers.ModelSerializer):
     snapshot = serializers.SerializerMethodField()
     needs_manual_grading = serializers.SerializerMethodField()
+    score = serializers.SerializerMethodField()
+    comment = serializers.SerializerMethodField()
 
     class Meta:
         model = HomeworkAnswer
@@ -233,12 +235,29 @@ class HomeworkAnswerSerializer(serializers.ModelSerializer):
     def get_needs_manual_grading(self, obj):
         return (obj.homework_question.snapshot or {}).get("qtype") == Question.QType.SHORT
 
+    def _score_visible(self, obj):
+        """学生视角下成绩发布后（returned）才可见批改结果（需求 T-H-05）。"""
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if user and user.is_authenticated and user.is_student:
+            return obj.submission.correct_status == HomeworkSubmission.CorrectStatus.RETURNED
+        return True
+
+    def get_score(self, obj):
+        return obj.score if self._score_visible(obj) else None
+
+    def get_comment(self, obj):
+        return obj.comment if self._score_visible(obj) else ""
+
 
 class HomeworkSubmissionSerializer(serializers.ModelSerializer):
     student_name = serializers.CharField(source="student.real_name", read_only=True)
     correct_status_display = serializers.CharField(source="get_correct_status_display", read_only=True)
     answers = serializers.JSONField(write_only=True, required=False)
     answer_items = HomeworkAnswerSerializer(many=True, read_only=True)
+    score = serializers.SerializerMethodField()
+    comment = serializers.SerializerMethodField()
+    objective_score = serializers.SerializerMethodField()
 
     class Meta:
         model = HomeworkSubmission
@@ -251,3 +270,19 @@ class HomeworkSubmissionSerializer(serializers.ModelSerializer):
             "student", "submitted_at", "is_late", "objective_score", "score", "comment",
             "correct_status", "auto_score", "auto_comment",
         ]
+
+    def _score_visible(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if user and user.is_authenticated and user.is_student:
+            return obj.correct_status == HomeworkSubmission.CorrectStatus.RETURNED
+        return True
+
+    def get_score(self, obj):
+        return obj.score if self._score_visible(obj) else None
+
+    def get_comment(self, obj):
+        return obj.comment if self._score_visible(obj) else ""
+
+    def get_objective_score(self, obj):
+        return obj.objective_score if self._score_visible(obj) else None

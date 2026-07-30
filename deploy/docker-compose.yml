@@ -1,0 +1,43 @@
+# 智课系统 V2 生产编排（独立网络/卷/容器名，不影响服务器现有服务）
+services:
+  backend:
+    build:
+      context: ../backend
+      dockerfile: ../deploy/Dockerfile.backend
+    image: zhike-v2-backend
+    container_name: zhike_v2_backend
+    restart: unless-stopped
+    env_file: .env.production
+    volumes:
+      - zhike_v2_data:/app/data
+      - zhike_v2_media:/app/media
+      - zhike_v2_static:/app/staticfiles
+    mem_limit: 1g
+    networks:
+      - zhike_v2_net
+
+  frontend:
+    image: nginx:1.25-alpine
+    container_name: zhike_v2_frontend
+    restart: unless-stopped
+    ports:
+      - "8088:80"
+    volumes:
+      - ../frontend/dist:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - zhike_v2_media:/app/media:ro
+      - zhike_v2_static:/app/staticfiles:ro
+    mem_limit: 128m
+    networks:
+      - zhike_v2_net
+    depends_on:
+      - backend
+
+networks:
+  zhike_v2_net:
+    name: zhike_v2_net
+
+volumes:
+  zhike_v2_data:
+  zhike_v2_media:
+  zhike_v2_static:

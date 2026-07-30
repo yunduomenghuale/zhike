@@ -98,6 +98,10 @@ class ExamSubmission(BaseModel):
     submitted_at = models.DateTimeField("提交时间", null=True, blank=True)
     objective_score = models.DecimalField("客观题得分", max_digits=6, decimal_places=1, null=True, blank=True)
     total_score = models.DecimalField("总分", max_digits=6, decimal_places=1, null=True, blank=True)
+    # 教师批改主观题得分：{question_id: 得分}
+    subjective_scores = models.JSONField("主观题得分", default=dict, blank=True)
+    # 统一出分：教师发布成绩后学生才可见分数与解析（需求 T-E-04 / S-E-05）
+    score_released = models.BooleanField("成绩已发布", default=False)
     status = models.CharField("状态", max_length=16, choices=Status.choices, default=Status.NOT_STARTED)
     abnormal = models.BooleanField("异常标记", default=False)
 
