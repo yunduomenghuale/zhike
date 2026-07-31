@@ -387,6 +387,7 @@ import { listCatalogs, listPpts, listVideos, listWatchProgress, reportVideoProgr
 import { listQuestions, practiceSubmit } from '@/api/question'
 import { listMaterials } from '@/api/knowledge'
 import MarkdownIt from 'markdown-it'
+import { genUid } from '@/utils/uid'
 
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
 
@@ -618,7 +619,7 @@ const chatMessages = ref([])
 const chatInput = ref('')
 const chatImage = ref('')
 const chatFileRef = ref(null)
-const chatSessionId = crypto.randomUUID()
+const chatSessionId = genUid()
 
 function onPickChatImage(e) {
   const file = e.target.files?.[0]

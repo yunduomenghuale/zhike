@@ -12,7 +12,8 @@ services:
       - zhike_v2_data:/app/data
       - zhike_v2_media:/app/media
       - zhike_v2_static:/app/staticfiles
-    mem_limit: 1g
+    # LibreOffice 渲染 PPT 时内存较高，与 gunicorn 共享该额度
+    mem_limit: 2g
     networks:
       - zhike_v2_net
 

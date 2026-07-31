@@ -41,29 +41,64 @@ def parse_ppt_pages(file_path: str) -> list[dict]:
 
 
 def render_presentation_slide_images(file_path: str, resource_id: int | str | None = None) -> dict[int, str]:
-    """Render PPT/PPTX slides to PNG images and return {page: media_url}.
+    """Render PPT/PPTX/PDF pages to PNG images and return {page: media_url}.
 
-    On Windows this uses the installed Microsoft PowerPoint COM automation.
+    PDF：版式已固化，pdftoppm 直接逐页出图，零偏移（推荐的高保真路径）。
+    PPT/PPTX：Windows 用 PowerPoint COM；Linux 用 LibreOffice 转 PDF 后出图（复杂排版可能有偏差）。
     If rendering is unavailable, callers still keep text extraction working.
     """
     if not file_path or not os.path.exists(file_path):
         return {}
     ext = os.path.splitext(file_path)[1].lower()
-    if ext not in (".ppt", ".pptx"):
+    if ext not in (".ppt", ".pptx", ".pdf"):
         return {}
 
-    try:
-        from django.conf import settings
-        import pythoncom
-        import win32com.client
-    except Exception:
-        return {}
+    from django.conf import settings
 
     rel_dir = Path("ppt_pages") / str(resource_id or Path(file_path).stem)
     out_dir = Path(settings.MEDIA_ROOT) / rel_dir
     if out_dir.exists():
         shutil.rmtree(out_dir, ignore_errors=True)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    if ext == ".pdf":
+        return _render_pdf_pages(file_path, out_dir, rel_dir)
+    rendered = _render_with_powerpoint(file_path, out_dir, rel_dir)
+    if not rendered:
+        rendered = _render_with_libreoffice(file_path, out_dir, rel_dir)
+    return rendered
+
+
+def _render_pdf_pages(file_path: str, out_dir: Path, rel_dir: Path) -> dict[int, str]:
+    """PDF 逐页转 PNG：版式已固化，渲染结果与原文件完全一致。"""
+    import subprocess
+
+    rendered: dict[int, str] = {}
+    try:
+        subprocess.run(
+            ["pdftoppm", "-png", "-r", "120", file_path, str(out_dir / "slide")],
+            timeout=300,
+            check=True,
+            capture_output=True,
+        )
+        for image_path in sorted(out_dir.glob("slide-*.png")):
+            try:
+                page_no = int(image_path.stem.rsplit("-", 1)[-1])
+            except ValueError:
+                continue
+            rendered[page_no] = _media_url(str(rel_dir / image_path.name))
+    except Exception:
+        return rendered
+    return rendered
+
+
+def _render_with_powerpoint(file_path: str, out_dir: Path, rel_dir: Path) -> dict[int, str]:
+    """Windows Microsoft PowerPoint COM 渲染（保留原行为）。"""
+    try:
+        import pythoncom
+        import win32com.client
+    except Exception:
+        return {}
 
     app = None
     presentation = None
@@ -98,6 +133,42 @@ def render_presentation_slide_images(file_path: str, resource_id: int | str | No
             except Exception:
                 pass
         pythoncom.CoUninitialize()
+    return rendered
+
+
+def _render_with_libreoffice(file_path: str, out_dir: Path, rel_dir: Path) -> dict[int, str]:
+    """Linux：LibreOffice headless 把 PPT 转 PDF，再用 pdftoppm 逐页转 PNG。"""
+    import subprocess
+    import tempfile
+
+    rendered: dict[int, str] = {}
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            # PPT/PPTX -> PDF（中文字体由容器内 fonts-noto-cjk 提供）
+            subprocess.run(
+                ["soffice", "--headless", "--convert-to", "pdf", "--outdir", tmp, file_path],
+                timeout=300,
+                check=True,
+                capture_output=True,
+            )
+            pdf_path = Path(tmp) / f"{Path(file_path).stem}.pdf"
+            if not pdf_path.exists():
+                return {}
+            # PDF -> 每页 PNG（pdftoppm 输出 slide-01.png 等）
+            subprocess.run(
+                ["pdftoppm", "-png", "-r", "120", str(pdf_path), str(out_dir / "slide")],
+                timeout=300,
+                check=True,
+                capture_output=True,
+            )
+        for image_path in sorted(out_dir.glob("slide-*.png")):
+            try:
+                page_no = int(image_path.stem.rsplit("-", 1)[-1])
+            except ValueError:
+                continue
+            rendered[page_no] = _media_url(str(rel_dir / image_path.name))
+    except Exception:
+        return rendered
     return rendered
 
 
@@ -318,8 +389,8 @@ def _read_pdf(file_path: str) -> list[dict]:
         pages = []
         for idx, page in enumerate(reader.pages, start=1):
             text = (page.extract_text() or "").strip()
-            if not text:
-                continue
+            # 保留无文本页（纯图片/过渡页）：页码必须与 PDF 物理页一致，
+            # 否则逐页渲染的图片会挂错页
             pages.append({"page": idx, "title": _first_line(text)[:80], "body": text, "source": "pdf"})
         return pages
     except Exception:

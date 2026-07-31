@@ -40,7 +40,7 @@ class CatalogSerializer(serializers.ModelSerializer):
 
 class PPTResourceSerializer(serializers.ModelSerializer):
     parse_status_display = serializers.CharField(source="get_parse_status_display", read_only=True)
-    allowed_extensions = {".ppt", ".pptx"}
+    allowed_extensions = {".ppt", ".pptx", ".pdf"}
 
     class Meta:
         model = PPTResource
@@ -54,7 +54,7 @@ class PPTResourceSerializer(serializers.ModelSerializer):
     def validate_file(self, value):
         ext = os.path.splitext(value.name)[1].lower()
         if ext not in self.allowed_extensions:
-            raise serializers.ValidationError("课件只支持上传 PPT / PPTX 文件")
+            raise serializers.ValidationError("课件支持 PPT / PPTX / PDF 文件；PDF 可保证页面版式零偏移，推荐优先使用")
         return value
 
 

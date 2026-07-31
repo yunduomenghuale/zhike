@@ -279,6 +279,7 @@ import {
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import TableSkeleton from '@/components/TableSkeleton.vue'
+import { genUid } from '@/utils/uid'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
 import {
   listCourses,
@@ -378,7 +379,7 @@ function resetOutline() {
 }
 
 function newChapter(title = '') {
-  return { uid: crypto.randomUUID(), title, children: [] }
+  return { uid: genUid(), title, children: [] }
 }
 
 function addChapter() {
@@ -544,7 +545,7 @@ function isPptFile(file) {
 
 function cloneToManual(tree) {
   const cloned = normalizeTree(tree).map((chapter) => ({
-    uid: crypto.randomUUID(),
+    uid: genUid(),
     title: chapter.title,
     children: [],
   }))

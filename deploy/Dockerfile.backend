@@ -6,6 +6,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# 国内 apt 源；安装 LibreOffice（PPT 页面渲染为图片）、poppler（PDF 转图）、中文字体
+RUN sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+       libreoffice-impress poppler-utils fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/*
+
 # 国内镜像加速安装依赖
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt gunicorn \

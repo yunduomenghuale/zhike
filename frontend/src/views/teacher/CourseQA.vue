@@ -130,6 +130,7 @@
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { genUid } from '@/utils/uid'
 import {
   Promotion, MagicStick, Loading, Search, Clock, Picture, Close, Plus,
 } from '@element-plus/icons-vue'
@@ -154,7 +155,7 @@ const fileInputRef = ref(null)
 
 // 会话制：records 为全部历史记录，messages 为当前查看的会话消息
 const records = ref([])
-const sessionId = ref(crypto.randomUUID()) // 保存新提问时使用的会话标识
+const sessionId = ref(genUid()) // 保存新提问时使用的会话标识
 const viewSessionKey = ref(sessionId.value) // 当前查看的会话（含 legacy 分组）
 
 function legacyKey(r) {
@@ -184,7 +185,7 @@ const sessionItems = computed(() => {
 })
 
 function newChat() {
-  sessionId.value = crypto.randomUUID()
+  sessionId.value = genUid()
   viewSessionKey.value = sessionId.value
   messages.value = []
   historyOpen.value = false
@@ -195,7 +196,7 @@ function switchSession(key) {
   viewSessionKey.value = key
   // legacy 记录逐条独立成组；在其中继续提问时开启新的正式会话
   const rec = records.value.find((r) => legacyKey(r) === key)
-  sessionId.value = rec?.session || crypto.randomUUID()
+  sessionId.value = rec?.session || genUid()
   messages.value = records.value
     .filter((r) => legacyKey(r) === key)
     .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
