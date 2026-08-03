@@ -17,6 +17,9 @@ from pathlib import Path
 
 SUPPORTED_EXTENSIONS = {".ppt", ".pptx", ".pdf", ".doc", ".docx", ".txt", ".md", ".csv"}
 
+# 幻灯片出图分辨率（DPI），150 兼顾清晰度与文件体积
+RENDER_DPI = 150
+
 META_PATTERNS = (
     "学年",
     "学期",
@@ -43,7 +46,7 @@ def parse_ppt_pages(file_path: str) -> list[dict]:
 def render_presentation_slide_images(file_path: str, resource_id: int | str | None = None) -> dict[int, str]:
     """Render PPT/PPTX/PDF pages to PNG images and return {page: media_url}.
 
-    PDF：版式已固化，pdftoppm 直接逐页出图，零偏移（推荐的高保真路径）。
+    PDF：版式已固化，pypdfium2 直接逐页出图，零偏移（推荐的高保真路径）。
     PPT/PPTX：Windows 用 PowerPoint COM；Linux 用 LibreOffice 转 PDF 后出图（复杂排版可能有偏差）。
     If rendering is unavailable, callers still keep text extraction working.
     """
@@ -71,24 +74,36 @@ def render_presentation_slide_images(file_path: str, resource_id: int | str | No
 
 def _render_pdf_pages(file_path: str, out_dir: Path, rel_dir: Path) -> dict[int, str]:
     """PDF 逐页转 PNG：版式已固化，渲染结果与原文件完全一致。"""
-    import subprocess
+    return _pdf_to_images(file_path, out_dir, rel_dir)
+
+
+def _pdf_to_images(pdf_path: str | Path, out_dir: Path, rel_dir: Path) -> dict[int, str]:
+    """用 pypdfium2（Chrome PDFium 引擎）把 PDF 逐页渲染为 PNG。
+
+    纯 pip 依赖、无系统命令，Windows/Linux 行为一致，替代原 pdftoppm 子进程方案。
+    """
+    import pypdfium2 as pdfium
 
     rendered: dict[int, str] = {}
     try:
-        subprocess.run(
-            ["pdftoppm", "-png", "-r", "120", file_path, str(out_dir / "slide")],
-            timeout=300,
-            check=True,
-            capture_output=True,
-        )
-        for image_path in sorted(out_dir.glob("slide-*.png")):
-            try:
-                page_no = int(image_path.stem.rsplit("-", 1)[-1])
-            except ValueError:
-                continue
-            rendered[page_no] = _media_url(str(rel_dir / image_path.name))
+        pdf = pdfium.PdfDocument(str(pdf_path))
     except Exception:
         return rendered
+    try:
+        scale = RENDER_DPI / 72
+        for index in range(len(pdf)):
+            page = pdf[index]
+            try:
+                image = page.render(scale=scale).to_pil()
+            finally:
+                page.close()
+            image_name = f"slide-{index + 1:03d}.png"
+            image.save(out_dir / image_name)
+            rendered[index + 1] = _media_url(str(rel_dir / image_name))
+    except Exception:
+        return rendered
+    finally:
+        pdf.close()
     return rendered
 
 
@@ -137,39 +152,42 @@ def _render_with_powerpoint(file_path: str, out_dir: Path, rel_dir: Path) -> dic
 
 
 def _render_with_libreoffice(file_path: str, out_dir: Path, rel_dir: Path) -> dict[int, str]:
-    """Linux：LibreOffice headless 把 PPT 转 PDF，再用 pdftoppm 逐页转 PNG。"""
+    """Linux：LibreOffice headless 转 PDF，再用 pypdfium2 逐页出 PNG。
+
+    老格式 .ppt 先预转 .pptx 再转 PDF——LibreOffice 对 OOXML 的排版保真度
+    明显好于二进制 .ppt，可减少文字错位/图形变形。
+    """
     import subprocess
     import tempfile
 
-    rendered: dict[int, str] = {}
     try:
         with tempfile.TemporaryDirectory() as tmp:
-            # PPT/PPTX -> PDF（中文字体由容器内 fonts-noto-cjk 提供）
+            source = file_path
+            stem = Path(file_path).stem
+            if file_path.lower().endswith(".ppt"):
+                # .ppt -> .pptx 预转换（失败则退回直接转 PDF）
+                subprocess.run(
+                    ["soffice", "--headless", "--convert-to", "pptx", "--outdir", tmp, file_path],
+                    timeout=300,
+                    check=True,
+                    capture_output=True,
+                )
+                pptx_path = Path(tmp) / f"{stem}.pptx"
+                if pptx_path.exists():
+                    source = str(pptx_path)
+            # PPT/PPTX -> PDF（中文字体由容器内 fonts-noto-cjk / wqy 等提供）
             subprocess.run(
-                ["soffice", "--headless", "--convert-to", "pdf", "--outdir", tmp, file_path],
+                ["soffice", "--headless", "--convert-to", "pdf", "--outdir", tmp, source],
                 timeout=300,
                 check=True,
                 capture_output=True,
             )
-            pdf_path = Path(tmp) / f"{Path(file_path).stem}.pdf"
+            pdf_path = Path(tmp) / f"{Path(source).stem}.pdf"
             if not pdf_path.exists():
                 return {}
-            # PDF -> 每页 PNG（pdftoppm 输出 slide-01.png 等）
-            subprocess.run(
-                ["pdftoppm", "-png", "-r", "120", str(pdf_path), str(out_dir / "slide")],
-                timeout=300,
-                check=True,
-                capture_output=True,
-            )
-        for image_path in sorted(out_dir.glob("slide-*.png")):
-            try:
-                page_no = int(image_path.stem.rsplit("-", 1)[-1])
-            except ValueError:
-                continue
-            rendered[page_no] = _media_url(str(rel_dir / image_path.name))
+            return _pdf_to_images(pdf_path, out_dir, rel_dir)
     except Exception:
-        return rendered
-    return rendered
+        return {}
 
 
 def attach_slide_images(pages: list[dict], images: dict[int, str]) -> list[dict]:

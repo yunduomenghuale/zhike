@@ -12,6 +12,8 @@ services:
       - zhike_v2_data:/app/data
       - zhike_v2_media:/app/media
       - zhike_v2_static:/app/staticfiles
+      # PPT 常用 Windows 中文字体 → 开源字体的替换映射（提升 LibreOffice 渲染保真度）
+      - ./fonts.conf:/etc/fonts/local.conf:ro
     # LibreOffice 渲染 PPT 时内存较高，与 gunicorn 共享该额度
     mem_limit: 2g
     networks:
