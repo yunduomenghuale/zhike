@@ -207,10 +207,10 @@ const menuGroups = computed(() => {
       {
         title: '管理端',
         items: [
-          { index: '/admin/overview', label: '管理概览', icon: 'DataAnalysis' },
-          { index: '/admin/users', label: '用户管理', icon: 'UserFilled' },
-          { index: '/admin/teaching', label: '教学监管', icon: 'Reading' },
-          { index: '/admin/ai-settings', label: '大模型配置', icon: 'Setting' },
+          { index: '/admin/overview', label: '管理概览', icon: DataAnalysis },
+          { index: '/admin/users', label: '用户管理', icon: UserFilled },
+          { index: '/admin/teaching', label: '教学监管', icon: Reading },
+          { index: '/admin/ai-settings', label: '大模型配置', icon: Setting },
         ],
       },
     ]
@@ -221,8 +221,8 @@ const menuGroups = computed(() => {
       {
         title: '教师端',
         items: [
-          { index: '/teacher/courses', label: '课程管理', icon: 'Reading' },
-          { index: '/teacher/classes', label: '班级管理', icon: 'School' },
+          { index: '/teacher/courses', label: '课程管理', icon: Reading },
+          { index: '/teacher/classes', label: '班级管理', icon: School },
         ],
       },
     ]
@@ -231,7 +231,7 @@ const menuGroups = computed(() => {
     {
       title: '学生端',
       items: [
-        { index: '/student/my-classes', label: '我的课程', icon: 'Reading' },
+        { index: '/student/my-classes', label: '我的课程', icon: Reading },
       ],
     },
   ]

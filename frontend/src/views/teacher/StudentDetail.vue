@@ -177,12 +177,12 @@ const cards = computed(() => {
   const s = detail.value?.summary || {}
   const p = detail.value?.progress || {}
   return [
-    { label: '学习进度', num: p.percent, suffix: '%', icon: 'Flag', color: 'blue' },
-    { label: '练习正确率', num: s.accuracy, suffix: '%', icon: 'TrendCharts', color: 'green' },
-    { label: '章节练习', value: `${s.practice_correct ?? 0}/${s.practice_total ?? 0} 题`, icon: 'Notebook', color: 'purple' },
-    { label: '作业提交', value: `${s.homework_submitted ?? 0}/${s.homework_total ?? 0}`, icon: 'Files', color: 'orange' },
-    { label: '考试参加', value: `${s.exam_taken ?? 0}/${s.exam_total ?? 0}`, icon: 'Medal', color: 'orange' },
-    { label: '考试均分', num: s.avg_exam_score, suffix: '', icon: 'Trophy', color: 'red' },
+    { label: '学习进度', num: p.percent, suffix: '%', icon: Flag, color: 'blue' },
+    { label: '练习正确率', num: s.accuracy, suffix: '%', icon: TrendCharts, color: 'green' },
+    { label: '章节练习', value: `${s.practice_correct ?? 0}/${s.practice_total ?? 0} 题`, icon: Notebook, color: 'purple' },
+    { label: '作业提交', value: `${s.homework_submitted ?? 0}/${s.homework_total ?? 0}`, icon: Files, color: 'orange' },
+    { label: '考试参加', value: `${s.exam_taken ?? 0}/${s.exam_total ?? 0}`, icon: Medal, color: 'orange' },
+    { label: '考试均分', num: s.avg_exam_score, suffix: '', icon: Trophy, color: 'red' },
   ]
 })
 
