@@ -23,6 +23,7 @@ RUN pip install --no-cache-dir -r requirements.txt gunicorn \
     -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 COPY . .
+RUN sed -i 's/\r$//' /app/deploy-entrypoint.sh
 
 EXPOSE 8000
 
