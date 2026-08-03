@@ -27,11 +27,11 @@ class ClassRoomSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["teacher", "invite_code"]
 
-    def get_course_name(self, obj):
+    def get_course_name(self, obj) -> str:
         link = next(iter(obj.course_links.all()), None)
         return link.course.name if link else ""
 
-    def get_course_names(self, obj):
+    def get_course_names(self, obj) -> list[str]:
         return [link.course.name for link in obj.course_links.all()]
 
     def validate(self, attrs):
@@ -114,4 +114,4 @@ class ClassStudentSerializer(serializers.ModelSerializer):
             "id", "classroom", "student", "student_name", "username",
             "joined_at", "learn_status",
         ]
-        read_only_fields = ["joined_at"]
+        read_only_fields = ["classroom", "student", "joined_at"]

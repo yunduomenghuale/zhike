@@ -34,7 +34,7 @@ class HomeworkQuestionSerializer(serializers.ModelSerializer):
         model = HomeworkQuestion
         fields = ["id", "question", "score", "order", "snapshot"]
 
-    def get_snapshot(self, obj):
+    def get_snapshot(self, obj) -> dict:
         request = self.context.get("request")
         return _snapshot_for_user(obj.snapshot, getattr(request, "user", None))
 
@@ -226,11 +226,11 @@ class HomeworkAnswerSerializer(serializers.ModelSerializer):
             "score", "comment", "graded_at", "needs_manual_grading",
         ]
 
-    def get_snapshot(self, obj):
+    def get_snapshot(self, obj) -> dict:
         request = self.context.get("request")
         return _snapshot_for_user(obj.homework_question.snapshot, getattr(request, "user", None))
 
-    def get_needs_manual_grading(self, obj):
+    def get_needs_manual_grading(self, obj) -> bool:
         return (obj.homework_question.snapshot or {}).get("qtype") == Question.QType.SHORT
 
 

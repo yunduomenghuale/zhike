@@ -14,6 +14,7 @@ from apps.common.response import api_response
 
 from .serializers import (
     AvatarUploadSerializer,
+    LoginSerializer,
     PasswordChangeSerializer,
     ProfileUpdateSerializer,
     RegisterSerializer,
@@ -49,6 +50,7 @@ class LoginView(APIView):
     """用户名或手机号加密码登录，返回 JWT。"""
 
     permission_classes = [AllowAny]
+    serializer_class = LoginSerializer
 
     def post(self, request):
         identifier = str(request.data.get("username") or "").strip()
@@ -70,6 +72,7 @@ class MeView(APIView):
     """获取或更新当前登录用户信息。"""
 
     permission_classes = [IsAuthenticated]
+    serializer_class = ProfileUpdateSerializer
 
     def get(self, request):
         return api_response(UserSerializer(request.user).data)
@@ -89,6 +92,7 @@ class AvatarUploadView(APIView):
     """上传当前用户头像，文件保存在 media/avatars 下。"""
 
     permission_classes = [IsAuthenticated]
+    serializer_class = AvatarUploadSerializer
 
     def post(self, request):
         serializer = AvatarUploadSerializer(data=request.data)
@@ -125,6 +129,7 @@ class PasswordChangeView(APIView):
     """校验当前密码后设置新密码。"""
 
     permission_classes = [IsAuthenticated]
+    serializer_class = PasswordChangeSerializer
 
     def post(self, request):
         serializer = PasswordChangeSerializer(data=request.data, context={"request": request})

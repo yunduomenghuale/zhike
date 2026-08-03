@@ -6,6 +6,7 @@ from django.db.models.deletion import ProtectedError
 from django.db.models import Max
 
 from apps.ai.services import generate_catalog_from_plan, generate_scripts_for_video
+from apps.common.access import courses_for_user
 from apps.common.permissions import IsTeacher, IsTeacherOrReadOnly
 from apps.common.response import api_response
 from apps.common.viewsets import BaseModelViewSet
@@ -26,12 +27,7 @@ class CourseViewSet(BaseModelViewSet):
     search_fields = ["name", "intro"]
 
     def get_queryset(self):
-        qs = Course.objects.all()
-        user = self.request.user
-        # 教师只看自己的课程；学生可见的课程由班级关系约束（此处返回全部，交由班级过滤）
-        if user.is_authenticated and user.is_teacher:
-            qs = qs.filter(teacher=user)
-        return qs
+        return courses_for_user(self.request.user)
 
     def perform_create(self, serializer):
         serializer.save(teacher=self.request.user)
@@ -43,7 +39,7 @@ class CatalogViewSet(BaseModelViewSet):
     filterset_fields = ["course", "parent", "is_published"]
 
     def get_queryset(self):
-        qs = Catalog.objects.all()
+        qs = Catalog.objects.filter(course__in=courses_for_user(self.request.user))
         user = self.request.user
         # 学生只见已发布章节（需求 T-D-04 / S-V-01）
         if user.is_authenticated and user.is_student:
@@ -202,7 +198,10 @@ class PPTResourceViewSet(BaseModelViewSet):
     filterset_fields = ["course", "catalog", "parse_status"]
 
     def get_queryset(self):
-        return PPTResource.objects.order_by("-version", "-id")
+        qs = PPTResource.objects.filter(course__in=courses_for_user(self.request.user))
+        if getattr(self.request.user, "is_student", False):
+            qs = qs.filter(catalog__is_published=True, is_active=True)
+        return qs.order_by("-version", "-id")
 
     def perform_create(self, serializer):
         """上传 PPT 后自动逐页解析文本（需求 T-P-02）。"""
@@ -248,7 +247,12 @@ class TeachingVideoViewSet(BaseModelViewSet):
     filterset_fields = ["course", "catalog", "gen_status", "is_published"]
 
     def get_queryset(self):
-        return TeachingVideo.objects.select_related("catalog")
+        qs = TeachingVideo.objects.filter(
+            course__in=courses_for_user(self.request.user)
+        ).select_related("catalog")
+        if getattr(self.request.user, "is_student", False):
+            qs = qs.filter(catalog__is_published=True, is_published=True)
+        return qs
 
     @action(detail=True, methods=["post"], url_path="generate-scripts")
     def generate_scripts(self, request, pk=None):

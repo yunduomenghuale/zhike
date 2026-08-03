@@ -51,6 +51,7 @@ def _paginated_response(queryset, request, serializer_class):
 
 class AdminOverviewView(APIView):
     permission_classes = [IsPlatformAdmin]
+    serializer_class = AdminCourseSerializer
 
     def get(self, request):
         admin_filter = Q(role=User.Role.ADMIN) | Q(is_superuser=True)
@@ -94,6 +95,7 @@ class AdminOverviewView(APIView):
 
 class AdminUserListCreateView(APIView):
     permission_classes = [IsPlatformAdmin]
+    serializer_class = AdminUserWriteSerializer
 
     def get(self, request):
         queryset = User.objects.all().order_by("-date_joined")
@@ -128,6 +130,7 @@ class AdminUserListCreateView(APIView):
 
 class AdminUserDetailView(APIView):
     permission_classes = [IsPlatformAdmin]
+    serializer_class = AdminUserWriteSerializer
 
     def patch(self, request, user_id):
         user = get_object_or_404(User, pk=user_id)
@@ -146,6 +149,7 @@ class AdminUserDetailView(APIView):
 
 class AdminPasswordResetView(APIView):
     permission_classes = [IsPlatformAdmin]
+    serializer_class = PasswordResetSerializer
 
     def post(self, request, user_id):
         user = get_object_or_404(User, pk=user_id)
@@ -160,6 +164,7 @@ class AdminPasswordResetView(APIView):
 
 class AdminCourseListView(APIView):
     permission_classes = [IsPlatformAdmin]
+    serializer_class = AdminCourseSerializer
 
     def get(self, request):
         queryset = Course.objects.select_related("teacher").annotate(
@@ -181,6 +186,7 @@ class AdminCourseListView(APIView):
 
 class AdminCourseStatusView(APIView):
     permission_classes = [IsPlatformAdmin]
+    serializer_class = CourseStatusSerializer
 
     def patch(self, request, course_id):
         course = get_object_or_404(Course, pk=course_id)
@@ -196,6 +202,7 @@ class AdminCourseStatusView(APIView):
 
 class AdminClassListView(APIView):
     permission_classes = [IsPlatformAdmin]
+    serializer_class = AdminClassSerializer
 
     def get(self, request):
         queryset = ClassRoom.objects.select_related("teacher").annotate(
@@ -217,6 +224,7 @@ class AdminClassListView(APIView):
 
 class AdminAIConfigurationView(APIView):
     permission_classes = [IsPlatformAdmin]
+    serializer_class = AdminAIConfigurationSerializer
 
     def _instance_or_environment(self):
         saved = AIConfiguration.objects.order_by("id").first()
@@ -256,6 +264,7 @@ class AdminAIConfigurationView(APIView):
 
 class AdminAIConnectionTestView(APIView):
     permission_classes = [IsPlatformAdmin]
+    serializer_class = AdminAIConfigurationSerializer
 
     def post(self, request):
         config = AIConfiguration.objects.order_by("id").first()

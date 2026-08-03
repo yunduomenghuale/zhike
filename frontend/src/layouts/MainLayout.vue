@@ -634,7 +634,7 @@ function onCommand(cmd) {
 }
 
 .menu :deep(.el-menu-item:hover) {
-  background: rgba(219, 234, 254, 0.66);
+  background: #ffffff;
   color: #2563eb;
   transform: translateX(2px);
 }
@@ -921,8 +921,7 @@ function onCommand(cmd) {
 
 .app-rail .menu :deep(.el-menu-item:hover) {
   color: #2563eb;
-  background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.95), rgba(219, 234, 254, 0.66));
+  background: #ffffff;
   box-shadow:
     0 10px 22px rgba(37, 99, 235, 0.09),
     inset 0 1px 1px rgba(255, 255, 255, 0.9),

@@ -1,5 +1,6 @@
 """Django settings for 智能课程教学平台 (config project)."""
 from datetime import timedelta
+from django.core.exceptions import ImproperlyConfigured
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -23,9 +24,19 @@ def env_list(key: str, default: str = "") -> list[str]:
 # ---------------------------------------------------------------------------
 # 基础
 # ---------------------------------------------------------------------------
-SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "django-insecure-dev-key-change-me")
 DEBUG = env_bool("DJANGO_DEBUG", True)
-ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost")
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "").strip()
+if not SECRET_KEY:
+    if DEBUG:
+        SECRET_KEY = "django-insecure-dev-key-change-me"
+    else:
+        raise ImproperlyConfigured("生产环境必须设置 DJANGO_SECRET_KEY")
+if not DEBUG and SECRET_KEY in {"change-me-in-production", "django-insecure-dev-key-change-me"}:
+    raise ImproperlyConfigured("DJANGO_SECRET_KEY 仍是示例值，请设置强随机密钥")
+
+ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost" if DEBUG else "")
+if not DEBUG and not ALLOWED_HOSTS:
+    raise ImproperlyConfigured("生产环境必须设置 DJANGO_ALLOWED_HOSTS")
 if DEBUG and "testserver" not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append("testserver")  # 便于运行测试与 DRF APIClient
 
@@ -156,6 +167,20 @@ SPECTACULAR_SETTINGS = {
     "DESCRIPTION": "教师端与学生端功能接口",
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
+    "ENUM_NAME_OVERRIDES": {
+        "CourseStatusEnum": [("active", "启用"), ("inactive", "停用"), ("archived", "归档")],
+        "ClassRoomStatusEnum": [("open", "开课中"), ("closed", "已结课")],
+        "QuestionStatusEnum": [
+            ("draft", "草稿"), ("pending", "待审核"),
+            ("published", "已发布"), ("disabled", "停用"),
+        ],
+        "HomeworkStatusEnum": [("draft", "草稿"), ("published", "已发布"), ("closed", "已截止")],
+        "ExamStatusEnum": [("draft", "草稿"), ("published", "已发布"), ("finished", "已结束")],
+        "ExamSubmissionStatusEnum": [
+            ("not_started", "未开始"), ("in_progress", "考试中"),
+            ("submitted", "已提交"), ("timeout", "超时交卷"), ("absent", "缺考"),
+        ],
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -165,6 +190,14 @@ CORS_ALLOWED_ORIGINS = env_list(
     "CORS_ALLOWED_ORIGINS",
     "http://127.0.0.1:5273,http://localhost:5273,http://127.0.0.1:5173,http://localhost:5173",
 )
+
+if not DEBUG:
+    SECURE_SSL_REDIRECT = env_bool("DJANGO_SECURE_SSL_REDIRECT", True)
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = int(os.getenv("DJANGO_SECURE_HSTS_SECONDS", "31536000"))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
 
 # ---------------------------------------------------------------------------
 # 国际化

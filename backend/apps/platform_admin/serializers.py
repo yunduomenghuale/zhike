@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password as django_validate_password
 from rest_framework import serializers
 
 from apps.classroom.models import ClassRoom
@@ -65,6 +66,10 @@ class AdminUserWriteSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("该手机号已被其他账号作为用户名使用")
         return value
 
+    def validate_password(self, value):
+        django_validate_password(value, self.instance)
+        return value
+
     def validate(self, attrs):
         if not self.instance and not attrs.get("password"):
             raise serializers.ValidationError({"password": "创建账号时必须设置初始密码"})
@@ -89,6 +94,10 @@ class AdminUserWriteSerializer(serializers.ModelSerializer):
 
 class PasswordResetSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True, min_length=6)
+
+    def validate_password(self, value):
+        django_validate_password(value)
+        return value
 
 
 class AdminCourseSerializer(serializers.ModelSerializer):

@@ -29,13 +29,25 @@ class CatalogSerializer(serializers.ModelSerializer):
             "intro", "is_published", "children",
         ]
 
-    def get_children(self, obj):
+    def get_children(self, obj) -> list[dict]:
         children = obj.children.all()
         request = self.context.get("request")
         user = getattr(request, "user", None)
         if user and user.is_authenticated and user.is_student:
             children = children.filter(is_published=True)
         return CatalogSerializer(children, many=True, context=self.context).data
+
+    def validate(self, attrs):
+        course = attrs.get("course", getattr(self.instance, "course", None))
+        parent = attrs.get("parent", getattr(self.instance, "parent", None))
+        if parent and course and parent.course_id != course.id:
+            raise serializers.ValidationError({"parent": "父级章节必须属于同一课程"})
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if user and user.is_authenticated and user.is_teacher:
+            if not course or course.teacher_id != user.id:
+                raise serializers.ValidationError("只能维护自己负责课程的章节")
+        return attrs
 
 
 class PPTResourceSerializer(serializers.ModelSerializer):
@@ -57,6 +69,18 @@ class PPTResourceSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("课件只支持上传 PPT / PPTX 文件")
         return value
 
+    def validate(self, attrs):
+        course = attrs.get("course", getattr(self.instance, "course", None))
+        catalog = attrs.get("catalog", getattr(self.instance, "catalog", None))
+        if catalog and course and catalog.course_id != course.id:
+            raise serializers.ValidationError({"catalog": "所选章节不属于当前课程"})
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if user and user.is_authenticated and user.is_teacher:
+            if not course or course.teacher_id != user.id:
+                raise serializers.ValidationError("只能上传自己负责课程的课件")
+        return attrs
+
 
 class TeachingVideoSerializer(serializers.ModelSerializer):
     gen_status_display = serializers.CharField(source="get_gen_status_display", read_only=True)
@@ -68,3 +92,20 @@ class TeachingVideoSerializer(serializers.ModelSerializer):
             "audio_url", "subtitle_url", "video_url",
             "gen_status", "gen_status_display", "is_published", "published_at",
         ]
+
+    def validate(self, attrs):
+        course = attrs.get("course", getattr(self.instance, "course", None))
+        catalog = attrs.get("catalog", getattr(self.instance, "catalog", None))
+        ppt = attrs.get("ppt", getattr(self.instance, "ppt", None))
+        if catalog and course and catalog.course_id != course.id:
+            raise serializers.ValidationError({"catalog": "所选章节不属于当前课程"})
+        if ppt and course and (
+            not catalog or ppt.course_id != course.id or ppt.catalog_id != catalog.id
+        ):
+            raise serializers.ValidationError({"ppt": "所选课件与课程章节不匹配"})
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if user and user.is_authenticated and user.is_teacher:
+            if not course or course.teacher_id != user.id:
+                raise serializers.ValidationError("只能维护自己负责课程的视频")
+        return attrs

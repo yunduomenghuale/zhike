@@ -19,11 +19,29 @@ def cosine(a: list[float], b: list[float]) -> float:
     return dot / (na * nb)
 
 
-def search_chunks(course_id: int, query_vec: list[float], top_k: int = 5):
+def search_chunks(
+    course_id: int,
+    query_vec: list[float],
+    top_k: int = 5,
+    *,
+    student_access: bool = False,
+    classroom_id=None,
+):
     """返回按相似度降序的 (chunk, score) 列表。"""
     from apps.knowledge.models import KnowledgeChunk
 
     chunks = KnowledgeChunk.objects.filter(course_id=course_id).exclude(embedding=[])
+    if student_access:
+        from django.db.models import Q
+
+        chunks = chunks.filter(material__qa_open=True)
+        if classroom_id:
+            chunks = chunks.filter(
+                Q(material__classroom__isnull=True)
+                | Q(material__classroom_id=classroom_id)
+            )
+        else:
+            chunks = chunks.filter(material__classroom__isnull=True)
     scored = [(c, cosine(query_vec, c.embedding)) for c in chunks]
     scored.sort(key=lambda x: x[1], reverse=True)
     return scored[:top_k]

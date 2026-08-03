@@ -7,7 +7,26 @@
 
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import * as THREE from 'three'
+import {
+  AdditiveBlending,
+  BoxGeometry,
+  BufferAttribute,
+  BufferGeometry,
+  Color,
+  IcosahedronGeometry,
+  Line,
+  LineBasicMaterial,
+  LineSegments,
+  Mesh,
+  MeshBasicMaterial,
+  OctahedronGeometry,
+  PerspectiveCamera,
+  Points,
+  PointsMaterial,
+  Scene,
+  TorusGeometry,
+  WebGLRenderer,
+} from 'three'
 
 const containerRef = ref(null)
 const canvasRef = ref(null)
@@ -40,14 +59,14 @@ function init() {
   const height = containerRef.value.offsetHeight
 
   // 场景
-  scene = new THREE.Scene()
+  scene = new Scene()
 
   // 相机
-  camera = new THREE.PerspectiveCamera(75, width / height, 1, 1000)
+  camera = new PerspectiveCamera(75, width / height, 1, 1000)
   camera.position.z = 220
 
   // 渲染器
-  renderer = new THREE.WebGLRenderer({
+  renderer = new WebGLRenderer({
     canvas: canvasRef.value,
     alpha: true,
     antialias: true,
@@ -76,13 +95,13 @@ function init() {
 }
 
 function createParticles(width, height) {
-  const geometry = new THREE.BufferGeometry()
+  const geometry = new BufferGeometry()
   const positions = new Float32Array(PARTICLE_COUNT * 3)
   const colors = new Float32Array(PARTICLE_COUNT * 3)
   const sizes = new Float32Array(PARTICLE_COUNT)
   const velocities = []
 
-  const colorPalette = COLORS.map((c) => new THREE.Color(c))
+  const colorPalette = COLORS.map((c) => new Color(c))
 
   for (let i = 0; i < PARTICLE_COUNT; i++) {
     const i3 = i * 3
@@ -106,65 +125,65 @@ function createParticles(width, height) {
     })
   }
 
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
-  geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1))
+  geometry.setAttribute('position', new BufferAttribute(positions, 3))
+  geometry.setAttribute('color', new BufferAttribute(colors, 3))
+  geometry.setAttribute('size', new BufferAttribute(sizes, 1))
   geometry.userData.velocities = velocities
 
-  const material = new THREE.PointsMaterial({
+  const material = new PointsMaterial({
     size: 4,
     vertexColors: true,
     transparent: true,
     opacity: 0.85,
-    blending: THREE.AdditiveBlending,
+    blending: AdditiveBlending,
     sizeAttenuation: true,
     depthWrite: false,
   })
 
-  particles = new THREE.Points(geometry, material)
+  particles = new Points(geometry, material)
   scene.add(particles)
 }
 
 function createLines() {
-  const geometry = new THREE.BufferGeometry()
+  const geometry = new BufferGeometry()
   const maxLines = PARTICLE_COUNT * MAX_CONNECTIONS
   const positions = new Float32Array(maxLines * 6)
   const colors = new Float32Array(maxLines * 6)
 
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+  geometry.setAttribute('position', new BufferAttribute(positions, 3))
+  geometry.setAttribute('color', new BufferAttribute(colors, 3))
   geometry.setDrawRange(0, 0)
 
-  const material = new THREE.LineBasicMaterial({
+  const material = new LineBasicMaterial({
     vertexColors: true,
     transparent: true,
     opacity: 0.45,
-    blending: THREE.AdditiveBlending,
+    blending: AdditiveBlending,
   })
 
-  lines = new THREE.LineSegments(geometry, material)
+  lines = new LineSegments(geometry, material)
   scene.add(lines)
 }
 
 function createFloatingGeometries() {
   const shapes = [
-    new THREE.IcosahedronGeometry(12, 0),
-    new THREE.OctahedronGeometry(14, 0),
-    new THREE.TorusGeometry(12, 3, 8, 24),
-    new THREE.BoxGeometry(16, 16, 16),
+    new IcosahedronGeometry(12, 0),
+    new OctahedronGeometry(14, 0),
+    new TorusGeometry(12, 3, 8, 24),
+    new BoxGeometry(16, 16, 16),
   ]
 
-  const material = new THREE.MeshBasicMaterial({
+  const material = new MeshBasicMaterial({
     color: 0x4f46e5,
     transparent: true,
     opacity: 0.18,
     wireframe: true,
-    blending: THREE.AdditiveBlending,
+    blending: AdditiveBlending,
   })
 
   for (let i = 0; i < 8; i++) {
     const geo = shapes[Math.floor(Math.random() * shapes.length)]
-    const mesh = new THREE.Mesh(geo, material.clone())
+    const mesh = new Mesh(geo, material.clone())
 
     mesh.position.set(
       (Math.random() - 0.5) * 900,
@@ -187,15 +206,15 @@ function createFloatingGeometries() {
 
 function createDataFlows() {
   // 创建流动的数据线条
-  const material = new THREE.LineBasicMaterial({
+  const material = new LineBasicMaterial({
     color: 0x3b82f6,
     transparent: true,
     opacity: 0.55,
-    blending: THREE.AdditiveBlending,
+    blending: AdditiveBlending,
   })
 
   for (let i = 0; i < 12; i++) {
-    const geometry = new THREE.BufferGeometry()
+    const geometry = new BufferGeometry()
     const startX = (Math.random() - 0.5) * 900
     const startY = (Math.random() - 0.5) * 700
     const endX = startX + (Math.random() - 0.5) * 200
@@ -206,9 +225,9 @@ function createDataFlows() {
       endX, endY, (Math.random() - 0.5) * 100,
     ])
 
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    geometry.setAttribute('position', new BufferAttribute(positions, 3))
 
-    const line = new THREE.Line(geometry, material.clone())
+    const line = new Line(geometry, material.clone())
     line.userData = {
       progress: Math.random(),
       speed: 0.005 + Math.random() * 0.01,
@@ -227,7 +246,7 @@ function updateConnections() {
   const positions = particles.geometry.attributes.position.array
   const linePositions = lines.geometry.attributes.position.array
   const lineColors = lines.geometry.attributes.color.array
-  const color = new THREE.Color(0x4f46e5)
+  const color = new Color(0x4f46e5)
 
   let lineIndex = 0
 

@@ -21,10 +21,20 @@ class ExamSerializer(serializers.ModelSerializer):
         course = attrs.get("course", getattr(self.instance, "course", None))
         start_at = attrs.get("start_at", getattr(self.instance, "start_at", None))
         end_at = attrs.get("end_at", getattr(self.instance, "end_at", None))
+        duration = attrs.get("duration", getattr(self.instance, "duration", None))
         if classroom and course and not classroom.courses.filter(id=course.id).exists():
             raise serializers.ValidationError({"course": "该课程未关联到所选班级"})
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if user and user.is_authenticated and user.is_teacher:
+            if not course or course.teacher_id != user.id:
+                raise serializers.ValidationError("只能维护自己负责课程的考试")
+            if not classroom or classroom.teacher_id != user.id:
+                raise serializers.ValidationError("只能维护自己负责班级的考试")
         if start_at and end_at and end_at <= start_at:
             raise serializers.ValidationError({"end_at": "结束时间必须晚于开始时间"})
+        if duration is not None and duration <= 0:
+            raise serializers.ValidationError({"duration": "考试时长必须大于 0 分钟"})
         return attrs
 
 

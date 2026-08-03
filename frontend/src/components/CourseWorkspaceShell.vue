@@ -274,8 +274,7 @@ watch([activeTab, () => props.courseName], updatePageTitle, { immediate: true })
 
 .course-menu-item:hover {
   color: #2563eb;
-  background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.95), rgba(219, 234, 254, 0.66));
+  background: #ffffff;
   box-shadow:
     0 10px 22px rgba(37, 99, 235, 0.09),
     inset 0 1px 1px rgba(255, 255, 255, 0.9),
@@ -284,17 +283,21 @@ watch([activeTab, () => props.courseName], updatePageTitle, { immediate: true })
 }
 
 .course-menu-item.active {
-  color: #1d4ed8;
-  background: linear-gradient(135deg, #eff6ff, #ffffff 65%);
+  color: #fff;
+  background: #3b82f6;
   border: 1px solid #3b82f6;
-  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.14);
+  box-shadow:
+    0 10px 22px rgba(37, 99, 235, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 
 .course-menu-item.active:hover {
-  color: #1d4ed8;
-  background: linear-gradient(135deg, #dbeafe, #ffffff 65%);
+  color: #fff;
+  background: #2563eb;
   border-color: #2563eb;
-  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.18);
+  box-shadow:
+    0 12px 26px rgba(37, 99, 235, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.24);
   transform: translateX(2px);
 }
 

@@ -1,7 +1,9 @@
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 
 from apps.ai.services import generate_questions
+from apps.common.access import courses_for_user, is_platform_admin
 from apps.common.permissions import IsStudent, IsTeacher, IsTeacherOrReadOnly
 from apps.common.response import api_response
 from apps.common.viewsets import BaseModelViewSet
@@ -23,12 +25,15 @@ class QuestionViewSet(BaseModelViewSet):
     search_fields = ["stem"]
 
     def get_queryset(self):
-        qs = Question.objects.all()
         user = self.request.user
+        qs = Question.objects.filter(course__in=courses_for_user(user))
         # 学生只见已发布题目（用于章节练习）
-        if user.is_authenticated and user.is_student:
-            qs = qs.filter(status=Question.Status.PUBLISHED)
-        return qs
+        if getattr(user, "is_student", False):
+            qs = qs.filter(
+                status=Question.Status.PUBLISHED,
+                catalog__is_published=True,
+            )
+        return qs.order_by("id")
 
     def get_serializer_class(self):
         # 学生列表/详情用不含答案解析的序列化器（练习时不泄题）
@@ -47,8 +52,14 @@ class QuestionViewSet(BaseModelViewSet):
         请求：{"answers": {"<question_id>": <answer_obj>, ...}}
         """
         answers = request.data.get("answers", {}) or {}
+        if not isinstance(answers, dict):
+            raise ValidationError({"answers": "答案格式不正确"})
+        try:
+            question_ids = [int(key) for key in answers]
+        except (TypeError, ValueError):
+            raise ValidationError({"answers": "题目编号格式不正确"})
         results, total, correct = [], 0, 0
-        q_map = {q.id: q for q in Question.objects.filter(id__in=[int(k) for k in answers.keys()])}
+        q_map = {q.id: q for q in self.get_queryset().filter(id__in=question_ids)}
         for qid, stu_ans in answers.items():
             q = q_map.get(int(qid))
             if not q:
@@ -82,7 +93,11 @@ class QuestionViewSet(BaseModelViewSet):
         catalog_id = request.data.get("catalog")
         if not catalog_id:
             return api_response(message="请先选择题目所属章节", code=400, status=400)
-        catalog = Catalog.objects.filter(id=catalog_id, course_id=course_id).first()
+        catalog = Catalog.objects.filter(
+            id=catalog_id,
+            course_id=course_id,
+            course__teacher=request.user,
+        ).first()
         if not catalog:
             return api_response(message="所选章节不属于当前课程", code=400, status=400)
         count = int(request.data.get("count", 5))
@@ -118,6 +133,7 @@ class QuestionViewSet(BaseModelViewSet):
 class AnswerRecordViewSet(BaseModelViewSet):
     serializer_class = AnswerRecordSerializer
     permission_classes = [IsAuthenticated]
+    http_method_names = ["get", "post", "head", "options"]
     filterset_fields = ["scene", "question", "student"]
 
     def get_queryset(self):
@@ -125,13 +141,26 @@ class AnswerRecordViewSet(BaseModelViewSet):
         qs = AnswerRecord.objects.select_related("question")
         if user.is_authenticated and user.is_student:
             qs = qs.filter(student=user)
-        return qs
+        elif user.is_authenticated and user.is_teacher:
+            qs = qs.filter(question__course__teacher=user)
+        elif not is_platform_admin(user):
+            qs = qs.none()
+        return qs.order_by("id")
 
     def create(self, request, *args, **kwargs):
         """学生提交章节练习答案，客观题即时自动评分（需求 S-Q-01/02）。"""
+        if not request.user.is_student:
+            raise PermissionDenied("仅学生可提交练习答案")
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         question = serializer.validated_data["question"]
+        if not Question.objects.filter(
+            pk=question.pk,
+            course__in=courses_for_user(request.user),
+            catalog__is_published=True,
+            status=Question.Status.PUBLISHED,
+        ).exists():
+            raise PermissionDenied("题目不存在、尚未发布或无权访问")
         student_answer = serializer.validated_data.get("student_answer", {})
         is_correct, score = grade_objective(question, student_answer)
         record = serializer.save(student=request.user, is_correct=is_correct, score=score)

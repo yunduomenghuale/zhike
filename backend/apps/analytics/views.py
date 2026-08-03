@@ -4,6 +4,7 @@
 """
 from django.db.models import Avg, Count, Q
 from django.utils import timezone
+from rest_framework import serializers
 from rest_framework.views import APIView
 
 from apps.classroom.models import ClassRoom, ClassStudent
@@ -16,6 +17,14 @@ from apps.questions.models import AnswerRecord, Question
 
 INACTIVE_DAYS = 7
 LOW_ACCURACY = 60
+
+
+class AnalyticsResponseSerializer(serializers.Serializer):
+    """Schema marker for aggregation endpoints with dynamic response bodies."""
+
+    code = serializers.IntegerField(read_only=True)
+    message = serializers.CharField(read_only=True)
+    data = serializers.JSONField(read_only=True)
 
 
 def _resolve_classroom_course(request, class_id):
@@ -138,6 +147,7 @@ class ClassStatsView(APIView):
     """班级学习统计 + 逐个学生进度 + 预警（需求 T-L-01/02/03）。"""
 
     permission_classes = [IsTeacher]
+    serializer_class = AnalyticsResponseSerializer
 
     def get(self, request, class_id):
         classroom, course, error = _resolve_classroom_course(request, class_id)
@@ -150,6 +160,7 @@ class ClassAIReportView(APIView):
     """AI 学情分析报告：基于班级统计数据生成整体报告 + 逐学生简评。"""
 
     permission_classes = [IsTeacher]
+    serializer_class = AnalyticsResponseSerializer
 
     def post(self, request, class_id):
         from apps.ai.services import analyze_class_stats
@@ -179,6 +190,7 @@ class ClassStudentDetailView(APIView):
     """教师查看班级内单个学生的学习详情（练习/作业/考试/预警）。"""
 
     permission_classes = [IsTeacher]
+    serializer_class = AnalyticsResponseSerializer
 
     def get(self, request, class_id, student_id):
         classroom, course, error = _resolve_classroom_course(request, class_id)
@@ -341,6 +353,7 @@ class MyWrongQuestionsView(APIView):
     """学生错题本（需求 S-Q-04）：由错误答题记录去重汇总。"""
 
     permission_classes = [IsStudent]
+    serializer_class = AnalyticsResponseSerializer
 
     def get(self, request):
         qs = (

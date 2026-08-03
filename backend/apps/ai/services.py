@@ -445,7 +445,13 @@ QA_SYSTEM_PROMPT = (
 
 
 def _gather_course_context(
-    course_id, question: str, catalog_id=None, max_chars: int = 6000
+    course_id,
+    question: str,
+    catalog_id=None,
+    max_chars: int = 6000,
+    *,
+    student_access: bool = False,
+    classroom_id=None,
 ) -> tuple[str, list[dict]]:
     """汇总某课程可用于问答的资料上下文（需求 S-K-01/02）。
 
@@ -462,7 +468,13 @@ def _gather_course_context(
     # 1) 知识库向量检索（若有片段）
     try:
         query_vec = provider.embed([question])[0]
-        for chunk, score in search_chunks(course_id, query_vec, top_k=5):
+        for chunk, score in search_chunks(
+            course_id,
+            query_vec,
+            top_k=5,
+            student_access=student_access,
+            classroom_id=classroom_id,
+        ):
             if score <= 0:
                 continue
             parts.append(chunk.content)
@@ -480,6 +492,8 @@ def _gather_course_context(
 
     # 2) 课件 PPT 讲义（把 PPT 当资料）
     ppt_qs = PPTResource.objects.filter(course_id=course_id, is_active=True)
+    if student_access:
+        ppt_qs = ppt_qs.filter(catalog__is_published=True)
     if catalog_id:
         ppt_qs = ppt_qs.filter(catalog_id=catalog_id)
     seen_catalogs: set = set()
@@ -504,6 +518,8 @@ def _gather_course_context(
 
     # 3) 逐页讲解稿（自然语言，最贴近讲课内容）
     vid_qs = TeachingVideo.objects.filter(course_id=course_id)
+    if student_access:
+        vid_qs = vid_qs.filter(catalog__is_published=True, is_published=True)
     if catalog_id:
         vid_qs = vid_qs.filter(catalog_id=catalog_id)
     for vid in vid_qs:
@@ -516,9 +532,23 @@ def _gather_course_context(
     return context, cited
 
 
-def knowledge_qa(course_id: int, question: str, catalog_id=None, image_b64: str | None = None) -> tuple[str, list[dict]]:
+def knowledge_qa(
+    course_id: int,
+    question: str,
+    catalog_id=None,
+    image_b64: str | None = None,
+    *,
+    student_access: bool = False,
+    classroom_id=None,
+) -> tuple[str, list[dict]]:
     provider = get_provider()
-    context, cited = _gather_course_context(course_id, question, catalog_id=catalog_id)
+    context, cited = _gather_course_context(
+        course_id,
+        question,
+        catalog_id=catalog_id,
+        student_access=student_access,
+        classroom_id=classroom_id,
+    )
     user_content = (
         f"课程资料：\n{context}\n\n学生问题：{question}"
         if context
@@ -541,7 +571,15 @@ def _qa_user_content(text: str, image_b64: str | None):
     ]
 
 
-def knowledge_qa_stream(course_id: int, question: str, catalog_id=None, image_b64: str | None = None):
+def knowledge_qa_stream(
+    course_id: int,
+    question: str,
+    catalog_id=None,
+    image_b64: str | None = None,
+    *,
+    student_access: bool = False,
+    classroom_id=None,
+):
     """知识库问答的流式版本（需求 S-K-01/02/04）。
 
     先产出一条 {"type":"meta","cited":[...]} 事件（引用片段），
@@ -549,7 +587,13 @@ def knowledge_qa_stream(course_id: int, question: str, catalog_id=None, image_b6
     资料来源除知识库片段外，也纳入课件 PPT 与讲解稿，避免生硬拒答。
     """
     provider = get_provider()
-    context, cited = _gather_course_context(course_id, question, catalog_id=catalog_id)
+    context, cited = _gather_course_context(
+        course_id,
+        question,
+        catalog_id=catalog_id,
+        student_access=student_access,
+        classroom_id=classroom_id,
+    )
     yield {"type": "meta", "cited": cited}
 
     user_content = (

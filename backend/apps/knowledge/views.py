@@ -1,7 +1,9 @@
 import json
 
+from django.db.models import Q
 from django.http import StreamingHttpResponse
 from rest_framework.decorators import action
+from rest_framework.exceptions import MethodNotAllowed, NotFound, ValidationError
 from rest_framework.permissions import IsAuthenticated
 
 from apps.ai.services import ingest_material, knowledge_qa, knowledge_qa_stream
@@ -33,13 +35,43 @@ def _validate_image(value):
     return value, None
 
 
+def _resolve_qa_scope(request):
+    """Resolve and validate the course/class/catalog named by a QA request."""
+    course_id = request.data.get("course")
+    course = courses_for_user(request.user).filter(pk=course_id).first()
+    if not course:
+        raise NotFound("课程不存在或无权访问")
+
+    classroom_id = request.data.get("classroom")
+    classroom = None
+    if classroom_id:
+        classroom = classrooms_for_user(request.user).filter(pk=classroom_id).first()
+        if not classroom or not classroom.courses.filter(pk=course.pk).exists():
+            raise ValidationError({"classroom": "班级不存在、无权访问或未关联当前课程"})
+
+    catalog_id = request.data.get("catalog")
+    catalog = None
+    if catalog_id:
+        catalog = course.catalogs.filter(pk=catalog_id).first()
+        if not catalog or (request.user.is_student and not catalog.is_published):
+            raise ValidationError({"catalog": "章节不存在或尚未发布"})
+    return course, classroom, catalog
+
+
 class MaterialViewSet(BaseModelViewSet):
     serializer_class = MaterialSerializer
     permission_classes = [IsTeacherOrReadOnly]
     filterset_fields = ["course", "classroom", "parse_status", "qa_open"]
 
     def get_queryset(self):
-        return Material.objects.all()
+        user = self.request.user
+        qs = Material.objects.filter(course__in=courses_for_user(user))
+        if getattr(user, "is_student", False):
+            qs = qs.filter(
+                Q(classroom__isnull=True)
+                | Q(classroom__students__student=user, classroom__students__learn_status="active")
+            )
+        return qs.distinct().order_by("id")
 
     def perform_create(self, serializer):
         """上传即自动识别类型并解析入库（需求 T-K-01/02）。"""
@@ -71,14 +103,21 @@ class QARecordViewSet(BaseModelViewSet):
     serializer_class = QARecordSerializer
     permission_classes = [IsAuthenticated]
     filterset_fields = ["course", "classroom", "student"]
+    http_method_names = ["get", "post", "head", "options"]
 
     def get_queryset(self):
         user = self.request.user
-        qs = QARecord.objects.select_related("student")
-        # 教师看全部（用于了解疑难点），学生只看自己的历史提问
-        if user.is_authenticated and user.is_student:
+        qs = QARecord.objects.select_related("student", "course", "classroom")
+        if getattr(user, "is_student", False):
             qs = qs.filter(student=user)
+        elif getattr(user, "is_teacher", False):
+            qs = qs.filter(course__teacher=user)
+        elif not is_platform_admin(user):
+            qs = qs.none()
         return qs
+
+    def create(self, request, *args, **kwargs):
+        raise MethodNotAllowed("POST", detail="请使用 ask 或 ask-stream 接口提问")
 
     @action(detail=False, methods=["post"], url_path="ask")
     def ask(self, request):
@@ -86,8 +125,7 @@ class QARecordViewSet(BaseModelViewSet):
 
         基于课程资料检索 + 大模型回答；无相关资料时提示资料不足，不编造。
         """
-        course_id = request.data.get("course")
-        classroom_id = request.data.get("classroom")
+        course, classroom, catalog = _resolve_qa_scope(request)
         question = request.data.get("question", "").strip()
         if not question:
             return api_response(message="问题不能为空", code=400, status=400)
@@ -95,11 +133,18 @@ class QARecordViewSet(BaseModelViewSet):
         if error:
             return api_response(message=error, code=400, status=400)
 
-        answer, cited = knowledge_qa(course_id=course_id, question=question, image_b64=image_b64)
+        answer, cited = knowledge_qa(
+            course_id=course.id,
+            question=question,
+            catalog_id=catalog.id if catalog else None,
+            image_b64=image_b64,
+            student_access=getattr(request.user, "is_student", False),
+            classroom_id=classroom.id if classroom else None,
+        )
         record = QARecord.objects.create(
-            course_id=course_id,
-            classroom_id=classroom_id,
-            catalog_id=request.data.get("catalog"),
+            course=course,
+            classroom=classroom,
+            catalog=catalog,
             session=str(request.data.get("session") or "")[:64],
             student=request.user,
             question=question,
@@ -115,9 +160,7 @@ class QARecordViewSet(BaseModelViewSet):
         事件序列：meta(引用片段) -> 若干 delta(文本片段) -> done。
         生成结束后落库为一条 QARecord。
         """
-        course_id = request.data.get("course")
-        classroom_id = request.data.get("classroom")
-        catalog_id = request.data.get("catalog")
+        course, classroom, catalog = _resolve_qa_scope(request)
         session = str(request.data.get("session") or "")[:64]
         question = (request.data.get("question") or "").strip()
         if not question:
@@ -131,7 +174,12 @@ class QARecordViewSet(BaseModelViewSet):
             full, cited = [], []
             try:
                 for evt in knowledge_qa_stream(
-                    course_id=course_id, question=question, catalog_id=catalog_id, image_b64=image_b64
+                    course_id=course.id,
+                    question=question,
+                    catalog_id=catalog.id if catalog else None,
+                    image_b64=image_b64,
+                    student_access=getattr(user, "is_student", False),
+                    classroom_id=classroom.id if classroom else None,
                 ):
                     if evt["type"] == "meta":
                         cited = evt["cited"]
@@ -144,9 +192,9 @@ class QARecordViewSet(BaseModelViewSet):
             answer = "".join(full)
             try:
                 QARecord.objects.create(
-                    course_id=course_id,
-                    classroom_id=classroom_id,
-                    catalog_id=catalog_id,
+                    course=course,
+                    classroom=classroom,
+                    catalog=catalog,
                     session=session,
                     student=user,
                     question=question,
@@ -161,3 +209,4 @@ class QARecordViewSet(BaseModelViewSet):
         resp["Cache-Control"] = "no-cache"
         resp["X-Accel-Buffering"] = "no"  # 关闭 nginx/代理缓冲，保证逐段下发
         return resp
+from apps.common.access import classrooms_for_user, courses_for_user, is_platform_admin

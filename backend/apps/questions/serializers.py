@@ -28,6 +28,11 @@ class QuestionSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"catalog": "题目必须归属到具体章节"})
         if course and catalog.course_id != course.id:
             raise serializers.ValidationError({"catalog": "所选章节不属于当前课程"})
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if user and user.is_authenticated and user.is_teacher:
+            if not course or course.teacher_id != user.id:
+                raise serializers.ValidationError("只能维护自己负责课程的题目")
         return attrs
 
 

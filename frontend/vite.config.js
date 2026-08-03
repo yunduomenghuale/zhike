@@ -6,6 +6,10 @@ import Components from 'unplugin-vue-components/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 
 export default defineConfig({
+  // 登录页的 three.js 背景已通过路由懒加载；其独立分包约 524 kB（gzip 约 133 kB）。
+  build: {
+    chunkSizeWarningLimit: 550,
+  },
   plugins: [
     vue(),
     // Element Plus 组件与 API 按需自动导入

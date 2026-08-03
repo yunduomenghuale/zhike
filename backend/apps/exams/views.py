@@ -1,9 +1,14 @@
-from decimal import Decimal
+from datetime import timedelta
+from decimal import Decimal, InvalidOperation
 
+from django.db import transaction
 from django.utils import timezone
 from rest_framework.decorators import action
+from rest_framework.exceptions import MethodNotAllowed, PermissionDenied, ValidationError
+from rest_framework.generics import get_object_or_404
 from rest_framework.permissions import IsAuthenticated
 
+from apps.common.access import is_platform_admin
 from apps.common.permissions import IsTeacher, IsTeacherOrReadOnly
 from apps.common.response import api_response
 from apps.common.viewsets import BaseModelViewSet
@@ -29,21 +34,54 @@ class ExamViewSet(BaseModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = Exam.objects.select_related("classroom")
-        if user.is_authenticated and user.is_student:
+        if getattr(user, "is_student", False):
             # 学生仅见已发布、且自己所在班级的考试
-            qs = qs.filter(status=Exam.Status.PUBLISHED, classroom__students__student=user)
+            qs = qs.filter(
+                status=Exam.Status.PUBLISHED,
+                classroom__students__student=user,
+                classroom__students__learn_status="active",
+            )
+        elif getattr(user, "is_teacher", False):
+            qs = qs.filter(classroom__teacher=user, course__teacher=user)
+        elif not is_platform_admin(user):
+            qs = qs.none()
         return qs.distinct()
 
     @action(detail=True, methods=["post"], url_path="compose", permission_classes=[IsTeacher])
     def compose(self, request, pk=None):
         """随机 / 手动组卷（需求 T-E-02 / T-E-03 / 8.2）。"""
         exam = self.get_object()
+        if exam.status != Exam.Status.DRAFT:
+            raise ValidationError("考试发布后不能重新组卷")
         mode = request.data.get("mode", "random")
-        if mode == "manual":
-            items, total = compose_manual(request.data.get("questions", []))
-        else:
-            items, total = compose_random(exam.course_id, request.data.get("rules", []))
+        try:
+            if mode == "manual":
+                raw_questions = request.data.get("questions", [])
+                if not isinstance(raw_questions, list) or not raw_questions:
+                    raise ValidationError({"questions": "请至少选择一道题目"})
+                question_ids = [int(item["question_id"]) for item in raw_questions]
+                if len(question_ids) != len(set(question_ids)):
+                    raise ValidationError({"questions": "同一道题不能重复添加"})
+                if any(Decimal(str(item.get("score", 5))) <= 0 for item in raw_questions):
+                    raise ValidationError({"questions": "题目分值必须大于 0"})
+                allowed = Question.objects.filter(
+                    id__in=question_ids,
+                    course=exam.course,
+                    status=Question.Status.PUBLISHED,
+                ).count()
+                if allowed != len(question_ids):
+                    raise ValidationError({"questions": "包含其他课程、未发布或不存在的题目"})
+                items, total = compose_manual(raw_questions)
+            elif mode == "random":
+                items, total = compose_random(exam.course_id, request.data.get("rules", []))
+            else:
+                raise ValidationError({"mode": "组卷模式不正确"})
+        except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
+            raise ValidationError("组卷参数格式不正确") from exc
+        if not items or total <= 0:
+            raise ValidationError("没有选出有效题目，请检查组卷规则和题目分值")
 
+        exam.papers.all().delete()
         paper = Paper.objects.create(
             course_id=exam.course_id,
             exam=exam,
@@ -67,19 +105,37 @@ class ExamSubmissionViewSet(BaseModelViewSet):
     serializer_class = ExamSubmissionSerializer
     permission_classes = [IsAuthenticated]
     filterset_fields = ["exam", "student", "status"]
+    http_method_names = ["get", "post", "head", "options"]
 
     def get_queryset(self):
         user = self.request.user
         qs = ExamSubmission.objects.select_related("student", "exam")
-        if user.is_authenticated and user.is_student:
+        if getattr(user, "is_student", False):
             qs = qs.filter(student=user)
+        elif getattr(user, "is_teacher", False):
+            qs = qs.filter(exam__classroom__teacher=user, exam__course__teacher=user)
+        elif not is_platform_admin(user):
+            qs = qs.none()
         return qs
 
+    def create(self, request, *args, **kwargs):
+        raise MethodNotAllowed("POST", detail="请使用 start 接口开始考试")
+
     @action(detail=False, methods=["post"], url_path="start")
+    @transaction.atomic
     def start(self, request):
         """学生开始考试，分配试卷（需求 S-E-02）。"""
+        if not request.user.is_student:
+            raise PermissionDenied("仅学生可开始考试")
         exam_id = request.data.get("exam")
-        exam = Exam.objects.get(id=exam_id)
+        exam = get_object_or_404(
+            Exam.objects.filter(
+                status=Exam.Status.PUBLISHED,
+                classroom__students__student=request.user,
+                classroom__students__learn_status="active",
+            ).distinct(),
+            id=exam_id,
+        )
         now = timezone.now()
         if exam.start_at and now < exam.start_at:
             return api_response(message="考试尚未开始", code=400, status=400)
@@ -90,16 +146,29 @@ class ExamSubmissionViewSet(BaseModelViewSet):
             exam.papers.filter(student=request.user).first()
             or exam.papers.filter(student__isnull=True).first()
         )
-        sub, _ = ExamSubmission.objects.get_or_create(
+        if not paper:
+            raise ValidationError("考试尚未完成组卷，请联系教师")
+        sub, created = ExamSubmission.objects.select_for_update().get_or_create(
             exam=exam,
             student=request.user,
             defaults={"paper": paper, "started_at": now, "status": ExamSubmission.Status.IN_PROGRESS},
         )
-        if sub.started_at is None:
+        if not created and sub.status in (
+            ExamSubmission.Status.SUBMITTED,
+            ExamSubmission.Status.TIMEOUT,
+        ):
+            if not exam.allow_resubmit:
+                raise ValidationError("本次考试已经提交，不能重复作答")
+            sub.answers = {}
+            sub.submitted_at = None
+            sub.objective_score = None
+            sub.total_score = None
+            sub.abnormal = False
+        if created or sub.status != ExamSubmission.Status.IN_PROGRESS or sub.started_at is None:
             sub.started_at = now
             sub.status = ExamSubmission.Status.IN_PROGRESS
             sub.paper = paper
-            sub.save(update_fields=["started_at", "status", "paper", "updated_at"])
+            sub.save()
         return api_response(
             {
                 "submission": ExamSubmissionSerializer(sub).data,
@@ -123,6 +192,11 @@ class ExamSubmissionViewSet(BaseModelViewSet):
             ExamSubmission.Status.TIMEOUT,
         ):
             return api_response(message="交卷后才能查看", code=400, status=400)
+        exam_finished = sub.exam.status == Exam.Status.FINISHED or (
+            sub.exam.end_at and timezone.now() >= sub.exam.end_at
+        )
+        if not exam_finished:
+            return api_response(message="考试结束后才能查看解析", code=403, status=403)
         return api_response(
             {
                 "submission": ExamSubmissionSerializer(sub).data,
@@ -133,9 +207,21 @@ class ExamSubmissionViewSet(BaseModelViewSet):
     @action(detail=True, methods=["post"], url_path="submit")
     def submit(self, request, pk=None):
         """交卷：客观题自动评分，主观题留待教师批改（需求 S-E-04 / T-E-07）。"""
+        if not request.user.is_student:
+            raise PermissionDenied("仅学生可提交答卷")
         sub = self.get_object()
+        if sub.status != ExamSubmission.Status.IN_PROGRESS or not sub.started_at:
+            raise ValidationError("答卷不在作答状态，请先开始考试")
+        if not sub.paper:
+            raise ValidationError("答卷未分配试卷，请联系教师")
         answers = request.data.get("answers", sub.answers)
-        timeout = bool(request.data.get("timeout", False))
+        if not isinstance(answers, dict):
+            raise ValidationError({"answers": "答案格式不正确"})
+        now = timezone.now()
+        deadlines = [sub.started_at + timedelta(minutes=sub.exam.duration)]
+        if sub.exam.end_at:
+            deadlines.append(sub.exam.end_at)
+        timeout = now > min(deadlines)
 
         objective_total = Decimal("0")
         items = sub.paper.question_items if sub.paper else []
@@ -155,7 +241,7 @@ class ExamSubmissionViewSet(BaseModelViewSet):
         sub.answers = answers
         sub.objective_score = objective_total
         sub.total_score = objective_total  # 含主观题时，教师批改后再累加
-        sub.submitted_at = timezone.now()
+        sub.submitted_at = now
         sub.status = ExamSubmission.Status.TIMEOUT if timeout else ExamSubmission.Status.SUBMITTED
         sub.save()
         return api_response(ExamSubmissionSerializer(sub).data, message="交卷成功")
@@ -165,22 +251,37 @@ class ExamLogViewSet(BaseModelViewSet):
     serializer_class = ExamLogSerializer
     permission_classes = [IsAuthenticated]
     filterset_fields = ["exam", "student", "action"]
+    http_method_names = ["get", "post", "head", "options"]
 
     def get_queryset(self):
         user = self.request.user
         qs = ExamLog.objects.all()
-        if user.is_authenticated and user.is_student:
+        if getattr(user, "is_student", False):
             qs = qs.filter(student=user)
+        elif getattr(user, "is_teacher", False):
+            qs = qs.filter(exam__classroom__teacher=user, exam__course__teacher=user)
+        elif not is_platform_admin(user):
+            qs = qs.none()
         return qs
 
     def create(self, request, *args, **kwargs):
         """前端上报防作弊行为日志（需求 T-E-05）。异常行为同时标记答卷。"""
+        if not request.user.is_student:
+            raise PermissionDenied("仅学生可上报考试行为")
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        exam = serializer.validated_data["exam"]
+        submission = ExamSubmission.objects.filter(
+            exam=exam,
+            student=request.user,
+            status=ExamSubmission.Status.IN_PROGRESS,
+        ).first()
+        if not submission:
+            raise PermissionDenied("考试未开始、已结束或无权访问")
         log = serializer.save(
             student=request.user,
             ip=request.META.get("REMOTE_ADDR", ""),
             device=request.META.get("HTTP_USER_AGENT", "")[:255],
         )
-        ExamSubmission.objects.filter(exam=log.exam, student=request.user).update(abnormal=True)
+        ExamSubmission.objects.filter(pk=submission.pk).update(abnormal=True)
         return api_response(self.get_serializer(log).data, message="已记录", status=201)

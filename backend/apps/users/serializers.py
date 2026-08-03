@@ -1,7 +1,7 @@
 import re
 
 from django.contrib.auth import get_user_model
-from django.contrib.auth.password_validation import validate_password
+from django.contrib.auth.password_validation import validate_password as django_validate_password
 from rest_framework import serializers
 
 User = get_user_model()
@@ -17,6 +17,11 @@ def normalize_phone(value):
     if not re.fullmatch(r"\+?\d{6,20}", value):
         raise serializers.ValidationError("请输入正确的手机号")
     return value
+
+
+class LoginSerializer(serializers.Serializer):
+    username = serializers.CharField()
+    password = serializers.CharField(write_only=True, trim_whitespace=False)
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -57,6 +62,10 @@ class RegisterSerializer(serializers.ModelSerializer):
         # 注册仅允许教师 / 学生，管理员由后台创建
         if value not in (User.Role.TEACHER, User.Role.STUDENT):
             raise serializers.ValidationError("角色只能是教师或学生")
+        return value
+
+    def validate_password(self, value):
+        django_validate_password(value)
         return value
 
     def validate_username(self, value):
@@ -148,5 +157,5 @@ class PasswordChangeSerializer(serializers.Serializer):
     def validate(self, attrs):
         if attrs["new_password"] != attrs["confirm_password"]:
             raise serializers.ValidationError({"confirm_password": "两次输入的新密码不一致"})
-        validate_password(attrs["new_password"], self.context["request"].user)
+        django_validate_password(attrs["new_password"], self.context["request"].user)
         return attrs
