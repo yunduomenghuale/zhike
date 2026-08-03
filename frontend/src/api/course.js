@@ -45,3 +45,8 @@ export const updateVideoScript = (videoId, data) =>
   request.post(`/videos/${videoId}/update-script/`, data)
 export const regenerateVideoScriptPage = (videoId, data) =>
   request.post(`/videos/${videoId}/regenerate-script-page/`, data, { timeout: 180000 })
+
+// 视频学习进度（PPT+配音连播）
+export const listWatchProgress = (params) => request.get('/watch-progress/', { params })
+export const reportVideoProgress = (videoId, data) =>
+  request.post(`/videos/${videoId}/report-progress/`, data)

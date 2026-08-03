@@ -129,9 +129,15 @@
 
       <!-- 结果 -->
       <template v-else-if="phase === 'result'">
-        <el-result icon="success" title="交卷成功" :sub-title="`客观题得分：${result.objective_score ?? '-'} / ${result.total_score ?? '-'} 分`">
+        <el-result
+          icon="success"
+          title="交卷成功"
+          :sub-title="result.score_released
+            ? `客观题得分：${result.objective_score ?? '-'} / ${result.total_score ?? '-'} 分`
+            : '答卷已提交，成绩将在教师统一发布后可见'"
+        >
           <template #extra>
-            <el-button v-if="canReview" type="primary" :icon="View" @click="loadReview">查看解析</el-button>
+            <el-button v-if="canReview && result.score_released" type="primary" :icon="View" @click="loadReview">查看解析</el-button>
             <el-button :icon="ArrowLeft" @click="$router.push('/student/exams')">返回考试列表</el-button>
           </template>
         </el-result>
@@ -312,7 +318,7 @@ async function loadReview() {
     const data = await reviewExam(subId.value)
     reviewList.value = data.questions
   } catch {
-    ElMessage.info('本次考试未开放解析')
+    ElMessage.info('成绩尚未发布或本次考试未开放解析')
   }
 }
 

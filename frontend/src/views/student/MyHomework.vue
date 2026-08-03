@@ -132,17 +132,18 @@
           </template>
 
           <template v-else>
-            <div v-if="viewData?.correct_status !== 'submitted'" class="result-summary">
+            <div v-if="viewData?.correct_status === 'returned'" class="result-summary">
               <div>
                 <span>本次得分</span>
                 <strong>{{ viewData?.score ?? '-' }}</strong>
                 <small>/ {{ current?.total_score }} 分</small>
               </div>
-              <span class="result-state">已批改</span>
+              <span class="result-state">已发布成绩</span>
             </div>
             <div v-else class="pending-review">
               <span class="pending-dot"></span>
-              <div><strong>作业已提交</strong><span>老师批改后会在这里显示成绩与评语</span></div>
+              <div v-if="viewData?.correct_status === 'graded'"><strong>老师已批改完成</strong><span>成绩发布后这里会显示得分与评语</span></div>
+              <div v-else><strong>作业已提交</strong><span>老师批改后会在这里显示成绩与评语</span></div>
             </div>
 
             <div class="view-block">
@@ -154,16 +155,18 @@
                     <strong>{{ item.snapshot.stem }}</strong>
                   </div>
                   <div class="submitted-answer">我的答案：{{ formatAnswer(item.student_answer) || '未作答' }}</div>
-                  <el-tag v-if="item.needs_manual_grading && item.score == null" type="warning" size="small">等待教师批改</el-tag>
-                  <el-tag v-else :type="item.is_correct === false ? 'danger' : 'success'" size="small">
-                    得分 {{ item.score ?? 0 }} 分
-                  </el-tag>
+                  <template v-if="viewData?.correct_status === 'returned'">
+                    <el-tag v-if="item.needs_manual_grading && item.score == null" type="warning" size="small">等待教师批改</el-tag>
+                    <el-tag v-else :type="item.is_correct === false ? 'danger' : 'success'" size="small">
+                      得分 {{ item.score ?? 0 }} 分
+                    </el-tag>
+                  </template>
                 </div>
               </div>
               <div v-else class="view-text">{{ viewData?.content || '附件提交' }}</div>
             </div>
 
-            <div v-if="viewData?.correct_status !== 'submitted' && viewData?.comment" class="teacher-comment">
+            <div v-if="viewData?.correct_status === 'returned' && viewData?.comment" class="teacher-comment">
               <div class="section-kicker">老师评语</div>
               <div class="view-text">{{ viewData.comment }}</div>
             </div>
@@ -249,7 +252,8 @@ function statusInfo(row) {
   if (!hasStarted(row)) return { label: '未开始', tone: 'muted' }
   if (!sub) return { label: '未提交', tone: 'muted' }
   if (sub.correct_status === 'submitted') return { label: '待批改', tone: 'warn' }
-  return { label: `已批改 ${sub.score} 分`, tone: 'success' }
+  if (sub.correct_status === 'graded') return { label: '已批改，待发布成绩', tone: 'warn' }
+  return { label: `已发布 ${sub.score} 分`, tone: 'success' }
 }
 
 async function load() {

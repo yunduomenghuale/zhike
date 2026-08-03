@@ -7,16 +7,17 @@ from django.db.models import Max
 
 from apps.ai.services import generate_catalog_from_plan, generate_scripts_for_video
 from apps.common.access import courses_for_user
-from apps.common.permissions import IsTeacher, IsTeacherOrReadOnly
+from apps.common.permissions import IsStudent, IsTeacher, IsTeacherOrReadOnly
 from apps.common.response import api_response
 from apps.common.viewsets import BaseModelViewSet
 
-from .models import Catalog, Course, PPTResource, TeachingVideo
+from .models import Catalog, Course, PPTResource, TeachingVideo, VideoWatchProgress
 from .serializers import (
     CatalogSerializer,
     CourseSerializer,
     PPTResourceSerializer,
     TeachingVideoSerializer,
+    VideoWatchProgressSerializer,
 )
 
 
@@ -356,3 +357,65 @@ class TeachingVideoViewSet(BaseModelViewSet):
         video.gen_status = TeachingVideo.GenStatus.SCRIPT_READY
         video.save(update_fields=["scripts", "audio_url", "subtitle_url", "video_url", "gen_status", "updated_at"])
         return api_response(self.get_serializer(video).data, message="该页讲稿已重新生成，需要重新配音")
+
+    @action(detail=True, methods=["post"], url_path="report-progress", permission_classes=[IsStudent])
+    def report_progress(self, request, pk=None):
+        """学生上报连播学习进度（需求 S-V-03）。
+
+        参数：last_page 当前页索引、last_position 页内秒数、
+        duration_delta 本次新增学习秒数、completed 是否学完整章。
+        """
+        video = self.get_object()
+
+        def _int(value, default=0):
+            try:
+                return max(0, int(value))
+            except (TypeError, ValueError):
+                return default
+
+        def _float(value, default=0.0):
+            try:
+                return max(0.0, float(value))
+            except (TypeError, ValueError):
+                return default
+
+        last_page = _int(request.data.get("last_page"))
+        last_position = _float(request.data.get("last_position"))
+        duration_delta = _int(request.data.get("duration_delta"))
+        completed = str(request.data.get("completed", "")).lower() in ("1", "true", "yes")
+
+        progress, _ = VideoWatchProgress.objects.get_or_create(
+            student=request.user, video=video
+        )
+        progress.last_page = last_page
+        progress.last_position = last_position
+        # 单次上报时长做上限保护，避免前端异常刷量
+        progress.watch_seconds += min(duration_delta, 300)
+        if completed:
+            progress.status = VideoWatchProgress.Status.COMPLETED
+        elif progress.status != VideoWatchProgress.Status.COMPLETED:
+            progress.status = VideoWatchProgress.Status.IN_PROGRESS
+        progress.save()
+        return api_response(
+            VideoWatchProgressSerializer(progress).data, message="进度已记录"
+        )
+
+
+class WatchProgressViewSet(BaseModelViewSet):
+    """视频学习进度查询（学生看自己的，教师看自己课程的）。"""
+
+    serializer_class = VideoWatchProgressSerializer
+    http_method_names = ["get", "head", "options"]
+    filterset_fields = ["video", "student", "status"]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = VideoWatchProgress.objects.select_related("student", "video__catalog")
+        if user.is_authenticated and user.is_student:
+            qs = qs.filter(student=user)
+        elif user.is_authenticated and user.is_teacher:
+            qs = qs.filter(video__course__teacher=user)
+        course_id = self.request.query_params.get("course")
+        if course_id:
+            qs = qs.filter(video__course_id=course_id)
+        return qs

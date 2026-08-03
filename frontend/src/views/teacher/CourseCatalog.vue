@@ -630,8 +630,8 @@
           <div class="ppt-upload-icon">
             <el-icon><UploadFilled /></el-icon>
           </div>
-          <div class="ppt-upload-title">{{ uploading ? '正在上传解析...' : '拖入或选择 PPT 课件' }}</div>
-          <div class="ppt-upload-desc">仅支持 .ppt / .pptx 文件</div>
+          <div class="ppt-upload-title">{{ uploading ? '正在上传解析...' : '拖入或选择课件文件' }}</div>
+          <div class="ppt-upload-desc">支持 .ppt / .pptx / .pdf；PDF 版式零偏移，推荐使用（PPT 另存为 PDF 即可）</div>
         </div>
       </el-upload>
       <div v-if="currentPpt?.parsed_pages?.length" class="ppt-page-preview">
@@ -839,6 +839,7 @@ import {
 } from '@/api/course'
 import { listMaterials } from '@/api/knowledge'
 import MarkdownIt from 'markdown-it'
+import { genUid } from '@/utils/uid'
 
 // html:false 会转义原始 HTML 标签，天然防止模型输出注入脚本
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
@@ -860,7 +861,7 @@ const emptyDescription = computed(() => (
 const pptMap = reactive({}) // catalogId -> {file_name, pages}
 const videoMap = reactive({}) // catalogId -> TeachingVideo
 const currentPpt = computed(() => (currentNode.value ? pptMap[String(currentNode.value.id)] : null))
-const fileAccept = '.ppt,.pptx'
+const fileAccept = '.ppt,.pptx,.pdf'
 
 async function loadCourseName() {
   const data = await listCourses()
@@ -1235,7 +1236,7 @@ const chatMessages = ref([])
 const chatInput = ref('')
 const chatImage = ref('')
 const chatFileRef = ref(null)
-const chatSessionId = crypto.randomUUID()
+const chatSessionId = genUid()
 
 function onPickChatImage(e) {
   const file = e.target.files?.[0]
@@ -1569,7 +1570,7 @@ function openPpt(node) {
 }
 async function handlePptUpload(file) {
   if (!isPptFile(file)) {
-    ElMessage.warning('课件只支持上传 PPT / PPTX 文件')
+    ElMessage.warning('课件支持 PPT / PPTX / PDF 文件')
     return false
   }
   uploading.value = true
@@ -1589,7 +1590,7 @@ async function handlePptUpload(file) {
 }
 
 function isPptFile(file) {
-  return /\.(ppt|pptx)$/i.test(file?.name || '')
+  return /\.(ppt|pptx|pdf)$/i.test(file?.name || '')
 }
 
 function setPptMapItem(ppt, fallbackCatalogId = null) {

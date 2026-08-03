@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Catalog, Course, PPTResource, TeachingVideo
+from .models import Catalog, Course, PPTResource, TeachingVideo, VideoWatchProgress
 
 
 @admin.register(Course)
@@ -27,3 +27,9 @@ class PPTResourceAdmin(admin.ModelAdmin):
 class TeachingVideoAdmin(admin.ModelAdmin):
     list_display = ("catalog", "course", "gen_status", "is_published", "published_at")
     list_filter = ("gen_status", "is_published")
+
+
+@admin.register(VideoWatchProgress)
+class VideoWatchProgressAdmin(admin.ModelAdmin):
+    list_display = ("student", "video", "last_page", "watch_seconds", "status", "updated_at")
+    list_filter = ("status",)

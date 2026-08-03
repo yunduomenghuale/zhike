@@ -220,6 +220,9 @@ class ExamFlowTests(PlatformFixtureMixin, APITestCase):
         )
         self.assertEqual(submitted.status_code, 200)
         self.assertEqual(submitted.data["data"]["status"], ExamSubmission.Status.SUBMITTED)
+        self.assertIsNone(submitted.data["data"]["objective_score"])
+        self.assertIsNone(submitted.data["data"]["total_score"])
+        self.assertEqual(submitted.data["data"]["subjective_scores"], {})
 
         repeated = self.client.post(
             f"/api/exam-submissions/{submission_id}/submit/",

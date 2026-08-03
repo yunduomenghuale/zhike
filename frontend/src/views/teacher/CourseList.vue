@@ -164,7 +164,7 @@
                 <el-icon><UploadFilled /></el-icon>
               </div>
               <div class="upload-main">拖入或选择授课文件</div>
-              <div class="upload-sub">PPT、PDF、Word、TXT、Markdown、CSV</div>
+              <div class="upload-sub">PPT、PDF、Word、TXT、Markdown、CSV（课件推荐 PDF，学生端显示零偏差）</div>
             </div>
           </el-upload>
 
@@ -279,6 +279,7 @@ import {
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import TableSkeleton from '@/components/TableSkeleton.vue'
+import { genUid } from '@/utils/uid'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
 import {
   listCourses,
@@ -378,7 +379,7 @@ function resetOutline() {
 }
 
 function newChapter(title = '') {
-  return { uid: crypto.randomUUID(), title, children: [] }
+  return { uid: genUid(), title, children: [] }
 }
 
 function addChapter() {
@@ -431,7 +432,7 @@ async function saveCatalogSetup() {
         file: outlineFile.value,
       })
     }
-    ElMessage.success(shouldUploadCourseware ? '目录和 PPT 课件已保存' : '目录已保存')
+    ElMessage.success(shouldUploadCourseware ? '目录和课件已保存' : '目录已保存')
     catalogVisible.value = false
     router.push({ name: 'course-chapters', params: { id: catalogCourse.value.id } })
   } finally {
@@ -539,12 +540,13 @@ function extractChapterTitle(line) {
 }
 
 function isPptFile(file) {
-  return /\.(ppt|pptx)$/i.test(file?.name || '')
+  // 课件文件：PPT/PPTX 会上传为课件；PDF 版式固化、学生端零偏差，同样作为课件
+  return /\.(ppt|pptx|pdf)$/i.test(file?.name || '')
 }
 
 function cloneToManual(tree) {
   const cloned = normalizeTree(tree).map((chapter) => ({
-    uid: crypto.randomUUID(),
+    uid: genUid(),
     title: chapter.title,
     children: [],
   }))

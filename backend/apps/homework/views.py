@@ -193,3 +193,29 @@ class HomeworkSubmissionViewSet(BaseModelViewSet):
         submission.correct_status = HomeworkSubmission.CorrectStatus.GRADED
         submission.save(update_fields=["score", "comment", "correct_status", "updated_at"])
         return api_response(self.get_serializer(submission).data, message="批改完成")
+
+    @action(detail=True, methods=["post"], url_path="release", permission_classes=[IsTeacher])
+    def release(self, request, pk=None):
+        """发布单个学生的批改结果（需求 T-H-05）。仅已批改的可发布。"""
+        submission = self.get_object()
+        if submission.correct_status == HomeworkSubmission.CorrectStatus.RETURNED:
+            return api_response(self.get_serializer(submission).data, message="成绩已发布")
+        if submission.correct_status != HomeworkSubmission.CorrectStatus.GRADED:
+            return api_response(message="请先完成批改再发布成绩", code=400, status=400)
+        submission.correct_status = HomeworkSubmission.CorrectStatus.RETURNED
+        submission.save(update_fields=["correct_status", "updated_at"])
+        return api_response(self.get_serializer(submission).data, message="成绩已发布")
+
+    @action(detail=False, methods=["post"], url_path="release-all", permission_classes=[IsTeacher])
+    def release_all(self, request):
+        """按作业批量发布所有已批改提交的成绩（需求 T-H-05）。"""
+        homework_id = request.data.get("homework")
+        if not homework_id:
+            return api_response(message="缺少 homework 参数", code=400, status=400)
+        qs = HomeworkSubmission.objects.filter(
+            homework_id=homework_id,
+            homework__classroom__teacher=request.user,
+            correct_status=HomeworkSubmission.CorrectStatus.GRADED,
+        )
+        count = qs.update(correct_status=HomeworkSubmission.CorrectStatus.RETURNED)
+        return api_response({"released": count}, message=f"已发布 {count} 份成绩")

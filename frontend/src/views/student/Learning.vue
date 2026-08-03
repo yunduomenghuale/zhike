@@ -219,6 +219,100 @@
       </div>
     </Teleport>
 
+    <Teleport to="body">
+      <div v-if="practiceVisible" class="full-lecture-page">
+        <header class="full-lecture-header">
+          <div class="full-lecture-title-wrap">
+            <div class="full-lecture-icon">
+              <el-icon><EditPen /></el-icon>
+            </div>
+            <div class="full-lecture-title-copy">
+              <div class="full-lecture-title-line">
+                <h1>章节练习</h1>
+                <span class="full-lecture-kicker">{{ activeCourseName }}</span>
+              </div>
+              <p>{{ current?.title || '请选择章节' }}</p>
+            </div>
+          </div>
+          <div class="full-lecture-actions">
+            <div class="full-lecture-stats">
+              <span><strong>{{ questions.length }}</strong> 道题</span>
+              <span v-if="!submitted">已答 <strong>{{ answeredCount }}</strong></span>
+              <el-tag v-if="submitted" type="success" effect="light" round>
+                答对 {{ result.correct }}/{{ result.total }}
+              </el-tag>
+            </div>
+            <el-button class="full-lecture-soft-btn" @click="closePractice">退出练习</el-button>
+          </div>
+        </header>
+
+        <div class="practice-body">
+          <div v-if="practiceLoading" class="practice-loading">
+            <el-icon class="is-loading"><Loading /></el-icon> 正在加载题目...
+          </div>
+          <el-empty v-else-if="!questions.length" description="本章还没有已发布的练习题" />
+          <template v-else>
+            <el-card v-for="(q, i) in questions" :key="q.id" class="q-card practice-card" shadow="never">
+              <div class="q-stem">
+                <span class="q-idx">{{ i + 1 }}.</span>
+                <el-tag size="small" effect="light">{{ q.qtype_display }}</el-tag>
+                <span>{{ q.stem }}</span>
+                <span class="practice-score">（{{ q.score }} 分）</span>
+              </div>
+
+              <el-radio-group v-if="q.qtype === 'single' || q.qtype === 'judge'" v-model="answers[q.id]" :disabled="submitted">
+                <el-radio v-for="opt in q.options" :key="opt.key" :value="opt.key" class="opt">
+                  <span class="opt-key">{{ opt.key }}.</span> {{ opt.text }}
+                </el-radio>
+              </el-radio-group>
+
+              <el-checkbox-group v-else-if="q.qtype === 'multi'" v-model="answers[q.id]" :disabled="submitted">
+                <el-checkbox v-for="opt in q.options" :key="opt.key" :value="opt.key" class="opt">
+                  <span class="opt-key">{{ opt.key }}.</span> {{ opt.text }}
+                </el-checkbox>
+              </el-checkbox-group>
+
+              <el-input
+                v-else-if="q.qtype === 'blank'"
+                v-model="answers[q.id][0]"
+                placeholder="请输入答案"
+                :disabled="submitted"
+                style="max-width: 420px"
+              />
+
+              <el-input
+                v-else
+                v-model="answers[q.id]"
+                type="textarea"
+                :rows="4"
+                placeholder="请作答"
+                :disabled="submitted"
+                resize="none"
+              />
+
+              <div v-if="submitted && feedback[q.id]" class="fb" :class="feedback[q.id].is_correct === null ? '' : feedback[q.id].is_correct ? 'ok' : 'no'">
+                <template v-if="feedback[q.id].is_correct === null">
+                  <div>本题为简答题，请参考以下答案自行核对：</div>
+                  <div class="fb-ana">参考答案：{{ fmt(feedback[q.id].correct_answer) }}</div>
+                </template>
+                <template v-else>
+                  <div>{{ feedback[q.id].is_correct ? '回答正确' : `回答错误，正确答案：${fmt(feedback[q.id].correct_answer)}` }}</div>
+                </template>
+                <div v-if="feedback[q.id].analysis" class="fb-ana">解析：{{ feedback[q.id].analysis }}</div>
+              </div>
+            </el-card>
+
+            <div class="practice-bar">
+              <el-button v-if="!submitted" type="primary" size="large" :loading="submitting" @click="submitPractice">
+                提交练习（{{ answeredCount }}/{{ questions.length }}）
+              </el-button>
+              <el-button v-else size="large" @click="resetPractice">重新作答</el-button>
+            </div>
+          </template>
+        </div>
+      </div>
+    </Teleport>
+
     <div class="page-header">
       <div>
         <div class="page-title">课程学习</div>
@@ -254,12 +348,20 @@
                   <el-icon class="node-icon"><Folder v-if="!row.isChild" /><Document v-else /></el-icon>
                 </span>
                 <span class="node-title">{{ row.node.title }}</span>
+                <el-tag
+                  v-if="progressOf(row.node.id)"
+                  size="small"
+                  :type="progressOf(row.node.id).status === 'completed' ? 'success' : 'warning'"
+                  effect="light"
+                  round
+                >{{ progressOf(row.node.id).status === 'completed' ? '已完成' : '学习中' }}</el-tag>
               </div>
             </div>
             <div class="node-actions">
               <div class="node-action-group">
                 <el-button class="node-action-btn" :icon="VideoPlay" @click.stop="openChapter(row.node, '')">完整讲解</el-button>
                 <el-button class="node-action-btn" :icon="Microphone" @click.stop="openChapter(row.node, 'script')">讲稿</el-button>
+                <el-button class="node-action-btn" :icon="EditPen" @click.stop="openPracticePanel(row.node)">章节练习</el-button>
                 <el-button class="node-action-btn" :icon="ChatDotRound" @click.stop="openChapter(row.node, 'chat')">AI 问答</el-button>
               </div>
             </div>
@@ -272,19 +374,20 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   Microphone, ArrowLeft, ArrowRight, CircleCheck, CircleClose, VideoPlay,
   Document, ChatDotRound, Folder, Close, MagicStick, Promotion, Picture, Loading,
-  Right, VideoPause,
+  Right, VideoPause, EditPen,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { listClasses } from '@/api/classroom'
-import { listCatalogs, listPpts, listVideos } from '@/api/course'
+import { listCatalogs, listPpts, listVideos, listWatchProgress, reportVideoProgress } from '@/api/course'
 import { listQuestions, practiceSubmit } from '@/api/question'
 import { listMaterials } from '@/api/knowledge'
 import MarkdownIt from 'markdown-it'
+import { genUid } from '@/utils/uid'
 
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
 
@@ -355,6 +458,68 @@ async function loadTree() {
   stopPlayer()
   const data = await listCatalogs({ course: courseId.value, tree: 1 })
   tree.value = data.results ?? data
+  loadWatchProgress()
+}
+
+// ---- 学习进度（断点续播 / 完成状态） ----
+const progressMap = ref({}) // catalog_id -> 进度记录
+const currentVideoId = ref(null)
+let watchAccum = 0 // 距上次上报累计观看秒数
+let lastTickTime = -1 // 上次 timeupdate 的播放位置
+let progressTimer = null
+let resumePending = false
+let resumePosition = 0
+
+function progressOf(catalogId) {
+  return progressMap.value[catalogId] || null
+}
+
+async function loadWatchProgress() {
+  try {
+    const data = await listWatchProgress({ course: courseId.value })
+    const rows = data.results ?? data
+    const map = {}
+    rows.forEach((p) => { map[p.catalog] = p })
+    progressMap.value = map
+  } catch {
+    progressMap.value = {}
+  }
+}
+
+async function flushProgress(completed = false) {
+  if (!currentVideoId.value || !lectureVisible.value) {
+    watchAccum = 0
+    return
+  }
+  const delta = Math.round(watchAccum)
+  watchAccum = 0
+  try {
+    const saved = await reportVideoProgress(currentVideoId.value, {
+      last_page: playerPageIndex.value,
+      last_position: Math.round(playerCurrent.value * 10) / 10,
+      duration_delta: delta,
+      completed,
+    })
+    if (saved && current.value) {
+      progressMap.value = { ...progressMap.value, [current.value.id]: saved }
+    }
+  } catch {
+    // 进度上报失败不打断学习
+  }
+}
+
+function startProgressTimer() {
+  stopProgressTimer()
+  progressTimer = setInterval(() => {
+    if (playerAutoPlay.value) flushProgress()
+  }, 10000)
+}
+
+function stopProgressTimer() {
+  if (progressTimer) {
+    clearInterval(progressTimer)
+    progressTimer = null
+  }
 }
 
 // 章节动作：'' 完整讲解 / 'script' 讲稿 / 'chat' AI 问答
@@ -367,7 +532,6 @@ async function openChapter(node, action = '') {
     pageIdx.value = 0
     pages.value = []
     scripts.value = []
-    loadPractice()
   }
   if (!pages.value.length && !learnLoading.value) await loadLearn()
   if (pages.value.length) {
@@ -397,6 +561,7 @@ async function loadLearn() {
   pages.value = []
   scripts.value = []
   pageIdx.value = 0
+  currentVideoId.value = null
   try {
     const ppt = await listPpts({ catalog: current.value.id })
     const pptList = ppt.results ?? ppt
@@ -405,6 +570,7 @@ async function loadLearn() {
     const vid = await listVideos({ catalog: current.value.id })
     const vids = vid.results ?? vid
     scripts.value = vids[0]?.scripts || []
+    currentVideoId.value = vids[0]?.id || null
   } finally {
     learnLoading.value = false
   }
@@ -453,7 +619,7 @@ const chatMessages = ref([])
 const chatInput = ref('')
 const chatImage = ref('')
 const chatFileRef = ref(null)
-const chatSessionId = crypto.randomUUID()
+const chatSessionId = genUid()
 
 function onPickChatImage(e) {
   const file = e.target.files?.[0]
@@ -511,8 +677,18 @@ async function openLecture(tabName = '') {
   }
   if (!pages.value.length && !learnLoading.value) await loadLearn()
   stopPlayer()
-  playerPageIndex.value = pageIdx.value || 0
+  // 断点续播：恢复到上次学习的页码与页内位置
+  const saved = progressOf(current.value.id)
+  if (saved && saved.status !== 'completed') {
+    playerPageIndex.value = Math.min(saved.last_page || 0, Math.max(pages.value.length - 1, 0))
+    resumePosition = saved.last_position || 0
+    resumePending = resumePosition > 0
+    pageIdx.value = playerPageIndex.value
+  } else {
+    playerPageIndex.value = pageIdx.value || 0
+  }
   lectureVisible.value = true
+  startProgressTimer()
   if (tabName) {
     dockTab.value = tabName
     dockVisible.value = true
@@ -522,6 +698,8 @@ async function openLecture(tabName = '') {
 }
 
 function closeLecture() {
+  flushProgress()
+  stopProgressTimer()
   stopPlayer()
   lectureVisible.value = false
 }
@@ -553,12 +731,14 @@ function switchDockTab(tabName) {
 
 function prevPlayerPage() {
   if (playerPageIndex.value <= 0) return
+  flushProgress()
   stopPlayer()
   playerPageIndex.value -= 1
 }
 
 function nextPlayerPage() {
   if (playerPageIndex.value >= pages.value.length - 1) return
+  flushProgress()
   stopPlayer()
   playerPageIndex.value += 1
 }
@@ -589,6 +769,7 @@ function stopPlayer() {
   playerAudioRef.value?.pause?.()
   playerCurrent.value = 0
   playerDuration.value = 0
+  lastTickTime = -1
 }
 
 function onPlayerPlay() {
@@ -600,21 +781,40 @@ function onPlayerAudioPause() {
 }
 
 function onPlayerTimeUpdate(e) {
-  playerCurrent.value = e.target?.currentTime || 0
+  const now = e.target?.currentTime || 0
+  // 正常播放累加学习时长；拖动进度条产生的跳变不计入
+  if (lastTickTime >= 0) {
+    const delta = now - lastTickTime
+    if (delta > 0 && delta <= 2) watchAccum += delta
+  }
+  lastTickTime = now
+  playerCurrent.value = now
 }
 
 function onPlayerLoadedMeta(e) {
   playerDuration.value = e.target?.duration || 0
   playerCurrent.value = 0
+  lastTickTime = -1
+  // 断点续播：恢复到上次页内播放位置
+  if (resumePending && e.target && resumePosition < (playerDuration.value || Infinity)) {
+    e.target.currentTime = resumePosition
+    playerCurrent.value = resumePosition
+    lastTickTime = resumePosition
+  }
+  resumePending = false
 }
 
 function onPlayerAudioEnded() {
+  flushProgress()
   const next = findNextAudioPage(playerPageIndex.value)
   if (next >= 0) {
     playerPageIndex.value = next
     nextTick(() => playerAudioRef.value?.play?.())
   } else {
+    // 整章连播结束，标记完成
+    flushProgress(true)
     stopPlayer()
+    ElMessage.success('本章讲解已学习完成')
   }
 }
 
@@ -629,6 +829,7 @@ function seekPlayer(e) {
 function selectScriptPage(item) {
   const index = pages.value.findIndex((page) => page.page === item.page)
   if (index < 0) return
+  flushProgress()
   stopPlayer()
   playerPageIndex.value = index
 }
@@ -749,6 +950,7 @@ watch(playerPageIndex, () => {
 })
 
 // ---- 章节练习 ----
+const practiceVisible = ref(false)
 const practiceLoading = ref(false)
 const questions = ref([])
 const answers = reactive({})
@@ -756,6 +958,18 @@ const feedback = reactive({})
 const submitted = ref(false)
 const submitting = ref(false)
 const result = reactive({ total: 0, correct: 0 })
+
+async function openPracticePanel(node) {
+  if (current.value?.id !== node.id) {
+    current.value = node
+  }
+  practiceVisible.value = true
+  await loadPractice()
+}
+
+function closePractice() {
+  practiceVisible.value = false
+}
 
 async function loadPractice() {
   practiceLoading.value = true
@@ -794,8 +1008,17 @@ function fmt(a) {
   if (a.key) return a.key
   if (a.keys) return a.keys.join(', ')
   if (a.blanks) return a.blanks.join(' / ')
+  if (a.text) return a.text
   return '-'
 }
+const answeredCount = computed(() => {
+  return questions.value.filter((q) => {
+    const v = answers[q.id]
+    if (q.qtype === 'multi') return Array.isArray(v) && v.length > 0
+    if (q.qtype === 'blank') return Array.isArray(v) && v.some((x) => String(x).trim())
+    return String(v ?? '').trim() !== ''
+  }).length
+})
 async function submitPractice() {
   const payload = {}
   questions.value.forEach((q) => { payload[q.id] = buildAns(q) })
@@ -819,6 +1042,9 @@ watch(fixedCourseId, (id) => {
 })
 
 onMounted(loadCourses)
+onUnmounted(() => {
+  stopProgressTimer()
+})
 </script>
 
 <style scoped>
@@ -1154,6 +1380,35 @@ onMounted(loadCourses)
   align-items: center;
   gap: 14px;
   margin-top: 8px;
+}
+
+.practice-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 26px clamp(20px, 12vw, 240px) 60px;
+}
+
+.practice-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 80px 0;
+  color: #64748b;
+}
+
+.practice-card {
+  border-radius: 16px;
+}
+
+.practice-score {
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.practice-bar {
+  justify-content: center;
+  padding: 18px 0 10px;
 }
 
 .full-lecture-page,

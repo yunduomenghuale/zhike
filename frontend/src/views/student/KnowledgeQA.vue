@@ -176,6 +176,7 @@ import {
   Search, Clock, Plus,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { genUid } from '@/utils/uid'
 import MarkdownIt from 'markdown-it'
 import { listClasses } from '@/api/classroom'
 import { listQaRecords } from '@/api/knowledge'
@@ -200,7 +201,7 @@ const historyKeyword = ref('')
 
 // 会话制：records 为全部历史记录，messages 为当前会话消息
 const records = ref([])
-const sessionId = ref(crypto.randomUUID())
+const sessionId = ref(genUid())
 const viewSessionKey = ref(sessionId.value)
 
 function legacyKey(r) {
@@ -230,7 +231,7 @@ const sessionItems = computed(() => {
 })
 
 function newChat() {
-  sessionId.value = crypto.randomUUID()
+  sessionId.value = genUid()
   viewSessionKey.value = sessionId.value
   messages.value = []
   historyOpen.value = false
@@ -240,7 +241,7 @@ function switchSession(key) {
   historyOpen.value = false
   viewSessionKey.value = key
   const rec = records.value.find((r) => legacyKey(r) === key)
-  sessionId.value = rec?.session || crypto.randomUUID()
+  sessionId.value = rec?.session || genUid()
   messages.value = records.value
     .filter((r) => legacyKey(r) === key)
     .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))

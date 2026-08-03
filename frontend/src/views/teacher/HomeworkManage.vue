@@ -312,6 +312,14 @@
             <span>平均分</span>
             <strong>{{ averageSubmissionScore }}</strong>
           </div>
+          <el-button
+            class="grading-release-all"
+            type="primary"
+            plain
+            :loading="releasingAll"
+            :disabled="!submissions.some((row) => row.correct_status === 'graded')"
+            @click="doReleaseAll"
+          >发布全部成绩</el-button>
         </div>
 
         <div class="grading-table-card">
@@ -331,6 +339,13 @@
             <el-table-column prop="score" label="得分" width="86" align="center">
               <template #default="{ row }">
                 <span :class="row.score == null ? 'grading-muted' : 'grading-score'">{{ row.score ?? '未批' }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="成绩" width="96" align="center">
+              <template #default="{ row }">
+                <el-tag v-if="row.correct_status === 'returned'" type="success" size="small" effect="light" round>已发布</el-tag>
+                <el-button v-else-if="row.correct_status === 'graded'" link type="success" @click="doReleaseOne(row)">发布</el-button>
+                <span v-else class="grading-muted">-</span>
               </template>
             </el-table-column>
             <el-table-column label="操作" width="92" align="center">
@@ -400,7 +415,7 @@ import { listCatalogs } from '@/api/course'
 import { listQuestions } from '@/api/question'
 import {
   listHomeworks, createHomework, updateHomework, deleteHomework,
-  listSubmissions, gradeSubmission,
+  listSubmissions, gradeSubmission, releaseSubmission, releaseAllSubmissions,
 } from '@/api/homework'
 
 const classes = ref([])
@@ -836,6 +851,29 @@ async function doGrade() {
     openSubmissions(currentHw.value)
   } finally {
     grading.value = false
+  }
+}
+
+// ---- 成绩发布 ----
+const releasingAll = ref(false)
+async function doReleaseOne(row) {
+  try {
+    await releaseSubmission(row.id)
+    ElMessage.success('成绩已发布')
+    openSubmissions(currentHw.value)
+  } catch {
+    // 错误信息由拦截器提示
+  }
+}
+async function doReleaseAll() {
+  if (!currentHw.value) return
+  releasingAll.value = true
+  try {
+    const res = await releaseAllSubmissions(currentHw.value.id)
+    ElMessage.success(`已发布 ${res.released} 份成绩`)
+    openSubmissions(currentHw.value)
+  } finally {
+    releasingAll.value = false
   }
 }
 
@@ -1999,8 +2037,14 @@ html.dark .hw-card-head {
 }
 .grading-summary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
   gap: 10px;
+  align-items: stretch;
+}
+.grading-release-all {
+  height: 100%;
+  border-radius: 16px;
+  font-weight: 700;
 }
 .grading-stat {
   min-width: 0;

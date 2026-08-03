@@ -14,13 +14,12 @@
     @pointercancel="handlePointerUp"
   >
     <div class="helix-carousel__collection">
-      <div class="helix-carousel__list">
+      <div ref="listRef" class="helix-carousel__list">
         <div
           v-for="item in renderedItems"
           :key="item._helixKey"
           class="helix-carousel__item"
           :data-primary="item._isPrimary"
-          :style="getItemStyle(item)"
         >
           <button
             class="helix-carousel__card"
@@ -57,7 +56,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 const props = defineProps({
   items: { type: Array, required: true },
@@ -80,9 +79,9 @@ const props = defineProps({
 const emit = defineEmits(['select'])
 
 const stageRef = ref(null)
+const listRef = ref(null)
 const stageWidth = ref(1280)
 const stageHeight = ref(820)
-const orbitOffset = ref(0)
 const paused = ref(false)
 const prefersReducedMotion = ref(false)
 
@@ -116,6 +115,7 @@ const renderedItems = computed(() => {
 
 let frameId = 0
 let lastFrame = 0
+let orbitOffset = 0
 let velocity = props.autoSpeed
 let isDragging = false
 let lastPointerY = 0
@@ -128,42 +128,51 @@ function wrapAround(value, size) {
 
 function centeredPosition(order) {
   const count = cardsPerHelix.value
-  return wrapAround(order - orbitOffset.value + count / 2, count) - count / 2
+  return wrapAround(order - orbitOffset + count / 2, count) - count / 2
 }
 
-function getItemStyle(item) {
-  const relative = centeredPosition(item._order)
-  const phase = item._helix * (Math.PI * 2 / safeHelixCount.value)
-  const angle = relative * rotationAngle.value + phase
-  const cos = Math.cos(angle)
-  const sin = Math.sin(angle)
-  const backAmount = (1 - cos) / 2
-  const verticalFade = Math.max(0, 1 - Math.abs(relative) / (cardsPerHelix.value * 0.43))
-  const frontAmount = (cos + 1) / 2
-  const x = sin * orbitDepth.value
-  const z = (cos - 1) * orbitDepth.value
-  const y = relative * cardGap.value
-  const scale = props.minScale + frontAmount * 0.28
-  const opacity = Math.max(0.12, verticalFade * (1 - backAmount * props.backFade))
-  const blur = Math.pow(backAmount, 2) * props.backBlur
-  const recede = Math.min(0.82, backAmount * 0.7 + (1 - verticalFade) * 0.32)
-  const contentOpacity = frontAmount > 0.5 && verticalFade > 0.38 ? 1 : 0
-  const clickable = frontAmount > 0.24 && verticalFade > 0.24
+function applyItemStyles() {
+  const elements = listRef.value?.children
+  if (!elements) return
 
-  return {
-    transform: [
+  renderedItems.value.forEach((item, index) => {
+    const element = elements[index]
+    if (!element) return
+
+    const relative = centeredPosition(item._order)
+    const phase = item._helix * (Math.PI * 2 / safeHelixCount.value)
+    const angle = relative * rotationAngle.value + phase
+    const cos = Math.cos(angle)
+    const sin = Math.sin(angle)
+    const backAmount = (1 - cos) / 2
+    const verticalFade = Math.max(0, 1 - Math.abs(relative) / (cardsPerHelix.value * 0.43))
+    const frontAmount = (cos + 1) / 2
+    const x = sin * orbitDepth.value
+    const z = (cos - 1) * orbitDepth.value
+    const y = relative * cardGap.value
+    const scale = props.minScale + frontAmount * 0.28
+    const opacity = Math.max(0.12, verticalFade * (1 - backAmount * props.backFade))
+    const blur = Math.pow(backAmount, 2) * props.backBlur
+    const recede = Math.min(0.82, backAmount * 0.7 + (1 - verticalFade) * 0.32)
+    const contentOpacity = frontAmount > 0.5 && verticalFade > 0.38 ? 1 : 0
+    const clickable = frontAmount > 0.24 && verticalFade > 0.24
+    const zIndex = Math.round(frontAmount * 1000 + verticalFade * 100)
+
+    element.style.transform = [
       'translate(-50%, -50%)',
       `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, ${z.toFixed(1)}px)`,
       `rotateY(${(angle * 180 / Math.PI).toFixed(1)}deg)`,
       `scale(${scale.toFixed(3)})`,
-    ].join(' '),
-    opacity: opacity.toFixed(3),
-    filter: `blur(${blur.toFixed(3)}em)`,
-    zIndex: Math.round(frontAmount * 1000 + verticalFade * 100),
-    pointerEvents: clickable ? 'auto' : 'none',
-    '--recede': recede.toFixed(3),
-    '--content-opacity': contentOpacity,
-  }
+    ].join(' ')
+    element.style.opacity = opacity.toFixed(3)
+    element.style.filter = `blur(${blur.toFixed(3)}em)`
+    element.style.setProperty('--recede', recede.toFixed(3))
+    element.style.setProperty('--content-opacity', String(contentOpacity))
+
+    const pointerEvents = clickable ? 'auto' : 'none'
+    if (element.style.zIndex !== String(zIndex)) element.style.zIndex = String(zIndex)
+    if (element.style.pointerEvents !== pointerEvents) element.style.pointerEvents = pointerEvents
+  })
 }
 
 function selectItem(item) {
@@ -210,10 +219,11 @@ function tick(now) {
   lastFrame = now
   const targetVelocity = paused.value ? 0 : props.autoSpeed
   velocity += (targetVelocity - velocity) * Math.min(1, delta / 900)
-  orbitOffset.value = wrapAround(
-    orbitOffset.value + velocity * delta / 1000,
+  orbitOffset = wrapAround(
+    orbitOffset + velocity * delta / 1000,
     cardsPerHelix.value,
   )
+  applyItemStyles()
   frameId = window.requestAnimationFrame(tick)
 }
 
@@ -236,11 +246,23 @@ function updateMotionPreference(event) {
 }
 
 function reset() {
-  orbitOffset.value = 0
+  orbitOffset = 0
   velocity = props.autoSpeed
+  nextTick(applyItemStyles)
 }
 
-watch(() => props.items.length, reset)
+watch(
+  () => [
+    props.items,
+    props.helixCount,
+    props.repeatCount,
+    props.rotationDegrees,
+    props.minScale,
+    props.backFade,
+    props.backBlur,
+  ],
+  reset,
+)
 watch(() => props.autoSpeed, (value) => { velocity = value })
 
 onMounted(() => {
@@ -252,13 +274,17 @@ onMounted(() => {
   }
   updateStageSize()
   if (typeof ResizeObserver !== 'undefined') {
-    resizeObserver = new ResizeObserver(updateStageSize)
+    resizeObserver = new ResizeObserver(() => {
+      updateStageSize()
+      applyItemStyles()
+    })
     resizeObserver.observe(stageRef.value)
   }
 
   motionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)') || null
   prefersReducedMotion.value = Boolean(motionQuery?.matches)
   motionQuery?.addEventListener?.('change', updateMotionPreference)
+  applyItemStyles()
   startAnimation()
 })
 
@@ -296,7 +322,7 @@ defineExpose({ reset, pause: () => { paused.value = true }, resume: () => { paus
   top: 50%;
   left: 50%;
   transform-style: preserve-3d;
-  will-change: transform, filter, opacity;
+  will-change: transform, opacity;
 }
 .helix-carousel__card {
   position: relative;
@@ -321,7 +347,6 @@ defineExpose({ reset, pause: () => { paused.value = true }, resume: () => { paus
   text-align: left;
   transform-style: preserve-3d;
   backface-visibility: hidden;
-  backdrop-filter: blur(18px) saturate(1.12);
 }
 .helix-carousel__card::before {
   content: '';
