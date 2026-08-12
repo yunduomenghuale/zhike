@@ -693,34 +693,4 @@ async function savePassword() {
     flex-direction: column;
   }
 }
-
-:global(html.dark) .profile-page {
-  color: #f8fafc;
-}
-
-:global(html.dark) .identity-card,
-:global(html.dark) .settings-card {
-  border-color: rgba(71, 85, 105, 0.74);
-  background: rgba(15, 23, 42, 0.92);
-}
-
-:global(html.dark) .identity-card::before {
-  background: linear-gradient(135deg, rgba(30, 64, 175, 0.52), rgba(30, 41, 59, 0.64));
-}
-
-:global(html.dark) .profile-heading p,
-:global(html.dark) .card-heading p,
-:global(html.dark) .account-name {
-  color: #94a3b8;
-}
-
-:global(html.dark) .card-heading,
-:global(html.dark) .identity-meta {
-  border-color: #334155;
-}
-
-:global(html.dark) .settings-form :deep(.el-input__wrapper) {
-  background: #111c2f;
-  box-shadow: inset 0 0 0 1px #334155;
-}
 </style>

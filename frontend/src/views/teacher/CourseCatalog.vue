@@ -1924,11 +1924,6 @@ onMounted(() => { loadCourseName(); loadTree() })
   border-left: 1px dashed var(--el-border-color-lighter);
 }
 
-html.dark .tree-node {
-  background: #1e293b;
-  border-color: #334155;
-}
-
 @media (max-width: 1280px) {
   .tree-node {
     align-items: flex-start;

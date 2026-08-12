@@ -137,3 +137,35 @@ class PasswordChangeView(APIView):
         request.user.set_password(serializer.validated_data["new_password"])
         request.user.save(update_fields=["password"])
         return api_response(message="密码修改成功")
+
+
+from rest_framework.decorators import action
+
+from apps.common.viewsets import BaseModelViewSet
+
+from .models import Notification
+from .serializers import NotificationSerializer
+
+
+class NotificationViewSet(BaseModelViewSet):
+    """我的站内通知：列表 + 标记已读。"""
+
+    serializer_class = NotificationSerializer
+    permission_classes = [IsAuthenticated]
+    http_method_names = ["get", "post", "head", "options"]
+
+    def get_queryset(self):
+        return Notification.objects.filter(user=self.request.user).order_by("-id")
+
+    @action(detail=True, methods=["post"], url_path="read")
+    def read_one(self, request, pk=None):
+        obj = self.get_object()
+        if not obj.is_read:
+            obj.is_read = True
+            obj.save(update_fields=["is_read", "updated_at"])
+        return api_response(message="已读")
+
+    @action(detail=False, methods=["post"], url_path="read-all")
+    def read_all(self, request):
+        n = self.get_queryset().filter(is_read=False).update(is_read=True)
+        return api_response({"count": n}, message="已全部标记为已读")

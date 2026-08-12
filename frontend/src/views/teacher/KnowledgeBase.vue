@@ -371,18 +371,4 @@ onMounted(loadCourses)
     justify-content: space-between;
   }
 }
-
-/* 深色模式 */
-html.dark .kb-title-text { color: #f1f5f9; }
-html.dark .kb-row {
-  background: #1e293b;
-  border-color: #334155;
-}
-html.dark .kb-row-title { color: #f1f5f9; }
-html.dark .kb-action-group { background: #0f172a; }
-html.dark .kb-action-btn:hover { background: #334155; }
-html.dark .kb-manage-group { border-left-color: #334155; }
-html.dark .kb-file-icon {
-  background: #0f172a;
-}
 </style>

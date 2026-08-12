@@ -159,3 +159,16 @@ class PasswordChangeSerializer(serializers.Serializer):
             raise serializers.ValidationError({"confirm_password": "两次输入的新密码不一致"})
         django_validate_password(attrs["new_password"], self.context["request"].user)
         return attrs
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    ntype_display = serializers.CharField(source="get_ntype_display", read_only=True)
+
+    class Meta:
+        from .models import Notification
+
+        model = Notification
+        fields = [
+            "id", "ntype", "ntype_display", "title", "content", "link",
+            "is_read", "created_at",
+        ]

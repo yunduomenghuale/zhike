@@ -20,9 +20,21 @@
                 <span :class="['student-status', statusInfo(current).tone]">{{ statusInfo(current).label }}</span>
               </div>
               <div class="workspace-meta">
-                <span><el-icon><Clock /></el-icon>{{ formatTime(current?.start_time, '立即开始') }}</span>
-                <span>截止 {{ formatTime(current?.deadline, '不限') }}</span>
-                <strong>{{ current?.total_score }} 分</strong>
+                <span class="meta-chip">
+                  <el-icon><Clock /></el-icon>
+                  <span class="meta-chip-label">开始</span>
+                  {{ formatTime(current?.start_time, '立即开始') }}
+                </span>
+                <span class="meta-chip">
+                  <el-icon><Clock /></el-icon>
+                  <span class="meta-chip-label">截止</span>
+                  {{ formatTime(current?.deadline, '不限') }}
+                </span>
+                <span class="meta-chip score">
+                  <el-icon><Trophy /></el-icon>
+                  <span class="meta-chip-label">满分</span>
+                  {{ current?.total_score }} 分
+                </span>
               </div>
             </div>
           </header>
@@ -32,49 +44,50 @@
             <div class="assignment-description">{{ current.description }}</div>
           </div>
 
-          <section v-if="current?.attachment" class="assignment-resource">
-            <div class="resource-heading">
-              <div>
-                <div class="section-kicker">作业资料</div>
-                <div class="resource-title">教师附件</div>
+          <div :class="{ 'submit-cols': splitAnswer }">
+            <section v-if="current?.attachment" class="assignment-resource">
+              <div class="resource-heading">
+                <div>
+                  <div class="section-kicker">作业资料</div>
+                  <div class="resource-title">教师附件</div>
+                </div>
+                <div class="resource-actions">
+                  <a
+                    class="resource-action"
+                    :href="current.attachment"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <el-icon><View /></el-icon>打开文件
+                  </a>
+                  <a class="resource-action primary" :href="current.attachment" download>
+                    <el-icon><Download /></el-icon>下载附件
+                  </a>
+                </div>
               </div>
-              <div class="resource-actions">
-                <a
-                  class="resource-action"
-                  :href="current.attachment"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <el-icon><View /></el-icon>打开文件
-                </a>
-                <a class="resource-action primary" :href="current.attachment" download>
-                  <el-icon><Download /></el-icon>下载附件
-                </a>
+              <div class="resource-file">
+                <span class="resource-file-icon"><el-icon><Document /></el-icon></span>
+                <div>
+                  <strong>{{ teacherAttachmentName }}</strong>
+                  <span>{{ isTeacherAttachmentPdf ? 'PDF 文档，可直接在线预览' : '教师提供的作业文件' }}</span>
+                </div>
               </div>
-            </div>
-            <div class="resource-file">
-              <span class="resource-file-icon"><el-icon><Document /></el-icon></span>
-              <div>
-                <strong>{{ teacherAttachmentName }}</strong>
-                <span>{{ isTeacherAttachmentPdf ? 'PDF 文档，可在下方直接预览' : '教师提供的作业文件' }}</span>
+              <div v-if="isTeacherAttachmentPdf && pdfPreviewLoading" class="resource-preview-state">
+                <el-icon class="is-loading"><Loading /></el-icon>
+                <span>正在加载 PDF 预览…</span>
               </div>
-            </div>
-            <div v-if="isTeacherAttachmentPdf && pdfPreviewLoading" class="resource-preview-state">
-              <el-icon class="is-loading"><Loading /></el-icon>
-              <span>正在加载 PDF 预览…</span>
-            </div>
-            <div v-else-if="isTeacherAttachmentPdf && pdfPreviewError" class="resource-preview-state is-error">
-              <span>在线预览加载失败，请使用右上角“打开文件”或“下载附件”。</span>
-            </div>
-            <iframe
-              v-else-if="isTeacherAttachmentPdf && pdfPreviewUrl"
-              class="resource-preview"
-              :src="pdfPreviewUrl"
-              title="作业附件 PDF 预览"
-            ></iframe>
-          </section>
+              <div v-else-if="isTeacherAttachmentPdf && pdfPreviewError" class="resource-preview-state is-error">
+                <span>在线预览加载失败，请使用右上角“打开文件”或“下载附件”。</span>
+              </div>
+              <iframe
+                v-else-if="isTeacherAttachmentPdf && pdfPreviewUrl"
+                class="resource-preview"
+                :src="pdfPreviewUrl"
+                title="作业附件 PDF 预览"
+              ></iframe>
+            </section>
 
-          <template v-if="detailMode === 'submit'">
+            <template v-if="detailMode === 'submit'">
             <div v-if="current?.mode === 'questions'" class="homework-question-list">
               <div v-for="(item, index) in current.questions" :key="item.id" class="homework-question-card">
                 <div class="question-title">
@@ -108,15 +121,35 @@
 
             <div v-else class="attachment-answer">
               <div class="section-kicker">我的作答</div>
-              <el-input v-model="submitForm.content" type="textarea" :rows="10" placeholder="在此输入作业内容…" />
-              <div class="upload-section">
-                <div>
-                  <div class="upload-title">作业附件</div>
-                  <div class="upload-tip">可选，最多上传一个文件</div>
+              <div class="answer-dock">
+                <el-input
+                  v-model="submitForm.content"
+                  type="textarea"
+                  resize="none"
+                  class="answer-dock-textarea"
+                  placeholder="在此输入作业内容…"
+                />
+                <div class="answer-dock-bar">
+                  <div class="upload-info">
+                    <div class="upload-title">作业附件</div>
+                    <div class="upload-tip">可选，最多上传一个文件</div>
+                  </div>
+                  <div class="upload-side">
+                    <el-tag v-if="submitFile" size="small" effect="plain" round closable @close="clearSubmitFile">
+                      {{ submitFile.name }}
+                    </el-tag>
+                    <el-upload
+                      ref="uploadRef"
+                      :auto-upload="false"
+                      :limit="1"
+                      :show-file-list="false"
+                      :on-change="onSubmitFile"
+                      :on-exceed="onExceedFile"
+                    >
+                      <el-button class="upload-btn" :icon="Upload">选择文件</el-button>
+                    </el-upload>
+                  </div>
                 </div>
-                <el-upload :auto-upload="false" :limit="1" :on-change="onSubmitFile" :on-remove="() => { submitFile = null }">
-                  <el-button>选择文件</el-button>
-                </el-upload>
               </div>
             </div>
 
@@ -171,6 +204,7 @@
               <div class="view-text">{{ viewData.comment }}</div>
             </div>
           </template>
+          </div>
         </section>
       </template>
 
@@ -215,7 +249,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowLeft, Check, Clock, Document, Download, Loading, View } from '@element-plus/icons-vue'
+import { ArrowLeft, Check, Clock, Document, Download, Loading, Trophy, Upload, View } from '@element-plus/icons-vue'
 import { listHomeworks, listSubmissions, submitHomework } from '@/api/homework'
 
 const route = useRoute()
@@ -277,6 +311,19 @@ const submitting = ref(false)
 const current = ref(null)
 const submitForm = reactive({ content: '', answers: {} })
 const submitFile = ref(null)
+const uploadRef = ref(null)
+
+function clearSubmitFile() {
+  submitFile.value = null
+  uploadRef.value?.clearFiles?.()
+}
+
+function onExceedFile(files) {
+  // 超过 1 个文件限制时：清空旧文件并以新文件替换
+  uploadRef.value?.clearFiles?.()
+  const f = files?.[0]
+  if (f) uploadRef.value?.handleStart?.(f)
+}
 const teacherAttachmentName = computed(() => {
   const url = String(current.value?.attachment || '')
   const rawName = url.split('/').pop()?.split('?')[0] || '作业附件'
@@ -287,6 +334,14 @@ const teacherAttachmentName = computed(() => {
   }
 })
 const isTeacherAttachmentPdf = computed(() => teacherAttachmentName.value.toLowerCase().endsWith('.pdf'))
+
+// 附件 PDF 作业：左资料右作答的分栏布局（仅提交页、附件/文本作业）
+const splitAnswer = computed(() => (
+  detailMode.value === 'submit'
+  && current.value?.mode !== 'questions'
+  && Boolean(current.value?.attachment)
+  && isTeacherAttachmentPdf.value
+))
 const pdfPreviewUrl = ref('')
 const pdfPreviewLoading = ref(false)
 const pdfPreviewError = ref(false)
@@ -489,22 +544,30 @@ onBeforeUnmount(() => {
   gap: 4px;
 }
 .student-status {
-  height: 22px;
-  padding: 0 9px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 11px;
   border-radius: 999px;
+  font-size: 12px;
   font-weight: 700;
+  letter-spacing: 0.01em;
 }
 .student-status.muted {
   color: #64748b;
   background: #f1f5f9;
+  box-shadow: inset 0 0 0 1px #e2e8f0;
 }
 .student-status.warn {
   color: #d97706;
   background: #fff7ed;
+  box-shadow: inset 0 0 0 1px #fde68a;
 }
 .student-status.success {
   color: #16a34a;
   background: #f0fdf4;
+  box-shadow: inset 0 0 0 1px #bbf7d0;
 }
 .student-action-btn {
   display: inline-flex;
@@ -564,6 +627,11 @@ onBeforeUnmount(() => {
 
 .workspace-heading {
   margin-top: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+  flex-wrap: wrap;
 }
 
 .workspace-title-row {
@@ -583,13 +651,39 @@ onBeforeUnmount(() => {
 }
 
 .workspace-meta {
-  margin-top: 10px;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px 16px;
-  color: #64748b;
-  font-size: 13px;
+  gap: 10px;
+}
+
+.meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid rgba(219, 229, 242, 0.9);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.85);
+  color: #475569;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.meta-chip .el-icon {
+  color: var(--primary-600);
+  font-size: 14px;
+}
+
+.meta-chip-label {
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.meta-chip.score {
+  border-color: rgba(96, 165, 250, 0.3);
+  background: var(--primary-50);
+  color: var(--primary-600);
 }
 
 .workspace-meta span {
@@ -755,6 +849,46 @@ onBeforeUnmount(() => {
   background: #f8fafc;
 }
 
+/* 附件 PDF 作业：左资料右作答分栏 */
+.submit-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr);
+  gap: 4px 20px;
+  align-items: stretch;
+}
+
+.submit-cols .assignment-resource {
+  display: flex;
+  flex-direction: column;
+}
+
+.submit-cols .resource-preview {
+  flex: 1;
+  min-height: 460px;
+  max-height: 660px;
+  height: auto;
+}
+
+.submit-cols .attachment-answer {
+  display: flex;
+  flex-direction: column;
+  margin-top: 20px;
+}
+
+.submit-cols .workspace-footer {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 1100px) {
+  .submit-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .submit-cols .resource-preview {
+    min-height: 420px;
+  }
+}
+
 .resource-preview-state {
   min-height: 180px;
   margin-top: 14px;
@@ -907,22 +1041,66 @@ onBeforeUnmount(() => {
 
 .attachment-answer {
   margin-top: 20px;
-  padding: 20px;
-  border: 1px solid #e5eaf2;
-  border-radius: 16px;
-  background: #fff;
 }
 
-.upload-section {
-  margin-top: 16px;
-  padding: 14px 16px;
-  border: 1px dashed #cbd5e1;
-  border-radius: 13px;
+/* 作答输入卡：文本域 + 底部附件工具行合并为一张卡 */
+.answer-dock {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  padding: 12px 14px 10px;
+  border: 1px solid #dbe5f2;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 10px 26px rgba(37, 99, 235, 0.07);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.answer-dock:focus-within {
+  border-color: var(--primary-500);
+  box-shadow: 0 10px 26px rgba(37, 99, 235, 0.1), 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+
+.answer-dock-textarea {
+  flex: 1;
+  display: flex;
+}
+
+.answer-dock-textarea :deep(.el-textarea__inner) {
+  flex: 1;
+  height: 100%;
+  min-height: 240px;
+  padding: 4px 6px;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: 14px;
+  line-height: 1.75;
+}
+
+.answer-dock-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  background: #f8fafc;
+  gap: 12px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--gray-200);
+}
+
+.upload-info {
+  min-width: 0;
+}
+
+.upload-side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.upload-btn {
+  border-radius: 10px;
 }
 
 .upload-title {
@@ -1117,11 +1295,6 @@ onBeforeUnmount(() => {
 
   .question-heading {
     gap: 8px;
-  }
-
-  .upload-section {
-    align-items: stretch;
-    flex-direction: column;
   }
 
   .resource-heading {

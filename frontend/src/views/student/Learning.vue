@@ -79,7 +79,7 @@
                 </button>
                 <template v-if="currentPlayerScript?.audio_url">
                   <span class="lecture-time">{{ fmtTime(playerCurrent) }}</span>
-                  <div class="lecture-progress" @click="seekPlayer">
+                  <div class="lecture-progress">
                     <div class="lecture-progress-fill" :style="{ width: playerProgress + '%' }"></div>
                   </div>
                   <span class="lecture-time">{{ fmtTime(playerDuration) }}</span>
@@ -349,12 +349,12 @@
                 </span>
                 <span class="node-title">{{ row.node.title }}</span>
                 <el-tag
-                  v-if="progressOf(row.node.id)"
+                  v-if="progressInfo(row.node.id)"
                   size="small"
-                  :type="progressOf(row.node.id).status === 'completed' ? 'success' : 'warning'"
+                  :type="progressInfo(row.node.id).type"
                   effect="light"
                   round
-                >{{ progressOf(row.node.id).status === 'completed' ? '已完成' : '学习中' }}</el-tag>
+                >{{ progressInfo(row.node.id).label }}</el-tag>
               </div>
             </div>
             <div class="node-actions">
@@ -384,6 +384,7 @@ import {
 import { ElMessage } from 'element-plus'
 import { listClasses } from '@/api/classroom'
 import { listCatalogs, listPpts, listVideos, listWatchProgress, reportVideoProgress } from '@/api/course'
+import { chapterProgress } from '@/utils/learningProgress'
 import { listQuestions, practiceSubmit } from '@/api/question'
 import { listMaterials } from '@/api/knowledge'
 import MarkdownIt from 'markdown-it'
@@ -463,6 +464,8 @@ async function loadTree() {
 
 // ---- 学习进度（断点续播 / 完成状态） ----
 const progressMap = ref({}) // catalog_id -> 进度记录
+const pageDurations = ref({}) // 当前章节每页音频时长（页索引 -> 秒）
+const pageWatched = ref({}) // 当前章节每页已看时长（页索引 -> 秒，取最大观看位置）
 const currentVideoId = ref(null)
 let watchAccum = 0 // 距上次上报累计观看秒数
 let lastTickTime = -1 // 上次 timeupdate 的播放位置
@@ -472,6 +475,13 @@ let resumePosition = 0
 
 function progressOf(catalogId) {
   return progressMap.value[catalogId] || null
+}
+
+// 章节徽章：已完成 / 进度 N%（按页统计，未播放的页不计入）/ 学习中
+function progressInfo(catalogId) {
+  const p = progressOf(catalogId)
+  if (!p) return null
+  return chapterProgress(p)
 }
 
 async function loadWatchProgress() {
@@ -493,13 +503,21 @@ async function flushProgress(completed = false) {
   }
   const delta = Math.round(watchAccum)
   watchAccum = 0
+  const payload = {
+    last_page: playerPageIndex.value,
+    last_position: Math.round(playerCurrent.value * 10) / 10,
+    duration_delta: delta,
+    completed,
+    page_count: pages.value.length,
+  }
+  if (Object.keys(pageDurations.value).length) {
+    payload.page_durations = pageDurations.value
+  }
+  if (Object.keys(pageWatched.value).length) {
+    payload.page_watched = pageWatched.value
+  }
   try {
-    const saved = await reportVideoProgress(currentVideoId.value, {
-      last_page: playerPageIndex.value,
-      last_position: Math.round(playerCurrent.value * 10) / 10,
-      duration_delta: delta,
-      completed,
-    })
+    const saved = await reportVideoProgress(currentVideoId.value, payload)
     if (saved && current.value) {
       progressMap.value = { ...progressMap.value, [current.value.id]: saved }
     }
@@ -532,6 +550,8 @@ async function openChapter(node, action = '') {
     pageIdx.value = 0
     pages.value = []
     scripts.value = []
+    pageDurations.value = {}
+    pageWatched.value = {}
   }
   if (!pages.value.length && !learnLoading.value) await loadLearn()
   if (pages.value.length) {
@@ -677,8 +697,12 @@ async function openLecture(tabName = '') {
   }
   if (!pages.value.length && !learnLoading.value) await loadLearn()
   stopPlayer()
-  // 断点续播：恢复到上次学习的页码与页内位置
+  // 断点续播：恢复到上次学习的页码与页内位置；每页时长/已看数据做种子
   const saved = progressOf(current.value.id)
+  if (saved) {
+    pageDurations.value = { ...(saved.page_durations || {}) }
+    pageWatched.value = { ...(saved.page_watched || {}) }
+  }
   if (saved && saved.status !== 'completed') {
     playerPageIndex.value = Math.min(saved.last_page || 0, Math.max(pages.value.length - 1, 0))
     resumePosition = saved.last_position || 0
@@ -789,12 +813,22 @@ function onPlayerTimeUpdate(e) {
   }
   lastTickTime = now
   playerCurrent.value = now
+  // 每页已看时长取最大观看位置，未播放的页不计入
+  const idx = playerPageIndex.value
+  if (now > (pageWatched.value[idx] || 0)) {
+    pageWatched.value = { ...pageWatched.value, [idx]: Math.round(now * 10) / 10 }
+  }
 }
 
 function onPlayerLoadedMeta(e) {
-  playerDuration.value = e.target?.duration || 0
+  const d = e.target?.duration || 0
+  playerDuration.value = d
   playerCurrent.value = 0
   lastTickTime = -1
+  // 记录每页音频时长，上报后用于计算章节总时长
+  if (d > 0 && Number.isFinite(d)) {
+    pageDurations.value = { ...pageDurations.value, [playerPageIndex.value]: Math.round(d * 10) / 10 }
+  }
   // 断点续播：恢复到上次页内播放位置
   if (resumePending && e.target && resumePosition < (playerDuration.value || Infinity)) {
     e.target.currentTime = resumePosition
@@ -816,14 +850,6 @@ function onPlayerAudioEnded() {
     stopPlayer()
     ElMessage.success('本章讲解已学习完成')
   }
-}
-
-function seekPlayer(e) {
-  const audio = playerAudioRef.value
-  if (!audio || !playerDuration.value) return
-  const rect = e.currentTarget.getBoundingClientRect()
-  const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
-  audio.currentTime = ratio * playerDuration.value
 }
 
 function selectScriptPage(item) {
@@ -1665,7 +1691,7 @@ onUnmounted(() => {
   height: 8px;
   border-radius: 999px;
   background: #dbe7f7;
-  cursor: pointer;
+  cursor: default;
   overflow: hidden;
 }
 

@@ -38,6 +38,7 @@ class Exam(BaseModel):
     class Meta:
         verbose_name = "考试"
         verbose_name_plural = verbose_name
+        ordering = ["-created_at"]
 
     def __str__(self):
         return self.name
@@ -109,6 +110,7 @@ class ExamSubmission(BaseModel):
         verbose_name = "考试答卷"
         verbose_name_plural = verbose_name
         unique_together = ("exam", "student")
+        ordering = ["-created_at"]
 
     def __str__(self):
         return f"{self.student} - {self.exam}"
@@ -130,6 +132,7 @@ class ExamLog(BaseModel):
     class Meta:
         verbose_name = "考试操作日志"
         verbose_name_plural = verbose_name
+        ordering = ["-created_at"]
 
     def __str__(self):
         return f"{self.student} {self.action}"

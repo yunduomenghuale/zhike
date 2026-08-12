@@ -1024,11 +1024,6 @@ onMounted(loadClasses)
   .hw-action-group { justify-content: space-between; }
 }
 
-/* 深色模式 */
-html.dark .hw-row { background: #1e293b; border-color: #334155; }
-html.dark .hw-title { color: #f1f5f9; }
-html.dark .hw-action-group { background: #0f172a; }
-html.dark .hw-action-btn:hover { background: #334155; }
 .homework-form-dialog :deep(.el-dialog),
 :global(.homework-form-dialog.el-dialog) {
   overflow: hidden;
@@ -1298,25 +1293,6 @@ html.dark .hw-action-btn:hover { background: #334155; }
   font-size: 16px;
 }
 
-html.dark .hw-editor-title { color: #f1f5f9; }
-html.dark .hw-editor-topbar { border-bottom-color: #1e293b; }
-html.dark .hw-editor-icon {
-  background: rgba(37, 99, 235, 0.18);
-  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.2);
-}
-html.dark .hw-back-btn {
-  background: rgba(30, 41, 59, 0.6);
-  border-color: #334155;
-  color: #93c5fd;
-}
-html.dark .hw-card {
-  background: rgba(30, 41, 59, 0.55);
-  border-color: #334155;
-}
-html.dark .hw-card-head {
-  color: #f1f5f9;
-  border-bottom-color: #334155;
-}
 .homework-creation-form :deep(.el-form-item) { margin-bottom: 18px; }
 .homework-creation-form :deep(.el-form-item__label) {
   height: auto;

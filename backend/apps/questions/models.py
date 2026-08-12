@@ -97,3 +97,57 @@ class AnswerRecord(BaseModel):
 
     def __str__(self):
         return f"{self.student} - Q{self.question_id}"
+
+
+class WrongNote(BaseModel):
+    """学生手动添加的错题记录（错题本补充入口）。
+
+    自动收录的错题来自答题记录；手动条目由学生自行整理，
+    与课程关联，便于按课程复习。
+    """
+
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="wrong_notes", verbose_name="学生"
+    )
+    course = models.ForeignKey(
+        "courses.Course", on_delete=models.CASCADE, related_name="wrong_notes", verbose_name="课程"
+    )
+    stem = models.TextField("题干")
+    my_answer = models.CharField("我的答案", max_length=500, blank=True)
+    correct_answer = models.CharField("正确答案", max_length=500, blank=True)
+    analysis = models.TextField("解析/笔记", blank=True)
+
+    class Meta:
+        verbose_name = "手动错题"
+        verbose_name_plural = verbose_name
+        ordering = ["-id"]
+
+    def __str__(self):
+        return f"{self.student} - {self.stem[:20]}"
+
+
+class WrongMastery(BaseModel):
+    """错题巩固状态：学生将自动收录或手动添加的错题标记为已巩固。
+
+    question 对应自动收录（答题记录派生）的错题，note 对应手动添加的错题，
+    二者必居其一。
+    """
+
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="wrong_masteries", verbose_name="学生"
+    )
+    question = models.ForeignKey(
+        Question, on_delete=models.CASCADE, related_name="mastered_by", null=True, blank=True, verbose_name="题目"
+    )
+    note = models.ForeignKey(
+        WrongNote, on_delete=models.CASCADE, related_name="mastered_by", null=True, blank=True, verbose_name="手动错题"
+    )
+    removed = models.BooleanField("已从错题本移除", default=False)
+
+    class Meta:
+        verbose_name = "错题巩固状态"
+        verbose_name_plural = verbose_name
+        ordering = ["-id"]
+
+    def __str__(self):
+        return f"{self.student} - Q{self.question_id or self.note_id}"

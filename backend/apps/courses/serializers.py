@@ -119,7 +119,8 @@ class VideoWatchProgressSerializer(serializers.ModelSerializer):
         model = VideoWatchProgress
         fields = [
             "id", "student", "student_name", "video", "catalog", "catalog_title",
-            "last_page", "last_position", "watch_seconds",
+            "last_page", "last_position", "watch_seconds", "total_seconds",
+            "page_durations", "page_watched", "page_count",
             "status", "status_display", "updated_at",
         ]
         read_only_fields = ["student", "watch_seconds", "status"]

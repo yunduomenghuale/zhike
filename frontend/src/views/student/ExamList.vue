@@ -24,9 +24,17 @@
             </div>
           </div>
           <div class="exam-actions course-standard-actions">
-            <button class="exam-action course-standard-action-btn primary" type="button" @click="enter(row)">
+            <button
+              v-if="examState(row) === 'open'"
+              class="exam-action course-standard-action-btn primary"
+              type="button"
+              @click="enter(row)"
+            >
               <el-icon><EditPen /></el-icon>进入考试
             </button>
+            <span v-else class="exam-action-disabled">
+              {{ examState(row) === 'not_started' ? '未开始' : '已结束' }}
+            </span>
           </div>
         </article>
       </div>
@@ -74,6 +82,14 @@ async function load() {
 
 function enter(row) {
   router.push(`/student/exams/${row.id}/take`)
+}
+
+// 考试可进入状态：未开始 / 已结束 / 进行中
+function examState(row) {
+  const now = Date.now()
+  if (row.start_at && now < new Date(row.start_at).getTime()) return 'not_started'
+  if (row.end_at && now > new Date(row.end_at).getTime()) return 'ended'
+  return 'open'
 }
 
 function formatDateTime(value) {
@@ -170,6 +186,13 @@ onMounted(load)
 .exam-action:hover {
   background: #fff;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.exam-action-disabled {
+  padding: 0 12px;
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .empty-text {

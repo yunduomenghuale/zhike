@@ -165,12 +165,13 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Document, Clock, CircleCheck, Grid, View, ArrowLeft } from '@element-plus/icons-vue'
 import { startExam, submitExam, reviewExam, reportCheat } from '@/api/exam'
 
 const route = useRoute()
+const router = useRouter()
 const examId = Number(route.params.id)
 
 const loading = ref(true)
@@ -286,7 +287,9 @@ async function init() {
     bindAntiCheat()
     startTimer(data.duration || 60)
   } catch {
-    ElMessage.error('无法进入考试')
+    // 失败原因（未开始/已结束等）由请求拦截器统一弹出，这里直接返回列表页，
+    // 避免停留在「试卷暂无题目」的空白答题页
+    router.replace('/student/exams')
   } finally {
     loading.value = false
   }

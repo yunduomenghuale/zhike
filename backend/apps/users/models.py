@@ -1,5 +1,8 @@
+from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+
+from apps.common.models import BaseModel
 
 
 class User(AbstractUser):
@@ -32,3 +35,44 @@ class User(AbstractUser):
     @property
     def is_student(self) -> bool:
         return self.role == self.Role.STUDENT
+
+
+class Notification(BaseModel):
+    """站内通知（作业/考试发布等推送给学生）。"""
+
+    class Type(models.TextChoices):
+        HOMEWORK = "homework", "作业"
+        EXAM = "exam", "考试"
+        SYSTEM = "system", "系统"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notifications", verbose_name="接收人"
+    )
+    ntype = models.CharField("类型", max_length=16, choices=Type.choices, default=Type.SYSTEM)
+    title = models.CharField("标题", max_length=200)
+    content = models.TextField("内容", blank=True)
+    link = models.CharField("跳转链接", max_length=300, blank=True)  # 前端路由
+    is_read = models.BooleanField("已读", default=False)
+
+    class Meta:
+        verbose_name = "通知"
+        verbose_name_plural = verbose_name
+
+    def __str__(self):
+        return f"{self.user} - {self.title}"
+
+
+def notify_class_students(classroom, *, ntype, title, content="", link="") -> int:
+    """给班级的在册学生批量发通知，返回发送数。"""
+    from apps.classroom.models import ClassStudent
+
+    students = [
+        cs.student
+        for cs in ClassStudent.objects.filter(
+            classroom=classroom, learn_status=ClassStudent.LearnStatus.ACTIVE
+        ).select_related("student")
+    ]
+    Notification.objects.bulk_create(
+        [Notification(user=u, ntype=ntype, title=title, content=content, link=link) for u in students]
+    )
+    return len(students)

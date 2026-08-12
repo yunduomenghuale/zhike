@@ -51,7 +51,7 @@ class CatalogViewSet(BaseModelViewSet):
             qs = qs.filter(parent__isnull=True)
         if course_id:
             qs = qs.filter(course_id=course_id)
-        return qs
+        return qs.order_by("id")
 
     def destroy(self, request, *args, **kwargs):
         catalog = self.get_object()
@@ -253,7 +253,7 @@ class TeachingVideoViewSet(BaseModelViewSet):
         ).select_related("catalog")
         if getattr(self.request.user, "is_student", False):
             qs = qs.filter(catalog__is_published=True, is_published=True)
-        return qs
+        return qs.order_by("id")
 
     @action(detail=True, methods=["post"], url_path="generate-scripts")
     def generate_scripts(self, request, pk=None):
@@ -265,7 +265,8 @@ class TeachingVideoViewSet(BaseModelViewSet):
         video.subtitle_url = ""
         video.video_url = ""
         video.gen_status = TeachingVideo.GenStatus.SCRIPT_READY
-        video.save(update_fields=["scripts", "audio_url", "subtitle_url", "video_url", "gen_status", "updated_at"])
+        video.is_published = True
+        video.save(update_fields=["scripts", "audio_url", "subtitle_url", "video_url", "gen_status", "is_published", "updated_at"])
         return api_response(self.get_serializer(video).data, message="讲解稿生成完成")
 
     @action(detail=True, methods=["post"], url_path="update-script", permission_classes=[IsTeacher])
@@ -305,7 +306,7 @@ class TeachingVideoViewSet(BaseModelViewSet):
             video.gen_status = TeachingVideo.GenStatus.SCRIPT_READY
 
         video.scripts = scripts
-        video.save(update_fields=["scripts", "audio_url", "subtitle_url", "video_url", "gen_status", "updated_at"])
+        video.save(update_fields=["scripts", "audio_url", "subtitle_url", "video_url", "gen_status", "is_published", "updated_at"])
         return api_response(self.get_serializer(video).data, message="讲稿已保存，修改页需要重新配音")
 
     @action(detail=True, methods=["post"], url_path="regenerate-script-page", permission_classes=[IsTeacher])
@@ -355,7 +356,7 @@ class TeachingVideoViewSet(BaseModelViewSet):
         video.subtitle_url = ""
         video.video_url = ""
         video.gen_status = TeachingVideo.GenStatus.SCRIPT_READY
-        video.save(update_fields=["scripts", "audio_url", "subtitle_url", "video_url", "gen_status", "updated_at"])
+        video.save(update_fields=["scripts", "audio_url", "subtitle_url", "video_url", "gen_status", "is_published", "updated_at"])
         return api_response(self.get_serializer(video).data, message="该页讲稿已重新生成，需要重新配音")
 
     @action(detail=True, methods=["post"], url_path="report-progress", permission_classes=[IsStudent])
@@ -383,12 +384,35 @@ class TeachingVideoViewSet(BaseModelViewSet):
         last_position = _float(request.data.get("last_position"))
         duration_delta = _int(request.data.get("duration_delta"))
         completed = str(request.data.get("completed", "")).lower() in ("1", "true", "yes")
+        page_durations = request.data.get("page_durations")
+        page_watched = request.data.get("page_watched")
+        page_count = _int(request.data.get("page_count"))
 
         progress, _ = VideoWatchProgress.objects.get_or_create(
             student=request.user, video=video
         )
         progress.last_page = last_page
         progress.last_position = last_position
+        # 每页时长 / 已看时长按页取最大值合并，未播放的页不计入
+        if isinstance(page_durations, dict) and page_durations:
+            merged = dict(progress.page_durations or {})
+            for k, v in page_durations.items():
+                try:
+                    merged[str(k)] = max(float(v), float(merged.get(str(k)) or 0))
+                except (TypeError, ValueError):
+                    continue
+            progress.page_durations = merged
+            progress.total_seconds = sum(merged.values())
+        if isinstance(page_watched, dict) and page_watched:
+            merged = dict(progress.page_watched or {})
+            for k, v in page_watched.items():
+                try:
+                    merged[str(k)] = max(float(v), float(merged.get(str(k)) or 0))
+                except (TypeError, ValueError):
+                    continue
+            progress.page_watched = merged
+        if page_count:
+            progress.page_count = max(progress.page_count, page_count)
         # 单次上报时长做上限保护，避免前端异常刷量
         progress.watch_seconds += min(duration_delta, 300)
         if completed:
@@ -418,4 +442,4 @@ class WatchProgressViewSet(BaseModelViewSet):
         course_id = self.request.query_params.get("course")
         if course_id:
             qs = qs.filter(video__course_id=course_id)
-        return qs
+        return qs.order_by("id")

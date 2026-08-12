@@ -387,7 +387,8 @@ def synthesize_audio_for_video(video, voice: str = "Cherry") -> int:
         if audio_count == len([item for item in scripts if item.get("script")])
         else video.GenStatus.SCRIPT_READY
     )
-    video.save(update_fields=["scripts", "gen_status", "updated_at"])
+    video.is_published = True  # 配音生成后自动对学生发布
+    video.save(update_fields=["scripts", "gen_status", "is_published", "updated_at"])
     return ok
 
 

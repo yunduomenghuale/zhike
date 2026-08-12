@@ -20,6 +20,16 @@
               <div class="class-name">{{ c.courseName }}</div>
               <div class="class-meta">
                 <span class="class-chip">{{ c.className }}</span>
+                <span v-if="courseProgress[c.id] != null" class="class-progress-inline">
+                  <el-progress
+                    :percentage="courseProgress[c.id]"
+                    :stroke-width="6"
+                    :show-text="false"
+                    color="#2563eb"
+                    class="class-progress-bar"
+                  />
+                  <span class="class-progress-text">学习进度 {{ courseProgress[c.id] }}%</span>
+                </span>
               </div>
             </div>
             <el-tag :type="c.status === 'open' ? 'success' : 'info'" effect="light" round class="class-status">
@@ -71,6 +81,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { Key, Plus, Reading, Close, ArrowRight } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { listClasses, joinClass } from '@/api/classroom'
+import { listCatalogs, listWatchProgress } from '@/api/course'
+import { chapterProgress } from '@/utils/learningProgress'
 
 const route = useRoute()
 const router = useRouter()
@@ -79,6 +91,34 @@ const joining = ref(false)
 const joinVisible = ref(false)
 const classes = ref([])
 const loading = ref(false)
+const courseProgress = ref({}) // courseId -> 总进度百分比
+
+// 课程总进度：各章进度平均（无记录的章计 0%）
+async function loadCourseProgress(courseIds) {
+  const result = {}
+  await Promise.all(courseIds.map(async (cid) => {
+    try {
+      const [cats, progress] = await Promise.all([
+        listCatalogs({ course: cid, tree: 1 }),
+        listWatchProgress({ course: cid }),
+      ])
+      const chapters = (cats.results ?? cats).length
+      const rows = progress.results ?? progress
+      if (!chapters) {
+        result[cid] = null
+        return
+      }
+      let sum = 0
+      rows.forEach((p) => {
+        sum += chapterProgress(p).pct ?? 0
+      })
+      result[cid] = Math.round(sum / chapters)
+    } catch {
+      result[cid] = null
+    }
+  }))
+  courseProgress.value = result
+}
 const keyword = computed(() => String(route.query.search || '').trim().toLowerCase())
 const courseCards = computed(() => {
   const cards = []
@@ -109,6 +149,8 @@ async function load() {
   try {
     const data = await listClasses()
     classes.value = data.results ?? data
+    const ids = [...new Set(courseCards.value.map((c) => c.id))]
+    if (ids.length) loadCourseProgress(ids)
   } finally {
     loading.value = false
   }
@@ -348,6 +390,10 @@ onMounted(load)
   white-space: nowrap;
 }
 .class-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
   margin: 7px 0 0;
 }
 .class-chip {
@@ -356,6 +402,24 @@ onMounted(load)
   background: var(--gray-100);
   color: var(--gray-500);
   font-size: 12px;
+}
+.class-progress-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 150px;
+}
+.class-progress-bar {
+  width: 72px;
+}
+.class-progress-bar :deep(.el-progress-bar__outer) {
+  background: var(--gray-100);
+}
+.class-progress-text {
+  color: var(--gray-500);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 .class-status {
   flex-shrink: 0;

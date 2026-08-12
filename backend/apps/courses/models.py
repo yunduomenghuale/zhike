@@ -156,6 +156,10 @@ class VideoWatchProgress(BaseModel):
     last_page = models.IntegerField("当前页索引", default=0)
     last_position = models.FloatField("页内播放位置(秒)", default=0)
     watch_seconds = models.IntegerField("累计学习时长(秒)", default=0)
+    total_seconds = models.FloatField("音视频总时长(秒)", default=0)
+    page_durations = models.JSONField("每页音视频时长(秒)", default=dict, blank=True)
+    page_watched = models.JSONField("每页已看时长(秒)", default=dict, blank=True)
+    page_count = models.IntegerField("章节总页数", default=0)
     status = models.CharField(
         "学习状态", max_length=16, choices=Status.choices, default=Status.IN_PROGRESS
     )

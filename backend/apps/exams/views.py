@@ -47,6 +47,29 @@ class ExamViewSet(BaseModelViewSet):
             qs = qs.none()
         return qs.distinct()
 
+    def _notify_if_published(self, instance, previous_status):
+        """考试首次进入「已发布」状态时通知班级学生。"""
+        if instance.status != Exam.Status.PUBLISHED or previous_status == Exam.Status.PUBLISHED:
+            return
+        from apps.users.models import notify_class_students
+
+        notify_class_students(
+            instance.classroom,
+            ntype="exam",
+            title=f"新考试发布：{instance.name}",
+            content=f"《{instance.course.name}》发布了新考试「{instance.name}」，请按时参加。",
+            link=f"/student/courses/{instance.course_id}/exams",
+        )
+
+    def perform_create(self, serializer):
+        instance = serializer.save()
+        self._notify_if_published(instance, None)
+
+    def perform_update(self, serializer):
+        previous = serializer.instance.status
+        instance = serializer.save()
+        self._notify_if_published(instance, previous)
+
     @action(detail=True, methods=["post"], url_path="compose", permission_classes=[IsTeacher])
     def compose(self, request, pk=None):
         """随机 / 手动组卷（需求 T-E-02 / T-E-03 / 8.2）。"""

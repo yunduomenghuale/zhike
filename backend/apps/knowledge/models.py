@@ -86,6 +86,7 @@ class QARecord(BaseModel):
     class Meta:
         verbose_name = "知识库问答记录"
         verbose_name_plural = verbose_name
+        ordering = ["-created_at"]
 
     def __str__(self):
         return self.question[:30]

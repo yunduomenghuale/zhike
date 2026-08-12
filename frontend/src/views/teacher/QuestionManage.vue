@@ -836,15 +836,6 @@ watch(
   }
 }
 
-/* 深色模式 */
-html.dark .q-row {
-  background: #1e293b;
-  border-color: #334155;
-}
-html.dark .q-stem { color: #f1f5f9; }
-html.dark .q-action-group { background: #0f172a; }
-html.dark .q-action-btn:hover { background: #334155; }
-
 /* AI 出题内容区沿用创建弹窗骨架。 */
 .ai-dialog :deep(.el-dialog__body) {
   padding: 18px 24px 4px;
@@ -864,12 +855,6 @@ html.dark .q-action-btn:hover { background: #334155; }
 }
 .ai-hint b { color: var(--primary-700); font-weight: 700; }
 .ai-hint-icon { flex: 0 0 auto; font-size: 17px; color: var(--primary-600); }
-
-html.dark .ai-hint {
-  border-color: rgba(96, 165, 250, 0.2);
-  background: rgba(37, 99, 235, 0.12);
-  color: #cbd5e1;
-}
 
 .opt-editor {
   width: 100%;

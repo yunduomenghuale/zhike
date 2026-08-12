@@ -114,4 +114,10 @@ router.beforeEach(async (to) => {
   return true
 })
 
+// 全局标题：普通页面使用路由 meta.title；课程空间内部由 CourseWorkspaceShell 覆盖为「课程 - 标签」
+router.afterEach((to) => {
+  const base = '智课平台'
+  document.title = to.meta?.title ? `${to.meta.title} - ${base}` : base
+})
+
 export default router

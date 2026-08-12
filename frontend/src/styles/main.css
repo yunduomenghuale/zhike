@@ -317,43 +317,6 @@ body,
   }
 }
 
-/* ===== 深色模式（点击顶栏月亮图标切换 html.dark）===== */
-html.dark {
-  /* 顶栏(.header)与内容区(.main)共用此变量，深色下依旧完全一致 */
-  --el-bg-color-page: #0f172a;
-  --el-bg-color: #1e293b;
-  color-scheme: dark;
-}
-
-html.dark body,
-html.dark #app {
-  background: var(--el-bg-color-page);
-  color: var(--gray-200);
-}
-
-html.dark .data-card,
-html.dark .stat-card {
-  background: #1e293b;
-  border-color: #334155;
-}
-
-html.dark .page-title,
-html.dark .stat-value {
-  color: #f1f5f9;
-}
-
-html.dark .page-subtitle,
-html.dark .stat-title,
-html.dark .empty-tip {
-  color: #94a3b8;
-}
-
-html.dark .el-table {
-  --el-table-header-bg-color: #1e293b;
-  --el-table-header-text-color: #cbd5e1;
-  --el-table-row-hover-bg-color: #334155;
-}
-
 /* ===== 路由切换过渡：淡入 + 轻微上移，平滑不生硬 ===== */
 .fade-slide-enter-active {
   transition: opacity 0.28s ease, transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
@@ -376,15 +339,6 @@ html.dark .el-table {
 /* ===== #9 按钮点击缩放反馈 ===== */
 .el-button:not(.is-link):not(.is-text):active {
   transform: scale(0.96);
-}
-
-/* ===== #8 深色/浅色切换的颜色过渡（仅切换瞬间启用，避免常态卡顿）===== */
-.theme-transition,
-.theme-transition *,
-.theme-transition *::before,
-.theme-transition *::after {
-  transition: background-color 0.35s ease, border-color 0.35s ease,
-    color 0.35s ease, fill 0.35s ease !important;
 }
 
 /* ===== #5 空状态统一视觉 ===== */
@@ -484,17 +438,6 @@ html.dark .el-table {
   color: var(--primary-600);
   background: transparent;
   font-weight: 800;
-}
-
-html.dark .module-select .el-select__wrapper,
-html.dark .module-select .el-select__wrapper:hover,
-html.dark .module-select .el-select__wrapper.is-focused {
-  background: #1e293b;
-  box-shadow: 0 0 0 1px #334155 inset, 0 6px 16px rgba(0, 0, 0, 0.3);
-}
-
-html.dark .module-select .el-select__selected-item {
-  color: #cbd5e1;
 }
 
 /* ===== 列表入场交错浮现：给列表容器加 .animate-list，子项逐行淡入上浮 ===== */

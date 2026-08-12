@@ -32,6 +32,29 @@ class HomeworkViewSet(BaseModelViewSet):
             qs = qs.filter(classroom__teacher=user)
         return qs.distinct()
 
+    def _notify_if_published(self, instance, previous_status):
+        """作业首次进入「已发布」状态时通知班级学生。"""
+        if instance.status != Homework.Status.PUBLISHED or previous_status == Homework.Status.PUBLISHED:
+            return
+        from apps.users.models import notify_class_students
+
+        notify_class_students(
+            instance.classroom,
+            ntype="homework",
+            title=f"新作业发布：{instance.title}",
+            content=f"《{instance.course.name}》发布了新作业「{instance.title}」，请及时完成。",
+            link=f"/student/courses/{instance.course_id}/homework",
+        )
+
+    def perform_create(self, serializer):
+        instance = serializer.save()
+        self._notify_if_published(instance, None)
+
+    def perform_update(self, serializer):
+        previous = serializer.instance.status
+        instance = serializer.save()
+        self._notify_if_published(instance, previous)
+
     def perform_destroy(self, instance):
         # HomeworkAnswer 对题目为 PROTECT 外键，先清理各题作答记录再删除作业
         HomeworkAnswer.objects.filter(homework_question__homework=instance).delete()

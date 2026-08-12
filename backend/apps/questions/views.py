@@ -1,4 +1,5 @@
 from rest_framework.decorators import action
+from rest_framework.views import APIView
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 
@@ -7,10 +8,11 @@ from apps.common.access import courses_for_user, is_platform_admin
 from apps.common.permissions import IsStudent, IsTeacher, IsTeacherOrReadOnly
 from apps.common.response import api_response
 from apps.common.viewsets import BaseModelViewSet
+from django.db.models import Q
 from apps.courses.models import Catalog
 
 from .grading import grade_objective
-from .models import AnswerRecord, Question
+from .models import AnswerRecord, Question, WrongMastery, WrongNote
 from .serializers import (
     AnswerRecordSerializer,
     QuestionSerializer,
@@ -167,3 +169,77 @@ class AnswerRecordViewSet(BaseModelViewSet):
         return api_response(
             AnswerRecordSerializer(record).data, message="提交成功", status=201
         )
+
+
+class WrongNoteViewSet(BaseModelViewSet):
+    """学生手动错题：学生只能增删查自己的记录。"""
+
+    permission_classes = [IsStudent]
+    filterset_fields = ["course"]
+
+    def get_queryset(self):
+        return WrongNote.objects.filter(student=self.request.user)
+
+    def get_serializer_class(self):
+        from .serializers import WrongNoteSerializer
+
+        return WrongNoteSerializer
+
+    def perform_create(self, serializer):
+        serializer.save(student=self.request.user)
+
+
+class WrongMasteryView(APIView):
+    """错题巩固/移除状态：查询我的标记集合 + 切换标记。
+
+    POST 参数：question 或 note（二选一），action=master(默认)|remove。
+    同一记录两个标记都被取消时自动删除记录。
+    """
+
+    permission_classes = [IsStudent]
+
+    def get(self, request):
+        qs = WrongMastery.objects.filter(student=request.user)
+        course_id = request.query_params.get("course")
+        if course_id:
+            qs = qs.filter(Q(question__course_id=course_id) | Q(note__course_id=course_id))
+        return api_response({
+            "questions": [m.question_id for m in qs if m.question_id and not m.removed],
+            "notes": [m.note_id for m in qs if m.note_id and not m.removed],
+            "removed_questions": [m.question_id for m in qs if m.question_id and m.removed],
+            "removed_notes": [m.note_id for m in qs if m.note_id and m.removed],
+        })
+
+    def post(self, request):
+        question_id = request.data.get("question")
+        note_id = request.data.get("note")
+        action = request.data.get("action", "master")
+        if not question_id and not note_id:
+            return api_response(message="缺少 question 或 note 参数", code=400, status=400)
+
+        lookup = {"student": request.user}
+        if question_id:
+            lookup["question_id"] = question_id
+        else:
+            lookup["note_id"] = note_id
+
+        obj = WrongMastery.objects.filter(**lookup).first()
+        if not obj:
+            obj = WrongMastery.objects.create(**lookup)
+
+        if action == "remove":
+            obj.removed = not obj.removed
+            obj.save()
+            if not obj.removed:
+                # 取消移除且未巩固：记录无意义，直接删除
+                obj.delete()
+                return api_response({"removed": False}, message="已恢复到错题本")
+            return api_response({"removed": True}, message="已从错题本移除")
+
+        # 巩固标记切换；若同时处于已移除状态则一并取消移除
+        if obj.pk and not obj.removed:
+            obj.delete()
+            return api_response({"mastered": False}, message="已取消巩固标记")
+        obj.removed = False
+        obj.save()
+        return api_response({"mastered": True}, message="已标记为已巩固")

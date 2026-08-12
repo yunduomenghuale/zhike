@@ -37,6 +37,7 @@ class Homework(BaseModel):
     class Meta:
         verbose_name = "作业"
         verbose_name_plural = verbose_name
+        ordering = ["-created_at"]
 
     def __str__(self):
         return self.title
@@ -143,6 +144,7 @@ class HomeworkSubmission(BaseModel):
         verbose_name = "作业提交"
         verbose_name_plural = verbose_name
         unique_together = ("homework", "student")
+        ordering = ["-created_at"]
 
     def __str__(self):
         return f"{self.student} - {self.homework}"

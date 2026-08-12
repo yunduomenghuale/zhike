@@ -19,16 +19,41 @@
       </div>
 
       <div class="header-right">
-        <el-badge is-dot class="head-badge">
-          <button class="icon-btn" title="通知" @click="onBell">
-            <el-icon><Bell /></el-icon>
-          </button>
-        </el-badge>
+        <el-popover placement="bottom-end" :width="360" trigger="click" popper-class="notify-popper">
+          <template #reference>
+            <el-badge :is-dot="unreadCount > 0" class="head-badge">
+              <button class="icon-btn" title="通知">
+                <el-icon><Bell /></el-icon>
+              </button>
+            </el-badge>
+          </template>
+          <div class="notify-panel">
+            <div class="notify-head">
+              <span class="notify-head-title">通知</span>
+              <button class="notify-read-all" :disabled="!unreadCount" @click="readAll">全部已读</button>
+            </div>
+            <div class="notify-list">
+              <button
+                v-for="n in notifications"
+                :key="n.id"
+                type="button"
+                class="notify-item"
+                :class="{ unread: !n.is_read }"
+                @click="openNotification(n)"
+              >
+                <span class="notify-dot" :class="{ on: !n.is_read }"></span>
+                <span class="notify-item-main">
+                  <span class="notify-item-title">{{ n.title }}</span>
+                  <span v-if="n.content" class="notify-item-content">{{ n.content }}</span>
+                  <span class="notify-item-time">{{ fmtNotifyTime(n.created_at) }}</span>
+                </span>
+              </button>
+              <div v-if="!notifications.length" class="notify-empty">暂无通知</div>
+            </div>
+          </div>
+        </el-popover>
         <button class="icon-btn" title="全屏" @click="toggleFullscreen">
           <el-icon><FullScreen /></el-icon>
-        </button>
-        <button class="icon-btn" :title="isDark ? '浅色模式' : '深色模式'" @click="toggleDark">
-          <el-icon><component :is="isDark ? Sunny : Moon" /></el-icon>
         </button>
 
         <el-dropdown @command="onCommand" trigger="click" popper-class="user-menu-popper">
@@ -105,15 +130,15 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
-import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/store/user'
+import { listNotifications, markAllNotificationsRead, markNotificationRead } from '@/api/notification'
 import {
   HomeFilled, Reading, School, Collection, EditPen, Document,
   VideoPlay, ChatDotRound, ArrowDown, UserFilled, Search, SwitchButton, Sunny,
-  Bell, FullScreen, Moon, Notebook,
+  Bell, FullScreen, Notebook,
   DataAnalysis,
   Setting,
 } from '@element-plus/icons-vue'
@@ -180,25 +205,58 @@ watch(
   { immediate: true },
 )
 
-// 深色模式：切换 html.dark，Element Plus 组件随暗色变量自动适配
-const isDark = ref(document.documentElement.classList.contains('dark'))
-function toggleDark() {
-  const el = document.documentElement
-  el.classList.add('theme-transition') // 切换瞬间启用颜色过渡
-  isDark.value = !isDark.value
-  el.classList.toggle('dark', isDark.value)
-  localStorage.setItem('theme', isDark.value ? 'dark' : 'light')
-  window.setTimeout(() => el.classList.remove('theme-transition'), 450)
-}
-
 // 全屏切换
 function toggleFullscreen() {
   if (!document.fullscreenElement) document.documentElement.requestFullscreen?.()
   else document.exitFullscreen?.()
 }
 
-function onBell() {
-  ElMessage.info('暂无新通知')
+// ---- 站内通知 ----
+const notifications = ref([])
+const unreadCount = computed(() => notifications.value.filter((n) => !n.is_read).length)
+let notifyTimer = null
+
+async function loadNotifications() {
+  try {
+    const data = await listNotifications({ page_size: 20 })
+    notifications.value = data.results ?? data
+  } catch {
+    // 通知加载失败不打断使用
+  }
+}
+
+function fmtNotifyTime(t) {
+  if (!t) return ''
+  const d = new Date(t)
+  const now = new Date()
+  const pad = (n) => String(n).padStart(2, '0')
+  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`
+  const startOf = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate())
+  const days = Math.round((startOf(now) - startOf(d)) / 86400000)
+  if (days <= 0) return `今天 ${hm}`
+  if (days === 1) return `昨天 ${hm}`
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`
+}
+
+async function openNotification(n) {
+  if (!n.is_read) {
+    n.is_read = true
+    try {
+      await markNotificationRead(n.id)
+    } catch {
+      // 已读标记失败不影响跳转
+    }
+  }
+  if (n.link) router.push(n.link)
+}
+
+async function readAll() {
+  notifications.value = notifications.value.map((n) => ({ ...n, is_read: true }))
+  try {
+    await markAllNotificationsRead()
+  } catch {
+    // 忽略失败，下次刷新会重新拉取
+  }
 }
 
 const menuGroups = computed(() => {
@@ -239,6 +297,12 @@ const menuGroups = computed(() => {
 
 onMounted(() => {
   if (!profile.value) userStore.fetchProfile()
+  loadNotifications()
+  notifyTimer = setInterval(loadNotifications, 30000)
+})
+
+onUnmounted(() => {
+  if (notifyTimer) clearInterval(notifyTimer)
 })
 
 function onCommand(cmd) {
@@ -442,11 +506,6 @@ function onCommand(cmd) {
 .icon-btn:hover {
   background: var(--el-fill-color);
   color: var(--el-color-primary);
-}
-
-.head-badge :deep(.el-badge__content.is-dot) {
-  top: 6px;
-  right: 8px;
 }
 
 .user {
@@ -706,17 +765,6 @@ function onCommand(cmd) {
   background: #fff;
   box-shadow: 0 8px 18px rgba(37, 99, 235, 0.12);
   transform: translateY(-1px);
-}
-
-.head-badge :deep(.el-badge__content.is-dot) {
-  box-shadow: 0 0 0 2px #fff;
-  animation: badge-pulse 2s ease-out infinite;
-}
-
-@keyframes badge-pulse {
-  0% { box-shadow: 0 0 0 2px #fff, 0 0 0 2px rgba(239, 68, 68, 0.45); }
-  70% { box-shadow: 0 0 0 2px #fff, 0 0 0 8px rgba(239, 68, 68, 0); }
-  100% { box-shadow: 0 0 0 2px #fff, 0 0 0 2px rgba(239, 68, 68, 0); }
 }
 
 /* 用户下拉菜单 */
@@ -1055,5 +1103,149 @@ function onCommand(cmd) {
   .app-main-panel .main :deep(.page-container) {
     padding: 20px 16px 24px;
   }
+}
+
+/* ===== 通知面板 ===== */
+.head-badge :deep(.el-badge__content.is-dot) {
+  top: 6px;
+  right: 8px;
+  box-shadow: 0 0 0 2px #fff;
+  animation: badge-pulse 2s ease-out infinite;
+}
+
+@keyframes badge-pulse {
+  0% { box-shadow: 0 0 0 2px #fff, 0 0 0 2px rgba(239, 68, 68, 0.45); }
+  70% { box-shadow: 0 0 0 2px #fff, 0 0 0 8px rgba(239, 68, 68, 0); }
+  100% { box-shadow: 0 0 0 2px #fff, 0 0 0 2px rgba(239, 68, 68, 0); }
+}
+
+:global(.notify-popper.el-popover) {
+  padding: 0 !important;
+  border: 1px solid var(--gray-200) !important;
+  border-radius: 14px !important;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18) !important;
+  overflow: hidden;
+}
+
+.notify-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--gray-100);
+}
+
+.notify-head-title {
+  color: var(--gray-900);
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.notify-read-all {
+  border: 0;
+  background: transparent;
+  color: var(--primary-600);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 8px;
+  transition: background 0.15s ease;
+}
+
+.notify-read-all:hover:not(:disabled) {
+  background: var(--primary-50);
+}
+
+.notify-read-all:disabled {
+  color: var(--gray-300);
+  cursor: default;
+}
+
+.notify-list {
+  max-height: 380px;
+  overflow-y: auto;
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+}
+
+.notify-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.notify-item:hover {
+  background: var(--gray-100);
+}
+
+.notify-item.unread {
+  background: var(--primary-50);
+}
+
+.notify-item.unread:hover {
+  background: #e0edff;
+}
+
+.notify-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.notify-dot.on {
+  background: var(--primary-600);
+}
+
+.notify-item-main {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.notify-item-title {
+  color: var(--gray-800);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.notify-item.unread .notify-item-title {
+  color: var(--primary-700);
+}
+
+.notify-item-content {
+  overflow: hidden;
+  display: -webkit-box;
+  color: var(--gray-500);
+  font-size: 12px;
+  line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.notify-item-time {
+  color: var(--gray-400);
+  font-size: 11px;
+}
+
+.notify-empty {
+  padding: 28px 10px;
+  color: var(--gray-400);
+  font-size: 12.5px;
+  text-align: center;
 }
 </style>
