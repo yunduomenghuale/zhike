@@ -3,7 +3,6 @@ from uuid import uuid4
 
 from django.contrib.auth import get_user_model
 from django.core.files.storage import default_storage
-from django.db.models import Q
 from rest_framework import status
 from rest_framework.generics import GenericAPIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -47,7 +46,7 @@ class RegisterView(GenericAPIView):
 
 
 class LoginView(APIView):
-    """用户名或手机号加密码登录，返回 JWT。"""
+    """使用唯一用户名和密码登录，返回 JWT。"""
 
     permission_classes = [AllowAny]
     serializer_class = LoginSerializer
@@ -55,13 +54,9 @@ class LoginView(APIView):
     def post(self, request):
         identifier = str(request.data.get("username") or "").strip()
         password = request.data.get("password")
-        normalized_phone = identifier.replace(" ", "").replace("-", "")
-        matches = list(User.objects.filter(
-            Q(username__iexact=identifier) | Q(phone=normalized_phone)
-        )[:2])
-        user = matches[0] if len(matches) == 1 else None
+        user = User.objects.filter(username__iexact=identifier).first()
         if user is None or not user.is_active or not user.check_password(password or ""):
-            return api_response(message="用户名、手机号或密码错误", code=401, status=401)
+            return api_response(message="用户名或密码错误", code=401, status=401)
         return api_response(
             {"user": UserSerializer(user).data, "token": tokens_for(user)},
             message="登录成功",

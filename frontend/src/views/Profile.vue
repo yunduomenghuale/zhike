@@ -70,7 +70,7 @@
             <span class="card-icon profile-icon"><EditPen /></span>
             <div>
               <h2>账号资料</h2>
-              <p>用户名和手机号均可用于登录，且都不能与其他账号重复。</p>
+              <p>用户名是唯一登录标识，姓名和手机号用于完善个人资料。</p>
             </div>
           </div>
 

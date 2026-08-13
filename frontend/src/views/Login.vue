@@ -3,8 +3,11 @@
     v-model="isRegister"
     logo-src="/smart-course-logo.svg"
     brand-name="智课平台"
-    login-description="欢迎回到智能课程教学平台"
-    register-description="创建账号开始使用平台"
+    :show-toggle-brand="false"
+    login-title=""
+    login-description=""
+    register-title=""
+    register-description=""
     :register-prompt="registerPrompt"
     :login-prompt="loginPrompt"
     @change="resetForm"
@@ -19,7 +22,7 @@
           <el-input
             v-model="form.username"
             :prefix-icon="User"
-            placeholder="请输入用户名或手机号"
+            placeholder="请输入用户名"
             size="large"
           />
         </el-form-item>
@@ -44,22 +47,52 @@
     </template>
 
     <template #register>
-      <el-form :model="form" @submit.prevent="submit">
+      <el-form class="register-form" :model="form" @submit.prevent="submit">
         <el-form-item class="auth-input">
           <el-input v-model="form.username" placeholder="请输入用户名" size="large" />
         </el-form-item>
 
-        <el-form-item class="auth-input">
-          <el-input v-model="form.password" type="password" show-password placeholder="请输入密码" size="large" />
+        <el-form-item
+          class="auth-input register-password-input"
+          :class="{ 'has-password-issue': showPasswordIssue }"
+        >
+          <el-input
+            v-model="form.password"
+            type="password"
+            show-password
+            placeholder="请输入密码"
+            size="large"
+            @blur="passwordTouched = true"
+          />
         </el-form-item>
+        <p
+          v-if="showPasswordIssue"
+          class="password-hint invalid"
+          aria-live="polite"
+        >
+          {{ passwordIssue }}
+        </p>
 
-        <el-form-item class="auth-input">
-          <el-input v-model="form.real_name" placeholder="请输入姓名" size="large" />
+        <el-form-item
+          class="auth-input confirm-password-input"
+          :class="{ 'has-password-issue': showConfirmationIssue }"
+        >
+          <el-input
+            v-model="form.confirm_password"
+            type="password"
+            show-password
+            placeholder="请再次输入密码"
+            size="large"
+            @blur="confirmationTouched = true"
+          />
         </el-form-item>
-
-        <el-form-item class="auth-input">
-          <el-input v-model="form.phone" placeholder="请输入手机号" maxlength="20" size="large" />
-        </el-form-item>
+        <p
+          v-if="showConfirmationIssue"
+          class="password-hint invalid"
+          aria-live="polite"
+        >
+          {{ confirmationIssue }}
+        </p>
 
         <el-form-item class="role-box">
           <div class="role-options">
@@ -107,7 +140,7 @@
 </template>
 
 <script setup>
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
@@ -136,11 +169,12 @@ const loginPrompt = {
 
 const isRegister = ref(false)
 const loading = ref(false)
+const passwordTouched = ref(false)
+const confirmationTouched = ref(false)
 const form = reactive({
   username: '',
   password: '',
-  real_name: '',
-  phone: '',
+  confirm_password: '',
   role: 'teacher',
 })
 
@@ -148,35 +182,60 @@ function resetForm() {
   Object.assign(form, {
     username: '',
     password: '',
-    real_name: '',
-    phone: '',
+    confirm_password: '',
     role: 'teacher',
   })
+  passwordTouched.value = false
+  confirmationTouched.value = false
 }
 
+const passwordIssue = computed(() => {
+  if (!form.password) return ''
+  if (form.password.length < 8) return `还需输入 ${8 - form.password.length} 位`
+  if (/^\d+$/.test(form.password)) return '密码不能全为数字，请加入字母或符号'
+  return ''
+})
+
+const showPasswordIssue = computed(() => (
+  Boolean(passwordIssue.value) && (passwordTouched.value || Boolean(form.password))
+))
+
+const confirmationIssue = computed(() => {
+  if (!form.confirm_password) return '请再次输入密码'
+  if (form.confirm_password !== form.password) return '两次输入的密码不一致'
+  return ''
+})
+
+const showConfirmationIssue = computed(() => (
+  Boolean(confirmationIssue.value)
+  && (confirmationTouched.value || Boolean(form.confirm_password))
+))
+
 async function submit() {
+  const registering = isRegister.value
+
   if (!form.username || !form.password) {
-    ElMessage.warning('请填写用户名或手机号和密码')
+    ElMessage.warning('请填写用户名和密码')
     return
   }
-  if (isRegister.value && !form.real_name) {
-    ElMessage.warning('请填写姓名')
-    return
-  }
-  if (isRegister.value && !/^\+?\d{6,20}$/.test(form.phone.replace(/[ -]/g, ''))) {
-    ElMessage.warning('请填写正确的手机号')
-    return
-  }
-  if (isRegister.value && form.password.length < 6) {
-    ElMessage.warning('密码至少 6 位')
+  if (registering && (passwordIssue.value || confirmationIssue.value)) {
+    passwordTouched.value = true
+    confirmationTouched.value = true
     return
   }
 
   loading.value = true
   try {
-    if (isRegister.value) await register(form)
+    if (registering) {
+      const registerPayload = {
+        username: form.username,
+        password: form.password,
+        role: form.role,
+      }
+      await register(registerPayload)
+    }
     await userStore.login({ username: form.username, password: form.password })
-    ElMessage.success('欢迎回来')
+    ElMessage.success(registering ? '注册成功，欢迎加入' : '欢迎回来')
     router.push(route.query.redirect || '/dashboard')
   } finally {
     loading.value = false
@@ -187,6 +246,31 @@ async function submit() {
 <style scoped>
 :deep(.auth-input) {
   margin-bottom: 24px;
+}
+
+:deep(.register-form .auth-input) {
+  margin-bottom: 14px;
+}
+
+:deep(.register-password-input.has-password-issue) {
+  margin-bottom: 7px;
+}
+
+:deep(.confirm-password-input.has-password-issue) {
+  margin-bottom: 7px;
+}
+
+.password-hint {
+  min-height: 18px;
+  margin: 0 3px 13px;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 18px;
+  transition: color 0.2s ease;
+}
+
+.password-hint.invalid {
+  color: #ef4444;
 }
 
 :deep(.auth-input .el-input__inner) {

@@ -51,12 +51,11 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class RegisterSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, min_length=6)
-    phone = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    password = serializers.CharField(write_only=True, min_length=8)
 
     class Meta:
         model = User
-        fields = ["username", "password", "real_name", "role", "phone"]
+        fields = ["username", "password", "role"]
 
     def validate_role(self, value):
         # 注册仅允许教师 / 学生，管理员由后台创建
@@ -72,18 +71,6 @@ class RegisterSerializer(serializers.ModelSerializer):
         value = value.strip()
         if User.objects.filter(username__iexact=value).exists():
             raise serializers.ValidationError("该用户名已被使用")
-        if User.objects.filter(phone=value).exists():
-            raise serializers.ValidationError("该用户名已被其他账号作为手机号使用")
-        return value
-
-    def validate_phone(self, value):
-        value = normalize_phone(value)
-        if value is None:
-            return None
-        if User.objects.filter(phone=value).exists():
-            raise serializers.ValidationError("该手机号已被使用")
-        if User.objects.filter(username__iexact=value).exists():
-            raise serializers.ValidationError("该手机号已被其他账号作为用户名使用")
         return value
 
     def create(self, validated_data):
@@ -110,11 +97,6 @@ class ProfileUpdateSerializer(serializers.ModelSerializer):
             queryset = queryset.exclude(pk=self.instance.pk)
         if queryset.exists():
             raise serializers.ValidationError("该用户名已被使用")
-        phone_queryset = User.objects.filter(phone=value)
-        if self.instance:
-            phone_queryset = phone_queryset.exclude(pk=self.instance.pk)
-        if phone_queryset.exists():
-            raise serializers.ValidationError("该用户名已被其他账号作为手机号使用")
         return value
 
     def validate_phone(self, value):
@@ -122,14 +104,10 @@ class ProfileUpdateSerializer(serializers.ModelSerializer):
         if value is None:
             return None
         queryset = User.objects.filter(phone=value)
-        username_queryset = User.objects.filter(username__iexact=value)
         if self.instance:
             queryset = queryset.exclude(pk=self.instance.pk)
-            username_queryset = username_queryset.exclude(pk=self.instance.pk)
         if queryset.exists():
             raise serializers.ValidationError("该手机号已被使用")
-        if username_queryset.exists():
-            raise serializers.ValidationError("该手机号已被其他账号作为用户名使用")
         return value
 
 

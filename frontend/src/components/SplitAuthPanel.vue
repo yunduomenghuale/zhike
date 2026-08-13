@@ -8,13 +8,17 @@
       <div class="split-auth__form-box split-auth__form-box--login">
         <div class="split-auth__form-content">
           <slot name="brand">
-            <div v-if="logoSrc || brandName" class="split-auth__brand">
+            <div
+              v-if="showFormBrand && (logoSrc || brandName)"
+              class="split-auth__brand"
+              :class="{ 'is-heading': !loginTitle && !loginDescription }"
+            >
               <img v-if="logoSrc" :src="logoSrc" alt="" aria-hidden="true" />
               <span>{{ brandName }}</span>
             </div>
           </slot>
-          <h1>{{ loginTitle }}</h1>
-          <p class="split-auth__description">{{ loginDescription }}</p>
+          <h1 v-if="loginTitle">{{ loginTitle }}</h1>
+          <p v-if="loginDescription" class="split-auth__description">{{ loginDescription }}</p>
           <slot name="login" :switch-mode="showRegister" />
         </div>
       </div>
@@ -22,13 +26,17 @@
       <div class="split-auth__form-box split-auth__form-box--register">
         <div class="split-auth__form-content">
           <slot name="brand">
-            <div v-if="logoSrc || brandName" class="split-auth__brand">
+            <div
+              v-if="showFormBrand && (logoSrc || brandName)"
+              class="split-auth__brand"
+              :class="{ 'is-heading': !registerTitle && !registerDescription }"
+            >
               <img v-if="logoSrc" :src="logoSrc" alt="" aria-hidden="true" />
               <span>{{ brandName }}</span>
             </div>
           </slot>
-          <h1>{{ registerTitle }}</h1>
-          <p class="split-auth__description">{{ registerDescription }}</p>
+          <h1 v-if="registerTitle">{{ registerTitle }}</h1>
+          <p v-if="registerDescription" class="split-auth__description">{{ registerDescription }}</p>
           <slot name="register" :switch-mode="showLogin" />
         </div>
       </div>
@@ -36,7 +44,13 @@
       <div class="split-auth__toggle-box">
         <div class="split-auth__toggle-panel split-auth__toggle-panel--left">
           <div class="split-auth__toggle-content">
-            <span class="split-auth__tag">{{ registerPrompt.tag }}</span>
+            <template v-if="showToggleBrand">
+              <div v-if="logoSrc || brandName" class="split-auth__toggle-brand">
+                <img v-if="logoSrc" :src="logoSrc" alt="" aria-hidden="true" />
+                <span>{{ brandName }}</span>
+              </div>
+              <span v-else class="split-auth__tag">{{ registerPrompt.tag }}</span>
+            </template>
             <h2>{{ registerPrompt.title }}</h2>
             <p>{{ registerPrompt.description }}</p>
             <button type="button" class="split-auth__toggle-button" @click="showRegister">
@@ -50,7 +64,13 @@
 
         <div class="split-auth__toggle-panel split-auth__toggle-panel--right">
           <div class="split-auth__toggle-content">
-            <span class="split-auth__tag">{{ loginPrompt.tag }}</span>
+            <template v-if="showToggleBrand">
+              <div v-if="logoSrc || brandName" class="split-auth__toggle-brand">
+                <img v-if="logoSrc" :src="logoSrc" alt="" aria-hidden="true" />
+                <span>{{ brandName }}</span>
+              </div>
+              <span v-else class="split-auth__tag">{{ loginPrompt.tag }}</span>
+            </template>
             <h2>{{ loginPrompt.title }}</h2>
             <p>{{ loginPrompt.description }}</p>
             <button type="button" class="split-auth__toggle-button" @click="showLogin">
@@ -73,6 +93,8 @@ const props = defineProps({
   modelValue: { type: Boolean, default: false },
   logoSrc: { type: String, default: '' },
   brandName: { type: String, default: '' },
+  showFormBrand: { type: Boolean, default: true },
+  showToggleBrand: { type: Boolean, default: true },
   loginTitle: { type: String, default: '登录账号' },
   loginDescription: { type: String, default: '欢迎回来' },
   registerTitle: { type: String, default: '注册账号' },
@@ -128,6 +150,14 @@ defineExpose({ showLogin, showRegister })
 </script>
 
 <style scoped>
+@font-face {
+  font-family: 'MiSans Auth';
+  src: url('/fonts/MiSans-Auth.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
 .split-auth {
   position: relative;
   min-height: 100%;
@@ -173,8 +203,14 @@ defineExpose({ showLogin, showRegister })
 
 .split-auth__form-box--register {
   z-index: 0;
+  padding-top: 42px;
+  padding-bottom: 42px;
   opacity: 0;
   visibility: hidden;
+}
+
+.split-auth__form-box--register .split-auth__brand.is-heading {
+  margin-bottom: 24px;
 }
 
 .split-auth__container.is-registering .split-auth__form-box--login {
@@ -211,11 +247,28 @@ defineExpose({ showLogin, showRegister })
   display: block;
 }
 
+.split-auth__brand.is-heading {
+  gap: 14px;
+  margin-bottom: 38px;
+  font-size: 28px;
+  font-weight: 750;
+  letter-spacing: -0.6px;
+}
+
+.split-auth__brand.is-heading img {
+  width: 48px;
+  height: 48px;
+}
+
 .split-auth__form-content > h1 {
   margin: 0 0 10px;
   color: #1e293b;
-  font-size: 38px;
-  font-weight: 700;
+  font-family: 'MiSans Auth', 'MiSans', 'Noto Sans SC', sans-serif;
+  font-size: 40px;
+  font-weight: 400;
+  line-height: 1.2;
+  letter-spacing: -0.8px;
+  text-rendering: geometricprecision;
 }
 
 .split-auth__description {
@@ -275,6 +328,30 @@ defineExpose({ showLogin, showRegister })
   font-size: 13px;
   font-weight: 500;
   backdrop-filter: blur(4px);
+}
+
+.split-auth__toggle-brand {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 22px;
+  padding: 9px 16px;
+  border: 1px solid rgb(255 255 255 / 70%);
+  border-radius: 14px;
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 10px 30px rgb(15 23 42 / 12%);
+  color: #0f172a;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
+  backdrop-filter: blur(8px);
+}
+
+.split-auth__toggle-brand img {
+  width: 30px;
+  height: 30px;
+  display: block;
 }
 
 .split-auth__toggle-panel h2 {
