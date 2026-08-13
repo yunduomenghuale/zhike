@@ -9,7 +9,7 @@ from apps.classroom.models import ClassCourse, ClassRoom, ClassStudent
 from apps.courses.models import Catalog, Course
 from apps.exams.models import Exam, ExamSubmission, Paper
 from apps.knowledge.models import KnowledgeChunk, Material
-from apps.questions.models import Question
+from apps.questions.models import Question, WrongMastery
 
 
 User = get_user_model()
@@ -76,6 +76,90 @@ class PlatformFixtureMixin:
 
 
 class AccessControlTests(PlatformFixtureMixin, APITestCase):
+
+    def test_wrong_question_mastery_can_be_marked_and_unmarked(self):
+        self.login_as(self.student1)
+
+        marked = self.client.post(
+            "/api/wrong-mastery/",
+            {"question": self.question1.id},
+            format="json",
+        )
+
+        self.assertEqual(marked.status_code, 200)
+        self.assertTrue(marked.data["data"]["mastered"])
+        self.assertTrue(
+            WrongMastery.objects.filter(
+                student=self.student1,
+                question=self.question1,
+                removed=False,
+            ).exists()
+        )
+
+        unmarked = self.client.post(
+            "/api/wrong-mastery/",
+            {"question": self.question1.id},
+            format="json",
+        )
+
+        self.assertEqual(unmarked.status_code, 200)
+        self.assertFalse(unmarked.data["data"]["mastered"])
+        self.assertFalse(
+            WrongMastery.objects.filter(
+                student=self.student1,
+                question=self.question1,
+            ).exists()
+        )
+
+    def test_student_must_complete_profile_before_joining_class(self):
+        self.login_as(self.student1)
+
+        denied = self.client.post(
+            "/api/classes/join/",
+            {"invite_code": self.class2.invite_code},
+            format="json",
+        )
+        self.assertEqual(denied.status_code, 400)
+        self.assertFalse(
+            ClassStudent.objects.filter(
+                classroom=self.class2,
+                student=self.student1,
+            ).exists()
+        )
+
+        self.student1.real_name = "Student One"
+        self.student1.phone = "13800000001"
+        self.student1.save(update_fields=["real_name", "phone"])
+        joined = self.client.post(
+            "/api/classes/join/",
+            {"invite_code": self.class2.invite_code},
+            format="json",
+        )
+
+        self.assertEqual(joined.status_code, 200)
+        self.assertTrue(
+            ClassStudent.objects.filter(
+                classroom=self.class2,
+                student=self.student1,
+            ).exists()
+        )
+
+    def test_teacher_cannot_add_student_with_incomplete_profile(self):
+        self.login_as(self.teacher1)
+
+        response = self.client.post(
+            f"/api/classes/{self.class1.id}/add-student/",
+            {"username": self.student2.username},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(
+            ClassStudent.objects.filter(
+                classroom=self.class1,
+                student=self.student2,
+            ).exists()
+        )
 
     def test_student_only_sees_enrolled_courses_and_questions(self):
         self.login_as(self.student1)

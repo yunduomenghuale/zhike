@@ -223,9 +223,7 @@ class WrongMasteryView(APIView):
         else:
             lookup["note_id"] = note_id
 
-        obj = WrongMastery.objects.filter(**lookup).first()
-        if not obj:
-            obj = WrongMastery.objects.create(**lookup)
+        obj, created = WrongMastery.objects.get_or_create(**lookup)
 
         if action == "remove":
             obj.removed = not obj.removed
@@ -237,7 +235,7 @@ class WrongMasteryView(APIView):
             return api_response({"removed": True}, message="已从错题本移除")
 
         # 巩固标记切换；若同时处于已移除状态则一并取消移除
-        if obj.pk and not obj.removed:
+        if not created and not obj.removed:
             obj.delete()
             return api_response({"mastered": False}, message="已取消巩固标记")
         obj.removed = False

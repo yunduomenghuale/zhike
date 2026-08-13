@@ -107,6 +107,8 @@
                 :type="masteredSet.has(q.key) ? 'success' : 'primary'"
                 :plain="!masteredSet.has(q.key)"
                 :icon="CircleCheckFilled"
+                :loading="masteringKeys.has(q.key)"
+                :disabled="masteringKeys.has(q.key)"
                 @click.stop="toggleMastery(q)"
               >
                 {{ masteredSet.has(q.key) ? '已巩固' : '标记为已巩固' }}
@@ -193,6 +195,7 @@ const courseId = ref(null)
 const rows = ref([])
 const notes = ref([])
 const masteredSet = ref(new Set())
+const masteringKeys = ref(new Set())
 const removedSet = ref(new Set())
 const loading = ref(false)
 const expandedKeys = ref(new Set())
@@ -306,15 +309,23 @@ async function load() {
 
 // ---- 巩固标记 ----
 async function toggleMastery(q) {
+  if (masteringKeys.value.has(q.key)) return
+  masteringKeys.value = new Set([...masteringKeys.value, q.key])
   const payload = q.source === 'auto'
     ? { question: Number(q.key.replace('auto-', '')) }
     : { note: q.noteId }
-  const res = await toggleWrongMastery(payload)
-  const next = new Set(masteredSet.value)
-  if (res?.mastered) next.add(q.key)
-  else next.delete(q.key)
-  masteredSet.value = next
-  ElMessage.success(res?.mastered ? '已标记为已巩固' : '已取消巩固标记')
+  try {
+    const res = await toggleWrongMastery(payload)
+    const next = new Set(masteredSet.value)
+    if (res?.mastered) next.add(q.key)
+    else next.delete(q.key)
+    masteredSet.value = next
+    ElMessage.success(res?.mastered ? '已标记为已巩固' : '已取消巩固标记')
+  } finally {
+    const pending = new Set(masteringKeys.value)
+    pending.delete(q.key)
+    masteringKeys.value = pending
+  }
 }
 
 // ---- 手动添加 ----

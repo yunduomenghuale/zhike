@@ -3,7 +3,7 @@
     <div v-loading="loading">
       <el-row :gutter="16" class="class-grid animate-list">
         <el-col :xs="24" :sm="12" :lg="8">
-          <button type="button" class="join-add-card" @click="joinVisible = true">
+          <button type="button" class="join-add-card" @click="openJoinDialog">
             <span class="add-icon">
               <el-icon><Plus /></el-icon>
             </span>
@@ -78,14 +78,18 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { storeToRefs } from 'pinia'
 import { Key, Plus, Reading, Close, ArrowRight } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { listClasses, joinClass } from '@/api/classroom'
 import { listCatalogs, listWatchProgress } from '@/api/course'
+import { useUserStore } from '@/store/user'
 import { chapterProgress } from '@/utils/learningProgress'
 
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
+const { isProfileComplete } = storeToRefs(userStore)
 const code = ref('')
 const joining = ref(false)
 const joinVisible = ref(false)
@@ -144,6 +148,29 @@ const filteredClasses = computed(() => {
   ].some((text) => String(text || '').toLowerCase().includes(keyword.value)))
 })
 
+async function requireCompleteProfile() {
+  if (isProfileComplete.value) return true
+  try {
+    await ElMessageBox.confirm(
+      '请先在个人中心填写姓名和手机号，完善资料后才能加入班级。',
+      '请完善个人资料',
+      {
+        confirmButtonText: '去填写',
+        cancelButtonText: '稍后再说',
+        type: 'warning',
+      },
+    )
+    await router.push('/profile')
+  } catch {
+    // 用户选择稍后填写时留在当前页面
+  }
+  return false
+}
+
+async function openJoinDialog() {
+  if (await requireCompleteProfile()) joinVisible.value = true
+}
+
 async function load() {
   loading.value = true
   try {
@@ -157,6 +184,10 @@ async function load() {
 }
 
 async function join() {
+  if (!(await requireCompleteProfile())) {
+    joinVisible.value = false
+    return
+  }
   const c = code.value.trim()
   if (!c) return ElMessage.warning('请输入邀请码')
   joining.value = true

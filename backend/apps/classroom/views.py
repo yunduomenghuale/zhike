@@ -10,6 +10,11 @@ from .models import ClassRoom, ClassStudent
 from .serializers import ClassRoomSerializer, ClassStudentSerializer
 
 
+def has_complete_profile(user):
+    """入班前必须填写姓名和手机号。"""
+    return bool(user.real_name.strip() and user.phone and user.phone.strip())
+
+
 class ClassRoomViewSet(BaseModelViewSet):
     serializer_class = ClassRoomSerializer
     permission_classes = [IsTeacherOrReadOnly]
@@ -43,6 +48,12 @@ class ClassRoomViewSet(BaseModelViewSet):
             student = User.objects.get(username=username, role=User.Role.STUDENT)
         except User.DoesNotExist:
             return api_response(message="未找到该学生账号", code=404, status=404)
+        if not has_complete_profile(student):
+            return api_response(
+                message="该学生尚未填写姓名和手机号，暂时无法加入班级",
+                code=400,
+                status=400,
+            )
         obj, created = ClassStudent.objects.get_or_create(classroom=classroom, student=student)
         if not created and obj.learn_status == ClassStudent.LearnStatus.REMOVED:
             obj.learn_status = ClassStudent.LearnStatus.ACTIVE
@@ -55,6 +66,12 @@ class ClassRoomViewSet(BaseModelViewSet):
     @action(detail=False, methods=["post"], url_path="join", permission_classes=[IsStudent])
     def join(self, request):
         """学生输入邀请码加入班级（需求 S-B-01）。"""
+        if not has_complete_profile(request.user):
+            return api_response(
+                message="请先在个人中心填写姓名和手机号，完善资料后才能加入班级",
+                code=400,
+                status=400,
+            )
         code = request.data.get("invite_code", "").strip().upper()
         try:
             classroom = ClassRoom.objects.get(

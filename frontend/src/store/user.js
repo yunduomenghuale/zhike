@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import {
   getMe,
   login as loginApi,
@@ -10,6 +10,9 @@ import {
 export const useUserStore = defineStore('user', () => {
   const token = ref(localStorage.getItem('access_token') || '')
   const profile = ref(null)
+  const isProfileComplete = computed(() => Boolean(
+    profile.value?.real_name?.trim() && profile.value?.phone?.trim(),
+  ))
 
   async function login(payload) {
     const data = await loginApi(payload)
@@ -48,6 +51,7 @@ export const useUserStore = defineStore('user', () => {
   return {
     token,
     profile,
+    isProfileComplete,
     login,
     fetchProfile,
     updateProfile,

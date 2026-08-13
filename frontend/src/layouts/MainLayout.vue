@@ -118,6 +118,16 @@
 
       <section class="app-main-panel">
         <div class="main">
+          <div v-if="profile && !isProfileComplete" class="profile-reminder" role="status">
+            <span class="profile-reminder-icon">
+              <el-icon><UserFilled /></el-icon>
+            </span>
+            <span class="profile-reminder-copy">
+              <strong>请完善个人资料</strong>
+              <span>{{ profileReminderText }}</span>
+            </span>
+            <el-button type="primary" plain round @click="router.push('/profile')">去填写</el-button>
+          </div>
           <router-view v-slot="{ Component }">
             <transition name="fade-slide" mode="out-in">
               <component :is="Component" />
@@ -146,7 +156,7 @@ import {
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
-const { profile } = storeToRefs(userStore)
+const { profile, isProfileComplete } = storeToRefs(userStore)
 const searchKeyword = ref('')
 let searchTimer = null
 const searchableRoutes = new Set([
@@ -176,6 +186,11 @@ const searchPlaceholder = computed(() => (
   searchPlaceholderMap[route.name] || '搜索功能、数据...'
 ))
 const searchEnabled = computed(() => searchableRoutes.has(route.name))
+const profileReminderText = computed(() => (
+  profile.value?.role === 'student'
+    ? '填写姓名和手机号后，才可以加入班级。'
+    : '请填写姓名和手机号，便于完善平台身份信息。'
+))
 
 function applyGlobalSearch() {
   if (!searchEnabled.value) return
@@ -1019,6 +1034,48 @@ function onCommand(cmd) {
   background: transparent;
 }
 
+.profile-reminder {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 36px 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(245, 158, 11, 0.24);
+  border-radius: 14px;
+  background: rgba(255, 251, 235, 0.96);
+  box-shadow: 0 10px 24px rgba(146, 64, 14, 0.08);
+  backdrop-filter: blur(12px);
+}
+
+.profile-reminder-icon {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  color: #b45309;
+  background: #fef3c7;
+}
+
+.profile-reminder-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: #92400e;
+  font-size: 13px;
+}
+
+.profile-reminder-copy strong {
+  color: #78350f;
+  font-size: 14px;
+}
+
 .app-main-panel .main :deep(.page-container) {
   min-height: 100%;
   padding: 30px 36px 36px;
@@ -1102,6 +1159,11 @@ function onCommand(cmd) {
 
   .app-main-panel .main :deep(.page-container) {
     padding: 20px 16px 24px;
+  }
+
+  .profile-reminder {
+    align-items: flex-start;
+    margin: 14px 16px 0;
   }
 }
 
