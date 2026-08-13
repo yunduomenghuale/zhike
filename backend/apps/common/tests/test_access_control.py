@@ -349,6 +349,32 @@ class ExamFlowTests(PlatformFixtureMixin, APITestCase):
 
 
 class PasswordPolicyTests(APITestCase):
+    def test_registration_accepts_twelve_character_password(self):
+        response = self.client.post(
+            "/api/auth/register/",
+            {
+                "username": "twelve-char-user",
+                "password": "Abcd!2345678",
+                "role": "student",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+    def test_registration_rejects_password_longer_than_twelve_characters(self):
+        response = self.client.post(
+            "/api/auth/register/",
+            {
+                "username": "long-password-user",
+                "password": "Abcd!23456789",
+                "role": "student",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
     def test_registration_rejects_weak_password(self):
         response = self.client.post(
             "/api/auth/register/",

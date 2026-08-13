@@ -61,6 +61,7 @@
             type="password"
             show-password
             placeholder="请输入密码"
+            maxlength="12"
             size="large"
             @blur="passwordTouched = true"
           />
@@ -82,6 +83,7 @@
             type="password"
             show-password
             placeholder="请再次输入密码"
+            maxlength="12"
             size="large"
             @blur="confirmationTouched = true"
           />
@@ -192,6 +194,7 @@ function resetForm() {
 const passwordIssue = computed(() => {
   if (!form.password) return ''
   if (form.password.length < 8) return `还需输入 ${8 - form.password.length} 位`
+  if (form.password.length > 12) return '密码不能超过 12 位'
   if (/^\d+$/.test(form.password)) return '密码不能全为数字，请加入字母或符号'
   return ''
 })

@@ -44,7 +44,7 @@
           <el-form-item label="手机号" prop="phone"><el-input v-model.trim="form.phone" placeholder="也可用于登录" maxlength="20" /></el-form-item>
           <el-form-item label="姓名" prop="real_name"><el-input v-model.trim="form.real_name" placeholder="请输入真实姓名" /></el-form-item>
           <el-form-item label="角色" prop="role"><el-select v-model="form.role" style="width:100%"><el-option label="学生" value="student" /><el-option label="教师" value="teacher" /><el-option label="管理员" value="admin" /></el-select></el-form-item>
-          <el-form-item v-if="!editingId" label="初始密码" prop="password" class="full"><el-input v-model="form.password" type="password" show-password placeholder="至少 6 位字符" /></el-form-item>
+          <el-form-item v-if="!editingId" label="初始密码" prop="password" class="full"><el-input v-model="form.password" type="password" show-password placeholder="8～12 位字符" maxlength="12" /></el-form-item>
           <el-form-item label="账号状态" class="full"><el-switch v-model="form.is_active" active-text="正常使用" inactive-text="停用账号" /></el-form-item>
         </div>
       </el-form>
@@ -53,7 +53,7 @@
 
     <el-dialog v-model="resetVisible" width="460px" align-center title="重置密码">
       <p class="dialog-tip">为 <b>{{ resetTarget?.real_name || resetTarget?.username }}</b> 设置新密码，保存后原密码立即失效。</p>
-      <el-form label-position="top"><el-form-item label="新密码"><el-input v-model="resetPassword" type="password" show-password placeholder="至少 6 位字符" @keyup.enter="submitReset" /></el-form-item></el-form>
+      <el-form label-position="top"><el-form-item label="新密码"><el-input v-model="resetPassword" type="password" show-password placeholder="8～12 位字符" maxlength="12" @keyup.enter="submitReset" /></el-form-item></el-form>
       <template #footer><el-button @click="resetVisible=false">取消</el-button><el-button type="primary" :loading="resetting" @click="submitReset">确认重置</el-button></template>
     </el-dialog>
   </div>
@@ -80,7 +80,7 @@ const rules = {
   phone: [{ required: true, message: '请输入手机号', trigger: 'blur' }, { pattern: /^\+?\d{6,20}$/, message: '请输入正确的手机号', trigger: 'blur' }],
   real_name: [{ required: true, message: '请输入姓名', trigger: 'blur' }],
   role: [{ required: true, message: '请选择角色', trigger: 'change' }],
-  password: [{ required: true, message: '请输入初始密码', trigger: 'blur' }, { min: 6, message: '密码至少 6 位', trigger: 'blur' }],
+  password: [{ required: true, message: '请输入初始密码', trigger: 'blur' }, { min: 8, max: 12, message: '密码长度应为 8～12 位', trigger: 'blur' }],
 }
 
 function roleType(role) { return role === 'admin' ? 'danger' : role === 'teacher' ? 'warning' : 'primary' }
@@ -108,7 +108,7 @@ async function changeActive(row, value) {
 }
 function openReset(row) { resetTarget.value = row; resetPassword.value = ''; resetVisible.value = true }
 async function submitReset() {
-  if (resetPassword.value.length < 6) return ElMessage.warning('密码至少 6 位')
+  if (resetPassword.value.length < 8 || resetPassword.value.length > 12) return ElMessage.warning('密码长度应为 8～12 位')
   resetting.value = true
   try { await resetAdminUserPassword(resetTarget.value.id, { password: resetPassword.value }); ElMessage.success('密码已重置'); resetVisible.value = false } finally { resetting.value = false }
 }

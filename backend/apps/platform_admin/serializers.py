@@ -5,7 +5,7 @@ from rest_framework import serializers
 from apps.classroom.models import ClassRoom
 from apps.courses.models import Course
 from apps.ai.models import AIConfiguration
-from apps.users.serializers import normalize_phone
+from apps.users.serializers import PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, normalize_phone
 
 User = get_user_model()
 
@@ -29,7 +29,12 @@ class AdminUserSerializer(serializers.ModelSerializer):
 
 
 class AdminUserWriteSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, required=False, min_length=6)
+    password = serializers.CharField(
+        write_only=True,
+        required=False,
+        min_length=PASSWORD_MIN_LENGTH,
+        max_length=PASSWORD_MAX_LENGTH,
+    )
     phone = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
     class Meta:
@@ -93,7 +98,11 @@ class AdminUserWriteSerializer(serializers.ModelSerializer):
 
 
 class PasswordResetSerializer(serializers.Serializer):
-    password = serializers.CharField(write_only=True, min_length=6)
+    password = serializers.CharField(
+        write_only=True,
+        min_length=PASSWORD_MIN_LENGTH,
+        max_length=PASSWORD_MAX_LENGTH,
+    )
 
     def validate_password(self, value):
         django_validate_password(value)

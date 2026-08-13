@@ -134,7 +134,8 @@
                   type="password"
                   show-password
                   autocomplete="new-password"
-                  placeholder="至少 6 位字符"
+                  placeholder="8～12 位字符"
+                  maxlength="12"
                 />
               </el-form-item>
               <el-form-item label="确认新密码" prop="confirm_password">
@@ -144,6 +145,7 @@
                   show-password
                   autocomplete="new-password"
                   placeholder="请再次输入新密码"
+                  maxlength="12"
                 />
               </el-form-item>
             </div>
@@ -221,7 +223,7 @@ const passwordRules = {
   current_password: [{ required: true, message: '请输入当前密码', trigger: 'blur' }],
   new_password: [
     { required: true, message: '请输入新密码', trigger: 'blur' },
-    { min: 6, message: '新密码至少需要 6 位字符', trigger: 'blur' },
+    { min: 8, max: 12, message: '新密码长度应为 8～12 位', trigger: 'blur' },
   ],
   confirm_password: [{ validator: validateConfirmPassword, trigger: ['blur', 'change'] }],
 }

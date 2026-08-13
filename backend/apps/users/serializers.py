@@ -5,6 +5,8 @@ from django.contrib.auth.password_validation import validate_password as django_
 from rest_framework import serializers
 
 User = get_user_model()
+PASSWORD_MIN_LENGTH = 8
+PASSWORD_MAX_LENGTH = 12
 
 
 def normalize_phone(value):
@@ -51,7 +53,11 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class RegisterSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, min_length=8)
+    password = serializers.CharField(
+        write_only=True,
+        min_length=PASSWORD_MIN_LENGTH,
+        max_length=PASSWORD_MAX_LENGTH,
+    )
 
     class Meta:
         model = User
@@ -124,8 +130,17 @@ class AvatarUploadSerializer(serializers.Serializer):
 
 class PasswordChangeSerializer(serializers.Serializer):
     current_password = serializers.CharField(write_only=True, trim_whitespace=False)
-    new_password = serializers.CharField(write_only=True, trim_whitespace=False, min_length=6)
-    confirm_password = serializers.CharField(write_only=True, trim_whitespace=False)
+    new_password = serializers.CharField(
+        write_only=True,
+        trim_whitespace=False,
+        min_length=PASSWORD_MIN_LENGTH,
+        max_length=PASSWORD_MAX_LENGTH,
+    )
+    confirm_password = serializers.CharField(
+        write_only=True,
+        trim_whitespace=False,
+        max_length=PASSWORD_MAX_LENGTH,
+    )
 
     def validate_current_password(self, value):
         if not self.context["request"].user.check_password(value):
