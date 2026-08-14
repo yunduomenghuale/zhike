@@ -62,6 +62,15 @@
             </div>
             <div class="kb-row-actions">
               <div class="kb-action-group">
+                <a
+                  v-if="m.file"
+                  class="kb-action-btn"
+                  :href="m.file"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <el-icon><View /></el-icon> 查看资料
+                </a>
                 <button class="kb-action-btn" @click="reparse(m)">
                   <el-icon><Refresh /></el-icon> 重新解析
                 </button>
@@ -94,7 +103,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import {
-  UploadFilled, Refresh, Delete, Document,
+  UploadFilled, Refresh, Delete, Document, View,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
@@ -339,6 +348,7 @@ onMounted(loadCourses)
   color: var(--primary-600);
   font-size: 13px;
   font-weight: 600;
+  text-decoration: none;
   cursor: pointer;
   transition: all 0.15s ease;
 }
