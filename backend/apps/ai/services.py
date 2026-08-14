@@ -66,7 +66,7 @@ def generate_scripts_for_video(pages: list[dict]) -> list[dict]:
             {
                 "page": page.get("page"),
                 "title": (page.get("title") or "")[:80],
-                "body": (page.get("body") or "")[:500],
+                "body": _dedupe_page_body(page.get("body") or "")[:500],
             }
         )
 
@@ -110,7 +110,8 @@ def _request_script_batch(provider, compact_pages: list[dict], timeout: int) -> 
                 "5. 可以补充必要的过渡语和通俗解释，但不要编造课件没有支撑的知识点。\n"
                 "6. 不要把课程安排、考核方式写成专业知识点。\n"
                 "7. 每页开头必须变化，禁止用“这一页”“这页”“本页”“我们继续看”作为固定开头。\n"
-                "8. 输出 JSON 数组，元素格式为 {\"page\":页码,\"script\":\"讲解稿\"}。\n\n"
+                "8. 同一个概念和同一句话只能讲一次，禁止重复句子，也不要给不同页面追加相同的固定总结。\n"
+                "9. 输出 JSON 数组，元素格式为 {\"page\":页码,\"script\":\"讲解稿\"}。\n\n"
                 f"PPT 页面：\n{json.dumps(compact_pages, ensure_ascii=False)}"
             ),
         },
@@ -139,7 +140,7 @@ def _request_script_batch(provider, compact_pages: list[dict], timeout: int) -> 
 
 def _local_script_for_page(page: dict) -> dict:
     title = (page.get("title") or f"第 {page.get('page', '')} 页").strip()
-    body = (page.get("body") or "").strip()
+    body = _dedupe_page_body(page.get("body") or "").strip()
     if _is_course_intro_page(title, body):
         return {"page": page.get("page"), "script": _polish_script_text(_script_for_course_intro(body))}
     if _is_chapter_cover_page(title, body):
@@ -149,8 +150,9 @@ def _local_script_for_page(page: dict) -> dict:
     section_title = _extract_section_title(body)
     if points:
         lead = _topic_lead(title, section_title)
-        point_text = "；".join(_explain_point(point) for point in points[:6])
-        script = f"{lead}{point_text}。学习时先把这些要点按顺序串起来，再回到具体例子中理解它们各自解决的问题。"
+        explanations = _dedupe_keep_order([_explain_point(point) for point in points[:6]])
+        point_text = "；".join(explanations)
+        script = f"{lead}{point_text}。"
     elif body:
         cleaned = _clean_inline_text(body)
         script = f"围绕“{title}”展开时，可以先把页面文字看作一个线索，重点理解它想引出的主题：{cleaned[:140]}。后面遇到具体概念时，再回到这里对照。"
@@ -251,6 +253,24 @@ def _dedupe_keep_order(items: list[str]) -> list[str]:
         seen.add(key)
         result.append(item)
     return result
+
+
+def _dedupe_page_body(body: str) -> str:
+    """移除 PPT 中因重叠文本框产生的重复文本，保留原始出现顺序。"""
+    lines = [line.strip() for line in (body or "").splitlines() if line.strip()]
+    if len(lines) <= 1:
+        return (body or "").strip()
+
+    seen = set()
+    result = []
+    for line in lines:
+        key = re.sub(r"\s+", "", line).strip(" ：:；;，,。")
+        key = re.sub(r"^[\-•·●○]*(?:\d+[.、)]|[（(]\d+[）)])", "", key)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        result.append(line)
+    return "\n".join(result)
 
 
 def _find_value(text: str, pattern: str) -> str:
@@ -356,7 +376,30 @@ def _polish_script_text(text: str) -> str:
     ]
     for pattern, repl in replacements:
         text = re.sub(pattern, repl, text).strip()
-    return text.lstrip("，,。；;：: ")
+    text = text.lstrip("，,。；;：: ")
+    return _dedupe_script_clauses(text)
+
+
+def _dedupe_script_clauses(text: str) -> str:
+    """移除模型或本地规则生成的重复句/分号分句。"""
+    segments = re.findall(r"[^。！？!?；;]+(?:[。！？!?；;]+|$)", text or "")
+    if len(segments) <= 1:
+        return text
+
+    seen = set()
+    result = []
+    for segment in segments:
+        content = re.sub(r"[。！？!?；;]+$", "", segment).strip()
+        punctuation_match = re.search(r"([。！？!?；;]+)$", segment)
+        punctuation = punctuation_match.group(1) if punctuation_match else ""
+        key = re.sub(r"[\s‘’“”\"'，,：:（）()]", "", content).lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        result.append(f"{content}{punctuation}")
+
+    polished = "".join(result).strip()
+    return re.sub(r"[；;]+$", "。", polished)
 
 
 # ---------------------------------------------------------------------------
