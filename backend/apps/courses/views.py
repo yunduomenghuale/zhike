@@ -2,8 +2,10 @@ import os
 import tempfile
 
 from rest_framework.decorators import action
+from django.db import transaction
 from django.db.models.deletion import ProtectedError
 from django.db.models import Max
+from django.utils import timezone
 
 from apps.ai.services import generate_catalog_from_plan, generate_scripts_for_video
 from apps.common.access import courses_for_user
@@ -19,6 +21,46 @@ from .serializers import (
     TeachingVideoSerializer,
     VideoWatchProgressSerializer,
 )
+
+
+def _invalidate_teaching_video_for_new_ppt(catalog, ppt):
+    """课件换版后清除旧衍生内容，防止学生继续访问旧讲稿或配音。"""
+    video = TeachingVideo.objects.select_for_update().filter(catalog=catalog).first()
+    if not video:
+        return
+
+    video.ppt = ppt
+    video.scripts = []
+    video.audio_url = ""
+    video.subtitle_url = ""
+    video.video_url = ""
+    video.gen_status = TeachingVideo.GenStatus.DRAFT
+    video.is_published = False
+    video.published_at = None
+    video.save(
+        update_fields=[
+            "ppt",
+            "scripts",
+            "audio_url",
+            "subtitle_url",
+            "video_url",
+            "gen_status",
+            "is_published",
+            "published_at",
+            "updated_at",
+        ]
+    )
+    video.watch_progress.update(
+        last_page=0,
+        last_position=0,
+        watch_seconds=0,
+        total_seconds=0,
+        page_durations={},
+        page_watched={},
+        page_count=0,
+        status=VideoWatchProgress.Status.NOT_STARTED,
+        updated_at=timezone.now(),
+    )
 
 
 class CourseViewSet(BaseModelViewSet):
@@ -95,13 +137,9 @@ class CatalogViewSet(BaseModelViewSet):
         video, _ = TeachingVideo.objects.get_or_create(
             catalog=catalog, defaults={"course": catalog.course, "ppt": ppt}
         )
-        # 换了新版本 PPT 或明确 force 时重置讲解稿（配音/字幕一并失效）
+        # 换了新版本 PPT 或明确 force 时重置衍生内容（含学生观看进度，沿用主线换版逻辑）
         if force or video.ppt_id != ppt.id:
-            video.scripts = []
-            video.audio_url = ""
-            video.subtitle_url = ""
-            video.video_url = ""
-            video.gen_status = TeachingVideo.GenStatus.DRAFT
+            _invalidate_teaching_video_for_new_ppt(catalog, ppt)
         video.course = catalog.course
         video.ppt = ppt
         video.save()
@@ -228,20 +266,26 @@ class PPTResourceViewSet(BaseModelViewSet):
         catalog = serializer.validated_data["catalog"]
         existing = PPTResource.objects.filter(course=course, catalog=catalog)
         next_version = (existing.aggregate(max_version=Max("version"))["max_version"] or 0) + 1
-        existing.update(is_active=False)
 
         ppt = serializer.save(
             version=next_version,
-            is_active=True,
+            is_active=False,
             parse_status=PPTResource.ParseStatus.PARSING,
         )
+        pages = []
         if ppt.file:
             pages = parse_teaching_file_pages(ppt.file.path)
             images = render_presentation_slide_images(ppt.file.path, resource_id=ppt.id)
             pages = attach_slide_images(pages, images)
+
+        with transaction.atomic():
             ppt.parsed_pages = pages
             ppt.parse_status = ppt.ParseStatus.DONE if pages else ppt.ParseStatus.FAILED
-            ppt.save(update_fields=["parsed_pages", "parse_status", "updated_at"])
+            ppt.is_active = bool(pages)
+            ppt.save(update_fields=["parsed_pages", "parse_status", "is_active", "updated_at"])
+            if pages:
+                existing.exclude(pk=ppt.pk).update(is_active=False)
+                _invalidate_teaching_video_for_new_ppt(catalog, ppt)
 
     @action(detail=True, methods=["post"], url_path="reparse")
     def reparse(self, request, pk=None):

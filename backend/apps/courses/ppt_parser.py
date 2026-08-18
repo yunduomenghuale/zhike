@@ -378,6 +378,7 @@ def _read_presentation(file_path: str) -> list[dict]:
     for idx, slide in enumerate(prs.slides, start=1):
         title = ""
         bodies = []
+        seen_bodies = set()
         for shape in slide.shapes:
             if not shape.has_text_frame:
                 continue
@@ -392,7 +393,14 @@ def _read_presentation(file_path: str) -> list[dict]:
             if is_title and not title:
                 title = text
             else:
+                normalized = re.sub(r"\s+", "", text)
+                if normalized in seen_bodies:
+                    continue
+                seen_bodies.add(normalized)
                 bodies.append(text)
+        if title:
+            title_key = re.sub(r"\s+", "", title)
+            bodies = [body for body in bodies if re.sub(r"\s+", "", body) != title_key]
         if not title and bodies:
             title = bodies[0][:80]
         pages.append({"page": idx, "title": title, "body": "\n".join(bodies), "source": "slide"})
