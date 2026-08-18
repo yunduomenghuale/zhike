@@ -8,12 +8,12 @@ services:
     container_name: zhike_v2_backend
     restart: unless-stopped
     env_file: .env.production
-    ports:
-      - "8005:8000"
+    # 后端不发布宿主端口，仅经 zhike_v2_net 供前端 nginx 反向代理
+    # 数据全部 bind mount 到项目目录（数据盘 /data），不再使用根盘的 named volume
     volumes:
-      - zhike_v2_data:/app/data
-      - zhike_v2_media:/app/media
-      - zhike_v2_static:/app/staticfiles
+      - ../data:/app/data
+      - ../media:/app/media
+      - ../staticfiles:/app/staticfiles
       # PPT 常用 Windows 中文字体 → 开源字体的替换映射（提升 LibreOffice 渲染保真度）
       - ./fonts.conf:/etc/fonts/local.conf:ro
     # LibreOffice 渲染 PPT 时内存较高，与 gunicorn 共享该额度
@@ -26,12 +26,13 @@ services:
     container_name: zhike_v2_frontend
     restart: unless-stopped
     ports:
-      - "5273:80"
+      # 对外 8088：华为云安全组已放行；主线曾改 5273 但安全组未放行该端口，保持 8088
+      - "8088:80"
     volumes:
       - ../frontend/dist:/usr/share/nginx/html:ro
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - zhike_v2_media:/app/media:ro
-      - zhike_v2_static:/app/staticfiles:ro
+      - ../media:/app/media:ro
+      - ../staticfiles:/app/staticfiles:ro
     mem_limit: 128m
     networks:
       - zhike_v2_net
@@ -41,8 +42,3 @@ services:
 networks:
   zhike_v2_net:
     name: zhike_v2_net
-
-volumes:
-  zhike_v2_data:
-  zhike_v2_media:
-  zhike_v2_static:

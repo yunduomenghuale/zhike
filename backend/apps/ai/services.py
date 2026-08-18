@@ -86,6 +86,58 @@ def generate_scripts_for_video(pages: list[dict]) -> list[dict]:
     return scripts
 
 
+def generate_script_pages_batched(video, pages: list[dict], batch_size: int = 6) -> dict:
+    """分批为教学视频生成讲解稿（避免一次生成几十页超过网关 180s 超时）。
+
+    对 video.scripts 中尚无讲解稿的页，每批 batch_size 页调用一次 AI，
+    每批完成立即落库（请求中断不丢进度）；AI 失败的页用本地兜底文本。
+    返回 {generated, pages, script_pages, remaining, done}。
+    """
+    provider = get_provider()
+    pages = pages or []
+    scripts = list(video.scripts or [])
+    if not scripts:
+        scripts = [{"page": page.get("page"), "script": ""} for page in pages]
+    page_map = {page.get("page"): page for page in pages}
+
+    pending = [item for item in scripts if not str(item.get("script") or "").strip()]
+    batch = pending[:batch_size]
+    generated = 0
+    if batch:
+        compact_pages = []
+        for item in batch:
+            page_data = page_map.get(item.get("page"), {})
+            compact_pages.append(
+                {
+                    "page": item.get("page"),
+                    "title": (page_data.get("title") or "")[:80],
+                    "body": (page_data.get("body") or "")[:500],
+                }
+            )
+        by_page = _request_script_batch(provider, compact_pages, timeout=60)
+        for item in batch:
+            page_data = page_map.get(item.get("page"), {})
+            script = by_page.get(item.get("page")) or _local_script_for_page(page_data)["script"]
+            item["script"] = _polish_script_text(script)
+            generated += 1
+        video.scripts = scripts
+        video.save(update_fields=["scripts", "updated_at"])
+
+    total = len(scripts)
+    script_pages = sum(1 for item in scripts if str(item.get("script") or "").strip())
+    all_done = total > 0 and script_pages == total
+    if all_done:
+        video.gen_status = video.GenStatus.SCRIPT_READY
+        video.save(update_fields=["gen_status", "updated_at"])
+    return {
+        "generated": generated,
+        "pages": total,
+        "script_pages": script_pages,
+        "remaining": total - script_pages,
+        "done": all_done,
+    }
+
+
 def _request_script_batch(provider, compact_pages: list[dict], timeout: int) -> dict:
     if not compact_pages:
         return {}
@@ -362,11 +414,16 @@ def _polish_script_text(text: str) -> str:
 # ---------------------------------------------------------------------------
 # 逐页 AI 配音（需求 T-V-03）：对讲解稿合成语音，落地音频地址
 # ---------------------------------------------------------------------------
-def synthesize_audio_for_video(video, voice: str = "Cherry") -> int:
-    """为教学视频的逐页讲解稿补齐配音，音频地址写回 scripts 每页。返回本次新增成功页数。"""
+def synthesize_audio_for_video(video, voice: str = "Cherry", limit: int | None = None) -> int:
+    """为教学视频的逐页讲解稿补齐配音，音频地址写回 scripts 每页。返回本批新增成功页数。
+
+    limit：本批最多合成的页数（分段生成，避免多页同步合成超过网关超时）；None 表示不限制。
+    每页处理完立即落库——即使请求中断，已合成的进度也不丢失，下次调用可继续补齐。
+    """
     provider = get_provider()
     scripts = video.scripts or []
     ok = 0
+    processed = 0
     for item in scripts:
         if item.get("audio_url"):
             item.pop("audio_error", None)
@@ -374,20 +431,27 @@ def synthesize_audio_for_video(video, voice: str = "Cherry") -> int:
         text = (item.get("script") or "").strip()
         if not text:
             continue
+        if limit is not None and processed >= limit:
+            break
+        processed += 1
         try:
             item["audio_url"] = provider.tts(text, voice=voice)
             item.pop("audio_error", None)
             ok += 1
         except Exception as exc:
             item["audio_error"] = str(exc)[:300]
-    video.scripts = scripts
+        video.scripts = scripts
+        video.save(update_fields=["scripts", "updated_at"])
+
     audio_count = sum(1 for item in scripts if item.get("audio_url"))
+    script_count = len([item for item in scripts if item.get("script")])
+    all_done = script_count > 0 and audio_count == script_count
+    video.scripts = scripts
     video.gen_status = (
-        video.GenStatus.AUDIO_READY
-        if audio_count == len([item for item in scripts if item.get("script")])
-        else video.GenStatus.SCRIPT_READY
+        video.GenStatus.AUDIO_READY if all_done else video.GenStatus.SCRIPT_READY
     )
-    video.is_published = True  # 配音生成后自动对学生发布
+    if all_done:
+        video.is_published = True  # 全部配音完成后自动对学生发布
     video.save(update_fields=["scripts", "gen_status", "is_published", "updated_at"])
     return ok
 

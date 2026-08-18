@@ -306,8 +306,8 @@
                   课件 {{ pptMap[data.id].pages }} 页
                 </el-tag>
                 <el-tag v-else size="small" type="info" effect="plain" round>无课件</el-tag>
-                <el-tag v-if="scriptCount(videoMap[data.id])" size="small" type="primary" effect="light" round>
-                  讲解稿 {{ scriptCount(videoMap[data.id]) }} 页
+                <el-tag v-if="scriptState(data).done" size="small" type="primary" effect="light" round>
+                  讲解稿 {{ scriptState(data).done }}{{ scriptState(data).complete ? '' : `/${scriptState(data).total}` }} 页
                 </el-tag>
                 <el-tag v-if="audioCount(videoMap[data.id])" size="small" type="warning" effect="light" round>
                   配音 {{ audioCount(videoMap[data.id]) }} 页
@@ -317,10 +317,20 @@
             <div class="node-actions">
               <div class="node-action-group">
                 <el-button class="node-action-btn" :icon="Upload" @click.stop="openPpt(data)">课件</el-button>
-                <el-button class="node-action-btn" :icon="Microphone" :loading="scriptLoading === data.id" @click.stop="openScript(data)">
-                  {{ scriptCount(videoMap[data.id]) ? '讲稿' : '生成讲稿' }}
+                <el-button class="node-action-btn" :icon="Microphone" :loading="!!genStore.scriptTasks[data.id]" @click.stop="openScript(data)">
+                  {{ genStore.scriptTasks[data.id]
+                    ? `讲稿 ${genStore.scriptTasks[data.id].done}/${genStore.scriptTasks[data.id].total}`
+                    : scriptState(data).complete
+                      ? '讲稿'
+                      : scriptState(data).done
+                        ? `续讲稿 ${scriptState(data).done}/${scriptState(data).total}`
+                        : '生成讲稿' }}
                 </el-button>
-                <el-button class="node-action-btn" :icon="Headset" :loading="audioLoading === data.id" @click.stop="genAudio(data)">配音</el-button>
+                <el-button class="node-action-btn" :icon="Headset" :loading="!!genStore.audioTasks[data.id]" @click.stop="genAudio(data)">
+                  {{ genStore.audioTasks[data.id]
+                    ? `配音 ${genStore.audioTasks[data.id].done}/${genStore.audioTasks[data.id].total}`
+                    : '配音' }}
+                </el-button>
                 <el-button class="node-action-btn" :icon="VideoPlay" @click.stop="openVideo(data, 'player')">完整讲解</el-button>
               </div>
               <div class="node-manage-group">
@@ -835,9 +845,10 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
 import {
   listCourses, listCatalogs, createCatalog, updateCatalog, deleteCatalog,
-  previewCatalogFromFile, listPpts, uploadPpt, generateScript, generateAudio, listVideos, updateVideoScript, regenerateVideoScriptPage,
+  previewCatalogFromFile, listPpts, uploadPpt, listVideos, updateVideoScript, regenerateVideoScriptPage,
 } from '@/api/course'
 import { listMaterials } from '@/api/knowledge'
+import { useGenerationStore } from '@/store/generation'
 import MarkdownIt from 'markdown-it'
 import { genUid } from '@/utils/uid'
 
@@ -1124,10 +1135,22 @@ function extractChapterTitle(line) {
     .trim()
 }
 
-// ---- AI 讲解稿 ----
-const scriptLoading = ref(null)
+// ---- AI 讲解稿 / 配音（分批循环在全局 generation store 中执行：路由切换组件卸载不中断，
+//      返回页面后进度仍实时显示；每批结果后端落库，中断可增量续传）----
+const genStore = useGenerationStore()
+
+// 讲稿完成度：complete=全部页已生成；done>0 但未完成时按钮显示「续讲稿 x/y」并可点击续生成
+// 注意 scripts 骨架创建后每页都有条目（script 可能为空），必须统计有内容的页
+function scriptState(node) {
+  const video = videoMap[String(node.id)]
+  const total = Number(pptMap[String(node.id)]?.pages || 0)
+  const done = Array.isArray(video?.scripts)
+    ? video.scripts.filter((s) => String(s.script || '').trim()).length
+    : 0
+  return { done, total, complete: total > 0 && done >= total }
+}
 async function openScript(node) {
-  if (scriptCount(videoMap[String(node.id)])) {
+  if (scriptState(node).complete) {
     await openVideo(node, 'script')
     return
   }
@@ -1135,36 +1158,15 @@ async function openScript(node) {
 }
 
 async function genScript(node) {
-  scriptLoading.value = node.id
-  try {
-    const res = await generateScript(node.id)
-    ElMessage.success(res.cached
-      ? `「${node.title}」已有 ${res.pages} 页讲解稿`
-      : `已为「${node.title}」生成 ${res.pages} 页讲解稿`)
-    await loadVideos()
-    await openVideo(node, 'script')
-  } finally {
-    scriptLoading.value = null
-  }
+  await genStore.runScript(node.id)
+  await loadVideos()
+  if (scriptState(node).complete) await openVideo(node, 'script')
 }
 
-// ---- AI 配音 ----
-const audioLoading = ref(null)
 async function genAudio(node) {
-  audioLoading.value = node.id
-  ElMessage.info('正在逐页合成配音，请稍候…')
-  try {
-    const res = await generateAudio(node.id)
-    if (res.audio_pages === res.total_pages) {
-      ElMessage.success(`已为「${node.title}」完成 ${res.audio_pages}/${res.total_pages} 页配音`)
-    } else {
-      ElMessage.warning(`已完成 ${res.audio_pages}/${res.total_pages} 页配音，未完成页可再次点击「配音」继续补齐`)
-    }
-    await loadVideos()
-    await openVideo(node, 'player')
-  } finally {
-    audioLoading.value = null
-  }
+  await genStore.runAudio(node.id)
+  await loadVideos()
+  await openVideo(node, 'player')
 }
 
 // ---- 讲解稿 / 配音查看 ----

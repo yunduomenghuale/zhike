@@ -67,7 +67,13 @@ class CatalogViewSet(BaseModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="generate-script", permission_classes=[IsTeacher])
     def generate_script(self, request, pk=None):
-        """基于该章节 PPT 逐页生成讲解稿并保存到教学视频（需求 T-V-01）。"""
+        """基于该章节 PPT 分批生成讲解稿并保存到教学视频（需求 T-V-01）。
+
+        分批生成：limit 指定本批最多生成页数（默认 6，上限 12），前端循环调用直至
+        done=true，避免一次生成几十页讲解稿超过网关 180s 超时（499）。
+        """
+        from apps.ai.services import generate_script_pages_batched
+
         catalog = self.get_object()
         ppt = (
             PPTResource.objects.filter(
@@ -79,61 +85,71 @@ class CatalogViewSet(BaseModelViewSet):
         )
         if not ppt or not ppt.parsed_pages:
             return api_response(message="该章节还没有已解析的 PPT", code=400, status=400)
-        video = TeachingVideo.objects.filter(catalog=catalog).first()
-        force = str(request.data.get("force", "")).lower() in ("1", "true", "yes", "on")
-        if (
-            video
-            and not force
-            and video.ppt_id == ppt.id
-            and video.scripts
-            and len(video.scripts) == len(ppt.parsed_pages)
-        ):
-            return api_response(
-                {"pages": len(video.scripts), "cached": True},
-                message="已存在讲解稿",
-            )
         try:
-            scripts = generate_scripts_for_video(ppt.parsed_pages)
-        except Exception:
-            return api_response(message="AI 讲解稿生成失败，请稍后重试", code=502, status=502)
+            limit = int(request.data.get("limit") or 6)
+        except (TypeError, ValueError):
+            limit = 6
+        limit = max(1, min(limit, 12))
+        force = str(request.data.get("force", "")).lower() in ("1", "true", "yes", "on")
+
         video, _ = TeachingVideo.objects.get_or_create(
             catalog=catalog, defaults={"course": catalog.course, "ppt": ppt}
         )
+        # 换了新版本 PPT 或明确 force 时重置讲解稿（配音/字幕一并失效）
+        if force or video.ppt_id != ppt.id:
+            video.scripts = []
+            video.audio_url = ""
+            video.subtitle_url = ""
+            video.video_url = ""
+            video.gen_status = TeachingVideo.GenStatus.DRAFT
         video.course = catalog.course
         video.ppt = ppt
-        video.scripts = scripts
-        video.audio_url = ""
-        video.subtitle_url = ""
-        video.video_url = ""
-        video.gen_status = TeachingVideo.GenStatus.SCRIPT_READY
         video.save()
-        return api_response({"pages": len(scripts)}, message="讲解稿生成完成")
+
+        result = generate_script_pages_batched(video, ppt.parsed_pages, batch_size=limit)
+        return api_response(
+            result,
+            message=f"已生成 {result['script_pages']}/{result['pages']} 页讲解稿",
+        )
 
     @action(detail=True, methods=["post"], url_path="generate-audio", permission_classes=[IsTeacher])
     def generate_audio(self, request, pk=None):
-        """基于讲解稿逐页 AI 配音（需求 T-V-03）。"""
+        """基于讲解稿逐页 AI 配音（需求 T-V-03）。
+
+        分段生成：limit 指定本批最多合成页数（默认 3，上限 10），前端循环调用直至
+        done=true，避免多页同步合成超过网关 180s 超时导致前端无反馈。
+        """
         from apps.ai.services import synthesize_audio_for_video
 
         catalog = self.get_object()
         video = TeachingVideo.objects.filter(catalog=catalog).first()
         if not video or not video.scripts:
             return api_response(message="请先生成讲解稿", code=400, status=400)
-        ok = synthesize_audio_for_video(video)
+        try:
+            limit = int(request.data.get("limit") or 3)
+        except (TypeError, ValueError):
+            limit = 3
+        limit = max(1, min(limit, 10))
+        created = synthesize_audio_for_video(video, limit=limit)
         video.refresh_from_db()
         scripts = video.scripts or []
         total = len([item for item in scripts if item.get("script")])
         audio_pages = sum(1 for item in scripts if item.get("audio_url"))
+        # 仅把明确合成失败（有 audio_error）的页计为失败；尚未轮到的页不算失败
         failed_pages = [
             item.get("page")
             for item in scripts
-            if item.get("script") and not item.get("audio_url")
+            if item.get("script") and not item.get("audio_url") and item.get("audio_error")
         ]
+        remaining = total - audio_pages
         return api_response(
             {
-                "created_pages": ok,
+                "created_pages": created,
                 "audio_pages": audio_pages,
                 "total_pages": total,
                 "failed_pages": failed_pages,
+                "remaining": remaining,
+                "done": remaining == 0,
             },
             message=f"已完成 {audio_pages}/{total} 页配音",
         )
