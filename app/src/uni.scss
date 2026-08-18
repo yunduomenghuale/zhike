@@ -1,0 +1,48 @@
+/**
+ * 设计令牌：与 Web 端 frontend/src/styles/main.css 保持一致。
+ * 品牌色 / 语义色 / 灰阶直接对齐 Web 端 CSS 变量。
+ */
+
+/* 品牌色（对齐 --primary-*） */
+$primary-50: #eff6ff;
+$primary-100: #dbeafe;
+$primary-500: #3b82f6;
+$primary-600: #2563eb;
+$primary-700: #1d4ed8;
+
+/* 语义色（对齐 --success/--warning/--danger/--info） */
+$success: #10b981;
+$warning: #f59e0b;
+$danger: #ef4444;
+$info: #64748b;
+
+/* 灰阶（对齐 --gray-*） */
+$gray-50: #f8fafc;
+$gray-100: #f1f5f9;
+$gray-200: #e2e8f0;
+$gray-300: #cbd5e1;
+$gray-400: #94a3b8;
+$gray-500: #64748b;
+$gray-600: #475569;
+$gray-700: #334155;
+$gray-800: #1e293b;
+$gray-900: #0f172a;
+
+/* uni-app 内置变量映射到项目令牌 */
+$uni-color-primary: $primary-600;
+$uni-color-success: $success;
+$uni-color-warning: $warning;
+$uni-color-error: $danger;
+
+$uni-text-color: $gray-800;
+$uni-text-color-inverse: #fff;
+$uni-text-color-grey: $gray-400;
+$uni-text-color-placeholder: $gray-400;
+$uni-text-color-disable: $gray-300;
+
+$uni-bg-color: #fff;
+$uni-bg-color-grey: $gray-50;
+$uni-bg-color-hover: $gray-100;
+$uni-bg-color-mask: rgba(0, 0, 0, 0.4);
+
+$uni-border-color: $gray-200;

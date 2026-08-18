@@ -77,6 +77,23 @@ npm run dev
 - 开发地址：`http://127.0.0.1:5273/`
 - 通过 Vite 代理将 `/api` 转发到后端 `http://127.0.0.1:8005`
 
+### App 端（uni-app）
+
+学生端移动端 MVP（uni-app + Vue3 + Vite），一套代码可编译 H5 / 微信小程序 / Android / iOS，复用后端 REST API + JWT。
+
+```bash
+cd app
+npm install
+npm run dev:h5            # 浏览器移动端模式调试（/api、/media 走 Vite 代理到 8005）
+npm run dev:mp-weixin     # 微信小程序：用微信开发者工具导入 app/dist/dev/mp-weixin
+npm run build:app         # App 端产出，离线打包需配合 HBuilderX
+```
+
+- 已包含：登录、工作台、我的课程（邀请码加入 + 学习进度）、章节学习、课件逐页查看（配音播放）、个人中心
+- 真机 / 小程序调试时，把 `app/src/config.js` 里的后端地址改为电脑局域网 IP（如 `http://192.168.1.10:8005`）
+- 微信小程序需在 mp 后台配置 request 合法域名，开发期可在开发者工具勾选「不校验合法域名」
+- 后续迭代：AI 助教、作业、考试、错题本等（当前请使用网页端）
+
 ## AI Provider 说明
 
 所有大模型能力通过 `apps/ai` 统一封装，三类能力：

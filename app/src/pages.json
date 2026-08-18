@@ -1,0 +1,193 @@
+{
+	"pages": [
+		{
+			"path": "pages/login/index",
+			"style": {
+				"navigationBarTitleText": "登录",
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "pages/home/index",
+			"style": {
+				"navigationBarTitleText": "工作台"
+			}
+		},
+		{
+			"path": "pages/course/index",
+			"style": {
+				"navigationBarTitleText": "我的课程"
+			}
+		},
+		{
+			"path": "pages/course/chapters",
+			"style": {
+				"navigationBarTitleText": "课程学习"
+			}
+		},
+		{
+			"path": "pages/course/lecture",
+			"style": {
+				"navigationBarTitleText": "课件学习"
+			}
+		},
+		{
+			"path": "pages/course/practice",
+			"style": {
+				"navigationBarTitleText": "章节练习"
+			}
+		},
+		{
+			"path": "pages/qa/index",
+			"style": {
+				"navigationBarTitleText": "AI 助教"
+			}
+		},
+		{
+			"path": "pages/homework/index",
+			"style": {
+				"navigationBarTitleText": "我的作业"
+			}
+		},
+		{
+			"path": "pages/homework/detail",
+			"style": {
+				"navigationBarTitleText": "作业详情"
+			}
+		},
+		{
+			"path": "pages/wrongbook/index",
+			"style": {
+				"navigationBarTitleText": "错题本"
+			}
+		},
+		{
+			"path": "pages/exam/index",
+			"style": {
+				"navigationBarTitleText": "我的考试"
+			}
+		},
+		{
+			"path": "pages/exam/taking",
+			"style": {
+				"navigationBarTitleText": "考试"
+			}
+		},
+		{
+			"path": "pages/exam/review",
+			"style": {
+				"navigationBarTitleText": "成绩与解析"
+			}
+		},
+		{
+			"path": "pages/notify/index",
+			"style": {
+				"navigationBarTitleText": "消息通知"
+			}
+		},
+		{
+			"path": "pages/profile/edit",
+			"style": {
+				"navigationBarTitleText": "编辑资料"
+			}
+		},
+		{
+			"path": "pages/teacher/courses",
+			"style": {
+				"navigationBarTitleText": "课程管理"
+			}
+		},
+		{
+			"path": "pages/teacher/catalogs",
+			"style": {
+				"navigationBarTitleText": "章节管理"
+			}
+		},
+		{
+			"path": "pages/teacher/classes",
+			"style": {
+				"navigationBarTitleText": "班级管理"
+			}
+		},
+		{
+			"path": "pages/teacher/questions",
+			"style": {
+				"navigationBarTitleText": "题库"
+			}
+		},
+		{
+			"path": "pages/teacher/homework",
+			"style": {
+				"navigationBarTitleText": "作业管理"
+			}
+		},
+		{
+			"path": "pages/teacher/homework-subs",
+			"style": {
+				"navigationBarTitleText": "作业批改"
+			}
+		},
+		{
+			"path": "pages/teacher/exams",
+			"style": {
+				"navigationBarTitleText": "考试管理"
+			}
+		},
+		{
+			"path": "pages/teacher/exam-monitor",
+			"style": {
+				"navigationBarTitleText": "考试监控"
+			}
+		},
+		{
+			"path": "pages/teacher/stats",
+			"style": {
+				"navigationBarTitleText": "学习统计"
+			}
+		},
+		{
+			"path": "pages/teacher/stats-student",
+			"style": {
+				"navigationBarTitleText": "学生明细"
+			}
+		},
+		{
+			"path": "pages/teacher/qa-records",
+			"style": {
+				"navigationBarTitleText": "问答记录"
+			}
+		},
+		{
+			"path": "pages/profile/index",
+			"style": {
+				"navigationBarTitleText": "个人中心"
+			}
+		}
+	],
+	"globalStyle": {
+		"navigationBarTextStyle": "black",
+		"navigationBarTitleText": "智课平台",
+		"navigationBarBackgroundColor": "#ffffff",
+		"backgroundColor": "#f8fafc"
+	},
+	"tabBar": {
+		"color": "#64748b",
+		"selectedColor": "#2563eb",
+		"backgroundColor": "#ffffff",
+		"borderStyle": "white",
+		"list": [
+			{
+				"pagePath": "pages/home/index",
+				"text": "工作台"
+			},
+			{
+				"pagePath": "pages/course/index",
+				"text": "我的课程"
+			},
+			{
+				"pagePath": "pages/profile/index",
+				"text": "我的"
+			}
+		]
+	}
+}
