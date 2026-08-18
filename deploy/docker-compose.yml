@@ -30,6 +30,8 @@ services:
       - "8088:80"
     volumes:
       - ../frontend/dist:/usr/share/nginx/html:ro
+      # 移动端 H5（uni-app 产物，nginx /m/ 子路径；挂 html 之外，避免在 ro 的 dist 挂载内建目录）
+      - ../app/dist/build/h5:/usr/share/nginx/m:ro
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ../media:/app/media:ro
       - ../staticfiles:/app/staticfiles:ro

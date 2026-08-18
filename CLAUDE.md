@@ -44,6 +44,7 @@
 - TTS 模型：必须用 `qwen-tts`（DashScope 原生 multimodal-generation 端点 + Cherry 发音人）；`cosyvoice-v1` 不被该端点接受（400 InvalidParameter），如需 cosyvoice 要走 WebSocket（未实现）
 - AI 配音为**分段生成**（2026-08-17）：`POST /catalogs/{id}/generate-audio/` 带 `limit`（默认 3），每页合成后即时落库，前端循环调用直至 `done=true`，按钮实时显示 `配音 x/y`；此前 18 页同步合成超 nginx 180s 导致 504 无反馈
 - 讲解稿同为**分批生成**（2026-08-18）：`POST /catalogs/{id}/generate-script/` 带 `limit`（默认 6），每批一次 AI 调用、批后落库，前端循环调用显示 `讲稿 x/y`；此前 44 页一次性生成（含 retries=3 重试）超 180s 被 499。换新版本 PPT 或 `force=true` 自动重置讲稿重新生成
+- 移动端（uni-app，主线 2026-08-18 合入）：**H5 形态部署在 `http://124.70.107.64:8088/m/`**（与 Web 同域，API/media 同源零 CORS）；`app/` 构建 `npm run build:h5` → `dist/build/h5`；`manifest.json h5.router.base` 与 `vite.config.js base` 均为 `/m/`；compose 挂载到容器 `/usr/share/nginx/m`（**不可挂 html/m**——html 是 ro 的 dist 挂载，嵌套建目录会启动失败，2026-08-18 曾致 Web 中断约 2 分钟）；小程序/App 打包另行操作（`app/src/config.js` 的 `USE_PROD=true` 切生产后端地址）
 - 同机系统（2026-08-17 清理后）：仅 **cv_\***（校园车辆，8080/8081/3308 均绑 127.0.0.1，线上运行勿动）与本系统；virtual-human、chaoxingai 已停止清理（容器/镜像/孤立卷已删，项目数据目录保留在 /data/Virtual-Human、/data/AIzhike）
 - 端口占用（2026-08-17 外网实测+全端口抽样）：对外可达 22 sshd / 80 宿主机 nginx / 8088 本系统前端；**安全组放行且空闲可用：443、9527、21、1433、3389、8082、8084**（8080/8081 放行但被 cv 绑 127.0.0.1 占用勿用）；全端口间隔抽样证实**无整段开放**，放行均为上述离散端口；未放行：5273、8005、3306、3307、3308、6380 等
 - 旧代码备份：`/data/zhike-v2/backend.bak.20260817`（可回滚，确认稳定后可删）

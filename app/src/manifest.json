@@ -5,6 +5,13 @@
     "versionName" : "1.0.0",
     "versionCode" : "100",
     "transformPx" : false,
+    /* H5 部署在 Web 前端同域 nginx 的 /m/ 子路径（http://124.70.107.64:8088/m/） */
+    "h5" : {
+        "title" : "智课平台",
+        "router" : {
+            "base" : "/m/"
+        }
+    },
     /* 5+App特有相关 */
     "app-plus" : {
         "usingComponents" : true,
