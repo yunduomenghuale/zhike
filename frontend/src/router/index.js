@@ -72,6 +72,8 @@ const routes = [
       { path: 'student/exams/:id/take', name: 'exam-taking', component: () => import('@/views/student/ExamTaking.vue'), meta: { title: '在线考试', role: 'student', activeMenu: '/student/my-classes' } },
     ],
   },
+  // 未知路径兜底：登录后 redirect 指向不存在页面（如手输 /admin-panel/）时回工作台，避免白屏
+  { path: '/:pathMatch(.*)*', redirect: ROLE_HOME },
 ]
 
 const router = createRouter({
