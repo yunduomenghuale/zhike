@@ -72,8 +72,8 @@ const routes = [
       { path: 'student/exams/:id/take', name: 'exam-taking', component: () => import('@/views/student/ExamTaking.vue'), meta: { title: '在线考试', role: 'student', activeMenu: '/student/my-classes' } },
     ],
   },
-  // 未知路径兜底：登录后 redirect 指向不存在页面（如手输 /admin-panel/）时回工作台，避免白屏
-  { path: '/:pathMatch(.*)*', redirect: ROLE_HOME },
+  // 未知路径兜底：守卫统一提示并回工作台（不直接 redirect，以便弹出“页面不存在”提示）
+  { path: '/:pathMatch(.*)*', name: 'not-found', component: { render: () => null }, meta: { notFound: true } },
 ]
 
 const router = createRouter({
@@ -103,6 +103,12 @@ router.beforeEach(async (to) => {
       userStore.logout()
       return { path: '/login', query: { redirect: to.fullPath } }
     }
+  }
+
+  // 未知路径：提示后回工作台（登录后 redirect 指向不存在页面时避免白屏，如手输 /admin-panel/）
+  if (to.meta.notFound) {
+    ElMessage.warning('页面不存在，已返回工作台')
+    return { path: ROLE_HOME }
   }
 
   // 角色边界：页面声明了 meta.role 且与当前角色不符 → 送回本角色主页
