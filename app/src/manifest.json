@@ -1,11 +1,13 @@
 {
     "name" : "智课平台",
-    "appid" : "",
-    "description" : "智能课程教学平台移动端（学生端）：课程学习、AI 助教、作业、错题本",
-    "versionName" : "1.0.0",
-    "versionCode" : "100",
+    "appid" : "__UNI__E27FC41",
+    "description" : "面向教师和学生的智能课程教学平台",
+    "versionName" : "1.0.5",
+    "versionCode" : 105,
     "transformPx" : false,
-    /* 5+App特有相关 */
+    "uniStatistics" : {
+        "enable" : false
+    },
     "app-plus" : {
         "usingComponents" : true,
         "nvueStyleCompiler" : "uni-app",
@@ -16,57 +18,34 @@
             "autoclose" : true,
             "delay" : 0
         },
-        /* 模块配置 */
-        "modules" : {},
-        /* 应用发布信息 */
         "distribute" : {
-            /* android打包配置 */
             "android" : {
+                "packagename" : "com.zhike.smartcourse",
                 "permissions" : [
-                    "<uses-permission android:name=\"android.permission.CHANGE_NETWORK_STATE\"/>",
-                    "<uses-permission android:name=\"android.permission.MOUNT_UNMOUNT_FILESYSTEMS\"/>",
-                    "<uses-permission android:name=\"android.permission.VIBRATE\"/>",
-                    "<uses-permission android:name=\"android.permission.READ_LOGS\"/>",
-                    "<uses-permission android:name=\"android.permission.ACCESS_WIFI_STATE\"/>",
-                    "<uses-feature android:name=\"android.hardware.camera.autofocus\"/>",
+                    "<uses-permission android:name=\"android.permission.INTERNET\"/>",
                     "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>",
-                    "<uses-permission android:name=\"android.permission.CAMERA\"/>",
-                    "<uses-permission android:name=\"android.permission.GET_ACCOUNTS\"/>",
-                    "<uses-permission android:name=\"android.permission.READ_PHONE_STATE\"/>",
-                    "<uses-permission android:name=\"android.permission.CHANGE_WIFI_STATE\"/>",
-                    "<uses-permission android:name=\"android.permission.WAKE_LOCK\"/>",
-                    "<uses-permission android:name=\"android.permission.FLASHLIGHT\"/>",
-                    "<uses-feature android:name=\"android.hardware.camera\"/>",
-                    "<uses-permission android:name=\"android.permission.WRITE_SETTINGS\"/>"
-                ]
+                    "<uses-permission android:name=\"android.permission.WRITE_EXTERNAL_STORAGE\"/>"
+                ],
+                "minSdkVersion" : 23,
+                "targetSdkVersion" : 35
             },
-            /* ios打包配置 */
-            "ios" : {},
-            /* SDK配置 */
-            "sdkConfigs" : {}
+            "ios" : {
+                "dSYMs" : false
+            },
+            "sdkConfigs" : {},
+            "icons" : {
+                "android" : {
+                    "mdpi" : "src/static/icons/48.png",
+                    "hdpi" : "src/static/icons/72.png",
+                    "xhdpi" : "src/static/icons/96.png",
+                    "xxhdpi" : "src/static/icons/144.png",
+                    "xxxhdpi" : "src/static/icons/192.png"
+                },
+                "ios" : {
+                    "appstore" : "src/static/icons/1024.png"
+                }
+            }
         }
-    },
-    /* 快应用特有相关 */
-    "quickapp" : {},
-    /* 小程序特有相关 */
-    "mp-weixin" : {
-        "appid" : "",
-        "setting" : {
-            "urlCheck" : false
-        },
-        "usingComponents" : true
-    },
-    "mp-alipay" : {
-        "usingComponents" : true
-    },
-    "mp-baidu" : {
-        "usingComponents" : true
-    },
-    "mp-toutiao" : {
-        "usingComponents" : true
-    },
-    "uniStatistics": {
-        "enable": false
     },
     "vueVersion" : "3"
 }

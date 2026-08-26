@@ -188,7 +188,7 @@ SPECTACULAR_SETTINGS = {
 # ---------------------------------------------------------------------------
 CORS_ALLOWED_ORIGINS = env_list(
     "CORS_ALLOWED_ORIGINS",
-    "http://127.0.0.1:5273,http://localhost:5273,http://127.0.0.1:5173,http://localhost:5173",
+    "http://127.0.0.1:5273,http://localhost:5273,http://127.0.0.1:5173,http://localhost:5173,http://localhost,https://localhost",
 )
 
 if not DEBUG:

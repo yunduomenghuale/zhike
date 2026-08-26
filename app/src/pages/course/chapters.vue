@@ -1,209 +1,92 @@
 <template>
   <view class="page">
-    <view class="course-head">{{ courseName }}</view>
+    <AppHeader :title="courseName" back />
+    <scroll-view class="scroll" scroll-y>
+      <view class="content">
+        <view class="course-summary">
+          <view class="summary-icon"><uni-icons type="list" color="#2563eb" size="26" /></view>
+          <view class="summary-copy"><view class="summary-label">课程章节</view><view class="summary-title">{{ courseName }}</view></view>
+          <view class="summary-count">{{ rows.length }} 节</view>
+        </view>
 
-    <view v-if="loading" class="tip">加载中…</view>
-    <template v-else>
-      <view v-if="!rows.length" class="tip">暂无已发布章节</view>
-      <view
-        v-for="row in rows"
-        :key="row.node.id"
-        class="chapter"
-        :class="{ child: row.isChild }"
-        @click="open(row.node)"
-      >
-        <view class="chapter-icon" :class="{ child: row.isChild }">
-          {{ row.isChild ? '📄' : '📁' }}
+        <view class="hint"><uni-icons type="info" color="#64748b" size="17" /><text>进入章节后可查看讲解、向 AI 助教提问并阅读相关资料</text></view>
+        <view v-if="loading" class="loading">正在加载章节…</view>
+        <EmptyState v-else-if="!rows.length" icon="folder-add" title="暂无已发布章节" description="教师发布章节后会显示在这里" />
+
+        <view v-else class="chapters">
+          <view v-for="(row, index) in rows" :key="row.node.id" class="chapter" :class="{ child: row.child }" hover-class="chapter-tap" @click="open(row.node)">
+            <view class="chapter-index">{{ String(index + 1).padStart(2, '0') }}</view>
+            <view class="chapter-copy">
+              <view class="chapter-type">{{ row.child ? '小节' : '章节' }}</view>
+              <view class="chapter-title">{{ row.node.title }}</view>
+              <view class="chapter-tools"><text>AI 助教</text><text>相关资料</text><text>章节讲解</text></view>
+            </view>
+            <view class="open"><uni-icons type="right" color="#2563eb" size="14" /></view>
+          </view>
         </view>
-        <view class="chapter-main">
-          <view class="chapter-title">{{ row.node.title }}</view>
-          <text v-if="progressInfo(row.node.id).label" class="tag" :class="progressInfo(row.node.id).type">
-            {{ progressInfo(row.node.id).label }}
-          </text>
-        </view>
-        <button class="practice-btn" @click.stop="openPractice(row.node)">练习</button>
-        <text class="arrow">›</text>
       </view>
-    </template>
+    </scroll-view>
   </view>
 </template>
 
 <script setup>
 import { ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
-import { listCatalogs, listWatchProgress } from '@/api/course.js'
-import { chapterProgress } from '@/utils/progress.js'
+import AppHeader from '@/components/AppHeader.vue'
+import EmptyState from '@/components/EmptyState.vue'
+import { listCatalogs } from '@/api/courses.js'
 
 const courseId = ref(null)
 const courseName = ref('课程学习')
-const tree = ref([])
 const rows = ref([])
-const progressMap = ref({})
 const loading = ref(false)
 
-// 学习进度仅学生有意义；教师视角的 watch-progress 是全班学生记录
-const isStudent = uni.getStorageSync('user')?.role === 'student'
-
-onLoad((q) => {
-  courseId.value = Number(q.id) || null
-  if (q.name) courseName.value = decodeURIComponent(q.name)
-  uni.setNavigationBarTitle({ title: courseName.value })
+onLoad((query) => {
+  courseId.value = Number(query.course) || null
+  if (query.name) courseName.value = decodeURIComponent(query.name)
   load()
 })
-
-function progressInfo(catalogId) {
-  return chapterProgress(progressMap.value[catalogId])
-}
 
 async function load() {
   if (!courseId.value) return
   loading.value = true
   try {
-    const [cats, progress] = await Promise.all([
-      listCatalogs({ course: courseId.value, tree: 1 }),
-      isStudent ? listWatchProgress({ course: courseId.value }) : Promise.resolve([]),
-    ])
-    tree.value = cats.results ?? cats
-    const map = {}
-    ;(progress.results ?? progress).forEach((p) => { map[p.catalog] = p })
-    progressMap.value = map
-    const flat = []
-    for (const n of tree.value) {
-      flat.push({ node: n, isChild: false })
-      for (const c of n.children || []) flat.push({ node: c, isChild: true })
-    }
-    rows.value = flat
-  } finally {
-    loading.value = false
-  }
+    const data = await listCatalogs({ course: courseId.value, tree: 1 })
+    const result = []
+    ;(data.results ?? data).forEach((node) => {
+      result.push({ node, child: false })
+      ;(node.children || []).forEach((child) => result.push({ node: child, child: true }))
+    })
+    rows.value = result
+  } finally { loading.value = false }
 }
 
 function open(node) {
-  uni.navigateTo({
-    url: `/pages/course/lecture?catalog=${node.id}&title=${encodeURIComponent(node.title)}&course=${encodeURIComponent(courseName.value)}`,
-  })
-}
-
-function openPractice(node) {
-  uni.navigateTo({
-    url: `/pages/course/practice?course=${courseId.value}&catalog=${node.id}&title=${encodeURIComponent(node.title)}`,
-  })
+  uni.navigateTo({ url: `/pages/course/lecture?course=${courseId.value}&catalog=${node.id}&title=${encodeURIComponent(node.title)}` })
 }
 </script>
 
-<style scoped>
-.page {
-  padding: 28rpx;
-}
-
-.course-head {
-  margin-bottom: 24rpx;
-  font-size: 34rpx;
-  font-weight: 800;
-  color: #0f172a;
-}
-
-.tip {
-  padding: 80rpx 0;
-  text-align: center;
-  font-size: 26rpx;
-  color: #94a3b8;
-}
-
-.chapter {
-  display: flex;
-  align-items: center;
-  gap: 20rpx;
-  margin-bottom: 18rpx;
-  padding: 26rpx 28rpx;
-  border-radius: 20rpx;
-  background: #ffffff;
-  border: 1rpx solid #f1f5f9;
-  box-shadow: 0 2rpx 6rpx rgba(15, 23, 42, 0.04);
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
-}
-
-.chapter.child {
-  margin-left: 48rpx;
-}
-
-.chapter:active {
-  transform: scale(0.98);
-}
-
-.chapter-icon {
-  width: 64rpx;
-  height: 64rpx;
-  display: flex;
-  flex: 0 0 64rpx;
-  align-items: center;
-  justify-content: center;
-  border-radius: 16rpx;
-  background: #eff6ff;
-  font-size: 32rpx;
-}
-
-.chapter-icon.child {
-  width: 56rpx;
-  height: 56rpx;
-  flex-basis: 56rpx;
-  background: #f1f5f9;
-  font-size: 28rpx;
-}
-
-.chapter-main {
-  flex: 1;
-  min-width: 0;
-}
-
-.chapter-title {
-  overflow: hidden;
-  font-size: 28rpx;
-  font-weight: 600;
-  color: #0f172a;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tag {
-  display: inline-flex;
-  margin-top: 8rpx;
-  padding: 2rpx 14rpx;
-  border-radius: 999rpx;
-  font-size: 20rpx;
-  background: #f1f5f9;
-  color: #94a3b8;
-}
-
-.tag.warning {
-  background: #fff7ed;
-  color: #d97706;
-}
-
-.tag.success {
-  background: #ecfdf5;
-  color: #10b981;
-}
-
-.practice-btn {
-  flex-shrink: 0;
-  height: 52rpx;
-  line-height: 52rpx;
-  padding: 0 24rpx;
-  border-radius: 999rpx;
-  background: #eff6ff;
-  color: #2563eb;
-  font-size: 22rpx;
-  font-weight: 700;
-}
-
-.practice-btn::after {
-  border: none;
-}
-
-.arrow {
-  flex-shrink: 0;
-  font-size: 38rpx;
-  color: #cbd5e1;
-}
+<style scoped lang="scss">
+.page { min-height: 100vh; }
+.scroll { height: calc(100vh - var(--app-safe-top) - 92rpx); }
+.content { padding: 26rpx 28rpx 55rpx; }
+.course-summary { position: relative; overflow: hidden; display: flex; align-items: center; gap: 18rpx; padding: 27rpx; border: 1rpx solid rgba(37, 99, 235, .1); border-radius: 29rpx; background: linear-gradient(135deg, #edf5ff, #fff); box-shadow: $shadow-card; }
+.summary-icon { width: 76rpx; height: 76rpx; display: flex; align-items: center; justify-content: center; border-radius: 23rpx; background: #fff; }
+.summary-copy { min-width: 0; flex: 1; }
+.summary-label { color: $brand; font-size: 19rpx; font-weight: 700; }
+.summary-title { margin-top: 6rpx; overflow: hidden; color: $text-main; font-size: 28rpx; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
+.summary-count { color: $text-sub; font-size: 20rpx; }
+.hint { display: flex; align-items: flex-start; gap: 12rpx; margin: 24rpx 2rpx 30rpx; padding: 20rpx 22rpx; border-radius: 21rpx; background: #eef2f7; color: $text-sub; font-size: 20rpx; line-height: 1.55; }
+.chapters { position: relative; }
+.chapter { display: flex; align-items: center; gap: 18rpx; margin-bottom: 18rpx; padding: 25rpx; border: 1rpx solid rgba(37, 99, 235, .075); border-radius: 27rpx; background: #fff; box-shadow: 0 8rpx 25rpx rgba(15, 23, 42, .04); }
+.chapter.child { margin-left: 34rpx; }
+.chapter-index { width: 60rpx; height: 60rpx; flex: 0 0 60rpx; border-radius: 19rpx; background: $brand-soft; color: $brand; font-size: 23rpx; font-weight: 800; line-height: 60rpx; text-align: center; }
+.chapter.child .chapter-index { background: #f1f5f9; color: $text-sub; }
+.chapter-copy { min-width: 0; flex: 1; }
+.chapter-type { color: $text-light; font-size: 18rpx; }
+.chapter-title { margin-top: 5rpx; overflow: hidden; color: $text-main; font-size: 25rpx; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
+.chapter-tools { display: flex; gap: 12rpx; margin-top: 10rpx; overflow: hidden; color: $text-light; font-size: 17rpx; white-space: nowrap; }
+.open { width: 48rpx; height: 48rpx; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: $brand-soft; }
+.chapter-tap { opacity: .68; transform: scale(.985); }
+.loading { padding: 90rpx; color: $text-light; font-size: 23rpx; text-align: center; }
 </style>

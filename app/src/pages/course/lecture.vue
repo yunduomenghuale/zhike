@@ -1,512 +1,252 @@
 <template>
   <view class="page">
-    <view v-if="loading" class="tip">加载中…</view>
-    <template v-else-if="pages.length">
-      <!-- 课件区 -->
-      <view class="stage" @click="preview">
-        <image
-          v-if="current?.image || current?.image_url"
-          class="stage-image"
-          :src="mediaURL(current.image || current.image_url)"
-          mode="widthFix"
-        />
-        <view v-else class="stage-text">
-          <view class="stage-title">{{ current?.title || `第 ${index + 1} 页` }}</view>
-          <view class="stage-body">{{ current?.body || '本页暂无文本内容' }}</view>
+    <AppHeader :title="title" back />
+    <view class="tabs">
+      <view v-for="item in tabs" :key="item.key" class="tab" :class="{ active: activeTab === item.key }" @click="switchTab(item.key)">
+        <uni-icons :type="item.icon" :color="activeTab === item.key ? '#2563eb' : '#94a3b8'" size="17" />
+        <text>{{ item.label }}</text>
+      </view>
+    </view>
+
+    <scroll-view class="scroll" scroll-y :scroll-into-view="chatAnchor" scroll-with-animation>
+      <view class="content">
+        <view v-if="activeTab === 'lecture'">
+          <view v-if="loading" class="loading">正在加载讲解…</view>
+          <EmptyState v-else-if="!pages.length" icon="videocam" title="本章暂无课件" description="教师上传并发布课件后可开始学习" />
+          <template v-else>
+            <view class="stage" @click="previewCurrent">
+              <image v-if="currentPage?.image || currentPage?.image_url" class="slide-image" :src="mediaUrl(currentPage.image || currentPage.image_url)" mode="widthFix" />
+              <view v-else class="slide-text"><view class="slide-title">{{ currentPage?.title || `第 ${pageIndex + 1} 页` }}</view><view class="slide-body">{{ currentPage?.body || '本页暂无文本内容' }}</view></view>
+              <view class="page-count">{{ pageIndex + 1 }} / {{ pages.length }}</view>
+            </view>
+            <view class="page-controls">
+              <button class="control" :disabled="pageIndex === 0" @click="pageIndex--"><uni-icons type="left" color="currentColor" size="15" />上一页</button>
+              <view class="progress"><view class="progress-fill" :style="{ width: `${((pageIndex + 1) / pages.length) * 100}%` }"></view></view>
+              <button class="control" :disabled="pageIndex >= pages.length - 1" @click="pageIndex++">下一页<uni-icons type="right" color="currentColor" size="15" /></button>
+            </view>
+            <view v-if="currentScript?.script" class="script-card">
+              <view class="script-head"><view class="script-icon"><uni-icons type="compose" color="#2563eb" size="18" /></view><view><view class="script-title">讲解稿</view><view class="script-subtitle">第 {{ pageIndex + 1 }} 页配套讲解</view></view></view>
+              <view class="script-text">{{ currentScript.script }}</view>
+            </view>
+          </template>
         </view>
-        <view class="stage-count">{{ index + 1 }} / {{ pages.length }}</view>
-      </view>
 
-      <!-- 控制条 -->
-      <view class="controls">
-        <button class="nav-btn" :disabled="index === 0" @click="goPrev">上一页</button>
-        <button
-          v-if="hasAnyAudio"
-          class="play-btn"
-          @click="toggleAudio"
-        >
-          {{ playing ? '⏸ 暂停' : '▶ 连播' }}
-        </button>
-        <text v-else class="no-audio">本章无配音</text>
-        <button class="nav-btn" :disabled="index >= pages.length - 1" @click="goNext">下一页</button>
-      </view>
-
-      <!-- 播放进度 -->
-      <view v-if="currentAudio" class="audio-bar">
-        <text class="audio-time">{{ fmtTime(currentTime) }}</text>
-        <view class="audio-track">
-          <view class="audio-fill" :style="{ width: playPct + '%' }"></view>
+        <view v-else-if="activeTab === 'ai'">
+          <view class="intro ai-intro">
+            <view class="intro-icon ai-icon"><uni-icons type="chatbubble" color="#6366f1" size="24" /></view>
+            <view class="intro-copy"><view class="intro-title">本章 AI 助教</view><view class="intro-desc">基于本章课件、讲解稿和课程知识库回答</view></view>
+          </view>
+          <view v-if="!messages.length" class="suggestions">
+            <view class="suggest-label">试试这样问</view>
+            <view v-for="question in suggests" :key="question" class="suggest" hover-class="tap" @click="ask(question)"><text>{{ question }}</text><uni-icons type="right" color="#94a3b8" size="13" /></view>
+          </view>
+          <view v-else class="messages">
+            <view v-for="(message, index) in messages" :key="index" class="message" :class="message.role">
+              <view class="bubble">
+                <view class="message-text">{{ message.content }}</view>
+                <view v-if="message.cited?.length" class="sources"><view class="sources-title">参考来源</view><view v-for="(source, sourceIndex) in message.cited" :key="sourceIndex" class="source">{{ source.material_name || '课程资料' }}{{ source.page ? ` · P${source.page}` : '' }}</view></view>
+              </view>
+            </view>
+            <view v-if="asking" class="message assistant"><view class="bubble thinking">正在检索本章资料…</view></view>
+            <view id="chat-bottom" class="anchor"></view>
+          </view>
         </view>
-        <text class="audio-time">{{ fmtTime(duration) }}</text>
-      </view>
-      <view v-if="currentAudio" class="audio-hint">
-        {{ playing ? '正在连播，配音结束自动翻页' : '点击「连播」从本页配音开始学习' }}
-      </view>
 
-      <!-- 讲解稿 -->
-      <view v-if="currentScript?.script" class="script">
-        <view class="script-label">讲解稿</view>
-        <view class="script-text">{{ currentScript.script }}</view>
+        <view v-else>
+          <view class="intro">
+            <view class="intro-icon material-icon"><uni-icons type="folder-add" color="#2563eb" size="24" /></view>
+            <view class="intro-copy"><view class="intro-title">相关资料</view><view class="intro-desc">教师上传的课程文档与知识库资料</view></view>
+          </view>
+          <view v-if="materialsLoading" class="loading">正在加载资料…</view>
+          <EmptyState v-else-if="!materials.length" icon="folder-add" title="暂无相关资料" description="老师上传后会显示在这里" />
+          <view v-else class="material-list">
+            <view v-for="material in materials" :key="material.id" class="material-row" hover-class="tap" @click="openMaterial(material)">
+              <view class="file-icon"><uni-icons type="paperclip" color="#2563eb" size="20" /></view>
+              <view class="file-copy"><view class="file-name">{{ material.file_name }}</view><view class="file-meta">{{ (material.file_type || '文件').toUpperCase() }} · {{ material.chunk_count || 0 }} 个知识片段</view></view>
+              <view class="file-status" :class="material.parse_status">{{ material.parse_status_display || '已上传' }}</view>
+              <uni-icons type="right" color="#cbd5e1" size="14" />
+            </view>
+          </view>
+        </view>
       </view>
-    </template>
-    <view v-else class="tip">本章节还没有可学习的课件</view>
+    </scroll-view>
+
+    <view v-if="activeTab === 'ai'" class="input-shell">
+      <view class="input-bar">
+        <input v-model="questionInput" class="question-input" placeholder="就本章内容提问…" placeholder-class="placeholder" confirm-type="send" :disabled="asking" @confirm="ask()" />
+        <button class="send" :disabled="asking || !questionInput.trim()" :loading="asking" @click="ask()"><uni-icons type="paperplane" color="#fff" size="20" /></button>
+      </view>
+    </view>
   </view>
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
-import { onHide, onLoad, onUnload } from '@dcloudio/uni-app'
-import { listPpts, listVideos, listWatchProgress, reportVideoProgress } from '@/api/course.js'
-import { mediaURL } from '@/config.js'
+import { computed, nextTick, ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import AppHeader from '@/components/AppHeader.vue'
+import EmptyState from '@/components/EmptyState.vue'
+import { listPpts, listVideos } from '@/api/courses.js'
+import { askQuestion, listMaterials } from '@/api/knowledge.js'
+import { mediaUrl } from '@/config.js'
 
+const tabs = [
+  { key: 'lecture', label: '章节讲解', icon: 'videocam' },
+  { key: 'ai', label: 'AI 助教', icon: 'chatbubble' },
+  { key: 'materials', label: '相关资料', icon: 'folder-add' },
+]
+const activeTab = ref('lecture')
+const courseId = ref(null)
 const catalogId = ref(null)
-const title = ref('课件学习')
+const title = ref('章节学习')
 const pages = ref([])
 const scripts = ref([])
-const index = ref(0)
+const pageIndex = ref(0)
 const loading = ref(false)
+const materials = ref([])
+const materialsLoading = ref(false)
+const materialsLoaded = ref(false)
+const messages = ref([])
+const questionInput = ref('')
+const asking = ref(false)
+const chatAnchor = ref('')
+const session = `app-chapter-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+const suggests = ['这一章的重点是什么？', '帮我总结本章核心概念', '这部分可以举个例子吗？']
+const currentPage = computed(() => pages.value[pageIndex.value])
+const currentScript = computed(() => scripts.value.find((item) => item.page === currentPage.value?.page))
 
-const current = computed(() => pages.value[index.value])
-const currentScript = computed(() =>
-  scripts.value.find((s) => s.page === current.value?.page),
-)
-const currentAudio = computed(() => {
-  const url = currentScript.value?.audio_url
-  return url ? mediaURL(url) : ''
+onLoad((query) => {
+  courseId.value = Number(query.course) || null
+  catalogId.value = Number(query.catalog) || null
+  if (query.title) title.value = decodeURIComponent(query.title)
+  loadLecture()
 })
-const hasAnyAudio = computed(() => scripts.value.some((s) => s?.audio_url))
 
-onLoad((q) => {
-  catalogId.value = Number(q.catalog) || null
-  if (q.title) title.value = decodeURIComponent(q.title)
-  uni.setNavigationBarTitle({ title: title.value })
-  load()
-})
-
-async function load() {
+async function loadLecture() {
   if (!catalogId.value) return
   loading.value = true
   try {
-    const [ppts, videos] = await Promise.all([
-      listPpts({ catalog: catalogId.value }),
-      listVideos({ catalog: catalogId.value }),
-    ])
-    const pptList = ppts.results ?? ppts
-    const active = pptList.find((p) => p.is_active) || pptList[0]
-    pages.value = active?.parsed_pages || []
-    const videoList = videos.results ?? videos
-    const video = videoList[0] || null
-    scripts.value = video?.scripts || []
-    videoId.value = video?.id || null
-    await restoreProgress()
-  } finally {
-    loading.value = false
-  }
+    const [pptData, videoData] = await Promise.all([listPpts({ catalog: catalogId.value }), listVideos({ catalog: catalogId.value })])
+    const ppts = pptData.results ?? pptData
+    const ppt = ppts.find((item) => item.is_active) || ppts[0]
+    pages.value = ppt?.parsed_pages || []
+    scripts.value = (videoData.results ?? videoData)[0]?.scripts || []
+  } finally { loading.value = false }
 }
 
-// ---- 学习进度（与 web 端 Learning.vue 规则一致）----
-// 进度上报接口仅学生可用（IsStudent），教师等角色浏览课件时不上报
-const isStudent = uni.getStorageSync('user')?.role === 'student'
-const videoId = ref(null)
-const pageDurations = ref({}) // 页索引 -> 音频时长（秒）
-const pageWatched = ref({}) // 页索引 -> 最大观看位置（秒）
-let watchAccum = 0 // 距上次上报累计观看秒数
-let lastTickTime = -1
-let progressTimer = null
-let resumePending = false
-let resumePosition = 0
+function switchTab(key) {
+  activeTab.value = key
+  if (key === 'materials') loadMaterials()
+}
 
-/** 断点续播：读取该视频的历史进度，恢复页码与页内位置 */
-async function restoreProgress() {
-  if (!isStudent || !videoId.value || !pages.value.length) return
+async function loadMaterials() {
+  if (materialsLoaded.value || !courseId.value) return
+  materialsLoading.value = true
   try {
-    const data = await listWatchProgress({ video: videoId.value })
-    const saved = (data.results ?? data)[0]
-    if (!saved) return
-    pageDurations.value = { ...(saved.page_durations || {}) }
-    pageWatched.value = { ...(saved.page_watched || {}) }
-    if (saved.status !== 'completed') {
-      index.value = Math.min(saved.last_page || 0, pages.value.length - 1)
-      resumePosition = Number(saved.last_position) || 0
-      resumePending = resumePosition > 0
-      if (saved.last_page) {
-        uni.showToast({ title: `已从第 ${index.value + 1} 页继续学习`, icon: 'none' })
-      }
-    }
-  } catch {
-    // 进度读取失败不影响学习
-  }
+    const data = await listMaterials({ course: courseId.value })
+    materials.value = data.results ?? data
+    materialsLoaded.value = true
+  } finally { materialsLoading.value = false }
 }
 
-async function flushProgress(completed = false) {
-  if (!videoId.value || !isStudent) {
-    watchAccum = 0
-    return
-  }
-  const delta = Math.round(watchAccum)
-  watchAccum = 0
-  const payload = {
-    last_page: index.value,
-    last_position: Math.round(currentTime.value * 10) / 10,
-    duration_delta: delta,
-    completed,
-    page_count: pages.value.length,
-  }
-  if (Object.keys(pageDurations.value).length) payload.page_durations = pageDurations.value
-  if (Object.keys(pageWatched.value).length) payload.page_watched = pageWatched.value
+async function ask(preset) {
+  const question = String(preset ?? questionInput.value).trim()
+  if (!question || asking.value) return
+  questionInput.value = ''
+  messages.value.push({ role: 'user', content: question })
+  asking.value = true
+  scrollBottom()
   try {
-    await reportVideoProgress(videoId.value, payload)
+    const record = await askQuestion({ course: courseId.value, catalog: catalogId.value, question, session })
+    messages.value.push({ role: 'assistant', content: record.answer || '（暂无回答）', cited: record.cited_chunks || [] })
   } catch {
-    // 进度上报失败不打断学习
-  }
+    messages.value.push({ role: 'assistant', content: 'AI 助教暂时没有响应，请稍后再试。' })
+  } finally { asking.value = false; scrollBottom() }
 }
 
-function startProgressTimer() {
-  stopProgressTimer()
-  if (!isStudent) return
-  progressTimer = setInterval(() => {
-    if (playing.value) flushProgress()
-  }, 10000)
+function scrollBottom() { nextTick(() => { chatAnchor.value = ''; nextTick(() => { chatAnchor.value = 'chat-bottom' }) }) }
+function previewCurrent() {
+  const images = pages.value.map((item) => item.image || item.image_url).filter(Boolean).map(mediaUrl)
+  if (!images.length) return
+  uni.previewImage({ current: mediaUrl(currentPage.value.image || currentPage.value.image_url), urls: images })
 }
 
-function stopProgressTimer() {
-  if (progressTimer) {
-    clearInterval(progressTimer)
-    progressTimer = null
-  }
-}
-
-function fmtTime(sec) {
-  const value = Number.isFinite(sec) ? Math.floor(sec) : 0
-  const min = Math.floor(value / 60)
-  const second = String(value % 60).padStart(2, '0')
-  return `${min}:${second}`
-}
-
-function preview() {
-  const url = current.value?.image || current.value?.image_url
-  if (!url) return
-  uni.previewImage({
-    current: mediaURL(url),
-    urls: pages.value.filter((p) => p.image || p.image_url).map((p) => mediaURL(p.image || p.image_url)),
+function openMaterial(material) {
+  if (!material.file) return uni.showToast({ title: '该资料暂无文件', icon: 'none' })
+  uni.showLoading({ title: '正在打开' })
+  uni.downloadFile({
+    url: mediaUrl(material.file),
+    success: ({ statusCode, tempFilePath }) => {
+      if (statusCode !== 200) return uni.showToast({ title: '资料下载失败', icon: 'none' })
+      uni.openDocument({ filePath: tempFilePath, showMenu: true, fail: () => uni.showToast({ title: '无法打开该文件', icon: 'none' }) })
+    },
+    fail: () => uni.showToast({ title: '资料下载失败', icon: 'none' }),
+    complete: () => uni.hideLoading(),
   })
 }
-
-// ---- 配音连播 ----
-let audioCtx = null
-const playing = ref(false)
-const currentTime = ref(0)
-const duration = ref(0)
-const playPct = computed(() =>
-  duration.value > 0 ? Math.min(100, Math.max(0, (currentTime.value / duration.value) * 100)) : 0,
-)
-
-/** 从 from 之后找下一页有配音的页 */
-function findNextAudioPage(from) {
-  for (let i = from + 1; i < pages.value.length; i += 1) {
-    const page = pages.value[i]?.page
-    if (scripts.value.some((s) => s.page === page && s.audio_url)) return i
-  }
-  return -1
-}
-
-function destroyAudio() {
-  if (audioCtx) {
-    audioCtx.stop()
-    audioCtx.destroy()
-    audioCtx = null
-  }
-  playing.value = false
-}
-
-/** 播放指定页的配音（连播主入口） */
-function playPage(i) {
-  const page = pages.value[i]
-  const script = scripts.value.find((s) => s.page === page?.page)
-  if (!script?.audio_url) return
-  destroyAudio()
-  currentTime.value = 0
-  duration.value = 0
-  lastTickTime = -1
-
-  audioCtx = uni.createInnerAudioContext()
-  audioCtx.src = mediaURL(script.audio_url)
-
-  audioCtx.onCanplay(() => {
-    const d = audioCtx.duration
-    if (d > 0 && Number.isFinite(d)) {
-      duration.value = d
-      pageDurations.value = { ...pageDurations.value, [i]: Math.round(d * 10) / 10 }
-    }
-    // 断点续播：恢复页内播放位置
-    if (resumePending && i === index.value) {
-      resumePending = false
-      if (resumePosition > 0 && resumePosition < (d || Infinity)) {
-        audioCtx.seek(resumePosition)
-        currentTime.value = resumePosition
-        lastTickTime = resumePosition
-      }
-    }
-  })
-
-  audioCtx.onTimeUpdate(() => {
-    const now = audioCtx.currentTime || 0
-    // 正常播放累加学习时长；拖动/跳转产生的跳变不计入
-    if (lastTickTime >= 0) {
-      const delta = now - lastTickTime
-      if (delta > 0 && delta <= 2) watchAccum += delta
-    }
-    lastTickTime = now
-    currentTime.value = now
-    // 每页已看时长取最大观看位置，未播放的页不计入
-    if (now > (pageWatched.value[i] || 0)) {
-      pageWatched.value = { ...pageWatched.value, [i]: Math.round(now * 10) / 10 }
-    }
-  })
-
-  audioCtx.onPlay(() => { playing.value = true })
-  audioCtx.onPause(() => { playing.value = false })
-
-  audioCtx.onEnded(async () => {
-    playing.value = false
-    await flushProgress()
-    const next = findNextAudioPage(i)
-    if (next >= 0) {
-      // 连播：自动翻到下一页有配音的页继续播放
-      index.value = next
-      playPage(next)
-    } else {
-      // 整章连播结束，标记完成
-      await flushProgress(true)
-      uni.showToast({ title: '本章讲解已学习完成', icon: 'success' })
-    }
-  })
-
-  audioCtx.onError(() => {
-    playing.value = false
-    uni.showToast({ title: '配音播放失败', icon: 'none' })
-  })
-
-  audioCtx.play()
-}
-
-function toggleAudio() {
-  if (playing.value) {
-    audioCtx?.pause()
-    playing.value = false
-    flushProgress()
-    return
-  }
-  // 当前页音频已加载且处于暂停状态：直接续播，不从头开始
-  if (audioCtx && currentAudio.value) {
-    audioCtx.play()
-    return
-  }
-  // 从当前页开始连播；当前页无配音则跳到下一页有配音的页
-  let target = index.value
-  if (!currentAudio.value) {
-    const next = findNextAudioPage(index.value - 1)
-    if (next < 0) return
-    target = next
-    index.value = next
-  }
-  playPage(target)
-}
-
-function goPrev() {
-  if (index.value <= 0) return
-  flushProgress()
-  destroyAudio()
-  currentTime.value = 0
-  duration.value = 0
-  resumePending = false
-  index.value -= 1
-}
-
-function goNext() {
-  if (index.value >= pages.value.length - 1) return
-  flushProgress()
-  destroyAudio()
-  currentTime.value = 0
-  duration.value = 0
-  resumePending = false
-  index.value += 1
-}
-
-startProgressTimer()
-
-onHide(() => {
-  // 退到后台/切页面时暂停并保存进度
-  if (playing.value) audioCtx?.pause()
-  flushProgress()
-})
-
-onUnload(() => {
-  flushProgress()
-  stopProgressTimer()
-  destroyAudio()
-})
 </script>
 
-<style scoped>
-.page {
-  padding: 28rpx;
-}
-
-.tip {
-  padding: 120rpx 0;
-  text-align: center;
-  font-size: 26rpx;
-  color: #94a3b8;
-}
-
-.stage {
-  position: relative;
-  overflow: hidden;
-  border-radius: 20rpx;
-  background: #ffffff;
-  border: 1rpx solid #f1f5f9;
-  box-shadow: 0 2rpx 8rpx rgba(15, 23, 42, 0.06);
-}
-
-.stage-image {
-  display: block;
-  width: 100%;
-}
-
-.stage-text {
-  padding: 60rpx 40rpx;
-}
-
-.stage-title {
-  margin-bottom: 24rpx;
-  font-size: 34rpx;
-  font-weight: 800;
-  text-align: center;
-  color: #0f172a;
-}
-
-.stage-body {
-  font-size: 27rpx;
-  line-height: 1.9;
-  color: #475569;
-  white-space: pre-wrap;
-}
-
-.stage-count {
-  position: absolute;
-  top: 20rpx;
-  right: 24rpx;
-  padding: 6rpx 18rpx;
-  border-radius: 999rpx;
-  background: rgba(255, 255, 255, 0.85);
-  font-size: 22rpx;
-  font-weight: 700;
-  color: #64748b;
-}
-
-.controls {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18rpx;
-  margin: 24rpx 0 16rpx;
-}
-
-.nav-btn {
-  flex: 1;
-  height: 80rpx;
-  line-height: 80rpx;
-  border-radius: 20rpx;
-  background: #ffffff;
-  border: 1rpx solid #e2e8f0;
-  color: #334155;
-  font-size: 26rpx;
-}
-
-.nav-btn::after {
-  border: none;
-}
-
-.nav-btn[disabled] {
-  color: #cbd5e1;
-  background: #f8fafc;
-}
-
-.play-btn {
-  flex: 1.2;
-  height: 80rpx;
-  line-height: 80rpx;
-  border-radius: 20rpx;
-  background: #2563eb;
-  color: #ffffff;
-  font-size: 26rpx;
-  font-weight: 600;
-}
-
-.play-btn::after {
-  border: none;
-}
-
-.no-audio {
-  flex: 1.2;
-  text-align: center;
-  font-size: 22rpx;
-  color: #94a3b8;
-}
-
-.audio-bar {
-  display: flex;
-  align-items: center;
-  gap: 16rpx;
-}
-
-.audio-track {
-  flex: 1;
-  height: 8rpx;
-  overflow: hidden;
-  border-radius: 999rpx;
-  background: #e2e8f0;
-}
-
-.audio-fill {
-  height: 100%;
-  border-radius: 999rpx;
-  background: #2563eb;
-}
-
-.audio-time {
-  width: 72rpx;
-  font-size: 20rpx;
-  text-align: center;
-  color: #94a3b8;
-}
-
-.audio-hint {
-  margin: 10rpx 0 8rpx;
-  font-size: 20rpx;
-  text-align: center;
-  color: #94a3b8;
-}
-
-.script {
-  margin-top: 16rpx;
-  padding: 28rpx;
-  border-radius: 20rpx;
-  background: #ffffff;
-  border: 1rpx solid #f1f5f9;
-}
-
-.script-label {
-  margin-bottom: 14rpx;
-  font-size: 24rpx;
-  font-weight: 700;
-  color: #2563eb;
-}
-
-.script-text {
-  font-size: 26rpx;
-  line-height: 1.85;
-  color: #475569;
-}
+<style scoped lang="scss">
+.page { min-height: 100vh; }
+.tabs { position: relative; z-index: 8; display: flex; gap: 6rpx; margin: 14rpx 28rpx 0; padding: 8rpx; border: 1rpx solid $line; border-radius: 23rpx; background: #eef2f7; }
+.tab { min-width: 0; height: 70rpx; flex: 1; display: flex; align-items: center; justify-content: center; gap: 8rpx; border-radius: 18rpx; color: $text-sub; font-size: 21rpx; font-weight: 650; }
+.tab.active { background: #fff; color: $brand; font-weight: 750; box-shadow: 0 6rpx 18rpx rgba(15, 23, 42, .07); }
+.scroll { height: calc(100vh - var(--app-safe-top) - 200rpx); }
+.content { padding: 26rpx 28rpx 48rpx; }
+.stage { position: relative; overflow: hidden; min-height: 360rpx; border: 1rpx solid $line; border-radius: 27rpx; background: #fff; box-shadow: $shadow-card; }
+.slide-image { display: block; width: 100%; }
+.slide-text { padding: 62rpx 36rpx; }
+.slide-title { color: $text-main; font-size: 32rpx; font-weight: 850; text-align: center; }
+.slide-body { margin-top: 22rpx; color: $text-sub; font-size: 25rpx; line-height: 1.75; white-space: pre-wrap; }
+.page-count { position: absolute; top: 18rpx; right: 20rpx; padding: 6rpx 15rpx; border-radius: 999rpx; background: rgba(15, 23, 42, .72); color: #fff; font-size: 19rpx; }
+.page-controls { display: flex; align-items: center; gap: 16rpx; margin: 20rpx 0; }
+.control { height: 70rpx; display: flex; align-items: center; justify-content: center; gap: 5rpx; padding: 0 20rpx; border: 1rpx solid $line; border-radius: 19rpx; background: #fff; color: $text-main; font-size: 21rpx; }
+.control[disabled] { color: #cbd5e1; background: #f8fafc; }
+.progress { min-width: 80rpx; height: 8rpx; flex: 1; overflow: hidden; border-radius: 999rpx; background: #e2e8f0; }
+.progress-fill { height: 100%; border-radius: inherit; background: $brand; }
+.script-card { margin-top: 22rpx; padding: 27rpx; border: 1rpx solid $line; border-radius: 27rpx; background: #fff; }
+.script-head { display: flex; align-items: center; gap: 14rpx; }
+.script-icon { width: 58rpx; height: 58rpx; display: flex; align-items: center; justify-content: center; border-radius: 17rpx; background: $brand-soft; }
+.script-title { color: $text-main; font-size: 24rpx; font-weight: 800; }
+.script-subtitle { margin-top: 3rpx; color: $text-light; font-size: 18rpx; }
+.script-text { margin-top: 20rpx; color: $text-sub; font-size: 25rpx; line-height: 1.8; white-space: pre-wrap; }
+.intro { display: flex; align-items: center; gap: 19rpx; padding: 26rpx; border: 1rpx solid rgba(37, 99, 235, .08); border-radius: 27rpx; background: #fff; box-shadow: 0 8rpx 25rpx rgba(15, 23, 42, .04); }
+.ai-intro { background: linear-gradient(135deg, #f4f1ff, #fff 75%); }
+.intro-icon { width: 74rpx; height: 74rpx; display: flex; align-items: center; justify-content: center; border-radius: 22rpx; }
+.ai-icon { background: #ede9fe; }
+.material-icon { background: $brand-soft; }
+.intro-copy { min-width: 0; flex: 1; }
+.intro-title { color: $text-main; font-size: 27rpx; font-weight: 850; }
+.intro-desc { margin-top: 6rpx; color: $text-sub; font-size: 20rpx; line-height: 1.5; }
+.suggestions { margin-top: 30rpx; }
+.suggest-label { margin: 0 5rpx 14rpx; color: $text-light; font-size: 20rpx; font-weight: 650; }
+.suggest { min-height: 84rpx; display: flex; align-items: center; justify-content: space-between; gap: 15rpx; margin-bottom: 13rpx; padding: 0 23rpx; border: 1rpx solid $line; border-radius: 21rpx; background: #fff; color: #334155; font-size: 23rpx; }
+.messages { margin-top: 28rpx; padding-bottom: 100rpx; }
+.message { display: flex; margin-bottom: 19rpx; }
+.message.user { justify-content: flex-end; }
+.bubble { max-width: 85%; padding: 20rpx 23rpx; border: 1rpx solid $line; border-radius: 22rpx 22rpx 22rpx 7rpx; background: #fff; }
+.message.user .bubble { border: 0; border-radius: 22rpx 22rpx 7rpx 22rpx; background: $brand; }
+.message-text { color: #334155; font-size: 24rpx; line-height: 1.72; white-space: pre-wrap; word-break: break-word; }
+.message.user .message-text { color: #fff; }
+.thinking { color: $text-light; font-size: 22rpx; }
+.sources { margin-top: 14rpx; padding-top: 12rpx; border-top: 1rpx solid $line; }
+.sources-title { color: $brand; font-size: 19rpx; font-weight: 750; }
+.source { margin-top: 6rpx; color: $text-sub; font-size: 19rpx; }
+.anchor { height: 8rpx; }
+.input-shell { position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; padding: 13rpx 28rpx calc(13rpx + env(safe-area-inset-bottom)); border-top: 1rpx solid $line; background: rgba(246, 248, 252, .97); }
+.input-bar { display: flex; gap: 13rpx; }
+.question-input { min-width: 0; height: 84rpx; flex: 1; padding: 0 23rpx; border: 1rpx solid #dbe3ee; border-radius: 22rpx; background: #fff; color: $text-main; font-size: 24rpx; }
+.placeholder { color: $text-light; }
+.send { width: 84rpx; height: 84rpx; display: flex; align-items: center; justify-content: center; border-radius: 22rpx; background: $brand; }
+.send[disabled] { background: #bfdbfe; }
+.material-list { overflow: hidden; margin-top: 24rpx; padding: 0 23rpx; border: 1rpx solid $line; border-radius: 27rpx; background: #fff; }
+.material-row { min-height: 120rpx; display: flex; align-items: center; gap: 16rpx; border-bottom: 1rpx solid $line; }
+.material-row:last-child { border-bottom: 0; }
+.file-icon { width: 62rpx; height: 62rpx; display: flex; align-items: center; justify-content: center; border-radius: 19rpx; background: $brand-soft; }
+.file-copy { min-width: 0; flex: 1; }
+.file-name { overflow: hidden; color: $text-main; font-size: 23rpx; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
+.file-meta { margin-top: 6rpx; color: $text-light; font-size: 18rpx; }
+.file-status { flex-shrink: 0; padding: 4rpx 10rpx; border-radius: 999rpx; background: #f1f5f9; color: $text-sub; font-size: 17rpx; }
+.file-status.done { background: #ecfdf5; color: #059669; }
+.loading { padding: 95rpx 20rpx; color: $text-light; font-size: 23rpx; text-align: center; }
+.tap { opacity: .62; transform: scale(.98); }
 </style>
