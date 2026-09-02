@@ -38,6 +38,8 @@
 - SSH 密钥：本机 `~/.ssh/id_claude_server`（`ssh -i ~/.ssh/id_claude_server -o IdentitiesOnly=yes root@124.70.107.64`）；`~/.ssh/config` 若首行带 BOM 会导致所有 ssh 命令报配置错误（2026-08-24 已修复）
 - 2026-08-24 上线：学生批量导入 + 注册关闭 + 首登改密提示；后端容器启动入口会自动 `migrate`（日志确认 `users.0006` 已应用）；回滚备份 `/data/zhike-v2/backend.bak.20260824`
 - 2026-08-27 上线：仅前端（401 静默续期，登录态延长至 7 天），替换 dist + restart frontend，无后端/迁移变更
+- 2026-09-02 上线：安全加固（详见下方"安全基线"），含迁移 courses.0006 / homework.0007 / knowledge.0006 与一次性命令 `manage.py obfuscate_media`（存量 ppt_pages/ID 目录改 hash、附件改 uuid 名，已执行）
+- 自动备份（2026-09-02 起）：crontab 每日 3:30 跑 `/data/zhike-v2/backups/backup.sh`——SQLite `VACUUM INTO` 在线备份至 `data/backups/db-YYYYMMDD.sqlite3`（保留 14 天）+ media rsync 增量至 `backups/media/`；日志 `backups/backup.log`
 - 服务器：华为云 `124.70.107.64`（CentOS 7，root），代码位于 `/data/zhike-v2/`
 - 方式：Docker Compose（`deploy/`），`zhike_v2_backend`（gunicorn，容器内 8000，**不发布宿主端口**）+ `zhike_v2_frontend`（nginx，对外 **8088**，华为云安全组已放行；主线曾改 5273 但安全组未放行该端口，2026-08-17 实测外部不可达后回退 8088）
 - 数据：**bind mount 到数据盘项目目录**（`/data/zhike-v2/{data,media,staticfiles}` → 容器 `/app/{data,media,staticfiles}`），不再使用根盘 named volume；生产配置在 `deploy/.env.production`（gitignore，仅存于服务器）
@@ -57,3 +59,11 @@
 ## 注意事项
 - PPT 页面渲染管线：Windows 开发机走 PowerPoint COM；Linux 生产走 LibreOffice（trixie 镜像自带 25.x）转 PDF → pypdfium2 出图（150 DPI，纯 pip 依赖，已弃用 pdftoppm/poppler）；老格式 .ppt 先预转 .pptx 再渲染；Windows 中文字体 → 开源字体替换映射见 `deploy/fonts.conf`（挂载为容器 `/etc/fonts/local.conf`）
 - 向量检索为全表暴力余弦，embed 失败会静默回退 Mock 向量
+
+## 安全基线（2026-09-02）
+- 登录防爆破：同 用户名+IP 连续失败 5 次锁 15 分钟（`users/views.py` LoginView；计数用 `login_fail` 文件缓存 **跨 worker 共享**，勿改回 locmem——2 worker 下 locmem 会把阈值稀释成约 10 次且不稳定，已实测）；初始密码规则（Lylg+学号后6位）为需求约定保留，首登改密维持前端提示可跳过
+- media 路径不可预测：PPT 页图目录 `ppt_pages/<sha256(ppt:{id}:{SECRET_KEY})[:16]>`（`ppt_parser.ppt_pages_dirname`，SECRET_KEY 换了旧 URL 即全失效需重跑 obfuscate_media）；课件/资料/作业附件文件名 uuid（各 models.py 的 upload_to callable）；头像/TTS 原本就是 uuid
+- 上传白名单：Material（pdf/word/ppt/txt/md，50MB）、HomeworkSubmission 附件（同教师侧，20MB）、课件（ppt/pptx/pdf，100MB）——防 media 同域存储型 XSS
+- nginx 兜底：`/media/` 全局 nosniff；html/svg/js 扩展强制 `application/octet-stream` 下载
+- 存量迁移命令 `manage.py obfuscate_media`（幂等可重跑）：改 ppt_pages 目录名并重写 parsed_pages/video scripts 引用、附件 uuid 重命名
+- 已知未修（2026-09-02 排查报告的中危项，待排期）：无 TLS（明文传输，小程序发布被阻断）、JWT 无登出吊销、考试交卷无事务行锁、SQLite 未配 WAL、AI 同步阻塞 worker 且无费用限流、Mock 静默回退、成绩外键全 CASCADE、`/api/docs/` 生产开放、Django 5.1.4 已落后安全补丁
