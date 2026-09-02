@@ -20,6 +20,8 @@ class User(AbstractUser):
     real_name = models.CharField("姓名", max_length=64, blank=True)
     phone = models.CharField("手机号", max_length=20, blank=True, null=True, unique=True)
     avatar = models.CharField("头像", max_length=500, blank=True)
+    # 批量导入/管理员重置密码后置为 True，前端据此提示首次登录修改密码（可跳过）
+    must_change_password = models.BooleanField("首次登录需修改密码", default=False)
 
     class Meta:
         verbose_name = "用户"

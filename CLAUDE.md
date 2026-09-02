@@ -26,13 +26,18 @@
 - 成绩可见性：考试 `score_released`、作业 `correct_status=returned` 后学生才可见分数（序列化器按角色隐藏）
 - 学习进度：`VideoWatchProgress`（学生×视频唯一），前端每 10 秒上报，断点续播
 - 作业/考试题目均以快照冻结，发布后不可改题
+- 注册通道已关闭（2026-08-21）：`POST /auth/register/` 返回 403，登录页仅登录；账号由管理员单个创建或 Excel 批量导入（`platform_admin/user_import.py`，初始密码 `Lylg+用户名后6位`，导入/管理员重置密码后 `must_change_password=True`，前端 MainLayout 弹窗提示改密可跳过）
+- 登录态（2026-08-27）：access 12h / refresh 7d；前端 `api/request.js` 已实现 401 静默续期（单飞并发去重 + 重放原请求，刷新也失败才登出），登录态最长 7 天
 
-## 当前状态（2026-07-28）
-- 已完成：学习进度记录/断点续播、章节练习 UI、考试主观题批改、统一出分、作业成绩发布
+## 当前状态（2026-08-21）
+- 已完成：学习进度记录/断点续播、章节练习 UI、考试主观题批改、统一出分、作业成绩发布、学生 Excel 批量导入（模板下载/解析预览/确认三段式）、注册收口与首登改密提示
 - 待办见 `docs/需求对照排查.md` 第六节（P2/P3）
 - 无自动化测试；AI 生成、PPT 解析为同步执行（待异步化）
 
-## 生产部署（2026-08-17 更新）
+## 生产部署（2026-08-24 更新）
+- SSH 密钥：本机 `~/.ssh/id_claude_server`（`ssh -i ~/.ssh/id_claude_server -o IdentitiesOnly=yes root@124.70.107.64`）；`~/.ssh/config` 若首行带 BOM 会导致所有 ssh 命令报配置错误（2026-08-24 已修复）
+- 2026-08-24 上线：学生批量导入 + 注册关闭 + 首登改密提示；后端容器启动入口会自动 `migrate`（日志确认 `users.0006` 已应用）；回滚备份 `/data/zhike-v2/backend.bak.20260824`
+- 2026-08-27 上线：仅前端（401 静默续期，登录态延长至 7 天），替换 dist + restart frontend，无后端/迁移变更
 - 服务器：华为云 `124.70.107.64`（CentOS 7，root），代码位于 `/data/zhike-v2/`
 - 方式：Docker Compose（`deploy/`），`zhike_v2_backend`（gunicorn，容器内 8000，**不发布宿主端口**）+ `zhike_v2_frontend`（nginx，对外 **8088**，华为云安全组已放行；主线曾改 5273 但安全组未放行该端口，2026-08-17 实测外部不可达后回退 8088）
 - 数据：**bind mount 到数据盘项目目录**（`/data/zhike-v2/{data,media,staticfiles}` → 容器 `/app/{data,media,staticfiles}`），不再使用根盘 named volume；生产配置在 `deploy/.env.production`（gitignore，仅存于服务器）

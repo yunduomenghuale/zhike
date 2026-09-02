@@ -136,6 +136,8 @@
         </div>
       </section>
     </div>
+
+    <FirstLoginPrompt v-model="firstLoginVisible" />
   </main>
 </template>
 
@@ -145,6 +147,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useUserStore } from '@/store/user'
 import { listNotifications, markAllNotificationsRead, markNotificationRead } from '@/api/notification'
+import FirstLoginPrompt from '@/components/FirstLoginPrompt.vue'
 import {
   HomeFilled, Reading, School, Collection, EditPen, Document,
   VideoPlay, ChatDotRound, ArrowDown, UserFilled, Search, SwitchButton, Sunny,
@@ -191,6 +194,14 @@ const profileReminderText = computed(() => (
     ? '填写姓名和手机号后，才可以加入班级。'
     : '请填写姓名和手机号，便于完善平台身份信息。'
 ))
+
+// 首次登录（批量导入/管理员重置密码后）提示修改密码，可跳过，下次登录再次提示
+const firstLoginVisible = ref(false)
+watch(
+  () => profile.value?.must_change_password,
+  (flag) => { if (flag) firstLoginVisible.value = true },
+  { immediate: true },
+)
 
 function applyGlobalSearch() {
   if (!searchEnabled.value) return

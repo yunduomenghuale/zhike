@@ -29,19 +29,16 @@ def tokens_for(user):
 
 
 class RegisterView(GenericAPIView):
-    """注册（教师 / 学生）。"""
+    """注册通道已关闭：账号统一由管理员在后台创建或批量导入。"""
 
     permission_classes = [AllowAny]
     serializer_class = RegisterSerializer
 
     def post(self, request):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        user = serializer.save()
         return api_response(
-            {"user": UserSerializer(user).data, "token": tokens_for(user)},
-            message="注册成功",
-            status=status.HTTP_201_CREATED,
+            message="注册通道已关闭，账号由管理员统一开通，请联系管理员",
+            code=403,
+            status=status.HTTP_403_FORBIDDEN,
         )
 
 
@@ -130,7 +127,8 @@ class PasswordChangeView(APIView):
         serializer = PasswordChangeSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         request.user.set_password(serializer.validated_data["new_password"])
-        request.user.save(update_fields=["password"])
+        request.user.must_change_password = False
+        request.user.save(update_fields=["password", "must_change_password"])
         return api_response(message="密码修改成功")
 
 

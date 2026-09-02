@@ -47,9 +47,10 @@ class UserSerializer(serializers.ModelSerializer):
             "phone",
             "avatar",
             "is_active",
+            "must_change_password",
             "date_joined",
         ]
-        read_only_fields = ["id", "date_joined", "is_active"]
+        read_only_fields = ["id", "date_joined", "is_active", "must_change_password"]
 
 
 class RegisterSerializer(serializers.ModelSerializer):

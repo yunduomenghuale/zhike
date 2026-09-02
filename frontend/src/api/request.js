@@ -20,7 +20,33 @@ request.interceptors.request.use((config) => {
   return config
 })
 
-// 响应拦截：解包统一结构 { code, message, data }，集中处理错误
+// ---- 静默续期：access 过期时用 refresh_token 换新 access 并重放原请求 ----
+// 用独立 axios 实例调用，避免进入本实例的拦截器造成循环。
+const authClient = axios.create({ baseURL: '/api', timeout: 30000 })
+
+let refreshPromise = null
+
+function refreshAccessToken() {
+  // 单飞：并发的多个 401 共享同一次刷新请求，成功后各自重放
+  if (!refreshPromise) {
+    refreshPromise = authClient
+      .post('/auth/refresh/', { refresh: localStorage.getItem('refresh_token') })
+      .then((resp) => {
+        const { access, refresh } = resp.data || {}
+        if (!access) throw new Error('刷新响应缺少 access')
+        localStorage.setItem('access_token', access)
+        if (refresh) localStorage.setItem('refresh_token', refresh)
+        return access
+      })
+      .finally(() => {
+        refreshPromise = null
+      })
+  }
+  return refreshPromise
+}
+
+// 响应拦截：解包统一结构 { code, message, data }，集中处理错误；
+// 401 时先尝试静默续期重放，续期失败才登出。
 request.interceptors.response.use(
   (response) => {
     const body = response.data
@@ -31,7 +57,7 @@ request.interceptors.response.use(
     }
     return body
   },
-  (error) => {
+  async (error) => {
     const status = error.response?.status
     const msg = error.response?.data?.message || error.message
     if (status === 401) {
@@ -48,6 +74,20 @@ request.interceptors.response.use(
         if (currentToken && currentToken !== requestToken) {
           return Promise.reject(error)
         }
+
+        // 先尝试用 refresh_token 静默续期并重放原请求（每请求最多一次）
+        const config = error.config
+        if (!config.__retried && localStorage.getItem('refresh_token')) {
+          config.__retried = true
+          try {
+            const newToken = await refreshAccessToken()
+            config.headers.Authorization = `Bearer ${newToken}`
+            return request(config)
+          } catch {
+            // 续期失败（refresh 也过期/失效），走下方统一登出
+          }
+        }
+
         if (requestToken !== handledUnauthorizedToken) {
           handledUnauthorizedToken = requestToken
           if (currentToken === requestToken) {

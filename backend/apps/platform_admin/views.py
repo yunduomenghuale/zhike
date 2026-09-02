@@ -1,5 +1,7 @@
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from django.db.models import Count, Q
+from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.generics import get_object_or_404
@@ -22,6 +24,14 @@ from .serializers import (
     CourseStatusSerializer,
     PasswordResetSerializer,
     AdminAIConfigurationSerializer,
+)
+from .user_import import (
+    MAX_FILE_SIZE,
+    MAX_IMPORT_ROWS,
+    annotate_rows,
+    build_template,
+    initial_password_for,
+    parse_excel,
 )
 
 User = get_user_model()
@@ -158,8 +168,87 @@ class AdminPasswordResetView(APIView):
         serializer = PasswordResetSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user.set_password(serializer.validated_data["password"])
-        user.save(update_fields=["password"])
+        # 管理员代设密码后，提示用户下次登录自行修改（前端弹窗可跳过）
+        user.must_change_password = True
+        user.save(update_fields=["password", "must_change_password"])
         return api_response(message="密码已重置")
+
+
+class AdminUserImportTemplateView(APIView):
+    """下载学生批量导入模板（xlsx）。"""
+
+    permission_classes = [IsPlatformAdmin]
+
+    def get(self, request):
+        response = HttpResponse(
+            build_template(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = "attachment; filename=student_import_template.xlsx"
+        return response
+
+
+class AdminUserImportPreviewView(APIView):
+    """上传 Excel 真实解析，返回逐行校验结果供前端预览/修改。"""
+
+    permission_classes = [IsPlatformAdmin]
+
+    def post(self, request):
+        file = request.FILES.get("file")
+        if not file:
+            return api_response(message="请上传 Excel 文件", code=400, status=400)
+        if not str(file.name).lower().endswith(".xlsx"):
+            return api_response(message="仅支持 .xlsx 文件，请使用系统模板", code=400, status=400)
+        if file.size > MAX_FILE_SIZE:
+            return api_response(message="文件大小不能超过 5MB", code=400, status=400)
+        try:
+            rows = parse_excel(file)
+        except ValueError as exc:
+            return api_response(message=str(exc), code=400, status=400)
+        annotated = annotate_rows(rows)
+        return api_response({
+            "rows": annotated,
+            "total": len(annotated),
+            "valid": sum(1 for row in annotated if row["status"] == "ok"),
+        })
+
+
+class AdminUserImportConfirmView(APIView):
+    """确认导入：服务端对最终行重新全量校验，全部合法才在事务中批量创建。"""
+
+    permission_classes = [IsPlatformAdmin]
+
+    def post(self, request):
+        rows = request.data.get("rows")
+        if not isinstance(rows, list) or not rows:
+            return api_response(message="没有可导入的数据", code=400, status=400)
+        if len(rows) > MAX_IMPORT_ROWS:
+            return api_response(message=f"单次最多导入 {MAX_IMPORT_ROWS} 行", code=400, status=400)
+        cleaned = [row for row in rows if isinstance(row, dict)]
+        annotated = annotate_rows(cleaned)
+        errors = [row for row in annotated if row["status"] != "ok"]
+        if errors:
+            return api_response(
+                {"rows": annotated},
+                message="存在无效或冲突的数据行，请修正后重新提交",
+                code=400,
+                status=400,
+            )
+        with transaction.atomic():
+            for row in annotated:
+                user = User(
+                    username=row["username"],
+                    real_name=row["real_name"],
+                    role=User.Role.STUDENT,
+                    must_change_password=True,
+                )
+                user.set_password(initial_password_for(row["username"]))
+                user.save()
+        return api_response(
+            {"created": len(annotated)},
+            message=f"成功导入 {len(annotated)} 个学生账号",
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class AdminCourseListView(APIView):
