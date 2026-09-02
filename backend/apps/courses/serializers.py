@@ -67,6 +67,8 @@ class PPTResourceSerializer(serializers.ModelSerializer):
         ext = os.path.splitext(value.name)[1].lower()
         if ext not in self.allowed_extensions:
             raise serializers.ValidationError("课件支持 PPT / PPTX / PDF 文件；PDF 可保证页面版式零偏移，推荐优先使用")
+        if value.size > 100 * 1024 * 1024:
+            raise serializers.ValidationError("课件大小不能超过 100MB")
         return value
 
     def validate(self, attrs):

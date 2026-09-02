@@ -1,7 +1,15 @@
+from pathlib import Path
+from uuid import uuid4
+
 from django.conf import settings
 from django.db import models
 
 from apps.common.models import BaseModel
+
+
+def _ppt_file_path(instance, filename):
+    """上传文件名 uuid 化：保留原文件名可被猜测/枚举下载，原文件名仅存 file_name 字段展示。"""
+    return f"ppt/{uuid4().hex}{Path(filename).suffix.lower()}"
 
 
 class Course(BaseModel):
@@ -75,7 +83,7 @@ class PPTResource(BaseModel):
         Catalog, on_delete=models.CASCADE, related_name="ppts", verbose_name="章节"
     )
     file_name = models.CharField("文件名称", max_length=255)
-    file = models.FileField("文件", upload_to="ppt/", null=True, blank=True)
+    file = models.FileField("文件", upload_to=_ppt_file_path, null=True, blank=True)
     parse_status = models.CharField(
         "解析状态", max_length=16, choices=ParseStatus.choices, default=ParseStatus.PENDING
     )

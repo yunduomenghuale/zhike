@@ -271,6 +271,16 @@ class HomeworkSubmissionSerializer(serializers.ModelSerializer):
             "correct_status", "auto_score", "auto_comment",
         ]
 
+    def validate_attachment(self, value):
+        # 与教师侧作业附件（HomeworkSerializer.validate_attachment）同款限制，
+        # 防止上传 HTML/SVG 等在 media 同域下造成存储型 XSS
+        allowed = {".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".txt", ".zip", ".rar"}
+        if Path(value.name).suffix.lower() not in allowed:
+            raise serializers.ValidationError("仅支持 PDF、Office 文档、TXT 或压缩包")
+        if value.size > 20 * 1024 * 1024:
+            raise serializers.ValidationError("附件大小不能超过 20MB")
+        return value
+
     def _score_visible(self, obj):
         request = self.context.get("request")
         user = getattr(request, "user", None)

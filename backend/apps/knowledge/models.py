@@ -1,8 +1,16 @@
+from pathlib import Path
+from uuid import uuid4
+
 from django.conf import settings
 from django.db import models
 
 from apps.common.models import BaseModel
 from apps.courses.models import Course
+
+
+def _material_file_path(instance, filename):
+    """上传文件名 uuid 化：保留原文件名可被猜测/枚举下载，原文件名仅存 file_name 字段展示。"""
+    return f"materials/{uuid4().hex}{Path(filename).suffix.lower()}"
 
 
 class Material(BaseModel):
@@ -25,7 +33,7 @@ class Material(BaseModel):
     )
     file_name = models.CharField("文件名称", max_length=255)
     file_type = models.CharField("文件类型", max_length=20, blank=True)  # pdf/word/ppt/txt
-    file = models.FileField("文件", upload_to="materials/", null=True, blank=True)
+    file = models.FileField("文件", upload_to=_material_file_path, null=True, blank=True)
     parse_status = models.CharField(
         "解析状态", max_length=16, choices=ParseStatus.choices, default=ParseStatus.PENDING
     )

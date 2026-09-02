@@ -2,6 +2,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.core.files.storage import default_storage
 from rest_framework import status
 from rest_framework.generics import GenericAPIView
@@ -42,6 +43,20 @@ class RegisterView(GenericAPIView):
         )
 
 
+# 登录失败锁定：同一 用户名+IP 连续失败 5 次锁 15 分钟（仅对失败计数，
+# 不影响学校 NAT 出口下多人正常登录；locmem 缓存按 gunicorn worker 各自计数，实际阈值约 2 倍）
+LOGIN_FAIL_LIMIT = 5
+LOGIN_FAIL_LOCK_SECONDS = 15 * 60
+
+
+def _client_ip(request) -> str:
+    """取客户端真实 IP（生产经 nginx 反代，取 X-Forwarded-For 首段）。"""
+    forwarded = request.META.get("HTTP_X_FORWARDED_FOR", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.META.get("REMOTE_ADDR", "")
+
+
 class LoginView(APIView):
     """使用唯一用户名和密码登录，返回 JWT。"""
 
@@ -51,9 +66,17 @@ class LoginView(APIView):
     def post(self, request):
         identifier = str(request.data.get("username") or "").strip()
         password = request.data.get("password")
+        fail_key = f"login:fail:{identifier.lower()}:{_client_ip(request)}"
+        fails = cache.get(fail_key, 0)
+        if fails >= LOGIN_FAIL_LIMIT:
+            return api_response(
+                message="登录失败次数过多，请15分钟后再试", code=429, status=429
+            )
         user = User.objects.filter(username__iexact=identifier).first()
         if user is None or not user.is_active or not user.check_password(password or ""):
+            cache.set(fail_key, fails + 1, LOGIN_FAIL_LOCK_SECONDS)
             return api_response(message="用户名或密码错误", code=401, status=401)
+        cache.delete(fail_key)
         return api_response(
             {"user": UserSerializer(user).data, "token": tokens_for(user)},
             message="登录成功",
