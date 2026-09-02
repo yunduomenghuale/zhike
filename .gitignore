@@ -29,6 +29,7 @@ backend/backups/
 backend/seed_learning_stats.py
 backend/media/
 backend/eval_reports/
+backend/login_fail_cache/
 staticfiles/
 
 # ===== 前端 =====
