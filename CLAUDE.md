@@ -26,7 +26,7 @@
 - 成绩可见性：考试 `score_released`、作业 `correct_status=returned` 后学生才可见分数（序列化器按角色隐藏）
 - 学习进度：`VideoWatchProgress`（学生×视频唯一），前端每 10 秒上报，断点续播
 - 作业/考试题目均以快照冻结，发布后不可改题
-- 注册通道已关闭（2026-08-21）：`POST /auth/register/` 返回 403，登录页仅登录；账号由管理员单个创建或 Excel 批量导入（`platform_admin/user_import.py`，初始密码 `Lylg+用户名后6位`，导入/管理员重置密码后 `must_change_password=True`，前端 MainLayout 弹窗提示改密可跳过）
+- 注册（2026-09-08 恢复开放）：曾于 2026-08-21 关闭，现恢复原注册功能（教师/学生自助注册，注册即登录）；账号也可由管理员单个创建或 Excel 批量导入（`platform_admin/user_import.py`，初始密码 `Lylg+用户名后6位`，导入/管理员重置密码后 `must_change_password=True`，前端 MainLayout 弹窗提示改密可跳过）
 - 登录态（2026-08-27）：access 12h / refresh 7d；前端 `api/request.js` 已实现 401 静默续期（单飞并发去重 + 重放原请求，刷新也失败才登出），登录态最长 7 天
 
 ## 当前状态（2026-08-21）
@@ -39,6 +39,7 @@
 - 2026-08-24 上线：学生批量导入 + 注册关闭 + 首登改密提示；后端容器启动入口会自动 `migrate`（日志确认 `users.0006` 已应用）；回滚备份 `/data/zhike-v2/backend.bak.20260824`
 - 2026-08-27 上线：仅前端（401 静默续期，登录态延长至 7 天），替换 dist + restart frontend，无后端/迁移变更
 - 2026-09-02 上线：安全加固（详见下方"安全基线"），含迁移 courses.0006 / homework.0007 / knowledge.0006 与一次性命令 `manage.py obfuscate_media`（存量 ppt_pages/ID 目录改 hash、附件改 uuid 名，已执行）
+- 2026-09-08 上线：恢复注册功能开放（后端 RegisterView 还原 + 前端登录/注册翻转面板恢复），批量导入与首登提示保留；无迁移变更；回滚备份 `/data/zhike-v2/backend.bak.20260908`
 - 自动备份（2026-09-02 起）：crontab 每日 3:30 跑 `/data/zhike-v2/backups/backup.sh`——SQLite `VACUUM INTO` 在线备份至 `data/backups/db-YYYYMMDD.sqlite3`（保留 14 天）+ media rsync 增量至 `backups/media/`；日志 `backups/backup.log`
 - 服务器：华为云 `124.70.107.64`（CentOS 7，root），代码位于 `/data/zhike-v2/`
 - 方式：Docker Compose（`deploy/`），`zhike_v2_backend`（gunicorn，容器内 8000，**不发布宿主端口**）+ `zhike_v2_frontend`（nginx，对外 **8088**，华为云安全组已放行；主线曾改 5273 但安全组未放行该端口，2026-08-17 实测外部不可达后回退 8088）
@@ -57,6 +58,7 @@
 - 旧代码备份：`/data/zhike-v2/backend.bak.20260817`（可回滚，确认稳定后可删）
 
 ## 注意事项
+- **DRF FileField 绝对 URL 依赖 Host 端口**（2026-09-17 修复）：DRF 序列化 FileField（知识库资料 file、作业/提交附件 attachment、课件 file）时会 `request.build_absolute_uri()` 生成绝对 URL，容器 nginx 必须用 `proxy_set_header Host $http_host`（保留端口）；此前用 `$host`（丢端口）导致所有文件链接变成 `http://ip/media/...`（80 端口），而 80 端口是宿主机 nginx/默认站（/media 不存在）→ 404 页来自同机 cv_nginx（1.31.2），极易误判为本系统问题。改配置只需 scp deploy/nginx.conf + `docker compose restart frontend`（scp 覆盖不换 inode，单文件 bind mount 安全）
 - PPT 页面渲染管线：Windows 开发机走 PowerPoint COM；Linux 生产走 LibreOffice（trixie 镜像自带 25.x）转 PDF → pypdfium2 出图（150 DPI，纯 pip 依赖，已弃用 pdftoppm/poppler）；老格式 .ppt 先预转 .pptx 再渲染；Windows 中文字体 → 开源字体替换映射见 `deploy/fonts.conf`（挂载为容器 `/etc/fonts/local.conf`）
 - 向量检索为全表暴力余弦，embed 失败会静默回退 Mock 向量
 
