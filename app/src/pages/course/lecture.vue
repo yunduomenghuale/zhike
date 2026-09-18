@@ -15,9 +15,29 @@
           <EmptyState v-else-if="!pages.length" icon="videocam" title="本章暂无课件" description="教师上传并发布课件后可开始学习" />
           <template v-else>
             <view class="stage" @click="previewCurrent">
-              <image v-if="currentPage?.image || currentPage?.image_url" class="slide-image" :src="mediaUrl(currentPage.image || currentPage.image_url)" mode="widthFix" />
+              <image v-if="(currentPage?.image || currentPage?.image_url) && !slideLoadFailed" class="slide-image" :src="mediaUrl(currentPage.image || currentPage.image_url)" mode="widthFix" @load="slideLoadFailed = false" @error="slideLoadFailed = true" />
               <view v-else class="slide-text"><view class="slide-title">{{ currentPage?.title || `第 ${pageIndex + 1} 页` }}</view><view class="slide-body">{{ currentPage?.body || '本页暂无文本内容' }}</view></view>
               <view class="page-count">{{ pageIndex + 1 }} / {{ pages.length }}</view>
+            </view>
+            <view class="audio-player" :class="{ unavailable: !currentAudioUrl }">
+              <button class="audio-toggle" :disabled="!hasAnyAudio" @click="toggleAudio">
+                <view v-if="isAudioPlaying" class="pause-symbol"><view></view><view></view></view>
+                <view v-else class="play-symbol"></view>
+              </button>
+              <view class="audio-main">
+                <view class="audio-heading">
+                  <view>
+                    <view class="audio-title">配音讲解</view>
+                    <view class="audio-status">{{ audioStatus }}</view>
+                  </view>
+                  <view v-if="hasAnyAudio" class="continuous-tag">连续播放</view>
+                </view>
+                <view class="audio-progress-row">
+                  <text>{{ formatTime(audioCurrent) }}</text>
+                  <view class="audio-progress"><view class="audio-progress-fill" :style="{ width: `${audioProgress}%` }"></view></view>
+                  <text>{{ formatTime(audioDuration) }}</text>
+                </view>
+              </view>
             </view>
             <view class="page-controls">
               <button class="control" :disabled="pageIndex === 0" @click="pageIndex--"><uni-icons type="left" color="currentColor" size="15" />上一页</button>
@@ -81,8 +101,8 @@
 </template>
 
 <script setup>
-import { computed, nextTick, ref } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { computed, nextTick, ref, watch } from 'vue'
+import { onLoad, onUnload } from '@dcloudio/uni-app'
 import AppHeader from '@/components/AppHeader.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import { listPpts, listVideos } from '@/api/courses.js'
@@ -101,6 +121,12 @@ const title = ref('章节学习')
 const pages = ref([])
 const scripts = ref([])
 const pageIndex = ref(0)
+const slideLoadFailed = ref(false)
+const isAudioPlaying = ref(false)
+const audioLoading = ref(false)
+const audioFailed = ref(false)
+const audioCurrent = ref(0)
+const audioDuration = ref(0)
 const loading = ref(false)
 const materials = ref([])
 const materialsLoading = ref(false)
@@ -113,12 +139,35 @@ const session = `app-chapter-${Date.now()}-${Math.random().toString(36).slice(2,
 const suggests = ['这一章的重点是什么？', '帮我总结本章核心概念', '这部分可以举个例子吗？']
 const currentPage = computed(() => pages.value[pageIndex.value])
 const currentScript = computed(() => scripts.value.find((item) => item.page === currentPage.value?.page))
+const currentAudioUrl = computed(() => currentScript.value?.audio_url ? mediaUrl(currentScript.value.audio_url) : '')
+const hasAnyAudio = computed(() => scripts.value.some((item) => item.audio_url))
+const audioProgress = computed(() => audioDuration.value > 0 ? Math.min(100, (audioCurrent.value / audioDuration.value) * 100) : 0)
+const audioStatus = computed(() => {
+  if (!hasAnyAudio.value) return '本章暂无配音'
+  if (!currentAudioUrl.value) return '本页暂无配音，点击播放下一段'
+  if (audioFailed.value) return '配音加载失败，请稍后重试'
+  if (audioLoading.value) return '正在加载本页配音…'
+  return isAudioPlaying.value ? `正在讲解第 ${pageIndex.value + 1} 页` : `第 ${pageIndex.value + 1} 页配套讲解`
+})
+let audioContext = null
+
+watch(pageIndex, () => {
+  slideLoadFailed.value = false
+  resetAudio()
+})
+
+watch(currentAudioUrl, () => resetAudio())
 
 onLoad((query) => {
   courseId.value = Number(query.course) || null
   catalogId.value = Number(query.catalog) || null
   if (query.title) title.value = decodeURIComponent(query.title)
   loadLecture()
+})
+
+onUnload(() => {
+  audioContext?.destroy?.()
+  audioContext = null
 })
 
 async function loadLecture() {
@@ -129,6 +178,7 @@ async function loadLecture() {
     const ppts = pptData.results ?? pptData
     const ppt = ppts.find((item) => item.is_active) || ppts[0]
     pages.value = ppt?.parsed_pages || []
+    slideLoadFailed.value = false
     scripts.value = (videoData.results ?? videoData)[0]?.scripts || []
   } finally { loading.value = false }
 }
@@ -170,6 +220,98 @@ function previewCurrent() {
   uni.previewImage({ current: mediaUrl(currentPage.value.image || currentPage.value.image_url), urls: images })
 }
 
+function ensureAudioContext() {
+  if (audioContext) return audioContext
+  audioContext = uni.createInnerAudioContext()
+  audioContext.autoplay = false
+  audioContext.onPlay(() => {
+    isAudioPlaying.value = true
+    audioLoading.value = false
+    audioFailed.value = false
+  })
+  audioContext.onPause(() => { isAudioPlaying.value = false })
+  audioContext.onWaiting(() => { audioLoading.value = true })
+  audioContext.onCanplay(() => {
+    audioLoading.value = false
+    setTimeout(() => {
+      if (Number.isFinite(audioContext?.duration)) audioDuration.value = audioContext.duration
+    }, 80)
+  })
+  audioContext.onTimeUpdate(() => {
+    audioCurrent.value = audioContext.currentTime || 0
+    audioDuration.value = audioContext.duration || audioDuration.value
+  })
+  audioContext.onEnded(playNextAudio)
+  audioContext.onError(() => {
+    isAudioPlaying.value = false
+    audioLoading.value = false
+    audioFailed.value = true
+  })
+  return audioContext
+}
+
+function resetAudio() {
+  if (audioContext) {
+    audioContext.pause()
+    audioContext.stop()
+  }
+  isAudioPlaying.value = false
+  audioLoading.value = false
+  audioFailed.value = false
+  audioCurrent.value = 0
+  audioDuration.value = 0
+}
+
+function findNextAudioIndex(fromIndex) {
+  for (let index = fromIndex + 1; index < pages.value.length; index += 1) {
+    const page = pages.value[index]
+    if (scripts.value.some((item) => item.page === page?.page && item.audio_url)) return index
+  }
+  return -1
+}
+
+function startCurrentAudio() {
+  if (!currentAudioUrl.value) return
+  const context = ensureAudioContext()
+  audioFailed.value = false
+  audioLoading.value = true
+  if (context.src !== currentAudioUrl.value) context.src = currentAudioUrl.value
+  context.play()
+}
+
+function toggleAudio() {
+  if (!hasAnyAudio.value) return
+  if (isAudioPlaying.value) {
+    audioContext?.pause?.()
+    return
+  }
+  if (!currentAudioUrl.value) {
+    const nextIndex = findNextAudioIndex(pageIndex.value - 1)
+    if (nextIndex < 0) return uni.showToast({ title: '后续页面暂无配音', icon: 'none' })
+    pageIndex.value = nextIndex
+    nextTick(startCurrentAudio)
+    return
+  }
+  startCurrentAudio()
+}
+
+function playNextAudio() {
+  isAudioPlaying.value = false
+  const nextIndex = findNextAudioIndex(pageIndex.value)
+  if (nextIndex < 0) {
+    audioCurrent.value = audioDuration.value
+    uni.showToast({ title: '本章讲解播放完毕', icon: 'none' })
+    return
+  }
+  pageIndex.value = nextIndex
+  nextTick(startCurrentAudio)
+}
+
+function formatTime(value) {
+  const seconds = Math.max(0, Math.floor(Number(value) || 0))
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+}
+
 function openMaterial(material) {
   if (!material.file) return uni.showToast({ title: '该资料暂无文件', icon: 'none' })
   uni.showLoading({ title: '正在打开' })
@@ -198,6 +340,22 @@ function openMaterial(material) {
 .slide-title { color: $text-main; font-size: 32rpx; font-weight: 850; text-align: center; }
 .slide-body { margin-top: 22rpx; color: $text-sub; font-size: 25rpx; line-height: 1.75; white-space: pre-wrap; }
 .page-count { position: absolute; top: 18rpx; right: 20rpx; padding: 6rpx 15rpx; border-radius: 999rpx; background: rgba(15, 23, 42, .72); color: #fff; font-size: 19rpx; }
+.audio-player { display: flex; align-items: center; gap: 18rpx; margin-top: 20rpx; padding: 21rpx 23rpx; border: 1rpx solid rgba(37, 99, 235, .12); border-radius: 24rpx; background: linear-gradient(135deg, #fff, #f6f9ff); box-shadow: 0 8rpx 24rpx rgba(37, 99, 235, .06); }
+.audio-player.unavailable { border-color: $line; background: #fff; }
+.audio-toggle { width: 72rpx; height: 72rpx; flex-shrink: 0; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 50%; background: linear-gradient(135deg, #2563eb, #3b82f6); box-shadow: 0 8rpx 20rpx rgba(37, 99, 235, .24); }
+.audio-toggle::after { border: 0; }
+.audio-toggle[disabled] { background: #dbe3ee; box-shadow: none; }
+.play-symbol { width: 0; height: 0; margin-left: 5rpx; border-top: 11rpx solid transparent; border-bottom: 11rpx solid transparent; border-left: 17rpx solid #fff; }
+.pause-symbol { display: flex; gap: 6rpx; }
+.pause-symbol view { width: 6rpx; height: 23rpx; border-radius: 3rpx; background: #fff; }
+.audio-main { min-width: 0; flex: 1; }
+.audio-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12rpx; }
+.audio-title { color: $text-main; font-size: 23rpx; font-weight: 800; }
+.audio-status { margin-top: 4rpx; color: $text-light; font-size: 18rpx; }
+.continuous-tag { flex-shrink: 0; padding: 5rpx 11rpx; border-radius: 999rpx; background: $brand-soft; color: $brand; font-size: 16rpx; font-weight: 700; }
+.audio-progress-row { display: flex; align-items: center; gap: 10rpx; margin-top: 15rpx; color: $text-light; font-size: 16rpx; font-variant-numeric: tabular-nums; }
+.audio-progress { height: 6rpx; flex: 1; overflow: hidden; border-radius: 999rpx; background: #e2e8f0; }
+.audio-progress-fill { height: 100%; border-radius: inherit; background: $brand; transition: width .15s linear; }
 .page-controls { display: flex; align-items: center; gap: 16rpx; margin: 20rpx 0; }
 .control { height: 70rpx; display: flex; align-items: center; justify-content: center; gap: 5rpx; padding: 0 20rpx; border: 1rpx solid $line; border-radius: 19rpx; background: #fff; color: $text-main; font-size: 21rpx; }
 .control[disabled] { color: #cbd5e1; background: #f8fafc; }

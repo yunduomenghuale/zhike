@@ -20,7 +20,7 @@
 
         <view class="group-title">其他</view>
         <view class="settings">
-          <view class="row"><view class="row-icon gray"><uni-icons type="info" color="#64748b" size="19" /></view><view class="row-copy"><view class="row-label">当前版本</view><view class="row-value">1.0.5</view></view></view>
+          <view class="row"><view class="row-icon gray"><uni-icons type="info" color="#64748b" size="19" /></view><view class="row-copy"><view class="row-label">当前版本</view><view class="row-value">1.0.7</view></view></view>
         </view>
         <button class="logout" @click="logout">退出登录</button>
       </view>
