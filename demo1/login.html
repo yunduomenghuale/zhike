@@ -1,0 +1,432 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录 - 计算机网络辅助教学平台</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .login-container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 40px;
+            width: 100%;
+            max-width: 450px;
+        }
+
+        .logo {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .logo-icon {
+            font-size: 60px;
+            margin-bottom: 10px;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 24px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        input[type="text"],
+        input[type="password"] {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: all 0.3s;
+        }
+
+        input[type="text"]:focus,
+        input[type="password"]:focus {
+            border-color: #4a90e2;
+            outline: none;
+            box-shadow: 0 0 10px rgba(74, 144, 226, 0.2);
+        }
+
+        .captcha-group {
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+        }
+
+        .captcha-display {
+            flex: 0 0 120px;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            padding: 12px;
+            text-align: center;
+            font-size: 18px;
+            font-weight: bold;
+            color: #333;
+            font-family: 'Courier New', monospace;
+            cursor: pointer;
+            transition: all 0.3s;
+            user-select: none;
+        }
+
+        .captcha-display:hover {
+            border-color: #4a90e2;
+            box-shadow: 0 0 10px rgba(74, 144, 226, 0.2);
+        }
+
+        .captcha-input {
+            flex: 1;
+        }
+
+        .captcha-hint {
+            font-size: 12px;
+            color: #999;
+            margin-top: 5px;
+            text-align: center;
+        }
+
+        .captcha-display .refresh-icon {
+            display: block;
+            font-size: 12px;
+            margin-top: 5px;
+            color: #666;
+        }
+
+        .user-type-select {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .user-type-btn {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            background: white;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-align: center;
+        }
+
+        .user-type-btn:hover {
+            border-color: #4a90e2;
+            background: #f0f8ff;
+        }
+
+        .user-type-btn.active {
+            border-color: #4a90e2;
+            background: #4a90e2;
+            color: white;
+        }
+
+        .user-type-icon {
+            font-size: 24px;
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .user-type-label {
+            font-size: 14px;
+            font-weight: bold;
+        }
+
+        button[type="submit"] {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #4a90e2 0%, #357abd 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-top: 10px;
+        }
+
+        button[type="submit"]:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(74, 144, 226, 0.4);
+        }
+
+        .error-message {
+            color: #e74c3c;
+            background: #ffeaea;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            text-align: center;
+            display: none;
+        }
+
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="logo">
+            <div class="logo-icon">🎓</div>
+        </div>
+        
+        <h1>计算机网络辅助教学平台</h1>
+        <p class="subtitle">洛阳理工学院计算机学院</p>
+
+        <div id="errorMessage" class="error-message"></div>
+
+        <form id="loginForm" onsubmit="return handleLogin(event)">
+            <label>用户类型</label>
+            <div class="user-type-select">
+                <div class="user-type-btn active" data-type="admin" onclick="selectUserType('admin')">
+                    <span class="user-type-icon">👨‍💼</span>
+                    <span class="user-type-label">管理员</span>
+                </div>
+                <div class="user-type-btn" data-type="teacher" onclick="selectUserType('teacher')">
+                    <span class="user-type-icon">👨‍🏫</span>
+                    <span class="user-type-label">教师</span>
+                </div>
+                <div class="user-type-btn" data-type="student" onclick="selectUserType('student')">
+                    <span class="user-type-icon">👨‍🎓</span>
+                    <span class="user-type-label">学生</span>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="username">用户名</label>
+                <input type="text" id="username" placeholder="请输入用户名" required>
+            </div>
+
+            <div class="form-group">
+                <label for="password">密码</label>
+                <input type="password" id="password" placeholder="请输入密码" required>
+            </div>
+
+            <div class="form-group">
+                <label for="captcha">验证码</label>
+                <div class="captcha-group">
+                    <div class="captcha-display" onclick="generateCaptcha()" title="点击刷新验证码">
+                        <span id="captchaQuestion">? + ? = </span>
+                        <span class="refresh-icon">点击刷新</span>
+                    </div>
+                    <div class="captcha-input">
+                        <input type="text" id="captcha" placeholder="请输入答案" required>
+                        <div class="captcha-hint">请计算左侧算式并输入结果</div>
+                    </div>
+                </div>
+            </div>
+
+            <button type="submit">登 录</button>
+        </form>
+
+    </div>
+
+    <script src="utils.js"></script>
+    <script src="api-client.js"></script>
+    <script>
+        let selectedUserType = 'admin';
+
+        // 生成验证码（1位或2位数字的加减乘除运算）
+        function generateCaptcha() {
+            const operators = ['+', '-', '×', '÷'];
+            const operator = operators[Math.floor(Math.random() * operators.length)];
+            
+            let num1, num2, answer;
+            
+            switch(operator) {
+                case '+':
+                    num1 = Math.floor(Math.random() * 20) + 1;
+                    num2 = Math.floor(Math.random() * 20) + 1;
+                    answer = num1 + num2;
+                    break;
+                case '-':
+                    num1 = Math.floor(Math.random() * 20) + 10;
+                    num2 = Math.floor(Math.random() * num1) + 1;
+                    answer = num1 - num2;
+                    break;
+                case '×':
+                    num1 = Math.floor(Math.random() * 9) + 1;
+                    num2 = Math.floor(Math.random() * 9) + 1;
+                    answer = num1 * num2;
+                    break;
+                case '÷':
+                    num2 = Math.floor(Math.random() * 9) + 1;
+                    answer = Math.floor(Math.random() * 9) + 1;
+                    num1 = num2 * answer;
+                    break;
+            }
+            
+            // 加密存储验证码答案（防止篡改）
+            const captchaData = {
+                answer: answer,
+                timestamp: Date.now()
+            };
+            sessionStorage.setItem('captchaToken', CryptoUtils.encrypt(captchaData));
+            
+            const question = `${num1} ${operator} ${num2} = `;
+            document.getElementById('captchaQuestion').textContent = question;
+            document.getElementById('captcha').value = '';
+        }
+
+        async function initTestUsers() {
+            return;
+        }
+
+        function selectUserType(type) {
+            selectedUserType = type;
+            document.querySelectorAll('.user-type-btn').forEach(btn => {
+                btn.classList.remove('active');
+                if (btn.dataset.type === type) {
+                    btn.classList.add('active');
+                }
+            });
+        }
+
+        async function handleLogin(event) {
+            event.preventDefault();
+            
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value;
+            const captchaInput = document.getElementById('captcha').value.trim();
+            const errorDiv = document.getElementById('errorMessage');
+
+            const captchaToken = sessionStorage.getItem('captchaToken');
+            if (!captchaToken) {
+                errorDiv.textContent = '验证码已过期，请刷新';
+                errorDiv.style.display = 'block';
+                generateCaptcha();
+                return false;
+            }
+
+            const captchaData = CryptoUtils.decrypt(captchaToken);
+            if (!captchaData || Date.now() - captchaData.timestamp > 300000) {
+                errorDiv.textContent = '验证码已过期，请刷新';
+                errorDiv.style.display = 'block';
+                generateCaptcha();
+                return false;
+            }
+
+            if (parseInt(captchaInput) !== captchaData.answer) {
+                errorDiv.textContent = '验证码错误，请重新计算';
+                errorDiv.style.display = 'block';
+                generateCaptcha();
+                setTimeout(() => errorDiv.style.display = 'none', 3000);
+                return false;
+            }
+
+            sessionStorage.removeItem('captchaToken');
+
+            try {
+                var result = await ApiClient.post('/api/user/login', { username: username, password: password, userType: selectedUserType });
+                if (result.success && result.data.token) {
+                    var data = result.data;
+                    if (data.user.type !== selectedUserType) {
+                        errorDiv.textContent = '用户类型不匹配，请重新选择';
+                        errorDiv.style.display = 'block';
+                        generateCaptcha();
+                        return false;
+                    }
+                    localStorage.setItem('authToken', data.token);
+                    completeLogin(data.user, errorDiv);
+                } else {
+                    errorDiv.textContent = (result.data && result.data.error) || result.error || '登录失败，请重试';
+                    errorDiv.style.display = 'block';
+                    generateCaptcha();
+                    setTimeout(() => errorDiv.style.display = 'none', 3000);
+                }
+            } catch (e) {
+                errorDiv.textContent = '网络错误，请检查服务是否启动';
+                errorDiv.style.display = 'block';
+                generateCaptcha();
+            }
+
+            return false;
+        }
+
+        function completeLogin(user, errorDiv) {
+            const loginData = {
+                username: user.username,
+                type: user.type,
+                typeName: user.typeName || user.type,
+                icon: user.icon || '👤',
+                name: user.name || user.username,
+                loginTime: new Date().toISOString()
+            };
+            localStorage.setItem('currentUser', JSON.stringify(loginData));
+            localStorage.setItem('lastActivity', String(Date.now()));
+            
+            if (user.firstLogin === true && user.type !== 'admin') {
+                window.location.href = 'force-change-password.html';
+                return;
+            }
+
+            if (user.type === 'admin') {
+                window.location.href = 'teacher.html';
+            } else if (user.type === 'teacher') {
+                window.location.href = 'teacher.html';
+            } else {
+                window.location.href = 'index.html';
+            }
+        }
+
+        // 页面加载时初始化
+        window.onload = function() {
+
+            initTestUsers();
+            generateCaptcha();
+            
+            const currentUser = localStorage.getItem('currentUser');
+            if (currentUser) {
+                try {
+                    var u = JSON.parse(currentUser);
+                    if (u.type === 'admin') {
+                        window.location.href = 'teacher.html';
+                    } else if (u.type === 'teacher') {
+                        window.location.href = 'teacher.html';
+                    } else {
+                        window.location.href = 'index.html';
+                    }
+                } catch(e) {
+                    window.location.href = 'index.html';
+                }
+            }
+        };
+    </script>
+
+
+</body>
+</html>

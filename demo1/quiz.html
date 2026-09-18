@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>作业习题 - 计算机网络辅助教学平台</title>
+    <script src="utils.js"></script>
+    <script src="api-client.js"></script>
+    <script src="auth-check.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', Arial, sans-serif; background: #0b1120; color: #e2e8f0; min-height: 100vh; }
+        .container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+        h1 { text-align: center; color: #38bdf8; margin-bottom: 25px; font-size: 24px; }
+        .tabs { display: flex; justify-content: center; gap: 5px; margin-bottom: 25px; flex-wrap: wrap; }
+        .tab { padding: 10px 24px; border: 1px solid #334155; background: #1e293b; color: #e2e8f0; cursor: pointer; border-radius: 8px 8px 0 0; font-size: 14px; transition: all 0.3s; }
+        .tab.active { background: #0ea5e9; color: #fff; border-color: #0ea5e9; }
+        .tab-content { display: none; background: #0f172a; border-radius: 0 8px 8px 8px; padding: 25px; box-shadow: 0 2px 12px rgba(0,0,0,0.3); }
+        .tab-content.active { display: block; }
+        .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
+        .toolbar h2 { font-size: 18px; color: #e2e8f0; }
+        .btn { padding: 8px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; transition: all 0.3s; }
+        .btn-success { background: #22c55e; color: #fff; }
+        .btn-success:hover { background: #16a34a; }
+        .btn-primary { background: #0ea5e9; color: #fff; }
+        .btn-primary:hover { background: #0284c7; }
+        .btn-danger { background: #ef4444; color: #fff; }
+        .btn-danger:hover { background: #dc2626; }
+        .btn-warning { background: #f59e0b; color: #fff; }
+        .btn-warning:hover { background: #d97706; }
+        .btn-outline { background: #0f172a; color: #38bdf8; border: 1px solid #38bdf8; }
+        .btn-outline:hover { background: #0ea5e9; color: #fff; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { padding: 12px; text-align: center; border: 1px solid #334155; }
+        th { background: #1e293b; color: #e2e8f0; font-weight: bold; }
+        tr:nth-child(even) { background: #0f172a; }
+        tr:hover { background: #1e293b; }
+        .chapter-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+        .chapter-card { border: 1px solid #334155; border-radius: 12px; padding: 22px; text-align: center; cursor: pointer; transition: all 0.3s; background: #1e293b; }
+        .chapter-card:hover { box-shadow: 0 6px 20px rgba(0,0,0,0.3); transform: translateY(-2px); }
+        .chapter-card .icon { font-size: 42px; margin-bottom: 10px; }
+        .chapter-card h3 { font-size: 15px; color: #e2e8f0; margin-bottom: 6px; }
+        .chapter-card .count { font-size: 13px; color: #94a3b8; }
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 10000; align-items: center; justify-content: center; }
+        .modal-overlay.show { display: flex; }
+        .modal { background: #0f172a; border-radius: 12px; padding: 30px; max-width: 700px; width: 95%; max-height: 85vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+        .modal h3 { margin-bottom: 20px; color: #e2e8f0; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: bold; color: #e2e8f0; font-size: 14px; }
+        .form-group input, .form-group select { width: 100%; padding: 10px; border: 1px solid #334155; border-radius: 6px; font-size: 14px; background: #1e293b; color: #e2e8f0; }
+        .question-select-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px; margin: 6px 0; border: 1px solid #334155; border-radius: 8px; transition: all 0.2s; }
+        .question-select-item:hover { background: #1e293b; }
+        .question-select-item.selected { background: #1e293b; border-color: #38bdf8; }
+        .question-select-item input[type="checkbox"] { margin-top: 3px; width: 18px; height: 18px; cursor: pointer; }
+        .question-select-item .q-info { flex: 1; }
+        .question-select-item .q-type-tag { display: inline-block; background: #0ea5e9; color: #fff; padding: 1px 8px; border-radius: 4px; font-size: 11px; margin-right: 6px; }
+        .question-select-item .q-text { font-size: 14px; color: #e2e8f0; line-height: 1.6; }
+        .empty-state { text-align: center; padding: 40px; color: #64748b; }
+        .empty-state .icon { font-size: 48px; margin-bottom: 10px; }
+        .quiz-card { border: 1px solid #334155; border-radius: 10px; padding: 20px; margin-bottom: 15px; transition: all 0.3s; }
+        .quiz-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+        .quiz-card h3 { color: #e2e8f0; margin-bottom: 8px; }
+        .quiz-card .meta { color: #94a3b8; font-size: 13px; margin-bottom: 10px; }
+        .quiz-card .actions { display: flex; gap: 8px; }
+        .question-block { background: #1e293b; border-radius: 8px; padding: 18px; margin-bottom: 15px; border-left: 4px solid #0ea5e9; }
+        .question-block .q-text { font-size: 15px; margin-bottom: 12px; font-weight: 500; }
+        .question-block .q-type { display: inline-block; background: #0ea5e9; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-bottom: 8px; }
+        .option-list { list-style: none; }
+        .option-list li { padding: 8px 12px; margin: 5px 0; border: 1px solid #334155; border-radius: 6px; cursor: pointer; transition: all 0.2s; }
+        .option-list li:hover { background: #334155; }
+        .option-list li.selected { background: #0ea5e9; color: #fff; border-color: #0ea5e9; }
+        .judge-options { display: flex; gap: 15px; }
+        .judge-btn { padding: 8px 30px; border: 1px solid #334155; border-radius: 6px; cursor: pointer; background: #1e293b; color: #e2e8f0; font-size: 14px; transition: all 0.2s; }
+        .judge-btn:hover { background: #334155; }
+        .judge-btn.selected { background: #0ea5e9; color: #fff; border-color: #0ea5e9; }
+        .timer { position: fixed; top: 80px; right: 20px; background: #22c55e; color: #fff; padding: 10px 20px; border-radius: 8px; font-size: 16px; font-weight: bold; z-index: 9999; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+        .result-correct { color: #22c55e; font-weight: bold; }
+        .result-wrong { color: #ef4444; font-weight: bold; }
+        .score-display { text-align: center; padding: 30px; }
+        .score-display .score { font-size: 60px; font-weight: bold; color: #38bdf8; }
+        .score-display .label { font-size: 16px; color: #94a3b8; }
+        .explanation { background: #33290a; padding: 8px 12px; border-radius: 4px; margin-top: 8px; font-size: 13px; color: #fbbf24; }
+        .status-open { color: #22c55e; font-weight: bold; }
+        .status-closed { color: #ef4444; font-weight: bold; }
+        .status-upcoming { color: #f59e0b; font-weight: bold; }
+        .back-link { display: inline-block; margin-bottom: 15px; color: #38bdf8; text-decoration: none; font-size: 14px; cursor: pointer; }
+        .back-link:hover { text-decoration: underline; }
+        .select-bar { position: sticky; top: 0; background: #0f172a; padding: 12px 0; border-bottom: 1px solid #334155; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; z-index: 10; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📝 作业习题</h1>
+
+        <!-- Teacher View -->
+        <div id="teacherView" style="display:none;">
+            <div class="tabs">
+                <button class="tab active" onclick="switchTeacherTab('chapters', event)">按章布置</button>
+                <button class="tab" onclick="switchTeacherTab('assign', event)">已布置作业</button>
+                <button class="tab" onclick="switchTeacherTab('results', event)">查看成绩</button>
+            </div>
+            <div id="teacher-chapters" class="tab-content active">
+                <h2 style="margin-bottom:18px;">选择章节布置作业</h2>
+                <div id="chapterGrid" class="chapter-grid"></div>
+            </div>
+            <div id="teacher-assign" class="tab-content">
+                <h2>已布置作业</h2>
+                <div id="assignmentList"></div>
+            </div>
+            <div id="teacher-results" class="tab-content">
+                <h2>作业成绩统计</h2>
+                <div id="resultsList"></div>
+            </div>
+        </div>
+
+        <!-- Chapter Detail Modal -->
+        <div id="chapterModal" class="modal-overlay">
+            <div class="modal">
+                <h3 id="chapterModalTitle">章节题目</h3>
+                <div class="select-bar">
+                    <span id="selectedCount">已选 0 题</span>
+                    <div style="display:flex;gap:8px;">
+                        <button class="btn btn-outline" onclick="selectAllQuestions()">全选</button>
+                        <button class="btn btn-outline" onclick="deselectAllQuestions()">取消全选</button>
+                    </div>
+                </div>
+                <div id="questionSelectList"></div>
+                <div style="margin-top:20px;padding-top:15px;border-top:1px solid #334155;">
+                    <div class="form-group">
+                        <label>作业标题</label>
+                        <input type="text" id="hwTitle" placeholder="如：第3章 数据链路层练习">
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                        <div class="form-group"><label>开放开始时间</label><input type="datetime-local" id="hwStartTime"></div>
+                        <div class="form-group"><label>开放结束时间</label><input type="datetime-local" id="hwEndTime"></div>
+                    </div>
+                    <div class="form-group"><label>限时（分钟）</label><input type="number" id="hwDuration" value="60" min="10" max="180"></div>
+                    <div style="display:flex;gap:10px;justify-content:flex-end;">
+                        <button class="btn" style="background:#334155;" onclick="closeChapterModal()">取消</button>
+                        <button class="btn btn-success" onclick="publishAssignment()">发布作业</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Student View -->
+        <div id="studentView" style="display:none;">
+            <div id="studentAssignmentList"></div>
+            <div id="studentQuizArea" style="display:none;">
+                <a class="back-link" onclick="backToList()">← 返回作业列表</a>
+                <div id="quizContent"></div>
+            </div>
+            <div id="studentResultArea" style="display:none;">
+                <a class="back-link" onclick="backToList()">← 返回作业列表</a>
+                <div id="resultContent"></div>
+            </div>
+        </div>
+
+        <!-- Teacher Review Modal -->
+        <div id="reviewModal" class="modal-overlay">
+            <div class="modal" style="max-width:900px;">
+                <h3>主观题复核 <span id="reviewStudentName" style="color:#94a3b8;font-size:14px;"></span></h3>
+                <div id="reviewContent" style="max-height:500px;overflow-y:auto;"></div>
+                <div style="margin-top:15px;padding-top:15px;border-top:1px solid #334155;display:flex;gap:10px;justify-content:flex-end;">
+                    <button class="btn" style="background:#334155;" onclick="closeReviewModal()">关闭</button>
+                    <button class="btn btn-success" onclick="saveReview()">保存复核</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="study-tracker.js"></script>
+    <script>
+    var _apiBase = (typeof API_BASE !== 'undefined' ? API_BASE : '');
+    var currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
+    var _assignments = [];
+    var _currentQuiz = null;
+    var _timerInterval = null;
+    var _timeRemaining = 0;
+    var _currentChapterQuestions = [];
+    var _selectedQuestionIds = [];
+    var _currentChapterName = '';
+
+    var CHAPTER_ICONS = {
+        'ch1': '🌐', 'ch2': '📡', 'ch3': '🔗', 'ch4': '🗺️', 'ch5': '🚚',
+        'ch6': '📬', 'ch7': '🔒', 'ch8': '🎬', 'ch9': '📶'
+    };
+
+    function apiGet(url) { return fetch(_apiBase + url).then(function(r) { return r.json(); }).catch(function() { return null; }); }
+    function apiPost(url, data) { return fetch(_apiBase + url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(function(r) { return r.json(); }).catch(function() { return null; }); }
+    function apiDelete(url) { return fetch(_apiBase + url, { method: 'DELETE' }).then(function(r) { return r.json(); }).catch(function() { return null; }); }
+
+    window.onload = function() {
+        if (currentUser.type === 'teacher' || currentUser.type === 'admin') {
+            document.getElementById('teacherView').style.display = 'block';
+            loadChapters();
+        } else if (currentUser.type === 'student') {
+            document.getElementById('studentView').style.display = 'block';
+            loadStudentAssignments();
+        } else {
+            window.location.href = 'login.html';
+        }
+    };
+
+    function switchTeacherTab(tab, evt) {
+        document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+        document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
+        if (evt && evt.target) evt.target.classList.add('active');
+        document.getElementById('teacher-' + tab).classList.add('active');
+        if (tab === 'assign') loadAssignments();
+        if (tab === 'results') loadResults();
+    }
+
+    async function loadChapters() {
+        var data = await apiGet('/api/questions/chapters');
+        var chapters = data ? data.chapters || [] : [];
+        var container = document.getElementById('chapterGrid');
+        if (chapters.length === 0) {
+            container.innerHTML = '<div class="empty-state"><div class="icon">📚</div><p>暂无章节</p></div>';
+            return;
+        }
+        container.innerHTML = chapters.map(function(ch) {
+            return '<div class="chapter-card" onclick="openChapter(\'' + ch.id + '\',\'' + escapeHtml(ch.name) + '\')">' +
+                '<div class="icon">' + (CHAPTER_ICONS[ch.id] || '📖') + '</div>' +
+                '<h3>' + escapeHtml(ch.name) + '</h3>' +
+                '<div class="count">' + ch.questionCount + ' 道题</div></div>';
+        }).join('');
+    }
+
+    async function openChapter(chId, chName) {
+        _currentChapterName = chName;
+        _selectedQuestionIds = [];
+        var data = await apiGet('/api/questions/chapter-full/' + encodeURIComponent(chId));
+        if (!data || !data.questions) { alert('加载题目失败'); return; }
+        _currentChapterQuestions = data.questions;
+        document.getElementById('chapterModalTitle').textContent = chName + ' - 选择题目';
+        document.getElementById('hwTitle').value = chName + ' 练习';
+        renderQuestionSelect();
+        document.getElementById('chapterModal').classList.add('show');
+    }
+
+    function renderQuestionSelect() {
+        var container = document.getElementById('questionSelectList');
+        var html = '';
+        _currentChapterQuestions.forEach(function(q, idx) {
+            var isSelected = _selectedQuestionIds.indexOf(q.id) >= 0;
+            html += '<div class="question-select-item' + (isSelected ? ' selected' : '') + '" onclick="toggleQuestion(\'' + q.id + '\', this)">';
+            html += '<input type="checkbox" ' + (isSelected ? 'checked' : '') + ' onclick="event.stopPropagation(); toggleQuestion(\'' + q.id + '\', this.parentElement)">';
+            html += '<div class="q-info"><span class="q-type-tag">' + (q.type === 'choice' ? '选择' : '判断') + '</span>';
+            html += '<span class="q-text">' + (idx + 1) + '. ' + escapeHtml(q.question) + '</span></div></div>';
+        });
+        container.innerHTML = html;
+        updateSelectedCount();
+    }
+
+    function toggleQuestion(qId, el) {
+        var idx = _selectedQuestionIds.indexOf(qId);
+        if (idx >= 0) { _selectedQuestionIds.splice(idx, 1); }
+        else { _selectedQuestionIds.push(qId); }
+        renderQuestionSelect();
+    }
+
+    function selectAllQuestions() {
+        _selectedQuestionIds = _currentChapterQuestions.map(function(q) { return q.id; });
+        renderQuestionSelect();
+    }
+
+    function deselectAllQuestions() {
+        _selectedQuestionIds = [];
+        renderQuestionSelect();
+    }
+
+    function updateSelectedCount() {
+        document.getElementById('selectedCount').textContent = '已选 ' + _selectedQuestionIds.length + ' 题';
+    }
+
+    function closeChapterModal() { document.getElementById('chapterModal').classList.remove('show'); }
+
+    async function publishAssignment() {
+        var title = document.getElementById('hwTitle').value.trim();
+        if (!title) { alert('请填写作业标题'); return; }
+        if (_selectedQuestionIds.length === 0) { alert('请至少选择一道题目'); return; }
+        var result = await apiPost('/api/assignments', {
+            title: title,
+            questionIds: _selectedQuestionIds,
+            chapters: [],
+            startTime: document.getElementById('hwStartTime').value,
+            endTime: document.getElementById('hwEndTime').value,
+            duration: document.getElementById('hwDuration').value
+        });
+        if (result && result.error) { alert(result.error); return; }
+        closeChapterModal();
+        alert('布置成功！共' + _selectedQuestionIds.length + '题');
+        switchTeacherTab('assign', null);
+        var tabs = document.querySelectorAll('.tab');
+        tabs.forEach(function(t) { t.classList.remove('active'); });
+        tabs[1].classList.add('active');
+    }
+
+    async function loadAssignments() {
+        var data = await apiGet('/api/assignments');
+        _assignments = data ? data.assignments || [] : [];
+        renderAssignmentList();
+    }
+
+    function getAssignmentStatus(a) {
+        var now = new Date().getTime();
+        if (a.startTime && now < new Date(a.startTime).getTime()) return 'upcoming';
+        if (a.endTime && now > new Date(a.endTime).getTime()) return 'closed';
+        return 'open';
+    }
+
+    function renderAssignmentList() {
+        var container = document.getElementById('assignmentList');
+        if (_assignments.length === 0) {
+            container.innerHTML = '<div class="empty-state"><div class="icon">📝</div><p>暂无作业</p></div>';
+            return;
+        }
+        var html = '<table><thead><tr><th>作业标题</th><th>题目数</th><th>限时</th><th>开放时间</th><th>状态</th><th>操作</th></tr></thead><tbody>';
+        _assignments.forEach(function(a) {
+            var status = getAssignmentStatus(a);
+            var statusText = status === 'open' ? '<span class="status-open">开放中</span>' : status === 'closed' ? '<span class="status-closed">已结束</span>' : '<span class="status-upcoming">未开始</span>';
+            var timeRange = '';
+            if (a.startTime) timeRange += new Date(a.startTime).toLocaleString('zh-CN');
+            if (a.endTime) timeRange += ' ~ ' + new Date(a.endTime).toLocaleString('zh-CN');
+            if (!timeRange) timeRange = '不限时';
+            html += '<tr><td>' + escapeHtml(a.title) + '</td><td>' + a.questionCount + '题</td><td>' + a.duration + '分钟</td><td style="font-size:12px;">' + timeRange + '</td><td>' + statusText + '</td><td><button class="btn btn-danger" onclick="deleteAssignment(\'' + a.id + '\')">删除</button></td></tr>';
+        });
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    }
+
+    async function deleteAssignment(id) {
+        if (!confirm('确定删除该作业？')) return;
+        await apiDelete('/api/assignments/' + encodeURIComponent(id));
+        loadAssignments();
+    }
+
+    var _allResultsData = null;
+    var _studentMap = null;
+
+    async function loadResults() {
+        var container = document.getElementById('resultsList');
+        container.innerHTML = '<p style="text-align:center;color:#94a3b8;">加载中...</p>';
+        var [resData, stuData, clsData] = await Promise.all([
+            apiGet('/api/quiz/all-results'),
+            apiGet('/api/students'),
+            apiGet('/api/classes')
+        ]);
+        var results = resData ? resData.results || [] : [];
+        var students = stuData ? stuData.students || [] : [];
+        var classes = clsData ? clsData.classes || [] : [];
+        _studentMap = {};
+        students.forEach(function(s) { _studentMap[s.id] = s; });
+        _allResultsData = { results: results, classes: classes };
+        renderResultsWithFilter();
+    }
+
+    function renderResultsWithFilter() {
+        var results = _allResultsData.results;
+        var classes = _allResultsData.classes;
+        var container = document.getElementById('resultsList');
+        var allAssignments = results.map(function(r) { return r.assignment; });
+        var selectedClass = document.getElementById('filterClass') ? document.getElementById('filterClass').value : '';
+        var selectedAssignment = document.getElementById('filterAssignment') ? document.getElementById('filterAssignment').value : '';
+        var filterStudentId = document.getElementById('filterStudentId') ? document.getElementById('filterStudentId').value.trim() : '';
+
+        var html = '<div style="display:flex;gap:15px;align-items:center;margin-bottom:15px;flex-wrap:wrap;background:#f0f4f8;padding:12px;border-radius:8px;">';
+        html += '<label style="font-weight:bold;">筛选:</label>';
+        html += '<select id="filterClass" onchange="renderResultsWithFilter()" style="padding:6px 10px;border:1px solid #334155;border-radius:4px;">';
+        html += '<option value="">全部班级</option>';
+        classes.forEach(function(c) {
+            html += '<option value="' + escapeHtml(c.name) + '"' + (selectedClass === c.name ? ' selected' : '') + '>' + escapeHtml(c.name) + '</option>';
+        });
+        html += '</select>';
+        html += '<select id="filterAssignment" onchange="renderResultsWithFilter()" style="padding:6px 10px;border:1px solid #334155;border-radius:4px;min-width:200px;">';
+        html += '<option value="">全部作业</option>';
+        allAssignments.forEach(function(a) {
+            html += '<option value="' + a.id + '"' + (selectedAssignment === a.id ? ' selected' : '') + '>' + escapeHtml(a.title) + '</option>';
+        });
+        html += '</select>';
+        html += '<input type="text" id="filterStudentId" value="' + escapeHtml(filterStudentId) + '" oninput="renderResultsWithFilter()" placeholder="输入学号搜索" style="padding:6px 10px;border:1px solid #334155;border-radius:4px;width:160px;">';
+        html += '<button class="btn btn-outline" style="padding:6px 12px;font-size:12px;" onclick="exportResultsCSV()">导出CSV</button>';
+        html += '</div>';
+
+        var filteredResults = results.filter(function(r) {
+            if (selectedAssignment && r.assignment.id !== selectedAssignment) return false;
+            return true;
+        });
+
+        var allRows = [];
+        filteredResults.forEach(function(r) {
+            r.submissions.forEach(function(s) {
+                var stu = _studentMap[s.studentId] || {};
+                if (selectedClass && stu.classname !== selectedClass) return;
+                if (filterStudentId && s.studentId.indexOf(filterStudentId) < 0) return;
+                allRows.push({
+                    assignmentId: r.assignment.id,
+                    assignmentTitle: r.assignment.title,
+                    studentId: s.studentId,
+                    studentName: stu.name || '未知',
+                    classname: stu.classname || '未分班',
+                    score: s.score,
+                    correctCount: s.correctCount,
+                    totalQuestions: s.totalQuestions,
+                    submitTime: s.submitTime,
+                    reviewed: s.reviewed
+                });
+            });
+        });
+
+        if (allRows.length === 0) {
+            html += '<div class="empty-state"><div class="icon">📊</div><p>暂无提交记录</p></div>';
+            container.innerHTML = html;
+            return;
+        }
+
+        allRows.sort(function(a, b) { return new Date(b.submitTime) - new Date(a.submitTime); });
+
+        html += '<table><thead><tr><th>学号</th><th>姓名</th><th>班级</th><th>作业名称</th><th>成绩</th><th>正确/总数</th><th>提交时间</th><th>状态</th><th>操作</th></tr></thead><tbody>';
+        allRows.forEach(function(row) {
+            var scoreColor = row.score >= 60 ? '#22c55e' : '#ef4444';
+            var reviewBadge = row.reviewed ? '<span style="color:#22c55e;font-size:12px;">已复核</span>' : '<span style="color:#f59e0b;font-size:12px;">待复核</span>';
+            html += '<tr>';
+            html += '<td>' + escapeHtml(row.studentId) + '</td>';
+            html += '<td>' + escapeHtml(row.studentName) + '</td>';
+            html += '<td>' + escapeHtml(row.classname) + '</td>';
+            html += '<td style="font-size:13px;">' + escapeHtml(row.assignmentTitle) + '</td>';
+            html += '<td style="color:' + scoreColor + ';font-weight:bold;">' + row.score + '</td>';
+            html += '<td>' + row.correctCount + '/' + row.totalQuestions + '</td>';
+            html += '<td style="font-size:12px;">' + new Date(row.submitTime).toLocaleString('zh-CN') + '</td>';
+            html += '<td>' + reviewBadge + '</td>';
+            html += '<td><button class="btn btn-primary" style="padding:4px 10px;font-size:12px;" onclick="openReviewModal(\'' + row.assignmentId + '\',\'' + escapeHtml(row.studentId) + '\')">复核</button></td>';
+            html += '</tr>';
+        });
+        html += '</tbody></table>';
+        html += '<div style="margin-top:10px;color:#94a3b8;font-size:13px;">共 ' + allRows.length + ' 条记录</div>';
+        container.innerHTML = html;
+    }
+
+    function exportResultsCSV() {
+        if (!_allResultsData || !_studentMap) return;
+        var results = _allResultsData.results;
+        var selectedClass = document.getElementById('filterClass') ? document.getElementById('filterClass').value : '';
+        var selectedAssignment = document.getElementById('filterAssignment') ? document.getElementById('filterAssignment').value : '';
+        var filterStudentId = document.getElementById('filterStudentId') ? document.getElementById('filterStudentId').value.trim() : '';
+        var rows = [];
+        results.forEach(function(r) {
+            if (selectedAssignment && r.assignment.id !== selectedAssignment) return;
+            r.submissions.forEach(function(s) {
+                var stu = _studentMap[s.studentId] || {};
+                if (selectedClass && stu.classname !== selectedClass) return;
+                if (filterStudentId && s.studentId.indexOf(filterStudentId) < 0) return;
+                rows.push([s.studentId, stu.name || '', stu.classname || '', r.assignment.title, s.score, s.correctCount + '/' + s.totalQuestions, new Date(s.submitTime).toLocaleString('zh-CN'), s.reviewed ? '已复核' : '待复核']);
+            });
+        });
+        var csv = '\uFEFF学号,姓名,班级,作业名称,成绩,正确/总数,提交时间,状态\n';
+        rows.forEach(function(r) { csv += r.map(function(c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(',') + '\n'; });
+        var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        var link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = '作业成绩_' + new Date().toISOString().substring(0, 10) + '.csv';
+        link.click();
+    }
+
+    // === Teacher Review functions ===
+    var _reviewData = null;
+    async function openReviewModal(assignmentId, studentId) {
+        document.getElementById('reviewStudentName').textContent = '- 学生: ' + studentId;
+        document.getElementById('reviewContent').innerHTML = '<p style="text-align:center;color:#94a3b8;">加载中...</p>';
+        document.getElementById('reviewModal').classList.add('show');
+        var data = await apiGet('/api/quiz/review/' + encodeURIComponent(assignmentId) + '?studentId=' + encodeURIComponent(studentId));
+        if (!data || !data.submission) { document.getElementById('reviewContent').innerHTML = '<p style="color:#ef4444;">加载失败</p>'; return; }
+        _reviewData = { assignmentId: assignmentId, studentId: studentId, submission: data.submission, questions: data.questions || [] };
+        renderReviewContent();
+    }
+
+    function renderReviewContent() {
+        var sub = _reviewData.submission;
+        var questions = _reviewData.questions;
+        var html = '<div style="background:#f0f4f8;padding:10px;border-radius:6px;margin-bottom:15px;">';
+        html += '<span>当前总分: <strong style="color:#38bdf8;">' + sub.score + '</strong></span>';
+        html += '<span style="margin-left:20px;">正确: ' + sub.correctCount + '/' + sub.totalQuestions + '</span>';
+        if (sub.reviewed) html += '<span style="margin-left:20px;color:#22c55e;">已复核</span>';
+        html += '</div>';
+        sub.results.forEach(function(r, idx) {
+            var q = questions[idx];
+            if (!q) return;
+            var isSubjective = q.type === 'fill' || q.type === 'short';
+            var borderColor = r.isCorrect ? '#22c55e' : (isSubjective && r.partialScore > 0 ? '#f59e0b' : '#ef4444');
+            if (r.pendingReview) borderColor = '#9b59b6';
+            html += '<div class="question-block" style="border-left-color:' + borderColor + ';">';
+            html += '<div class="q-type">' + ({choice:'选择题',judge:'判断题',fill:'填空题',short:'简答题'}[q.type] || q.type);
+            if (r.pendingReview) html += ' <span style="color:#9b59b6;font-size:11px;">(图片作答-待评阅)</span>';
+            if (r.reviewed) html += ' <span style="color:#22c55e;font-size:11px;">(已复核)</span>';
+            html += '</div>';
+            html += '<div class="q-text">' + (idx + 1) + '. ' + escapeHtml(q.question) + '</div>';
+            if (q.type === 'choice' && q.options) {
+                q.options.forEach(function(opt, oi) {
+                    var mark = '';
+                    if (oi === q.answer) mark += ' ✓';
+                    if (oi === r.userAnswer && !r.isCorrect) mark += ' ✗';
+                    html += '<div style="padding:3px 10px;">' + String.fromCharCode(65 + oi) + '. ' + escapeHtml(opt) + mark + '</div>';
+                });
+                html += '<div style="margin-top:5px;color:#94a3b8;">AI评分: ' + (r.isCorrect ? '正确' : '错误') + '</div>';
+            } else if (q.type === 'judge') {
+                html += '<div>学生答案: ' + (r.userAnswer ? '正确' : '错误') + ' | 正确答案: ' + (q.answer ? '正确' : '错误') + '</div>';
+            } else if (q.type === 'fill') {
+                html += '<div>学生答案: ' + escapeHtml(String(r.userAnswer || '未作答')) + '</div>';
+                html += '<div>正确答案: ' + escapeHtml(String(q.answer || '')) + '</div>';
+            } else if (q.type === 'short') {
+                html += '<div style="margin-bottom:6px;">学生答案: <div style="background:#1e293b;padding:8px;border-radius:4px;margin-top:4px;white-space:pre-wrap;">' + escapeHtml(String(r.userAnswer || '未作答')) + '</div></div>';
+                html += '<div>参考答案: <div style="background:#e8f5e9;padding:8px;border-radius:4px;margin-top:4px;white-space:pre-wrap;">' + escapeHtml(String(q.answer || '')) + '</div></div>';
+            }
+            if (_reviewData.submission.images && _reviewData.submission.images[q.id]) {
+                html += '<div style="margin-top:8px;"><strong>手写图片:</strong><br><img src="' + _reviewData.submission.images[q.id] + '" style="max-width:400px;max-height:300px;border:2px solid #475569;border-radius:6px;margin-top:5px;" onclick="window.open(this.src)"></div>';
+            }
+            if (isSubjective) {
+                var currentScore = Math.round((r.partialScore || 0) * 100);
+                html += '<div style="margin-top:10px;padding:10px;background:#fff8e1;border-radius:6px;">';
+                html += '<label style="font-weight:bold;">教师评分: </label>';
+                html += '<input type="range" min="0" max="100" value="' + currentScore + '" oninput="document.getElementById(\'scoreLabel_' + idx + '\').textContent=this.value+\'%\'" id="reviewScore_' + idx + '" style="width:200px;vertical-align:middle;">';
+                html += '<span id="scoreLabel_' + idx + '" style="margin-left:8px;font-weight:bold;color:#38bdf8;">' + currentScore + '%</span>';
+                if (r.similarity !== null && r.similarity !== undefined && !r.pendingReview) {
+                    html += '<span style="margin-left:15px;color:#94a3b8;">AI相似度: ' + Math.round(r.similarity * 100) + '%</span>';
+                }
+                html += '<br><input type="text" id="reviewComment_' + idx + '" placeholder="评语（可选）" value="' + escapeHtml(r.teacherComment || '') + '" style="width:100%;margin-top:8px;padding:6px;border:1px solid #334155;border-radius:4px;">';
+                html += '</div>';
+            }
+            html += '</div>';
+        });
+        document.getElementById('reviewContent').innerHTML = html;
+    }
+
+    function closeReviewModal() {
+        document.getElementById('reviewModal').classList.remove('show');
+        _reviewData = null;
+    }
+
+    async function saveReview() {
+        if (!_reviewData) return;
+        var sub = _reviewData.submission;
+        var questions = _reviewData.questions;
+        var reviews = [];
+        sub.results.forEach(function(r, idx) {
+            var q = questions[idx];
+            if (!q) return;
+            if (q.type === 'fill' || q.type === 'short') {
+                var scoreInput = document.getElementById('reviewScore_' + idx);
+                var commentInput = document.getElementById('reviewComment_' + idx);
+                if (scoreInput) {
+                    var newScore = parseInt(scoreInput.value) / 100;
+                    var oldScore = r.partialScore || 0;
+                    if (Math.abs(newScore - oldScore) > 0.001 || (commentInput && commentInput.value)) {
+                        reviews.push({ questionId: r.questionId, partialScore: newScore, isCorrect: newScore >= 1, comment: commentInput ? commentInput.value : '' });
+                    }
+                }
+            }
+        });
+        if (reviews.length === 0) { alert('没有修改任何题目分数'); return; }
+        var result = await apiPost('/api/quiz/review', {
+            assignmentId: _reviewData.assignmentId,
+            studentId: _reviewData.studentId,
+            reviews: reviews
+        });
+        if (result && result.error) { alert(result.error); return; }
+        alert('复核成功！新总分: ' + result.score + '分');
+        closeReviewModal();
+        loadResults();
+    }
+
+    // === Student functions ===
+    async function loadStudentAssignments() {
+        var data = await apiGet('/api/assignments');
+        _assignments = data ? data.assignments || [] : [];
+        var subData = await apiGet('/api/quiz/my-submissions?studentId=' + encodeURIComponent(currentUser.username));
+        var mySubs = subData ? subData.submissions || [] : [];
+        var container = document.getElementById('studentAssignmentList');
+        if (_assignments.length === 0) {
+            container.innerHTML = '<div class="empty-state"><div class="icon">📝</div><p>暂无作业</p></div>';
+            return;
+        }
+        var html = '';
+        _assignments.forEach(function(a) {
+            var status = getAssignmentStatus(a);
+            var sub = mySubs.find(function(s) { return s.assignmentId === a.id; });
+            var statusText = status === 'open' ? '<span class="status-open">开放中</span>' : status === 'closed' ? '<span class="status-closed">已结束</span>' : '<span class="status-upcoming">未开始</span>';
+            html += '<div class="quiz-card"><h3>' + escapeHtml(a.title) + '</h3>';
+            html += '<div class="meta">' + a.questionCount + '题 | 限时' + a.duration + '分钟 | ' + statusText;
+            if (a.startTime) html += ' | ' + new Date(a.startTime).toLocaleString('zh-CN') + ' ~ ' + new Date(a.endTime).toLocaleString('zh-CN');
+            html += '</div><div class="actions">';
+            if (sub) {
+                html += '<span style="color:#22c55e;font-weight:bold;">已提交 得分:' + sub.score + '</span> <button class="btn btn-primary" onclick="viewResult(\'' + a.id + '\')">查看详情</button>';
+            } else if (status === 'open') {
+                html += '<button class="btn btn-success" onclick="startQuiz(\'' + a.id + '\')">开始作答</button>';
+            } else if (status === 'upcoming') {
+                html += '<span style="color:#f59e0b;">未开放</span>';
+            } else {
+                html += '<span style="color:#ef4444;">已结束</span>';
+            }
+            html += '</div></div>';
+        });
+        container.innerHTML = html;
+    }
+
+    async function startQuiz(assignmentId) {
+        if (!confirm('开始作答后将计时，确定开始吗？')) return;
+        var data = await apiGet('/api/quiz/questions/' + encodeURIComponent(assignmentId));
+        if (!data || !data.questions || data.questions.length === 0) { alert('加载题目失败'); return; }
+        _currentQuiz = { assignmentId: assignmentId, questions: data.questions, answers: {}, images: {} };
+        var assignment = _assignments.find(function(a) { return a.id === assignmentId; });
+        _timeRemaining = assignment ? assignment.duration * 60 : 3600;
+        document.getElementById('studentAssignmentList').style.display = 'none';
+        document.getElementById('studentQuizArea').style.display = 'block';
+        renderQuiz();
+        startTimer();
+    }
+
+    function renderQuiz() {
+        var html = '<h2 style="margin-bottom:20px;">' + escapeHtml(_assignments.find(function(a) { return a.id === _currentQuiz.assignmentId; }).title) + '</h2>';
+        _currentQuiz.questions.forEach(function(q, idx) {
+            html += '<div class="question-block"><div class="q-type">' + ({choice:'选择题',judge:'判断题',fill:'填空题',short:'简答题'}[q.type] || q.type) + '</div>';
+            html += '<div class="q-text">' + (idx + 1) + '. ' + escapeHtml(q.question) + '</div>';
+            if (q.type === 'choice' && q.options) {
+                html += '<ul class="option-list">';
+                q.options.forEach(function(opt, oi) {
+                    var sel = _currentQuiz.answers[q.id] === oi ? ' selected' : '';
+                    html += '<li class="' + sel + '" onclick="selectAnswer(\'' + q.id + '\',' + oi + ')">' + String.fromCharCode(65 + oi) + '. ' + escapeHtml(opt) + '</li>';
+                });
+                html += '</ul>';
+            } else if (q.type === 'judge') {
+                var selT = _currentQuiz.answers[q.id] === true ? ' selected' : '';
+                var selF = _currentQuiz.answers[q.id] === false ? ' selected' : '';
+                html += '<div class="judge-options"><button class="judge-btn' + selT + '" onclick="selectAnswer(\'' + q.id + '\',true)">✅ 正确</button><button class="judge-btn' + selF + '" onclick="selectAnswer(\'' + q.id + '\',false)">❌ 错误</button></div>';
+
+            } else if (q.type === 'fill') {
+                html += '<input type="text" value="' + escapeHtml(_currentQuiz.answers[q.id] || '') + '" oninput="setFillAnswer(\'' + q.id + '\',this.value)" onpaste="return false" ondrop="return false" ondragover="return false" placeholder="请输入答案（禁止粘贴）" style="width:100%;padding:10px;border:2px solid #475569;border-radius:6px;font-size:14px;margin-top:8px;">';
+                html += '<div style="margin-top:8px;"><label class="btn btn-outline" style="cursor:pointer;font-size:13px;padding:6px 12px;">📷 上传手写图片<input type="file" accept="image/*" style="display:none;" onchange="uploadAnswerImage(\'' + q.id + '\',this)"></label><span id="imgHint_' + q.id + '" style="margin-left:10px;color:#94a3b8;font-size:12px;"></span></div>';
+                html += '<div id="imgPreview_' + q.id + '"></div>';
+            } else if (q.type === 'short') {
+                html += '<textarea oninput="setFillAnswer(\'' + q.id + '\',this.value)" onpaste="return false" ondrop="return false" ondragover="return false" placeholder="请输入答案（禁止粘贴，可上传手写图片）" style="width:100%;padding:10px;border:2px solid #475569;border-radius:6px;font-size:14px;margin-top:8px;min-height:100px;resize:vertical;font-family:inherit;">' + escapeHtml(_currentQuiz.answers[q.id] || '') + '</textarea>';
+                html += '<div style="margin-top:8px;"><label class="btn btn-outline" style="cursor:pointer;font-size:13px;padding:6px 12px;">📷 上传手写图片<input type="file" accept="image/*" style="display:none;" onchange="uploadAnswerImage(\'' + q.id + '\',this)"></label><span id="imgHint_' + q.id + '" style="margin-left:10px;color:#94a3b8;font-size:12px;"></span></div>';
+                html += '<div id="imgPreview_' + q.id + '"></div>';            }
+            html += '</div>';
+        });
+        html += '<div style="text-align:center;margin-top:20px;"><button class="btn btn-success" style="padding:12px 40px;font-size:16px;" onclick="submitQuiz()">提交作业</button></div>';
+        document.getElementById('quizContent').innerHTML = html;
+    }
+
+    function selectAnswer(qId, val) {
+        _currentQuiz.answers[qId] = val;
+        renderQuiz();
+    }
+
+    function setFillAnswer(qId, val) {
+        _currentQuiz.answers[qId] = val;
+    }
+
+    function uploadAnswerImage(qId, input) {
+        var file = input.files[0];
+        if (!file) return;
+        if (file.size > 5 * 1024 * 1024) { alert('图片不能超过5MB'); input.value = ''; return; }
+        var reader = new FileReader();
+        reader.onload = function(e) {
+            _currentQuiz.images[qId] = e.target.result;
+            var previewDiv = document.getElementById('imgPreview_' + qId);
+            var hintSpan = document.getElementById('imgHint_' + qId);
+            if (previewDiv) {
+                previewDiv.innerHTML = '<div style="margin-top:8px;position:relative;display:inline-block;"><img src="' + e.target.result + '" style="max-width:300px;max-height:200px;border:2px solid #38bdf8;border-radius:6px;"><button onclick="removeAnswerImage(\'' + qId + '\')" style="position:absolute;top:-8px;right:-8px;background:#ef4444;color:#fff;border:none;border-radius:50%;width:24px;height:24px;cursor:pointer;font-size:14px;">×</button></div>';
+            }
+            if (hintSpan) hintSpan.textContent = '已上传手写图片（教师将人工评阅）';
+        };
+        reader.readAsDataURL(file);
+    }
+
+    function removeAnswerImage(qId) {
+        delete _currentQuiz.images[qId];
+        var previewDiv = document.getElementById('imgPreview_' + qId);
+        var hintSpan = document.getElementById('imgHint_' + qId);
+        if (previewDiv) previewDiv.innerHTML = '';
+        if (hintSpan) hintSpan.textContent = '';
+    }
+
+    function startTimer() {
+        if (_timerInterval) clearInterval(_timerInterval);
+        var timerEl = document.createElement('div');
+        timerEl.id = 'quizTimer';
+        timerEl.className = 'timer';
+        document.body.appendChild(timerEl);
+        _timerInterval = setInterval(function() {
+            _timeRemaining--;
+            var m = Math.floor(_timeRemaining / 60);
+            var s = _timeRemaining % 60;
+            document.getElementById('quizTimer').textContent = '⏱ ' + m + ':' + (s < 10 ? '0' : '') + s;
+            if (_timeRemaining <= 0) { clearInterval(_timerInterval); alert('时间到！自动提交'); submitQuiz(); }
+            if (_timeRemaining <= 300) document.getElementById('quizTimer').style.background = '#ef4444';
+        }, 1000);
+    }
+
+    async function submitQuiz() {
+        if (!confirm('确定提交？提交后不能修改。')) return;
+        if (_timerInterval) clearInterval(_timerInterval);
+        var timerEl = document.getElementById('quizTimer');
+        if (timerEl) timerEl.remove();
+        var hasImages = _currentQuiz.images && Object.keys(_currentQuiz.images).length > 0;
+        var result = await apiPost('/api/quiz/submit', {
+            assignmentId: _currentQuiz.assignmentId,
+            studentId: currentUser.username,
+            answers: _currentQuiz.answers,
+            images: _currentQuiz.images || {}
+        });
+        if (result && result.error) { alert(result.error); return; }
+        var msg = '提交成功！得分：' + (result ? result.score : 0) + '分';
+        if (hasImages) msg += '\n注：手写图片题目将由教师人工评阅，当前分数可能后续调整。';
+        alert(msg);
+        backToList();
+    }
+
+    function backToList() {
+        if (_timerInterval) clearInterval(_timerInterval);
+        var timerEl = document.getElementById('quizTimer');
+        if (timerEl) timerEl.remove();
+        document.getElementById('studentAssignmentList').style.display = 'block';
+        document.getElementById('studentQuizArea').style.display = 'none';
+        document.getElementById('studentResultArea').style.display = 'none';
+        loadStudentAssignments();
+    }
+
+    async function viewResult(assignmentId) {
+        var data = await apiGet('/api/quiz/result/' + encodeURIComponent(assignmentId) + '?studentId=' + encodeURIComponent(currentUser.username));
+        if (!data || !data.submission) { alert('加载结果失败'); return; }
+        document.getElementById('studentAssignmentList').style.display = 'none';
+        document.getElementById('studentResultArea').style.display = 'block';
+        var sub = data.submission;
+        var questions = data.questions || [];
+        var html = '<div class="score-display"><div class="label">得分</div><div class="score">' + sub.score + '</div><div class="label">正确 ' + sub.correctCount + '/' + sub.totalQuestions + '</div></div>';
+        sub.results.forEach(function(r, idx) {
+            var q = questions[idx];
+            if (!q) return;
+            var isSubjective = q.type === 'fill' || q.type === 'short';
+            var borderColor = '#ef4444';
+            if (r.isCorrect) borderColor = '#22c55e';
+            else if (isSubjective && r.partialScore > 0) borderColor = '#f59e0b';
+            if (r.pendingReview) borderColor = '#9b59b6';
+            html += '<div class="question-block" style="border-left-color:' + borderColor + ';">';
+            html += '<div class="q-type">' + ({choice:'选择题',judge:'判断题',fill:'填空题',short:'简答题'}[q.type] || q.type);
+            if (r.pendingReview) html += ' <span style="color:#9b59b6;font-size:11px;">(图片作答-待教师评阅)</span>';
+            if (r.reviewed) html += ' <span style="color:#22c55e;font-size:11px;">(已复核)</span>';
+            html += '</div>';
+            html += '<div class="q-text">' + (idx + 1) + '. ' + escapeHtml(q.question) + '</div>';
+            if (q.type === 'choice' && q.options) {
+                q.options.forEach(function(opt, oi) {
+                    var cls = '';
+                    if (oi === q.answer) cls = 'result-correct';
+                    else if (oi === r.userAnswer && !r.isCorrect) cls = 'result-wrong';
+                    html += '<div style="padding:5px 10px;margin:3px 0;border-radius:4px;' + (cls ? 'font-weight:bold;' : '') + '">' + String.fromCharCode(65 + oi) + '. ' + escapeHtml(opt) + (oi === q.answer ? ' ✓' : '') + (oi === r.userAnswer && !r.isCorrect ? ' ✗' : '') + '</div>';
+                });
+            } else if (q.type === 'judge') {
+                html += '<div>你的答案：<span class="' + (r.isCorrect ? 'result-correct' : 'result-wrong') + '">' + (r.userAnswer ? '正确' : '错误') + '</span> | 正确答案：<span class="result-correct">' + (q.answer ? '正确' : '错误') + '</span></div>';
+
+            } else if (q.type === 'fill') {
+                html += '<div>你的答案：<span class="' + (r.isCorrect ? 'result-correct' : 'result-wrong') + '">' + escapeHtml(String(r.userAnswer || '未作答')) + '</span></div>';
+                html += '<div>正确答案：<span class="result-correct">' + escapeHtml(String(q.answer || '')) + '</span></div>';
+            } else if (q.type === 'short') {
+                html += '<div style="margin-bottom:8px;">你的答案：<div style="background:#1e293b;padding:10px;border-radius:4px;margin-top:4px;">' + escapeHtml(String(r.userAnswer || '未作答')) + '</div></div>';
+                html += '<div>参考答案：<div style="background:#e8f5e9;padding:10px;border-radius:4px;margin-top:4px;">' + escapeHtml(String(q.answer || '')) + '</div></div>';            }
+            if (sub.images && sub.images[q.id]) {
+                html += '<div style="margin-top:8px;"><strong>手写图片:</strong><br><img src="' + sub.images[q.id] + '" style="max-width:400px;max-height:300px;border:2px solid #475569;border-radius:6px;margin-top:5px;" onclick="window.open(this.src)"></div>';
+            }
+            if (isSubjective && r.pendingReview) {
+                html += '<div style="margin-top:8px;padding:8px 12px;background:#f3e5f5;border-radius:6px;font-size:13px;color:#9b59b6;">📷 图片作答，等待教师评阅中...</div>';
+            } else if (isSubjective && r.similarity !== null && r.similarity !== undefined) {
+                var simPct = Math.round(r.similarity * 100);
+                var partialPct = Math.round(r.partialScore * 100);
+                var simColor = simPct >= 90 ? '#22c55e' : (simPct >= 30 ? '#f59e0b' : '#ef4444');
+                html += '<div style="margin-top:8px;padding:8px 12px;background:#f0f4f8;border-radius:6px;font-size:13px;">';
+                html += '<span style="color:' + simColor + ';font-weight:bold;">相似度 ' + simPct + '%</span>';
+                html += ' | <span style="color:#94a3b8;">本题得分 ' + partialPct + '%</span>';
+                if (simPct < 30) html += ' | <span style="color:#ef4444;">相似度过低，不给分</span>';
+                else if (simPct >= 90 && r.isCorrect) html += ' | <span style="color:#22c55e;">要点一致，满分</span>';
+                else html += ' | <span style="color:#f59e0b;">按相似度给分</span>';
+                html += '</div>';
+            }
+            if (!r.isCorrect && r.explanation) {
+                html += '<div class="explanation">💡 ' + escapeHtml(r.explanation) + '</div>';
+            }
+            if (r.teacherComment) {
+                html += '<div style="margin-top:8px;padding:8px 12px;background:#e8f5e9;border-radius:6px;font-size:13px;"><strong>教师评语:</strong> ' + escapeHtml(r.teacherComment) + '</div>';
+            }
+            html += '</div>';
+        });
+        document.getElementById('resultContent').innerHTML = html;
+    }
+    </script>
+    <script src="chat-knowledge.js"></script>
+    <script src="kb-loader.js"></script>
+    <script src="chat-agent.js"></script>
+</body>
+</html>

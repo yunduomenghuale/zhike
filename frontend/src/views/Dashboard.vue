@@ -35,10 +35,13 @@ import { useRouter } from 'vue-router'
 import { useUserStore } from '@/store/user'
 import { listCourses } from '@/api/course'
 import { listClasses } from '@/api/classroom'
+import { createDemo1Sso } from '@/api/auth'
+import { DEMO1_URL } from '@/config'
 import {
   ArrowRight,
   ChatDotRound,
   Collection,
+  Connection,
   DataAnalysis,
   Document,
   EditPen,
@@ -118,6 +121,7 @@ const teacherFeatures = computed(() => [
   { label: '作业管理', desc: '布置与批改作业', path: courseTab('homework', '/teacher/homework'), icon: Notebook, color: '#0ea5e9', bg: '#f0f9ff' },
   { label: '考试', desc: '组卷与发布考试', path: courseTab('exams', '/teacher/exams'), icon: Document, color: '#ef4444', bg: '#fef2f2' },
   { label: '学习统计', desc: '查看学习数据', path: courseTab('analytics', '/teacher/analytics'), icon: TrendCharts, color: '#14b8a6', bg: '#ecfeff' },
+  { label: '网络学习小伴侣', desc: '计算机网络专题与仿真实验（免登录）', sso: true, icon: Connection, color: '#d946ef', bg: '#fdf4ff' },
   { label: '个人中心', desc: '维护账号资料', path: '/profile', icon: HomeFilled, color: '#64748b', bg: '#f1f5f9' },
 ])
 
@@ -129,6 +133,7 @@ const studentFeatures = computed(() => [
   { label: '我的考试', desc: '参加考试答题', path: studentCourseTab('exams', '/student/exams'), icon: Document, color: '#ef4444', bg: '#fef2f2' },
   { label: '错题本', desc: '复盘错题记录', path: studentCourseTab('wrong', '/student/wrong'), icon: Collection, color: '#f59e0b', bg: '#fff7ed' },
   { label: '我的班级', desc: '查看所在班级', path: '/student/my-classes', icon: School, color: '#14b8a6', bg: '#ecfeff' },
+  { label: '网络学习小伴侣', desc: '计算机网络专题与仿真实验（免登录）', sso: true, icon: Connection, color: '#d946ef', bg: '#fdf4ff' },
   { label: '个人中心', desc: '维护账号资料', path: '/profile', icon: HomeFilled, color: '#64748b', bg: '#f1f5f9' },
 ])
 
@@ -147,7 +152,24 @@ const features = computed(() => {
 })
 
 function handleSelect(item) {
+  // 外部系统（如网络学习小伴侣）新标签页打开；内部功能走路由跳转
+  if (item.sso) return openDemo1()
+  if (item.external) {
+    window.open(item.external, '_blank', 'noopener')
+    return
+  }
   if (item.path) router.push(item.path)
+}
+
+// 网络学习小伴侣免登：先向后端换 HMAC 票据，再带票据新标签页进入；
+// 换取失败（如后端未就绪）退化为直接打开 demo1 登录页
+async function openDemo1() {
+  try {
+    const data = await createDemo1Sso()
+    window.open(data.url, '_blank', 'noopener')
+  } catch {
+    window.open(DEMO1_URL, '_blank', 'noopener')
+  }
 }
 </script>
 

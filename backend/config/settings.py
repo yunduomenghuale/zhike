@@ -230,6 +230,15 @@ MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # ---------------------------------------------------------------------------
+# 网络学习小伴侣（demo1）单点免登
+# 票据用 HMAC-SHA256 签名，密钥必须与 demo1 的 DEMO1_SSO_SECRET 环境变量一致；
+# 开发默认值仅用于本地，生产务必通过环境变量覆盖。
+# ---------------------------------------------------------------------------
+DEMO1_SSO_SECRET = os.getenv("DEMO1_SSO_SECRET", "zhike-demo1-sso-dev-secret")
+DEMO1_BASE_URL = os.getenv("DEMO1_BASE_URL", "http://127.0.0.1:8081")
+DEMO1_SSO_TICKET_TTL = int(os.getenv("DEMO1_SSO_TICKET_TTL", "300"))  # 秒
+
+# ---------------------------------------------------------------------------
 # 大模型配置（供 apps.ai 读取）
 # ---------------------------------------------------------------------------
 AI_PROVIDER = os.getenv("AI_PROVIDER", "mock")

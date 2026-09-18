@@ -1,6 +1,7 @@
 from pathlib import Path
 from uuid import uuid4
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.cache import caches
 from django.core.files.storage import default_storage
@@ -157,6 +158,38 @@ class PasswordChangeView(APIView):
         request.user.must_change_password = False
         request.user.save(update_fields=["password", "must_change_password"])
         return api_response(message="密码修改成功")
+
+
+class Demo1SsoView(APIView):
+    """生成"网络学习小伴侣"（demo1）免登票据。
+
+    票据 = base64url(payload) + "." + HMAC-SHA256 签名，demo1 侧用同一密钥
+    验签后自动开通/复用本地账号并建立会话。角色按 demo1 的账号体系映射。
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        import base64
+        import hashlib
+        import hmac
+        import json
+        import secrets
+        import time
+
+        user = request.user
+        role = user.role if user.role in ("teacher", "student", "admin") else "student"
+        payload = {
+            "u": user.username,
+            "n": user.real_name or user.username,
+            "r": role,
+            "exp": int(time.time()) + settings.DEMO1_SSO_TICKET_TTL,
+            "nonce": secrets.token_hex(8),
+        }
+        body = base64.urlsafe_b64encode(json.dumps(payload, ensure_ascii=False).encode()).decode().rstrip("=")
+        sig = hmac.new(settings.DEMO1_SSO_SECRET.encode(), body.encode(), hashlib.sha256).hexdigest()
+        url = f"{settings.DEMO1_BASE_URL.rstrip('/')}/sso.html?ticket={body}.{sig}"
+        return api_response({"url": url})
 
 
 from rest_framework.decorators import action

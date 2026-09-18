@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>计算机网络辅助教学平台</title>
+    <script src="auth-check.js"></script>
+    <script src="utils.js"></script>
+    <script src="api-client.js"></script>
+    <script src="study-tracker.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: "Microsoft Yahei", "微软雅黑", sans-serif; }
+        body { background: linear-gradient(135deg, #0b1120 0%, #1e293b 100%); color: #e2e8f0; min-height: 100vh; padding: 0; }
+
+        .container { max-width: 1400px; margin: 0 auto; padding: 30px 20px; }
+        header { text-align: center; margin-bottom: 30px; }
+        h1 { font-size: 36px; color: #38bdf8; text-shadow: 0 0 20px rgba(56, 189, 248, 0.5); margin-bottom: 10px; letter-spacing: 2px; text-align: center; }
+        .subtitle { font-size: 16px; color: #94a3b8; margin-bottom: 8px; }
+        .description { font-size: 14px; color: #64748b; max-width: none; margin: 0 auto; line-height: 1.6; white-space: nowrap; }
+        .featured-card {
+            background: linear-gradient(135deg, #1e293b 0%, #243449 100%);
+            border: 3px solid #0ea5e9;
+            border-radius: 16px;
+            padding: 35px;
+            margin: 30px auto;
+            max-width: 800px;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            box-shadow: 0 10px 40px rgba(14, 165, 233, 0.15);
+        }
+        .featured-card:hover { transform: translateY(-6px); box-shadow: 0 20px 50px rgba(14, 165, 233, 0.3); border-color: #38bdf8; }
+        .featured-icon { font-size: 50px; margin-bottom: 15px; }
+        .featured-title { font-size: 24px; font-weight: bold; color: #38bdf8; margin-bottom: 10px; }
+        .featured-desc { font-size: 14px; color: #cbd5e1; line-height: 1.7; margin-bottom: 20px; }
+        .featured-link { display: inline-block; padding: 10px 25px; background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%); color: #fff; text-decoration: none; font-weight: bold; border-radius: 8px; transition: all 0.3s ease; font-size: 14px; }
+        .featured-link:hover { background: linear-gradient(135deg, #38bdf8 0%, #0ea5e9 100%); transform: translateY(-2px); }
+        .tabs { display: flex; flex-wrap: nowrap; gap: 10px; margin-bottom: 25px; border-bottom: 2px solid #334155; padding-bottom: 10px; justify-content: center; }
+        .tab { padding: 10px 24px; background: #1e293b; border: 2px solid #475569; border-radius: 8px; cursor: pointer; font-size: 16px; transition: all 0.3s; color: #94a3b8; font-weight: bold; white-space: nowrap; flex-shrink: 0; }
+        .tab:hover { background: #243449; border-color: #0ea5e9; color: #38bdf8; }
+        .tab.active { background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%); color: #fff; border-color: #0ea5e9; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 10px; }
+        .card {
+            background: linear-gradient(135deg, #1e293b 0%, #243449 100%);
+            border: 2px solid #334155;
+            border-radius: 10px;
+            padding: 18px 14px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+            text-align: center;
+        }
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 3px;
+            background: linear-gradient(90deg, #0ea5e9, #38bdf8);
+            transform: scaleX(0);
+            transition: transform 0.3s ease;
+        }
+        .card:hover { transform: translateY(-4px); border-color: #0ea5e9; box-shadow: 0 8px 25px rgba(14, 165, 233, 0.2); }
+        .card:hover::before { transform: scaleX(1); }
+        .card-icon { font-size: 30px; margin-bottom: 8px; }
+        .card-title { font-size: 14px; color: #38bdf8; margin-bottom: 6px; font-weight: bold; }
+        .card-desc { font-size: 12px; color: #94a3b8; line-height: 1.5; margin-bottom: 8px; }
+        .card-link { display: inline-block; color: #0ea5e9; text-decoration: none; font-weight: bold; font-size: 12px; }
+        .card-link:hover { color: #38bdf8; }
+        .card.lab { border-color: #92400e; }
+        .card.lab::before { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+        .card.lab:hover { border-color: #f59e0b; box-shadow: 0 8px 25px rgba(245, 158, 11, 0.2); }
+        .card.lab .card-title { color: #fbbf24; }
+        .card.lab .card-link { color: #f59e0b; }
+        .card.lab .card-link:hover { color: #fbbf24; }
+        .card.quiz { border-color: #166534; }
+        .card.quiz::before { background: linear-gradient(90deg, #22c55e, #4ade80); }
+        .card.quiz:hover { border-color: #22c55e; box-shadow: 0 8px 25px rgba(34, 197, 94, 0.2); }
+        .card.quiz .card-title { color: #4ade80; }
+        .card.quiz .card-link { color: #22c55e; }
+        .card.quiz .card-link:hover { color: #4ade80; }
+        .card.quiz.no-assign { opacity: 0.55; cursor: default; }
+        .card.quiz.no-assign:hover { transform: none; border-color: #166534; box-shadow: none; }
+        .card.quiz.no-assign::before { display: none; }
+        .digital-human-placeholder { text-align: center; padding: 60px 20px; color: #64748b; }
+        .digital-human-placeholder .icon { font-size: 80px; margin-bottom: 20px; }
+        .digital-human-placeholder h3 { font-size: 20px; color: #94a3b8; margin-bottom: 10px; }
+        .digital-human-placeholder p { font-size: 14px; line-height: 1.8; }
+        .dh-card { background: linear-gradient(135deg, #1e293b 0%, #243449 100%); border: 2px solid #4b5563; border-radius: 10px; overflow: hidden; transition: all 0.3s ease; cursor: pointer; position: relative; }
+        .dh-card::before { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 3px; background: linear-gradient(90deg, #6b7280, #9ca3af); transform: scaleX(0); transition: transform 0.3s ease; z-index: 1; }
+        .dh-card:hover { transform: translateY(-4px); border-color: #9ca3af; box-shadow: 0 8px 25px rgba(156, 163, 175, 0.25); }
+        .dh-card:hover::before { transform: scaleX(1); }
+        footer { text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #334155; color: #64748b; font-size: 13px; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <header>
+            <p class="description">
+                集数字人在线课堂、可视化动画和交互式演示、虚拟仿真实验、作业习题及学习小伴侣于一体的课程教学网站
+            </p>
+        </header>
+
+        <div class="featured-card" onclick="window.location.href='demos/Mind-Map.html'">
+            <div class="featured-icon">🧠</div>
+            <h2 class="featured-title">计算机网络思维导图</h2>
+            <p class="featured-desc">
+                全面梳理计算机网络知识体系结构，系统化展示核心概念与知识脉络<br>
+                作为学习导航总览，帮助你建立完整的知识框架
+            </p>
+            <a href="demos/Mind-Map.html" class="featured-link">查看知识体系总览</a>
+        </div>
+
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('digital', event)">数字人在线课堂</button>
+            <button class="tab" onclick="switchTab('topics', event)">专题学习模块</button>
+            <button class="tab" onclick="switchTab('labs', event)">虚拟仿真实验</button>
+            <button class="tab" onclick="switchTab('quiz', event)">作业习题</button>
+        </div>
+
+        <div id="tab-digital" class="tab-content active">
+            <div id="dh-video-list-home" style="display:grid;grid-template-columns:repeat(4,1fr);gap:15px;"></div>
+            <div id="dh-video-empty" style="text-align:center;padding:60px 20px;color:#64748b;display:none;">
+                <div style="font-size:60px;margin-bottom:15px;">🤖</div>
+                <h3 style="font-size:18px;color:#b594b8;margin-bottom:8px;">暂无数字人在线课堂视频</h3>
+                <p style="font-size:14px;">教师和管理员可在后台上传教学视频</p>
+            </div>
+        </div>
+
+        <div id="tab-topics" class="tab-content">
+            <div class="grid">
+                <div class="card" onclick="window.location.href='demos/network-classification.html'">
+                    <div class="card-icon">🏛️</div>
+                    <h2 class="card-title">计算机网络分类</h2>
+                    <p class="card-desc">按覆盖范围分类展示PAN、LAN、MAN、WAN</p>
+                    <a href="demos/network-classification.html" class="card-link">开始学习 →</a>
+                </div>
+                <div class="card" onclick="window.location.href='demos/network-switching-demo.html'">
+                    <div class="card-icon">🔄</div>
+                    <h2 class="card-title">网络交换技术</h2>
+                    <p class="card-desc">电路交换、分组交换对比演示</p>
+                    <a href="demos/network-switching-demo.html" class="card-link">开始学习 →</a>
+                </div>
+                <div class="card" onclick="window.location.href='demos/network-data-animation.html'">
+                    <div class="card-icon">📊</div>
+                    <h2 class="card-title">网络数据传输动画</h2>
+                    <p class="card-desc">数据封装与解封装过程可视化</p>
+                    <a href="demos/network-data-animation.html" class="card-link">开始学习 →</a>
+                </div>
+                <div class="card" onclick="window.location.href='demos/network-delay-demo.html'">
+                    <div class="card-icon">⏱️</div>
+                    <h2 class="card-title">网络延迟分析</h2>
+                    <p class="card-desc">传输延迟、传播延迟计算</p>
+                    <a href="demos/network-delay-demo.html" class="card-link">开始学习 →</a>
+                </div>
+                <div class="card" onclick="window.location.href='demos/transmission-media-comparison.html'">
+                    <div class="card-icon">🔌</div>
+                    <h2 class="card-title">传输介质比较</h2>
+                    <p class="card-desc">双绞线、同轴电缆、光纤对比</p>
+                    <a href="demos/transmission-media-comparison.html" class="card-link">开始学习 →</a>
+                </div>
+                <div class="card" onclick="window.location.href='demos/digital-signal-encoding.html'">
+                    <div class="card-icon">📡</div>
+                    <h2 class="card-title">数字信号编码</h2>
+                    <p class="card-desc">NRZ、曼彻斯特编码演示</p>
+                    <a href="demos/digital-signal-encoding.html" class="card-link">开始学习 →</a>
+                </div>
+                <div class="card" onclick="window.location.href='demos/channel-multiplexing.html'">
+                    <div class="card-icon">🔀</div>
+                    <h2 class="card-title">信道复用技术</h2>
+                    <p class="card-desc">频分复用、时分复用技术</p>
+                    <a href="demos/channel-multiplexing.html" class="card-link">开始学习 →</a>
+                </div>
+                <div class="card" onclick="window.location.href='demos/csma-cd-protocol.html'">
+                    <div class="card-icon">⚡</div>
+                    <h2 class="card-title">CSMA/CD协议</h2>
+                    <p class="card-desc">载波监听多点接入协议</p>
+                    <a href="demos/csma-cd-protocol.html" class="card-link">开始学习 →</a>
+                </div>
+                <div class="card" onclick="window.location.href='demos/sliding-window.html'">
+                    <div class="card-icon">🪟</div>
+                    <h2 class="card-title">滑动窗口协议</h2>
+                    <p class="card-desc">GBN、SR协议演示</p>
+                    <a href="demos/sliding-window.html" class="card-link">开始学习 →</a>
+                </div>
+                <div class="card" onclick="window.location.href='demos/network-device-comparison.html'">
+                    <div class="card-icon">🖥️</div>
+                    <h2 class="card-title">网络设备对比</h2>
+                    <p class="card-desc">集线器、交换机、路由器原理与对比</p>
+                    <a href="demos/network-device-comparison.html" class="card-link">开始学习 →</a>
+                </div>
+                <div class="card" onclick="window.location.href='demos/tcp-demo.html'">
+                    <div class="card-icon">🤝</div>
+                    <h2 class="card-title">TCP三次握手与四次挥手</h2>
+                    <p class="card-desc">TCP连接建立与断开过程</p>
+                    <a href="demos/tcp-demo.html" class="card-link">开始学习 →</a>
+                </div>
+            </div>
+        </div>
+
+        <div id="tab-labs" class="tab-content">
+            <div class="grid">
+                <div class="card lab" onclick="window.location.href='labs/lab-guide.html'" style="background: linear-gradient(135deg, #fff9e6 0%, #fff3cd 100%); border: 2px solid #f39c12;">
+                    <div class="card-icon">📖</div>
+                    <h2 class="card-title">实验必读</h2>
+                    <p class="card-desc">实验操作手册：系统使用说明、各实验目的/拓扑/步骤/命令参考</p>
+                    <a href="labs/lab-guide.html" class="card-link">阅读必读 →</a>
+                </div>
+                <div class="card lab" onclick="window.location.href='labs/switch-vlan-stp-lab.html'">
+                    <div class="card-icon">🔬</div>
+                    <h2 class="card-title">实验一：交换机与VLAN综合实验</h2>
+                    <p class="card-desc">MAC学习、VLAN配置与隔离、Trunk、STP生成树协议</p>
+                    <a href="labs/switch-vlan-stp-lab.html" class="card-link">进入实验 →</a>
+                </div>
+                <div class="card lab" onclick="window.location.href='labs/arp-ip-lab.html'">
+                    <div class="card-icon">🔍</div>
+                    <h2 class="card-title">实验二：ARP与IP子网综合实验</h2>
+                    <p class="card-desc">ARP请求响应、同网段/跨网段通信、静态ARP、子网划分</p>
+                    <a href="labs/arp-ip-lab.html" class="card-link">进入实验 →</a>
+                </div>
+                <div class="card lab" onclick="window.location.href='labs/routing-ospf-lab.html'">
+                    <div class="card-icon">🧭</div>
+                    <h2 class="card-title">实验三：路由协议综合实验</h2>
+                    <p class="card-desc">静态路由、RIP动态路由、OSPF配置与路由表分析</p>
+                    <a href="labs/routing-ospf-lab.html" class="card-link">进入实验 →</a>
+                </div>
+                <div class="card lab" onclick="window.location.href='labs/vlan-nat-lab.html'">
+                    <div class="card-icon">🌉</div>
+                    <h2 class="card-title">实验四：VLAN互连与NAT综合实验</h2>
+                    <p class="card-desc">三层交换机VLANIF、VLAN间路由、静态NAT、NAPT</p>
+                    <a href="labs/vlan-nat-lab.html" class="card-link">进入实验 →</a>
+                </div>
+                <div class="card lab" onclick="window.location.href='labs/tcp-udp-lab.html'">
+                    <div class="card-icon">🤝</div>
+                    <h2 class="card-title">实验五：传输层协议综合实验</h2>
+                    <p class="card-desc">TCP三次握手/四次挥手、状态变迁、UDP报文分析</p>
+                    <a href="labs/tcp-udp-lab.html" class="card-link">进入实验 →</a>
+                </div>
+                <div class="card lab" onclick="window.location.href='labs/app-layer-lab.html'">
+                    <div class="card-icon">🌐</div>
+                    <h2 class="card-title">实验六：应用层协议综合实验</h2>
+                    <p class="card-desc">DHCP地址分配、DNS域名解析、HTTP请求响应</p>
+                    <a href="labs/app-layer-lab.html" class="card-link">进入实验 →</a>
+                </div>
+                <div class="card lab" onclick="window.location.href='labs/comprehensive-lab.html'">
+                    <div class="card-icon">🏆</div>
+                    <h2 class="card-title">实验七：计算机网络综合实验</h2>
+                    <p class="card-desc">VLAN+路由+NAT+DHCP+DNS+HTTP全流程企业网络配置</p>
+                    <a href="labs/comprehensive-lab.html" class="card-link">进入实验 →</a>
+                </div>
+            </div>
+        </div>
+
+        <div id="tab-quiz" class="tab-content">
+            <div id="quizChapterGrid" class="grid"></div>
+            <div id="quizEmpty" style="text-align:center;padding:60px 20px;color:#64748b;display:none;">
+                <div style="font-size:60px;margin-bottom:15px;">📝</div>
+                <h3 style="font-size:18px;color:#94a3b8;margin-bottom:8px;">暂无作业</h3>
+                <p style="font-size:14px;">请等待教师布置作业</p>
+            </div>
+        </div>
+
+        <footer>
+            <p id="footer-count"></p>
+            <div style="margin-top:16px;padding-top:12px;border-top:1px dashed #475569;">
+                <p style="font-size:14px;color:#94a3b8;font-weight:bold;">© 洛阳理工学院计算机学院</p>
+                <p style="font-size:12px;color:#64748b;margin-top:4px;">洛阳市洛龙区学子街8号</p>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+
+        var dhVideoCount = 0;
+        var TOPIC_COUNT = 11;
+        var LAB_COUNT = 7;
+        var QUIZ_CHAPTERS = [
+            {id:'ch1',icon:'🌐',name:'第1章 计算机网络概述'},
+            {id:'ch2',icon:'📡',name:'第2章 物理层'},
+            {id:'ch3',icon:'🔗',name:'第3章 数据链路层'},
+            {id:'ch4',icon:'🗺️',name:'第4章 网络层'},
+            {id:'ch5',icon:'🚚',name:'第5章 运输层'},
+            {id:'ch6',icon:'📬',name:'第6章 应用层'}
+        ];
+
+        function switchTab(tab, evt) {
+            document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+            document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
+            if (evt && evt.target) evt.target.classList.add('active');
+            document.getElementById('tab-' + tab).classList.add('active');
+            updateFooter(tab);
+        }
+
+        function updateFooter(tab) {
+            var el = document.getElementById('footer-count');
+            if (tab === 'digital') {
+                el.textContent = '共收录 ' + dhVideoCount + ' 个数字人在线课堂视频';
+            } else if (tab === 'topics') {
+                el.textContent = '共收录 ' + TOPIC_COUNT + ' 个专题学习模块';
+            } else if (tab === 'labs') {
+                el.textContent = '共收录 ' + LAB_COUNT + ' 个虚拟仿真实验';
+            } else if (tab === 'quiz') {
+                var assignCount = document.querySelectorAll('.card.quiz:not(.no-assign)').length;
+                el.textContent = '共 6个章节，包括选择题、填空题、简答题等题型 ' ;
+            }
+        }
+
+        function loadHomeVideos() {
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', '/api/kb/digital-human/list?page=1&pageSize=50', true);
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState !== 4 || xhr.status !== 200) return;
+                try {
+                    var data = JSON.parse(xhr.responseText);
+                    dhVideoCount = (data.items && data.items.length) || 0;
+                    var listEl = document.getElementById('dh-video-list-home');
+                    var emptyEl = document.getElementById('dh-video-empty');
+                    if (!data.items || data.items.length === 0) {
+                        listEl.style.display = 'none';
+                        emptyEl.style.display = 'block';
+                        updateFooter('digital');
+                        return;
+                    }
+                    listEl.style.display = 'grid';
+                    emptyEl.style.display = 'none';
+                    var html = '';
+                    data.items.forEach(function(item) {
+                        var date = new Date(item.createdAt).toLocaleDateString();
+                        html += '<div class="dh-card">' +
+                            '<video src="/api/kb/digital-human/video/' + encodeURIComponent(item.filename) + '" controls preload="metadata" style="width:100%;max-height:220px;background:#000;"></video>' +
+                            '<div style="padding:12px;">' +
+                            '<div style="font-weight:bold;font-size:14px;color:#38bdf8;margin-bottom:6px;">' + escapeHtmlHome(item.originalName) + '</div>' +
+                            (item.description ? '<div style="font-size:12px;color:#94a3b8;line-height:1.6;margin-bottom:6px;">' + escapeHtmlHome(item.description) + '</div>' : '') +
+                            '<div style="font-size:11px;color:#64748b;">' + date + '</div>' +
+                            '</div></div>';
+                    });
+                    listEl.innerHTML = html;
+                    updateFooter('digital');
+                } catch (e) {}
+            };
+            xhr.send();
+        }
+
+        function escapeHtmlHome(text) {
+            var div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        loadHomeVideos();
+
+        function loadQuizCards() {
+            var user = JSON.parse(localStorage.getItem('currentUser') || '{}');
+            var isTeacher = user.type === 'teacher' || user.type === 'admin';
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', '/api/assignments', true);
+            xhr.onreadystatechange = function() {
+                var assignments = [];
+                if (xhr.readyState === 4 && xhr.status === 200) {
+                    try { var d = JSON.parse(xhr.responseText); assignments = d.assignments || []; } catch(e) {}
+                }
+                var gridEl = document.getElementById('quizChapterGrid');
+                var emptyEl = document.getElementById('quizEmpty');
+                var chapterAssignMap = {};
+                var assignByChapter = {};
+                assignments.forEach(function(a) {
+                    var chs = a.chapters || [];
+                    if (chs.length === 0 && a.questionIds) {
+                        var seen = {};
+                        a.questionIds.forEach(function(qid) {
+                            var m = qid.match(/^(ch\d+)_/);
+                            if (m && !seen[m[1]]) { chs.push(m[1]); seen[m[1]] = true; }
+                        });
+                    }
+                    chs.forEach(function(c) { chapterAssignMap[c] = a; });
+                });
+                var hasAnyAssign = assignments.length > 0;
+                var htm = '';
+                QUIZ_CHAPTERS.forEach(function(ch) {
+                    var assign = chapterAssignMap[ch.id];
+                    var hasAssign = !!assign;
+                    var noAssignClass = (!isTeacher && !hasAssign) ? ' no-assign' : '';
+                    var onclick = '';
+                    if (isTeacher) {
+                        onclick = " onclick=\"window.location.href='teacher.html'\"";
+                    } else if (hasAssign) {
+                        onclick = " onclick=\"window.location.href='quiz.html'\"";
+                    }
+                    htm += '<div class="card quiz' + noAssignClass + '"' + onclick + '>';
+                    htm += '<div class="card-icon">' + ch.icon + '</div>';
+                    htm += '<h2 class="card-title">' + ch.name + '</h2>';
+                    if (hasAssign) {
+                        htm += '<p class="card-desc">作业：' + escapeHtmlHome(assign.title) + ' | ' + assign.questionCount + '题 | 限时' + assign.duration + '分钟</p>';
+                        if (!isTeacher) htm += '<a href="quiz.html" class="card-link">进入作答 →</a>';
+                        else htm += '<span class="card-link">已布置</span>';
+                    } else {
+                        htm += '<p class="card-desc">配套教材章节练习题</p>';
+                        if (isTeacher) htm += '<a href="teacher.html" class="card-link">去布置 →</a>';
+                        else htm += '<span class="card-link" style="color:#64748b;">未布置</span>';
+                    }
+                    htm += '</div>';
+                });
+                gridEl.innerHTML = htm;
+                var studentVisible = isTeacher || hasAnyAssign;
+                gridEl.style.display = studentVisible ? 'grid' : 'none';
+                emptyEl.style.display = studentVisible ? 'none' : 'block';
+                updateFooter('quiz');
+            };
+            xhr.send();
+        }
+        loadQuizCards();
+    </script>
+
+    <script src="chat-knowledge.js"></script>
+    <script src="kb-loader.js"></script>
+    <script src="chat-agent.js"></script>
+</body>
+</html>

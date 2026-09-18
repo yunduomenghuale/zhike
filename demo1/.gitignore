@@ -1,0 +1,13 @@
+# 运行时与生成内容不入库
+node_modules/
+user-data/
+reports/
+*.log
+desktop.ini
+.server-pid
+.arts/
+
+# HTTPS 证书/密钥不入库
+*.crt
+*.key
+*.pem
