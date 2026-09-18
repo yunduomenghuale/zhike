@@ -132,7 +132,7 @@ import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { genUid } from '@/utils/uid'
 import {
-  Promotion, MagicStick, Loading, Search, Clock, Picture, Close, Plus,
+  ChatDotRound, Promotion, MagicStick, Loading, Search, Clock, Picture, Close, Plus,
 } from '@element-plus/icons-vue'
 import MarkdownIt from 'markdown-it'
 import { listQaRecords } from '@/api/knowledge'
