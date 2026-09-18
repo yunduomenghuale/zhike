@@ -78,6 +78,18 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
+# 登录失败计数必须跨 gunicorn worker 共享（locmem 各 worker 独立会把锁定阈值稀释一倍且不稳定），
+# 用文件缓存实现共享，无需引入外部服务
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+    },
+    "login_fail": {
+        "BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
+        "LOCATION": BASE_DIR / "login_fail_cache",
+    },
+}
+
 ROOT_URLCONF = "config.urls"
 
 TEMPLATES = [

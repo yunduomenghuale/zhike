@@ -37,10 +37,12 @@ export const deletePpt = (id) => request.delete(`/ppts/${id}/`)
 
 // 教学视频 / 讲解稿
 export const listVideos = (params) => request.get('/videos/', { params })
+// 分批生成讲解稿：每批最多 limit 页（后端默认 6），前端循环调用直至 done=true
 export const generateScript = (catalogId, data = {}) =>
-  request.post(`/catalogs/${catalogId}/generate-script/`, data, { timeout: 180000 })
-export const generateAudio = (catalogId) =>
-  request.post(`/catalogs/${catalogId}/generate-audio/`, {}, { timeout: 300000 })
+  request.post(`/catalogs/${catalogId}/generate-script/`, data, { timeout: 120000 })
+// 分段配音：每批最多 limit 页（后端默认 3），前端循环调用直至 done=true
+export const generateAudio = (catalogId, limit = 3) =>
+  request.post(`/catalogs/${catalogId}/generate-audio/`, { limit }, { timeout: 120000 })
 export const updateVideoScript = (videoId, data) =>
   request.post(`/videos/${videoId}/update-script/`, data)
 export const regenerateVideoScriptPage = (videoId, data) =>

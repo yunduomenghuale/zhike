@@ -8,6 +8,12 @@
     "uniStatistics" : {
         "enable" : false
     },
+    "h5" : {
+        "title" : "智课平台",
+        "router" : {
+            "base" : "/m/"
+        }
+    },
     "app-plus" : {
         "usingComponents" : true,
         "nvueStyleCompiler" : "uni-app",

@@ -8,6 +8,7 @@ returns invalid JSON, a conservative rule-based fallback is used.
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import os
 import re
@@ -43,6 +44,20 @@ def parse_ppt_pages(file_path: str) -> list[dict]:
     return parse_teaching_file_pages(file_path)
 
 
+def ppt_pages_dirname(resource_id: int | str) -> str:
+    """页图目录名由 resource_id + SECRET_KEY 派生。
+
+    稳定：同一资源重渲染得到同一目录（沿用"先清空再渲染"的覆盖逻辑）；
+    不可预测：外部无法枚举遍历全部课件页图（此前目录名为自增 ID，可批量猜 URL）。
+    """
+    from django.conf import settings
+
+    digest = hashlib.sha256(
+        f"ppt:{resource_id}:{settings.SECRET_KEY}".encode()
+    ).hexdigest()[:16]
+    return digest
+
+
 def render_presentation_slide_images(file_path: str, resource_id: int | str | None = None) -> dict[int, str]:
     """Render PPT/PPTX/PDF pages to PNG images and return {page: media_url}.
 
@@ -58,7 +73,10 @@ def render_presentation_slide_images(file_path: str, resource_id: int | str | No
 
     from django.conf import settings
 
-    rel_dir = Path("ppt_pages") / str(resource_id or Path(file_path).stem)
+    if resource_id is not None:
+        rel_dir = Path("ppt_pages") / ppt_pages_dirname(resource_id)
+    else:
+        rel_dir = Path("ppt_pages") / Path(file_path).stem
     out_dir = Path(settings.MEDIA_ROOT) / rel_dir
     if out_dir.exists():
         shutil.rmtree(out_dir, ignore_errors=True)

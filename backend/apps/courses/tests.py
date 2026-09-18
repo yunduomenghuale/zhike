@@ -143,11 +143,24 @@ class PptReplacementTests(APITestCase):
     def test_regenerated_script_publishes_replacement_content(self):
         self.upload([{"page": 1, "title": "新课件", "body": "新内容"}])
 
+        def fake_batched(video, pages, batch_size=6):
+            # 模拟分批生成全部完成：写入新讲稿并按主线语义自动发布
+            video.scripts = [{"page": 1, "script": "新讲解稿"}]
+            video.gen_status = TeachingVideo.GenStatus.SCRIPT_READY
+            video.is_published = True
+            video.published_at = timezone.now()
+            video.save()
+            return {"generated": 1, "pages": 1, "script_pages": 1, "remaining": 0, "done": True}
+
         with patch(
-            "apps.courses.views.generate_scripts_for_video",
-            return_value=[{"page": 1, "script": "新讲解稿"}],
+            "apps.ai.services.generate_script_pages_batched",
+            side_effect=fake_batched,
         ):
-            response = self.client.post(f"/api/catalogs/{self.catalog.id}/generate-script/")
+            response = self.client.post(
+                f"/api/catalogs/{self.catalog.id}/generate-script/",
+                {"limit": 1},
+                format="json",
+            )
 
         self.assertEqual(response.status_code, 200)
         self.video.refresh_from_db()
