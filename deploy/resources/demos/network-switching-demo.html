@@ -1,0 +1,1215 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>网络交换技术 - 计算机网络辅助教学平台</title>
+    
+    
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+            background: #0b1120;
+            min-height: 100vh;
+            padding: 20px;
+         color: #e2e8f0; }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .demo-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+
+        .panel {
+            background: #0f172a;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .panel h2 {
+            color: #e2e8f0;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #667eea;
+        }
+
+        .canvas-container {
+            background: #0f172a;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+            position: relative;
+        }
+
+        canvas {
+            display: block;
+            margin: 0 auto;
+            border-radius: 8px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+
+        .btn-primary {
+            background: #0ea5e9;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #c82333;
+        }
+
+        .info-box {
+            background: #e7f3ff;
+            border-left: 4px solid #2196F3;
+            padding: 15px;
+            margin-top: 15px;
+            border-radius: 5px;
+        }
+
+        .info-box h3 {
+            color: #1976D2;
+            margin-bottom: 10px;
+        }
+
+        .info-box ul {
+            margin-left: 20px;
+            color: #94a3b8;
+        }
+
+        .info-box li {
+            margin-bottom: 5px;
+        }
+
+        .status {
+            padding: 10px;
+            background: #1e293b;
+            border-radius: 5px;
+            margin-top: 10px;
+            font-size: 14px;
+            min-height: 60px;
+        }
+
+        .comparison-table {
+            background: #0f172a;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            margin-top: 30px;
+        }
+
+        .comparison-table h2 {
+            color: #e2e8f0;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+
+        th, td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid #334155;
+        }
+
+        th {
+            background: #1e293b;
+            color: white;
+            font-weight: bold;
+        }
+
+        tr:hover {
+            background: #f5f5f5;
+        }
+
+        .advantage {
+            color: #28a745;
+            font-weight: bold;
+        }
+
+        .disadvantage {
+            color: #dc3545;
+            font-weight: bold;
+        }
+
+        .legend {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .transmitting {
+            animation: pulse 1s infinite;
+        }
+    </style>
+
+</head>
+<body>
+    <div class="container">
+        <h1>网络交换方式演示</h1>
+        
+        <div class="demo-section">
+            <!-- 电路交换面板 -->
+            <div class="panel">
+                <h2>📞 电路交换 (Circuit Switching)</h2>
+                <div class="canvas-container">
+                    <canvas id="circuitCanvas" width="500" height="350"></canvas>
+                </div>
+                <div class="legend">
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #4CAF50;"></div>
+                        <span>发送端</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #2196F3;"></div>
+                        <span>交换节点</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #FF9800;"></div>
+                        <span>接收端</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #E91E63;"></div>
+                        <span>数据传输</span>
+                    </div>
+                </div>
+                <div class="controls">
+                    <button class="btn-primary" onclick="startCircuitSwitching()">自动演示</button>
+                    <button class="btn-primary" onclick="manualCircuitStep()" id="circuitManualBtn">下一步</button>
+                    <button class="btn-secondary" onclick="resetCircuitSwitching()">重置</button>
+                </div>
+                <div class="status" id="circuitStatus">点击"自动演示"查看电路交换工作过程</div>
+                <div class="info-box">
+                    <h3>工作原理</h3>
+                    <ul>
+                        <li><strong>建立连接</strong>通信前需要建立专用的物理通路</li>
+                        <li><strong>数据传输</strong>独占整个通路进行数据传输</li>
+                        <li><strong>释放连接</strong>通信结束后释放通路资源</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- 分组交换面板 -->
+            <div class="panel">
+                <h2>📦 分组交换 (Packet Switching)</h2>
+                <div class="canvas-container">
+                    <canvas id="packetCanvas" width="500" height="350"></canvas>
+                </div>
+                <div class="legend">
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #4CAF50;"></div>
+                        <span>发送端</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #2196F3;"></div>
+                        <span>路由节点</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #FF9800;"></div>
+                        <span>接收端</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #9C27B0;"></div>
+                        <span>数据分组</span>
+                    </div>
+                </div>
+                <div class="controls">
+                    <button class="btn-primary" onclick="startPacketSwitching()">自动演示</button>
+                    <button class="btn-primary" onclick="manualPacketStep()" id="packetManualBtn">下一步</button>
+                    <button class="btn-secondary" onclick="resetPacketSwitching()">重置</button>
+                </div>
+                <div class="status" id="packetStatus">点击"自动演示"查看分组交换工作过程</div>
+                <div class="info-box">
+                    <h3>工作原理</h3>
+                    <ul>
+                        <li><strong>分组</strong>将数据分割成若干个小分组</li>
+                        <li><strong>存储转发</strong>每个节点存储并转发分组。</li>
+                        <li><strong>重组</strong>接收端将分组重新组装成完整数据。</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- 对比表格 -->
+        <div class="comparison-table">
+            <h2>📊 两种交换方式对比</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>对比</th>
+                        <th>电路交换</th>
+                        <th>分组交换</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>连接方式</strong></td>
+                        <td>面向连接，需建立专用通路</td>
+                        <td>无连接或面向连接，无需专用通路</td>
+                    </tr>
+                    <tr>
+                        <td><strong>资源分配</strong></td>
+                        <td>独占整个通路资源</td>
+                        <td>统计复用，共享网络资源</td>
+                    </tr>
+                    <tr>
+                        <td><strong>传输延迟</strong></td>
+                        <td>建立连接后有固定延迟</td>
+                        <td>每个分组可能有不同延迟</td>
+                    </tr>
+                    <tr>
+                        <td><strong>传输效率</strong></td>
+                        <td class="disadvantage">线路利用率低（空闲时浪费）</td>
+                        <td class="advantage">线路利用率高</td>
+                    </tr>
+                    <tr>
+                        <td><strong>实时性</strong></td>
+                        <td class="advantage">好，适合实时通信</td>
+                        <td class="disadvantage">较差，可能有延迟抖动</td>
+                    </tr>
+                    <tr>
+                        <td><strong>可靠性</strong></td>
+                        <td>一旦建立，可靠性高</td>
+                        <td>可通过重传机制保证可靠性</td>
+                    </tr>
+                    <tr>
+                        <td><strong>适用场景</strong></td>
+                        <td>语音通信、视频会议。</td>
+                        <td>数据传输、互联网应用</td>
+                    </tr>
+                    <tr>
+                        <td><strong>典型应用</strong></td>
+                        <td>传统电话网络 (PSTN)</td>
+                        <td>互联网(IP网络)</td>
+                    </tr>
+                    <tr>
+                        <td><strong>优点</strong></td>
+                        <td>
+                            <ul>
+                                <li class="advantage">传输延迟固定</li>
+                                <li class="advantage">适合实时业务</li>
+                                <li class="advantage">实现简单</li>
+                            </ul>
+                        </td>
+                        <td>
+                            <ul>
+                                <li class="advantage">资源利用率高</li>
+                                <li class="advantage">灵活性强</li>
+                                <li class="advantage">可靠性高</li>
+                            </ul>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><strong>缺点</strong></td>
+                        <td>
+                            <ul>
+                                <li class="disadvantage">资源利用率低</li>
+                                <li class="disadvantage">建立连接时间长</li>
+                                <li class="disadvantage">不适合突发数据</li>
+                            </ul>
+                        </td>
+                        <td>
+                            <ul>
+                                <li class="disadvantage">延迟不确定</li>
+                                <li class="disadvantage">可能丢包</li>
+                                <li class="disadvantage">需要缓冲区</li>
+                            </ul>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // 电路交换演示
+        const circuitCanvas = document.getElementById('circuitCanvas');
+        const circuitCtx = circuitCanvas.getContext('2d');
+        let circuitAnimationId = null;
+        let circuitPhase = 0;
+        let circuitProgress = 0;
+        let activeSegments = []; // 当前活动的连接段
+        let buildSegmentIndex = 0; // 建立连接的段索引
+        let releaseSegmentIndex = 0; // 释放连接的段索引
+        let blockedRequests = []; // 被阻塞的通信请求
+        let showBlockedMessage = false; // 是否显示阻塞消息
+
+        function drawCircuitNetwork() {
+            circuitCtx.clearRect(0, 0, circuitCanvas.width, circuitCanvas.height);
+            
+            // 绘制节点
+            const nodes = [
+                { x: 50, y: 175, label: 'A', color: '#4CAF50', type: 'sender' },
+                { x: 150, y: 100, label: 'S1', color: '#2196F3', type: 'switch' },
+                { x: 150, y: 250, label: 'S2', color: '#2196F3', type: 'switch' },
+                { x: 300, y: 100, label: 'S3', color: '#2196F3', type: 'switch' },
+                { x: 300, y: 250, label: 'S4', color: '#2196F3', type: 'switch' },
+                { x: 450, y: 175, label: 'B', color: '#FF9800', type: 'receiver' }
+            ];
+
+            // 绘制所有可能的连接线（灰色）
+            circuitCtx.strokeStyle = '#334155';
+            circuitCtx.lineWidth = 2;
+            
+            const allConnections = [
+                [0, 1], [0, 2], [1, 2], [1, 3], [2, 4], [3, 4], [3, 5], [4, 5]
+            ];
+            
+            allConnections.forEach(([i, j]) => {
+                circuitCtx.beginPath();
+                circuitCtx.moveTo(nodes[i].x, nodes[i].y);
+                circuitCtx.lineTo(nodes[j].x, nodes[j].y);
+                circuitCtx.stroke();
+            });
+
+            // 绘制活动的连接段（逐段建立/释放）
+            const fullPath = [[0, 1], [1, 3], [3, 5]]; // A->S1, S1->S3, S3->B
+            
+            // 绘制已建立的段（独占通路）
+            if (activeSegments.length > 0) {
+                circuitCtx.strokeStyle = '#E91E63';
+                circuitCtx.lineWidth = 5;
+                
+                activeSegments.forEach(([i, j]) => {
+                    circuitCtx.beginPath();
+                    circuitCtx.moveTo(nodes[i].x, nodes[i].y);
+                    circuitCtx.lineTo(nodes[j].x, nodes[j].y);
+                    circuitCtx.stroke();
+                    
+                    // 绘制独占标记
+                    const midX = (nodes[i].x + nodes[j].x) / 2;
+                    const midY = (nodes[i].y + nodes[j].y) / 2;
+                    
+                    circuitCtx.fillStyle = '#E91E63';
+                    circuitCtx.font = 'bold 10px Arial';
+                    circuitCtx.textAlign = 'center';
+                    circuitCtx.fillText('独占', midX, midY - 10);
+                });
+            }
+
+            // 绘制正在建立/释放的段（动画效果）
+            if (circuitPhase === 1 && circuitProgress > 0 && circuitProgress < 1) {
+                // 找出当前正在建立的段（activeSegments中不存在的下一个段）
+                const fullPath = [[0, 1], [1, 3], [3, 5]];
+                const currentSegIdx = activeSegments.length;
+                if (currentSegIdx < fullPath.length) {
+                    const segment = fullPath[currentSegIdx];
+                    const progress = circuitProgress;
+                    
+                    circuitCtx.strokeStyle = '#FFC107';
+                    circuitCtx.lineWidth = 4;
+                    circuitCtx.beginPath();
+                    circuitCtx.moveTo(nodes[segment[0]].x, nodes[segment[0]].y);
+                    circuitCtx.lineTo(
+                        nodes[segment[0]].x + (nodes[segment[1]].x - nodes[segment[0]].x) * progress,
+                        nodes[segment[0]].y + (nodes[segment[1]].y - nodes[segment[0]].y) * progress
+                    );
+                    circuitCtx.stroke();
+                }
+            }
+
+            // 绘制数据流动
+            if (circuitPhase === 2) {
+                const t = circuitProgress;
+                const path = [
+                    { x: 50, y: 175 },
+                    { x: 150, y: 100 },
+                    { x: 300, y: 100 },
+                    { x: 450, y: 175 }
+                ];
+                
+                // 绘制多个数据率
+                for (let i = 0; i < 3; i++) {
+                    const offset = (t + i * 0.3) % 1;
+                    const pos = getPositionOnPath(path, offset);
+                    
+                    circuitCtx.fillStyle = '#E91E63';
+                    circuitCtx.beginPath();
+                    circuitCtx.arc(pos.x, pos.y, 8, 0, Math.PI * 2);
+                    circuitCtx.fill();
+                }
+            }
+
+            // 绘制正在释放的段（动画效果）
+            if (circuitPhase === 3 && circuitProgress > 0 && circuitProgress < 1) {
+                // 找出当前正在释放的段（activeSegments中的最后一个）
+                const fullPath = [[0, 1], [1, 3], [3, 5]];
+                if (activeSegments.length > 0) {
+                    const segment = activeSegments[activeSegments.length - 1];
+                    const progress = circuitProgress;
+                    
+                    // 先绘制完整的
+                    circuitCtx.strokeStyle = '#E91E63';
+                    circuitCtx.lineWidth = 4;
+                    circuitCtx.beginPath();
+                    circuitCtx.moveTo(nodes[segment[0]].x, nodes[segment[0]].y);
+                    circuitCtx.lineTo(nodes[segment[1]].x, nodes[segment[1]].y);
+                    circuitCtx.stroke();
+                    
+                    // 用背景色覆盖（模拟释放）
+                    circuitCtx.strokeStyle = '#0f172a';
+                    circuitCtx.lineWidth = 5;
+                    circuitCtx.beginPath();
+                    circuitCtx.moveTo(nodes[segment[0]].x, nodes[segment[0]].y);
+                    circuitCtx.lineTo(
+                        nodes[segment[0]].x + (nodes[segment[1]].x - nodes[segment[0]].x) * progress,
+                        nodes[segment[0]].y + (nodes[segment[1]].y - nodes[segment[0]].y) * progress
+                    );
+                    circuitCtx.stroke();
+                }
+            }
+
+            // 绘制被阻塞的通信请求
+            blockedRequests.forEach((req, index) => {
+                // 绘制阻塞的连接线（虚线）
+                circuitCtx.strokeStyle = '#f44336';
+                circuitCtx.lineWidth = 2;
+                circuitCtx.setLineDash([5, 5]);
+                circuitCtx.beginPath();
+                circuitCtx.moveTo(nodes[req.from].x, nodes[req.from].y);
+                circuitCtx.lineTo(nodes[req.to].x, nodes[req.to].y);
+                circuitCtx.stroke();
+                circuitCtx.setLineDash([]);
+                
+                // 绘制阻塞标记
+                const midX = (nodes[req.from].x + nodes[req.to].x) / 2;
+                const midY = (nodes[req.from].y + nodes[req.to].y) / 2;
+                
+                circuitCtx.fillStyle = '#f44336';
+                circuitCtx.font = 'bold 10px Arial';
+                circuitCtx.textAlign = 'center';
+                circuitCtx.fillText('阻塞', midX, midY + 15);
+            });
+
+            // 绘制节点
+            nodes.forEach(node => {
+                circuitCtx.fillStyle = node.color;
+                circuitCtx.beginPath();
+                circuitCtx.arc(node.x, node.y, 20, 0, Math.PI * 2);
+                circuitCtx.fill();
+                
+                circuitCtx.fillStyle = 'white';
+                circuitCtx.font = 'bold 14px Arial';
+                circuitCtx.textAlign = 'center';
+                circuitCtx.textBaseline = 'middle';
+                circuitCtx.fillText(node.label, node.x, node.y);
+            });
+
+            // 绘制标签
+            circuitCtx.fillStyle = '#e2e8f0';
+            circuitCtx.font = '12px Arial';
+            circuitCtx.fillText('发送端', nodes[0].x, nodes[0].y + 35);
+            circuitCtx.fillText('接收', nodes[5].x, nodes[5].y + 35);
+            
+            // 绘制独占特性说明框
+            if (showBlockedMessage && circuitPhase === 2) {
+                circuitCtx.fillStyle = 'rgba(244, 67, 54, 0.9)';
+                circuitCtx.fillRect(100, 280, 300, 60);
+                
+                circuitCtx.fillStyle = 'white';
+                circuitCtx.font = 'bold 12px Arial';
+                circuitCtx.textAlign = 'center';
+                circuitCtx.fillText('⚠️ 独占特性演示', 250, 300);
+                circuitCtx.font = '11px Arial';
+                circuitCtx.fillText('其他通信请求被阻塞，必须等待通路释放', 250, 320);
+            }
+        }
+
+        function getPositionOnPath(path, t) {
+            const totalSegments = path.length - 1;
+            const segmentLength = 1 / totalSegments;
+            const segmentIndex = Math.min(Math.floor(t / segmentLength), totalSegments - 1);
+            const localT = (t - segmentIndex * segmentLength) / segmentLength;
+            
+            const start = path[segmentIndex];
+            const end = path[segmentIndex + 1];
+            
+            return {
+                x: start.x + (end.x - start.x) * localT,
+                y: start.y + (end.y - start.y) * localT
+            };
+        }
+
+        function startCircuitSwitching() {
+            if (circuitAnimationId) {
+                cancelAnimationFrame(circuitAnimationId);
+            }
+            
+            circuitPhase = 0;
+            circuitProgress = 0;
+            activeSegments = [];
+            buildSegmentIndex = 0;
+            releaseSegmentIndex = 0;
+            blockedRequests = [];
+            showBlockedMessage = false;
+            
+            const statusEl = document.getElementById('circuitStatus');
+            const fullPath = [[0, 1], [1, 3], [3, 5]];
+            const segmentNames = ['A→S1', 'S1→S3', 'S3→B'];
+            
+            // 阶段1：逐段建立连接
+            statusEl.innerHTML = '<strong style="color: #2196F3;">阶段1：逐段建立连接</strong><br>开始建立连接..';
+            
+            function buildNextSegment() {
+                if (buildSegmentIndex < fullPath.length) {
+                    circuitPhase = 1;
+                    circuitProgress = 0;
+                    statusEl.innerHTML = `<strong style="color: #2196F3;">阶段1：逐段建立连接</strong><br>正在建立${buildSegmentIndex + 1} ${segmentNames[buildSegmentIndex]}`;
+                    animateBuildSegment();
+                } else {
+                    // 建立完成，开始数据传输
+                    circuitPhase = 2;
+                    statusEl.innerHTML = '<strong style="color: #4CAF50;">阶段2：数据传输（独占通路）</strong><br>通路已被独占，其他通信请求被阻..';
+                    
+                    // 添加被阻塞的通信请求
+                    // 当前通路: A->S1->S3->B
+                    // 阻塞的连接：
+                    // 1. A->S2: 因为A的出口被S1独占
+                    // 2. S1->S2: 因为S1的出口被S3独占
+                    // 3. S3->S4: 因为S3的出口被B独占
+                    // 4. S4->B: 因为B已经被占
+                    blockedRequests = [
+                        { from: 0, to: 2, label: 'A→S2' },  // A->S2 被阻塞（A的出口被独占）
+                        { from: 1, to: 2, label: 'S1→S2' },  // S1->S2 被阻塞（S1的出口被独占）
+                        { from: 3, to: 4, label: 'S3→S4' },  // S3->S4 被阻塞（S3的出口被独占）
+                        { from: 4, to: 5, label: 'S4→B' }    // S4->B 被阻塞（B已被占用）
+                    ];
+                    showBlockedMessage = true;
+                    
+                    animateCircuitData();
+                }
+            }
+            
+            function animateBuildSegment() {
+                circuitProgress += 0.03;
+                drawCircuitNetwork();
+                
+                if (circuitProgress < 1) {
+                    circuitAnimationId = requestAnimationFrame(animateBuildSegment);
+                } else {
+                    // 当前段建立完成
+                    activeSegments.push(fullPath[buildSegmentIndex]);
+                    buildSegmentIndex++;
+                    drawCircuitNetwork();
+                    setTimeout(buildNextSegment, 500);
+                }
+            }
+            
+            // 开始建立第一
+            setTimeout(buildNextSegment, 500);
+            
+            // 阶段3：逐段释放连接（在数据传输后）
+            setTimeout(() => {
+                if (circuitAnimationId) {
+                    cancelAnimationFrame(circuitAnimationId);
+                }
+                circuitPhase = 3;
+                circuitProgress = 0;
+                releaseSegmentIndex = 0;
+                showBlockedMessage = false;
+                statusEl.innerHTML = '<strong style="color: #FF9800;">阶段3：逐段释放连接</strong><br>开始释放连接，被阻塞的请求可以开始建..';
+                
+                function releaseNextSegment() {
+                    if (releaseSegmentIndex < fullPath.length) {
+                        circuitProgress = 0;
+                        const segIdx = fullPath.length - 1 - releaseSegmentIndex;
+                        statusEl.innerHTML = `<strong style="color: #FF9800;">阶段3：逐段释放连接</strong><br>正在释放${releaseSegmentIndex + 1} ${segmentNames[segIdx]}`;
+                        animateReleaseSegment();
+                    } else {
+                        // 所有段释放完成
+                        activeSegments = [];
+                        blockedRequests = [];
+                        circuitPhase = 0;
+                        statusEl.innerHTML = '<strong style="color: #607D8B;">连接已完全释放</strong><br>通路资源已释放，其他通信请求可以建立连接';
+                        drawCircuitNetwork();
+                    }
+                }
+                
+                function animateReleaseSegment() {
+                    circuitProgress += 0.03;
+                    drawCircuitNetwork();
+                    
+                    if (circuitProgress < 1) {
+                        circuitAnimationId = requestAnimationFrame(animateReleaseSegment);
+                    } else {
+                        // 当前段释放完成
+                        activeSegments.pop();
+                        releaseSegmentIndex++;
+                        drawCircuitNetwork();
+                        setTimeout(releaseNextSegment, 500);
+                    }
+                }
+                
+                // 开始释放第一
+                setTimeout(releaseNextSegment, 500);
+            }, 8000);
+        }
+
+        function animateCircuitData() {
+            circuitProgress += 0.01;
+            if (circuitProgress > 1) {
+                circuitProgress = 0;
+            }
+            drawCircuitNetwork();
+            if (circuitPhase === 2) {
+                circuitAnimationId = requestAnimationFrame(animateCircuitData);
+            }
+        }
+
+        function resetCircuitSwitching() {
+            if (circuitAnimationId) {
+                cancelAnimationFrame(circuitAnimationId);
+            }
+            circuitPhase = 0;
+            circuitProgress = 0;
+            activeSegments = [];
+            buildSegmentIndex = 0;
+            releaseSegmentIndex = 0;
+            blockedRequests = [];
+            showBlockedMessage = false;
+            document.getElementById('circuitStatus').textContent = '点击"自动演示"下一步';
+            drawCircuitNetwork();
+        }
+
+        // 电路交换手动控制
+        let manualCircuitStepIndex = 0;
+
+        function manualCircuitStep() {
+            if (circuitAnimationId) {
+                cancelAnimationFrame(circuitAnimationId);
+                circuitAnimationId = null;
+            }
+            
+            const statusEl = document.getElementById('circuitStatus');
+            const fullPath = [[0, 1], [1, 3], [3, 5]];
+            
+            // 步骤说明
+            const steps = [
+                '建立连接：A→S1',
+                '建立连接：S1→S3',
+                '建立连接：S3→B',
+                '数据传输中（独占通路）',
+                '释放连接：S3→B',
+                '释放连接：S1→S3',
+                '释放连接：A→S1'
+            ];
+            
+            if (manualCircuitStepIndex === 0) {
+                // 初始
+                circuitPhase = 0;
+                circuitProgress = 0;
+                activeSegments = [];
+                blockedRequests = [];
+                showBlockedMessage = false;
+                drawCircuitNetwork();
+            }
+            
+            // 执行当前步骤
+            if (manualCircuitStepIndex < 3) {
+                // 建立连接阶段
+                const segIdx = manualCircuitStepIndex;
+                circuitPhase = 1;
+                circuitProgress = 0;
+                statusEl.innerHTML = `<strong style="color: #2196F3;">手动控制：${steps[manualCircuitStepIndex]}</strong>`;
+                
+                // 动画建立当前
+                const animateBuild = () => {
+                    circuitProgress += 0.05;
+                    drawCircuitNetwork();
+                    if (circuitProgress < 1) {
+                        circuitAnimationId = requestAnimationFrame(animateBuild);
+                    } else {
+                        activeSegments.push(fullPath[segIdx]);
+                        circuitProgress = 0;
+                        circuitPhase = 0;
+                        drawCircuitNetwork();
+                    }
+                };
+                animateBuild();
+                
+            } else if (manualCircuitStepIndex === 3) {
+                // 数据传输阶段
+                circuitPhase = 2;
+                circuitProgress = 0;
+                blockedRequests = [
+                    { from: 0, to: 2, label: 'A→S2' },
+                    { from: 1, to: 2, label: 'S1→S2' },
+                    { from: 3, to: 4, label: 'S3→S4' },
+                    { from: 4, to: 5, label: 'S4→B' }
+                ];
+                showBlockedMessage = true;
+                statusEl.innerHTML = `<strong style="color: #4CAF50;">手动控制：${steps[manualCircuitStepIndex]}</strong><br>通路已被独占，其他请求被阻塞。点击下一步停止传输`;
+                
+                // 动画传输数据
+                const animateData = () => {
+                    circuitProgress += 0.02;
+                    if (circuitProgress > 1) circuitProgress = 0;
+                    drawCircuitNetwork();
+                    if (circuitPhase === 2) {
+                        circuitAnimationId = requestAnimationFrame(animateData);
+                    }
+                };
+                animateData();
+                
+            } else if (manualCircuitStepIndex < 7) {
+                // 释放连接阶段
+                circuitPhase = 3;
+                circuitProgress = 0;
+                showBlockedMessage = false;
+                statusEl.innerHTML = `<strong style="color: #FF9800;">手动控制：${steps[manualCircuitStepIndex]}</strong>`;
+                
+                // 动画释放当前
+                const animateRelease = () => {
+                    circuitProgress += 0.05;
+                    drawCircuitNetwork();
+                    if (circuitProgress < 1) {
+                        circuitAnimationId = requestAnimationFrame(animateRelease);
+                    } else {
+                        activeSegments.pop();
+                        circuitProgress = 0;
+                        circuitPhase = 0;
+                        drawCircuitNetwork();
+                    }
+                };
+                animateRelease();
+            }
+            
+            manualCircuitStepIndex++;
+            if (manualCircuitStepIndex >= 7) {
+                manualCircuitStepIndex = 0;
+                setTimeout(() => {
+                    statusEl.innerHTML = '<strong style="color: #607D8B;">演示完成</strong><br>点击"下一步"重新开始';
+                }, 500);
+            }
+        }
+
+        // 分组交换手动控制
+        let manualPacketStepIndex = 0;
+        let manualPacketTimer = null;
+
+        function manualPacketStep() {
+            if (packetAnimationId) {
+                cancelAnimationFrame(packetAnimationId);
+            }
+            if (manualPacketTimer) {
+                clearTimeout(manualPacketTimer);
+            }
+            
+            const statusEl = document.getElementById('packetStatus');
+            
+            if (manualPacketStepIndex === 0) {
+                // 初始
+                packets = [];
+                packetPaths = [];
+                
+                const paths = [
+                    [{ x: 50, y: 175 }, { x: 150, y: 100 }, { x: 300, y: 100 }, { x: 450, y: 175 }],
+                    [{ x: 50, y: 175 }, { x: 150, y: 250 }, { x: 300, y: 250 }, { x: 450, y: 175 }],
+                    [{ x: 50, y: 175 }, { x: 150, y: 100 }, { x: 150, y: 250 }, { x: 300, y: 250 }, { x: 450, y: 175 }],
+                    [{ x: 50, y: 175 }, { x: 150, y: 250 }, { x: 150, y: 100 }, { x: 300, y: 100 }, { x: 450, y: 175 }],
+                    [{ x: 50, y: 175 }, { x: 150, y: 100 }, { x: 300, y: 100 }, { x: 300, y: 250 }, { x: 450, y: 175 }]
+                ];
+                
+                const pathNames = ['A→R1→R3→B', 'A→R2→R4→B', 'A→R1→R2→R4→B', 'A→R2→R1→R3→B', 'A→R1→R3→R4→B'];
+                const colors = ['#9C27B0', '#E91E63', '#00BCD4', '#FF9800', '#4CAF50'];
+                
+                for (let i = 0; i < 5; i++) {
+                    packets.push({
+                        id: `P${i+1}`,
+                        x: 50,
+                        y: 175,
+                        path: paths[i],
+                        pathName: pathNames[i],
+                        pathIndex: 0,
+                        progress: 0,
+                        color: colors[i],
+                        active: false
+                    });
+                    packetPaths.push(paths[i]);
+                }
+                
+                statusEl.innerHTML = '<strong style="color: #2196F3;">手动控制：准备发送分组</strong><br>点击"下一步"发送第一个分组';
+                drawPacketNetwork();
+                manualPacketStepIndex = 1;
+                return;
+            }
+            
+            if (manualPacketStepIndex <= 5) {
+                // 发送分用
+                const packetIdx = manualPacketStepIndex - 1;
+                packets[packetIdx].active = true;
+                statusEl.innerHTML = `<strong style="color: #4CAF50;">手动控制：发送分组P${manualPacketStepIndex}</strong><br>路径: ${packets[packetIdx].pathName}`;
+                
+                // 动画移动当前分组
+                const animatePacket = () => {
+                    let allDone = true;
+                    
+                    packets.forEach((packet, idx) => {
+                        if (!packet.active) return;
+                        
+                        if (packet.pathIndex < packet.path.length - 1) {
+                            allDone = false;
+                            packet.progress += 0.03;
+                            
+                            if (packet.progress >= 1) {
+                                packet.progress = 0;
+                                packet.pathIndex++;
+                            }
+                            
+                            if (packet.pathIndex < packet.path.length - 1) {
+                                const start = packet.path[packet.pathIndex];
+                                const end = packet.path[packet.pathIndex + 1];
+                                packet.x = start.x + (end.x - start.x) * packet.progress;
+                                packet.y = start.y + (end.y - start.y) * packet.progress;
+                            } else {
+                                const last = packet.path[packet.path.length - 1];
+                                packet.x = last.x;
+                                packet.y = last.y;
+                            }
+                        }
+                    });
+                    
+                    drawPacketNetwork();
+                    
+                    if (!allDone) {
+                        packetAnimationId = requestAnimationFrame(animatePacket);
+                    }
+                };
+                animatePacket();
+                
+                manualPacketStepIndex++;
+                
+                if (manualPacketStepIndex > 5) {
+                    manualPacketTimer = setTimeout(() => {
+                        statusEl.innerHTML = '<strong style="color: #4CAF50;">所有分组已发送</strong><br>点击"下一步"重新开始';
+                        manualPacketStepIndex = 0;
+                    }, 2000);
+                }
+            }
+        }
+
+        // 分组交换演示
+        const packetCanvas = document.getElementById('packetCanvas');
+        const packetCtx = packetCanvas.getContext('2d');
+        let packetAnimationId = null;
+        let packets = [];
+        let packetPaths = []; // 记录每个分组的路径信号
+
+        function drawPacketNetwork() {
+            packetCtx.clearRect(0, 0, packetCanvas.width, packetCanvas.height);
+            
+            const nodes = [
+                { x: 50, y: 175, label: 'A', color: '#4CAF50' },
+                { x: 150, y: 100, label: 'R1', color: '#2196F3' },
+                { x: 150, y: 250, label: 'R2', color: '#2196F3' },
+                { x: 300, y: 100, label: 'R3', color: '#2196F3' },
+                { x: 300, y: 250, label: 'R4', color: '#2196F3' },
+                { x: 450, y: 175, label: 'B', color: '#FF9800' }
+            ];
+
+            // 绘制连接收
+            packetCtx.strokeStyle = '#334155';
+            packetCtx.lineWidth = 2;
+            
+            const connections = [
+                [0, 1], [0, 2], [1, 2], [1, 3], [2, 4], [3, 4], [3, 5], [4, 5]
+            ];
+            
+            connections.forEach(([i, j]) => {
+                packetCtx.beginPath();
+                packetCtx.moveTo(nodes[i].x, nodes[i].y);
+                packetCtx.lineTo(nodes[j].x, nodes[j].y);
+                packetCtx.stroke();
+            });
+
+            // 绘制分组路径（半透明线条）
+            packets.forEach((packet, index) => {
+                if (packetPaths[index] && packetPaths[index].length > 1) {
+                    packetCtx.strokeStyle = packet.color + '40'; // 添加透明
+                    packetCtx.lineWidth = 3;
+                    packetCtx.beginPath();
+                    packetCtx.moveTo(packetPaths[index][0].x, packetPaths[index][0].y);
+                    for (let i = 1; i < packetPaths[index].length; i++) {
+                        packetCtx.lineTo(packetPaths[index][i].x, packetPaths[index][i].y);
+                    }
+                    packetCtx.stroke();
+                }
+            });
+
+            // 绘制分组
+            packets.forEach(packet => {
+                packetCtx.fillStyle = packet.color;
+                packetCtx.beginPath();
+                packetCtx.arc(packet.x, packet.y, 10, 0, Math.PI * 2);
+                packetCtx.fill();
+                
+                packetCtx.fillStyle = 'white';
+                packetCtx.font = 'bold 10px Arial';
+                packetCtx.textAlign = 'center';
+                packetCtx.textBaseline = 'middle';
+                packetCtx.fillText(packet.id, packet.x, packet.y);
+            });
+
+            // 绘制节点
+            nodes.forEach(node => {
+                packetCtx.fillStyle = node.color;
+                packetCtx.beginPath();
+                packetCtx.arc(node.x, node.y, 20, 0, Math.PI * 2);
+                packetCtx.fill();
+                
+                packetCtx.fillStyle = 'white';
+                packetCtx.font = 'bold 14px Arial';
+                packetCtx.textAlign = 'center';
+                packetCtx.textBaseline = 'middle';
+                packetCtx.fillText(node.label, node.x, node.y);
+            });
+
+            // 绘制标签
+            packetCtx.fillStyle = '#e2e8f0';
+            packetCtx.font = '12px Arial';
+            packetCtx.fillText('发送端', nodes[0].x, nodes[0].y + 35);
+            packetCtx.fillText('接收', nodes[5].x, nodes[5].y + 35);
+            
+            // 绘制路径说明
+            if (packets.length > 0) {
+                packetCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                packetCtx.fillRect(10, 10, 480, 25);
+                
+                packetCtx.fillStyle = 'white';
+                packetCtx.font = '11px Arial';
+                packetCtx.textAlign = 'left';
+                packetCtx.fillText('动态路由：每个分组根据网络状况选择不同路径', 15, 27);
+            }
+        }
+
+        function startPacketSwitching() {
+            if (packetAnimationId) {
+                cancelAnimationFrame(packetAnimationId);
+            }
+            
+            packets = [];
+            packetPaths = [];
+            const statusEl = document.getElementById('packetStatus');
+            statusEl.innerHTML = '<strong style="color: #2196F3;">分组传输中..</strong><br>数据被分成多个分组，根据网络状况动态选择不同路径';
+            
+            // 创建多个分组，走不同路径（展示动态路由）
+            const paths = [
+                // 路径1: A -> R1 -> R3 -> B (最短路由
+                [
+                    { x: 50, y: 175 },
+                    { x: 150, y: 100 },
+                    { x: 300, y: 100 },
+                    { x: 450, y: 175 }
+                ],
+                // 路径2: A -> R2 -> R4 -> B (另一条最短路由
+                [
+                    { x: 50, y: 175 },
+                    { x: 150, y: 250 },
+                    { x: 300, y: 250 },
+                    { x: 450, y: 175 }
+                ],
+                // 路径3: A -> R1 -> R2 -> R4 -> B (绕行路径)
+                [
+                    { x: 50, y: 175 },
+                    { x: 150, y: 100 },
+                    { x: 150, y: 250 },
+                    { x: 300, y: 250 },
+                    { x: 450, y: 175 }
+                ],
+                // 路径4: A -> R2 -> R1 -> R3 -> B (另一条绕行路由
+                [
+                    { x: 50, y: 175 },
+                    { x: 150, y: 250 },
+                    { x: 150, y: 100 },
+                    { x: 300, y: 100 },
+                    { x: 450, y: 175 }
+                ],
+                // 路径5: A -> R1 -> R3 -> R4 -> B (经过R4的路由
+                [
+                    { x: 50, y: 175 },
+                    { x: 150, y: 100 },
+                    { x: 300, y: 100 },
+                    { x: 300, y: 250 },
+                    { x: 450, y: 175 }
+                ]
+            ];
+
+            const pathNames = [
+                'A→R1→R3→B',
+                'A→R2→R4→B',
+                'A→R1→R2→R4→B',
+                'A→R2→R1→R3→B',
+                'A→R1→R3→R4→B'
+            ];
+
+            const colors = ['#9C27B0', '#E91E63', '#00BCD4', '#FF9800', '#4CAF50'];
+            
+            // 创建5个分组，走不同路由
+            for (let i = 0; i < 5; i++) {
+                packets.push({
+                    id: `P${i+1}`,
+                    x: 50,
+                    y: 175,
+                    path: paths[i],
+                    pathName: pathNames[i],
+                    pathIndex: 0,
+                    progress: 0,
+                    color: colors[i],
+                    delay: i * 20,
+                    speed: 0.012 + Math.random() * 0.008
+                });
+                packetPaths.push(paths[i]);
+            }
+
+            // 显示路径信息
+            let pathInfo = '<strong style="color: #2196F3;">分组传输中..</strong><br>';
+            pathInfo += '各分组路径：<br>';
+            pathInfo += `P1: ${pathNames[0]} | P2: ${pathNames[1]} | P3: ${pathNames[2]}<br>`;
+            pathInfo += `P4: ${pathNames[3]} | P5: ${pathNames[4]}`;
+            statusEl.innerHTML = pathInfo;
+
+            animatePackets();
+        }
+
+        function animatePackets() {
+            let allArrived = true;
+            
+            packets.forEach(packet => {
+                if (packet.delay > 0) {
+                    packet.delay--;
+                    allArrived = false;
+                    return;
+                }
+                
+                if (packet.pathIndex < packet.path.length - 1) {
+                    allArrived = false;
+                    packet.progress += packet.speed;
+                    
+                    if (packet.progress >= 1) {
+                        packet.progress = 0;
+                        packet.pathIndex++;
+                    }
+                    
+                    if (packet.pathIndex < packet.path.length - 1) {
+                        const start = packet.path[packet.pathIndex];
+                        const end = packet.path[packet.pathIndex + 1];
+                        packet.x = start.x + (end.x - start.x) * packet.progress;
+                        packet.y = start.y + (end.y - start.y) * packet.progress;
+                    } else {
+                        const last = packet.path[packet.path.length - 1];
+                        packet.x = last.x;
+                        packet.y = last.y;
+                    }
+                }
+            });
+
+            drawPacketNetwork();
+            
+            if (!allArrived) {
+                packetAnimationId = requestAnimationFrame(animatePackets);
+            } else {
+                document.getElementById('packetStatus').innerHTML = 
+                    '<strong style="color: #4CAF50;">传输完成</strong><br>所有分组已通过不同路径到达，接收端进行重组';
+            }
+        }
+
+        function resetPacketSwitching() {
+            if (packetAnimationId) {
+                cancelAnimationFrame(packetAnimationId);
+            }
+            packets = [];
+            packetPaths = [];
+            document.getElementById('packetStatus').textContent = '点击"自动演示"查看分组交换工作过程';
+            drawPacketNetwork();
+        }
+
+        // 初始
+        drawCircuitNetwork();
+        drawPacketNetwork();
+    </script>
+
+
+    
+    
+    
+</body>
+</html>

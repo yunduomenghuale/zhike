@@ -38,6 +38,24 @@
 			}
 		},
 		{
+			"path": "pages/course/resources",
+			"style": {
+				"navigationBarTitleText": "课程资源"
+			}
+		},
+		{
+			"path": "pages/course/resource-viewer",
+			"style": {
+				"navigationBarTitleText": "资源查看"
+			}
+		},
+		{
+			"path": "pages/lab/grades",
+			"style": {
+				"navigationBarTitleText": "实验成绩"
+			}
+		},
+		{
 			"path": "pages/qa/index",
 			"style": {
 				"navigationBarTitleText": "AI 助教"

@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数据传递过程 - 计算机网络辅助教学平台</title>
+    
+    
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+            background: #0b1120;
+            min-height: 100vh;
+            padding: 20px;
+            overflow-x: hidden;
+         color: #e2e8f0; }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: #0f172a;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 30px;
+        }
+
+        h1 {
+            text-align: center;
+            color: #e2e8f0;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #cbd5e1;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .animation-area {
+            display: flex;
+            justify-content: space-between;
+            gap: 40px;
+            margin-bottom: 30px;
+            min-height: 600px;
+        }
+
+        .host {
+            flex: 1;
+            border: 3px solid #4a90e2;
+            border-radius: 15px;
+            padding: 20px;
+            background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+            position: relative;
+            overflow: visible;
+        }
+
+        .router {
+            flex: 1.5;
+            border: 3px solid #e67e22;
+            border-radius: 15px;
+            padding: 20px;
+            background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+            position: relative;
+            align-self: flex-end;
+            margin-bottom: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: visible;
+        }
+
+        .router-title {
+            text-align: center;
+            font-size: 20px;
+            font-weight: bold;
+            color: #e67e22;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e67e22;
+        }
+
+        .router-ports {
+            display: flex;
+            gap: 20px;
+            flex: 1;
+        }
+
+        .router-port {
+            flex: 1;
+            border: 2px dashed #e67e22;
+            border-radius: 10px;
+            padding: 10px;
+            background: rgba(30, 41, 59, 0.5);
+            overflow: visible;
+        }
+
+        .port-title {
+            text-align: center;
+            font-size: 14px;
+            font-weight: bold;
+            color: #d35400;
+            margin-bottom: 10px;
+            padding: 5px;
+            background: rgba(230, 126, 34, 0.1);
+            border-radius: 5px;
+        }
+
+        .host-title {
+            text-align: center;
+            font-size: 20px;
+            font-weight: bold;
+            color: #4a90e2;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #4a90e2;
+        }
+
+        .layers {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            height: calc(100% - 60%);
+            overflow: visible;
+        }
+
+        .router-layers {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            overflow: visible;
+        }
+
+        .router-layers {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .layer {
+            flex: 1;
+            border: 2px solid;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 15px;
+            position: relative;
+            transition: all 0.3s ease;
+            min-height: 60px;
+        }
+
+        .router-layer {
+            flex: 0 0 calc((100% - 16px) / 7);
+            border: 2px solid;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 15px;
+            position: relative;
+            transition: all 0.3s ease;
+            min-height: 60px;
+        }
+
+        .layer:hover {
+            transform: scale(1.02);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        .layer-name {
+            font-weight: bold;
+            font-size: 14px;
+            color: #1e293b;
+        }
+
+        .layer-data {
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            background: rgba(0, 0, 0, 0.05);
+            color: #1e293b;
+            padding: 4px 8px;
+            border-radius: 4px;
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* 各层颜色 */
+        .layer-7 { border-color: #e74c3c; background: linear-gradient(90deg, #ffeaea 0%, #fff5f5 100%); }
+        .layer-6 { border-color: #e67e22; background: linear-gradient(90deg, #fff8f0 0%, #fef3e2 100%); }
+        .layer-5 { border-color: #f39c12; background: linear-gradient(90deg, #fef9e7 0%, #fffcf5 100%); }
+        .layer-4 { border-color: #2ecc71; background: linear-gradient(90deg, #e8f8f5 0%, #f0fdf9 100%); }
+        .layer-3 { border-color: #3498db; background: linear-gradient(90deg, #ebf5fb 0%, #f4fafd 100%); }
+        .layer-2 { border-color: #9b59b6; background: linear-gradient(90deg, #f5eef8 0%, #faf7fc 100%); }
+        .layer-1 { border-color: #34495e; background: linear-gradient(90deg, #ebedef 0%, #f5f6f7 100%); }
+
+        .physical-medium {
+            width: 100%;
+            height: 80px;
+            background: linear-gradient(90deg, #95a5a6 0%, #7f8c8d 50%, #95a5a6 100%);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 16px;
+            position: relative;
+            overflow: hidden;
+            margin: 20px 0;
+        }
+
+        .data-packet {
+            position: absolute;
+            padding: 8px 15px;
+            background: #e74c3c;
+            color: white;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            white-space: nowrap;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            z-index: 100;
+            transition: all 0.5s ease;
+        }
+
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            padding: 12px 30px;
+            font-size: 16px;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: bold;
+        }
+
+        .btn-start {
+            background: #0ea5e9;
+            color: white;
+        }
+
+        .btn-start:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-reset {
+            background: linear-gradient(135deg, #95a5a6 0%, #7f8c8d 100%);
+            color: white;
+        }
+
+        .btn-reset:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(127, 140, 141, 0.4);
+        }
+
+        .btn-step {
+            background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
+            color: white;
+        }
+
+        .btn-step:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(46, 204, 113, 0.4);
+        }
+
+        .info-panel {
+            background: #0f172a;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+
+        .info-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #e2e8f0;
+            margin-bottom: 15px;
+        }
+
+        .info-content {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .info-item {
+            background: #0f172a;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #4a90e2;
+        }
+
+        .info-item h3 {
+            color: #4a90e2;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        @keyframes slideRight {
+            0% { opacity: 0; transform: translateX(-20px) translateY(-50%); }
+            50% { opacity: 1; transform: translateX(0) translateY(-50%); }
+            100% { opacity: 0; transform: translateX(20px) translateY(-50%); }
+        }
+
+        .forward-arrow {
+            z-index: 1000;
+            pointer-events: none;
+        }
+
+        .enter-arrow {
+            z-index: 1000;
+            pointer-events: none;
+        }
+
+        .info-item p {
+            color: #cbd5e1;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .status-bar {
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            font-size: 16px;
+            margin-bottom: 20px;
+        }
+
+        .legend {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            border: 2px solid;
+        }
+
+        .active-layer {
+            animation: pulse 0.5s ease-in-out;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        .arrow-down, .arrow-up {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 32px;
+            color: #e74c3c;
+            font-weight: bold;
+            z-index: 1000;
+            text-shadow: 0 0 10px rgba(231, 76, 60, 0.5);
+            pointer-events: none;
+        }
+
+        @keyframes arrowBounce {
+            0%, 100% { transform: translateX(-50%) translateY(0); opacity: 1; }
+            50% { transform: translateX(-50%) translateY(8px); opacity: 0.8; }
+        }
+
+        @keyframes arrowBounceUp {
+            0%, 100% { transform: translateX(-50%) translateY(0); opacity: 1; }
+            50% { transform: translateX(-50%) translateY(-8px); opacity: 0.8; }
+        }
+
+        .arrow-down {
+            animation: arrowBounce 0.6s ease-in-out infinite;
+        }
+
+        .arrow-up {
+            animation: arrowBounceUp 0.6s ease-in-out infinite;
+        }
+
+        .arrow {
+            position: absolute;
+            font-size: 24px;
+            color: #e74c3c;
+            animation: moveArrow 0.5s ease-in-out;
+        }
+
+        @keyframes moveArrow {
+            0% { opacity: 0; transform: translateY(-10px); }
+            100% { opacity: 1; transform: translateY(0); }
+        }
+
+        .speed-control {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+
+        .speed-control label {
+            font-weight: bold;
+            color: #e2e8f0;
+        }
+
+        .speed-control input {
+            width: 200px;
+        }
+
+        .speed-value {
+            color: #4a90e2;
+            font-weight: bold;
+        }
+    </style>
+
+</head>
+<body>
+    <div class="container">
+        <h1>计算机网络 - 数据在各层之间的传递过程</h1>
+        <p class="subtitle">基于《计算机网络教程（第7版）》图1-16 | OSI七层模型数据封装与解封装过程</p>
+
+        <div class="status-bar" id="statusBar">
+            点击"开始演示"按钮，观察数据在各层之间的传递过程
+        </div>
+
+        <div class="controls">
+            <button class="btn-start" onclick="startAnimation()">开始演示</button>
+            <button class="btn-step" onclick="stepAnimation()">单步执行</button>
+            <button class="btn-reset" onclick="resetAnimation()">重置</button>
+        </div>
+
+        <div class="speed-control">
+            <label>动画速度：</label>
+            <input type="range" id="speedSlider" min="100" max="2000" value="800" onchange="updateSpeed()">
+            <span class="speed-value" id="speedValue">800ms</span>
+        </div>
+
+        <div class="legend">
+            <div class="legend-item"><div class="legend-color layer-7"></div>应用层</div>
+            <div class="legend-item"><div class="legend-color layer-6"></div>表示层</div>
+            <div class="legend-item"><div class="legend-color layer-5"></div>会话层</div>
+            <div class="legend-item"><div class="legend-color layer-4"></div>传输层</div>
+            <div class="legend-item"><div class="legend-color layer-3"></div>网络层</div>
+            <div class="legend-item"><div class="legend-color layer-2"></div>数据链路层</div>
+            <div class="legend-item"><div class="legend-color layer-1"></div>物理层</div>
+        </div>
+
+        <div class="animation-area">
+            <!-- 发送方主机A -->
+            <div class="host" id="hostA">
+                <div class="host-title">主机 A（发送方）</div>
+                <div class="layers">
+                    <div class="layer layer-7" data-layer="7">
+                        <span class="layer-name">7 应用层</span>
+                        <span class="layer-data" id="a7">-</span>
+                    </div>
+                    <div class="layer layer-6" data-layer="6">
+                        <span class="layer-name">6 表示层</span>
+                        <span class="layer-data" id="a6">-</span>
+                    </div>
+                    <div class="layer layer-5" data-layer="5">
+                        <span class="layer-name">5 会话层</span>
+                        <span class="layer-data" id="a5">-</span>
+                    </div>
+                    <div class="layer layer-4" data-layer="4">
+                        <span class="layer-name">4 传输层</span>
+                        <span class="layer-data" id="a4">-</span>
+                    </div>
+                    <div class="layer layer-3" data-layer="3">
+                        <span class="layer-name">3 网络层</span>
+                        <span class="layer-data" id="a3">-</span>
+                    </div>
+                    <div class="layer layer-2" data-layer="2">
+                        <span class="layer-name">2 数据链路层</span>
+                        <span class="layer-data" id="a2">-</span>
+                    </div>
+                    <div class="layer layer-1" data-layer="1">
+                        <span class="layer-name">1 物理层</span>
+                        <span class="layer-data" id="a1">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 物理传输介质1 -->
+            <div style="display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 20px; width: 80px;">
+                <div style="writing-mode: vertical-rl; font-weight: bold; color: #cbd5e1; font-size: 12px;">
+                    物理介质1
+                </div>
+                <div class="physical-medium" id="medium1" style="width: 60px; height: 400px; writing-mode: vertical-rl;">
+                    <span style="z-index: 1; font-size: 12px;">比特流</span>
+                </div>
+            </div>
+
+            <!-- 路由器-->
+            <div class="router" id="router">
+                <div class="router-title">路由器R</div>
+                <div class="router-ports">
+                    <!-- 输入端口 -->
+                    <div class="router-port" id="router-in-port">
+                        <div class="port-title">⬇️ 输入端口（入口）</div>
+                        <div class="router-layers">
+                            <div class="router-layer layer-3" data-layer="3">
+                                <span class="layer-name">3 网络层</span>
+                            </div>
+                            <div class="router-layer layer-2" data-layer="2">
+                                <span class="layer-name">2 数据链路层</span>
+                            </div>
+                            <div class="router-layer layer-1" data-layer="1">
+                                <span class="layer-name">1 物理层</span>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- 输出端口 -->
+                    <div class="router-port" id="router-out-port">
+                        <div class="port-title">⬆️ 输出端口（出口）</div>
+                        <div class="router-layers">
+                            <div class="router-layer layer-3" data-layer="3">
+                                <span class="layer-name">3 网络层</span>
+                            </div>
+                            <div class="router-layer layer-2" data-layer="2">
+                                <span class="layer-name">2 数据链路层</span>
+                            </div>
+                            <div class="router-layer layer-1" data-layer="1">
+                                <span class="layer-name">1 物理层</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 物理传输介质2 -->
+            <div style="display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 20px; width: 80px;">
+                <div style="writing-mode: vertical-rl; font-weight: bold; color: #cbd5e1; font-size: 12px;">
+                    物理介质2
+                </div>
+                <div class="physical-medium" id="medium2" style="width: 60px; height: 400px; writing-mode: vertical-rl;">
+                    <span style="z-index: 1; font-size: 12px;">比特流</span>
+                </div>
+            </div>
+
+            <!-- 接收方主机B -->
+            <div class="host" id="hostB">
+                <div class="host-title">主机 B（接收方）</div>
+                <div class="layers">
+                    <div class="layer layer-7" data-layer="7">
+                        <span class="layer-name">7 应用层</span>
+                        <span class="layer-data" id="b7">-</span>
+                    </div>
+                    <div class="layer layer-6" data-layer="6">
+                        <span class="layer-name">6 表示层</span>
+                        <span class="layer-data" id="b6">-</span>
+                    </div>
+                    <div class="layer layer-5" data-layer="5">
+                        <span class="layer-name">5 会话层</span>
+                        <span class="layer-data" id="b5">-</span>
+                    </div>
+                    <div class="layer layer-4" data-layer="4">
+                        <span class="layer-name">4 传输层</span>
+                        <span class="layer-data" id="b4">-</span>
+                    </div>
+                    <div class="layer layer-3" data-layer="3">
+                        <span class="layer-name">3 网络层</span>
+                        <span class="layer-data" id="b3">-</span>
+                    </div>
+                    <div class="layer layer-2" data-layer="2">
+                        <span class="layer-name">2 数据链路层</span>
+                        <span class="layer-data" id="b2">-</span>
+                    </div>
+                    <div class="layer layer-1" data-layer="1">
+                        <span class="layer-name">1 物理层</span>
+                        <span class="layer-data" id="b1">-</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="info-panel">
+            <div class="info-title">📚 数据传递过程说明</div>
+            <div class="info-content">
+                <div class="info-item">
+                    <h3>🔹 封装过程（发送方主机A）</h3>
+                    <p>数据从应用层向下传递，每层添加协议首部。应用层→表示层→会话层→传输层→网络层→数据链路层→物理层，最终形成比特流。</p>
+                </div>
+                <div class="info-item">
+                    <h3>🔹 路由器处理过程</h3>
+                    <p>路由器有<strong>输入端口</strong>和<strong>输出端口</strong>两个端口。输入端口接收数据后逐层解封装到网络层，查路由表后转发到输出端口，输出端口再重新封装发送。</p>
+                </div>
+                <div class="info-item">
+                    <h3>🔹 解封装过程（接收方主机B）</h3>
+                    <p>数据从物理层向上传递，每层去除协议首部，最终在应用层获得原始数据。这是封装过程的逆过程。</p>
+                </div>
+                <div class="info-item">
+                    <h3>🔹 路由器的关键作用</h3>
+                    <p>路由器只处理到网络层，不涉及传输层及以上。它根据网络层首部中的目的IP地址查路由表，决定将分组从输入端口转发到哪个输出端口。</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let animationSpeed = 800;
+        let currentStep = 0;
+        let isAnimating = false;
+        let animationTimer = null;
+
+        const steps = [
+            // 发送方主机A封装过程
+            { phase: 'encap', layer: 7, host: 'A', data: 'DATA', desc: '主机A-应用层：产生原始数据 DATA' },
+            { phase: 'encap', layer: 6, host: 'A', data: 'AH|DATA', desc: '主机A-表示层：添加表示层首部AH' },
+            { phase: 'encap', layer: 5, host: 'A', data: 'PH|AH|DATA', desc: '主机A-会话层：添加会话层首部PH' },
+            { phase: 'encap', layer: 4, host: 'A', data: 'SH|PH|AH|DATA', desc: '主机A-传输层：添加传输层首部SH' },
+            { phase: 'encap', layer: 3, host: 'A', data: 'TH|SH|PH|AH|DATA', desc: '主机A-网络层：添加网络层首部TH' },
+            { phase: 'encap', layer: 2, host: 'A', data: 'NH|TH|SH|PH|AH|DATA|DT', desc: '主机A-数据链路层：添加首部 NH 和尾DT' },
+            { phase: 'encap', layer: 1, host: 'A', data: 'DH|NH|TH|SH|PH|AH|DATA|DT', desc: '主机A-物理层：转换为比特流' },
+            
+            // 物理传输1
+            { phase: 'transmit1', desc: '比特流通过物理介质1传输到路由器...' },
+            
+            // 路由器输入端口处理过
+            { phase: 'router-decap', layer: 1, host: 'R-in', data: 'DH|NH|TH|SH|PH|AH|DATA|DT', desc: '路由器输入端口物理层：接收比特流' },
+            { phase: 'router-decap', layer: 2, host: 'R-in', data: 'NH|TH|SH|PH|AH|DATA|DT', desc: '路由器输入端口数据链路层：去除首部NH和尾部DT' },
+            { phase: 'router-process', layer: 3, host: 'R-in', data: 'TH|SH|PH|AH|DATA', desc: '路由器输入端口网络层：检查首部TH，查路由表转发' },
+            { phase: 'router-forward', desc: '➡️ 路由器查路由表，将分组从输入端口转发到输出端口..' },
+            // 路由器输出端口处理过
+            { phase: 'router-out-network', layer: 3, host: 'R-out', data: 'TH|SH|PH|AH|DATA', desc: '路由器输出端口网络层：接收转发的分组' },
+            { phase: 'router-encap', layer: 2, host: 'R-out', data: "NH'|TH|SH|PH|AH|DATA|DT'", desc: '路由器输出端口数据链路层：重新封装（新首部 NH\' 和尾DT\'）' },
+            { phase: 'router-encap', layer: 1, host: 'R-out', data: "DH'|NH'|TH|SH|PH|AH|DATA|DT'", desc: '路由器输出端口物理层：转换为比特流' },
+            
+            // 物理传输2
+            { phase: 'transmit2', desc: '比特流通过物理介质2传输到主机B...' },
+            
+            // 接收方主机B解封装过
+            { phase: 'decap', layer: 1, host: 'B', data: "DH'|NH'|TH|SH|PH|AH|DATA|DT'", desc: '主机B-物理层：接收比特流' },
+            { phase: 'decap', layer: 2, host: 'B', data: 'TH|SH|PH|AH|DATA', desc: '主机B-数据链路层：去除首部和尾部' },
+            { phase: 'decap', layer: 3, host: 'B', data: 'SH|PH|AH|DATA', desc: '主机B-网络层：去除网络层首部TH' },
+            { phase: 'decap', layer: 4, host: 'B', data: 'PH|AH|DATA', desc: '主机B-传输层：去除传输层首部SH' },
+            { phase: 'decap', layer: 5, host: 'B', data: 'AH|DATA', desc: '主机B-会话层：去除会话层首部PH' },
+            { phase: 'decap', layer: 6, host: 'B', data: 'DATA', desc: '主机B-表示层：去除表示层首部AH' },
+            { phase: 'decap', layer: 7, host: 'B', data: 'DATA', desc: '主机B-应用层：获得原始数据 DATA' },
+        ];
+
+        function updateSpeed() {
+            animationSpeed = parseInt(document.getElementById('speedSlider').value);
+            document.getElementById('speedValue').textContent = animationSpeed + 'ms';
+        }
+
+        function updateStatus(text) {
+            document.getElementById('statusBar').textContent = text;
+        }
+
+        function highlightLayer(host, layer, active, direction = null) {
+            let hostElement;
+            if (host === 'A') {
+                hostElement = document.getElementById('hostA');
+            } else if (host === 'B') {
+                hostElement = document.getElementById('hostB');
+            } else if (host === 'R-in') {
+                hostElement = document.getElementById('router-in-port');
+            } else if (host === 'R-out') {
+                hostElement = document.getElementById('router-out-port');
+            }
+            const layerElement = hostElement.querySelector(`.layer-${layer}`);
+            if (active) {
+                layerElement.classList.add('active-layer');
+                layerElement.style.boxShadow = '0 0 20px rgba(233, 76, 60, 0.6)';
+                
+                // 只有当direction不为null时才添加箭头
+                if (direction) {
+                    let arrow = layerElement.querySelector('.arrow-down, .arrow-up');
+                    if (!arrow) {
+                        arrow = document.createElement('div');
+                        layerElement.appendChild(arrow);
+                    }
+                    arrow.className = direction === 'down' ? 'arrow-down' : 'arrow-up';
+                    arrow.textContent = direction === 'down' ? '↓' : '↑';
+                    arrow.style.position = 'absolute';
+                    arrow.style.bottom = direction === 'down' ? '-20px' : 'auto';
+                    arrow.style.top = direction === 'up' ? '-20px' : 'auto';
+                }
+            } else {
+                layerElement.classList.remove('active-layer');
+                layerElement.style.boxShadow = '';
+                
+                // 移除箭头
+                const arrow = layerElement.querySelector('.arrow-down, .arrow-up');
+                if (arrow) {
+                    arrow.remove();
+                }
+            }
+        }
+
+        function updateLayerData(host, layer, data) {
+            let elementId;
+            if (host === 'A') {
+                elementId = `a${layer}`;
+            } else if (host === 'B') {
+                elementId = `b${layer}`;
+            } else if (host === 'R-in' || host === 'R-out') {
+                // 路由器端口不显示数据参数，直接返
+                return;
+            }
+            const element = document.getElementById(elementId);
+            if (element) {
+                element.textContent = data;
+            }
+        }
+
+        function executeStep(stepIndex) {
+            if (stepIndex >= steps.length) {
+                updateStatus('数据传递完成！原始数据已成功从主机A经路由器传输到主机B');
+                isAnimating = false;
+                return;
+            }
+
+            const step = steps[stepIndex];
+            updateStatus(`步骤 ${stepIndex + 1}/${steps.length}: ${step.desc}`);
+
+            if (step.phase === 'encap') {
+                // 发送方封装 - 向下箭头
+                highlightLayer('A', step.layer, true, 'down');
+                updateLayerData('A', step.layer, step.data);
+                
+                setTimeout(() => {
+                    highlightLayer('A', step.layer, false);
+                    currentStep++;
+                    if (isAnimating) {
+                        animationTimer = setTimeout(() => executeStep(currentStep), animationSpeed);
+                    }
+                }, animationSpeed);
+            } else if (step.phase === 'transmit1') {
+                // 物理传输动画1
+                const medium = document.getElementById('medium1');
+                medium.style.background = 'linear-gradient(180deg, #e74c3c 0%, #c0392b 50%, #e74c3c 100%)';
+                
+                setTimeout(() => {
+                    medium.style.background = 'linear-gradient(180deg, #95a5a6 0%, #7f8c8d 50%, #95a5a6 100%)';
+                    currentStep++;
+                    if (isAnimating) {
+                        animationTimer = setTimeout(() => executeStep(currentStep), animationSpeed);
+                    }
+                }, animationSpeed);
+            } else if (step.phase === 'transmit2') {
+                // 物理传输动画2
+                const medium = document.getElementById('medium2');
+                medium.style.background = 'linear-gradient(180deg, #e74c3c 0%, #c0392b 50%, #e74c3c 100%)';
+                
+                setTimeout(() => {
+                    medium.style.background = 'linear-gradient(180deg, #95a5a6 0%, #7f8c8d 50%, #95a5a6 100%)';
+                    currentStep++;
+                    if (isAnimating) {
+                        animationTimer = setTimeout(() => executeStep(currentStep), animationSpeed);
+                    }
+                }, animationSpeed);
+            } else if (step.phase === 'router-decap') {
+                // 路由器输入端口解封装 - 向上箭头
+                highlightLayer('R-in', step.layer, true, 'up');
+                updateLayerData('R-in', step.layer, step.data);
+                
+                setTimeout(() => {
+                    highlightLayer('R-in', step.layer, false);
+                    currentStep++;
+                    if (isAnimating) {
+                        animationTimer = setTimeout(() => executeStep(currentStep), animationSpeed);
+                    }
+                }, animationSpeed);
+            } else if (step.phase === 'router-process') {
+                // 路由器输入端口网络层处理 - 无箭
+                highlightLayer('R-in', step.layer, true);
+                updateLayerData('R-in', step.layer, step.data);
+                
+                setTimeout(() => {
+                    highlightLayer('R-in', step.layer, false);
+                    currentStep++;
+                    if (isAnimating) {
+                        animationTimer = setTimeout(() => executeStep(currentStep), animationSpeed);
+                    }
+                }, animationSpeed);
+            } else if (step.phase === 'router-forward') {
+                // 路由器转发过- 显示横向箭头动画
+                const routerElement = document.getElementById('router');
+                const inPort = document.getElementById('router-in-port');
+                const outPort = document.getElementById('router-out-port');
+                
+                // 高亮整个路由器
+                routerElement.style.boxShadow = '0 0 30px rgba(230, 126, 34, 0.8)';
+                
+                // 在输入端口网络层显示向右箭头
+                const inLayer3 = inPort.querySelector('.layer-3');
+                let forwardArrow = document.createElement('div');
+                forwardArrow.className = 'forward-arrow';
+                forwardArrow.innerHTML = '➡️';
+                forwardArrow.style.cssText = `
+                    position: absolute;
+                    right: -30px;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    font-size: 24px;
+                    animation: slideRight 0.8s ease-in-out;
+                `;
+                inLayer3.style.position = 'relative';
+                inLayer3.appendChild(forwardArrow);
+                
+                setTimeout(() => {
+                    routerElement.style.boxShadow = '';
+                    if (forwardArrow.parentNode) {
+                        forwardArrow.remove();
+                    }
+                    currentStep++;
+                    if (isAnimating) {
+                        animationTimer = setTimeout(() => executeStep(currentStep), animationSpeed);
+                    }
+                }, animationSpeed);
+            } else if (step.phase === 'router-out-network') {
+                // 路由器输出端口网络层 - 显示横向进入效果
+                const outPort = document.getElementById('router-out-port');
+                const outLayer3 = outPort.querySelector('.layer-3');
+                
+                outLayer3.classList.add('active-layer');
+                outLayer3.style.boxShadow = '0 0 20px rgba(233, 76, 60, 0.6)';
+                
+                // 添加横向进入箭头
+                let enterArrow = document.createElement('div');
+                enterArrow.className = 'enter-arrow';
+                enterArrow.innerHTML = '↓';
+                enterArrow.style.cssText = `
+                    position: absolute;
+                    left: 50%;
+                    bottom: -18px;
+                    transform: translateX(-50%);
+                    font-size: 20px;
+                    color: #e74c3c;
+                `;
+                outLayer3.style.position = 'relative';
+                outLayer3.appendChild(enterArrow);
+                
+                setTimeout(() => {
+                    outLayer3.classList.remove('active-layer');
+                    outLayer3.style.boxShadow = '';
+                    if (enterArrow.parentNode) {
+                        enterArrow.remove();
+                    }
+                    currentStep++;
+                    if (isAnimating) {
+                        animationTimer = setTimeout(() => executeStep(currentStep), animationSpeed);
+                    }
+                }, animationSpeed);
+            } else if (step.phase === 'router-encap') {
+                // 路由器输出端口封- 向下箭头
+                highlightLayer('R-out', step.layer, true, 'down');
+                updateLayerData('R-out', step.layer, step.data);
+                
+                setTimeout(() => {
+                    highlightLayer('R-out', step.layer, false);
+                    currentStep++;
+                    if (isAnimating) {
+                        animationTimer = setTimeout(() => executeStep(currentStep), animationSpeed);
+                    }
+                }, animationSpeed);
+            } else if (step.phase === 'decap') {
+                // 接收方解封装 - 向上箭头
+                highlightLayer('B', step.layer, true, 'up');
+                updateLayerData('B', step.layer, step.data);
+                
+                setTimeout(() => {
+                    highlightLayer('B', step.layer, false);
+                    currentStep++;
+                    if (isAnimating) {
+                        animationTimer = setTimeout(() => executeStep(currentStep), animationSpeed);
+                    }
+                }, animationSpeed);
+            }
+        }
+
+        function startAnimation() {
+            if (isAnimating) return;
+            
+            resetAnimation();
+            isAnimating = true;
+            currentStep = 0;
+            updateStatus('🚀 开始数据传递过程...');
+            
+            setTimeout(() => executeStep(0), animationSpeed);
+        }
+
+        function stepAnimation() {
+            if (currentStep >= steps.length) {
+                updateStatus('数据传递已完成，点击"重置"可重新开始');
+                return;
+            }
+            
+            isAnimating = false;
+            if (animationTimer) {
+                clearTimeout(animationTimer);
+            }
+            
+            executeStep(currentStep);
+        }
+
+        function resetAnimation() {
+            isAnimating = false;
+            if (animationTimer) {
+                clearTimeout(animationTimer);
+            }
+            currentStep = 0;
+            
+            // 清除所有层数据
+            for (let i = 1; i <= 7; i++) {
+                updateLayerData('A', i, '-');
+                updateLayerData('B', i, '-');
+                highlightLayer('A', i, false);
+                highlightLayer('B', i, false);
+            }
+            
+            // 清除路由器层数据
+            for (let i = 1; i <= 3; i++) {
+                updateLayerData('R-in', i, '-');
+                updateLayerData('R-out', i, '-');
+                highlightLayer('R-in', i, false);
+                highlightLayer('R-out', i, false);
+            }
+            
+            // 重置物理介质
+            const medium1 = document.getElementById('medium1');
+            const medium2 = document.getElementById('medium2');
+            medium1.style.background = 'linear-gradient(180deg, #95a5a6 0%, #7f8c8d 50%, #95a5a6 100%)';
+            medium2.style.background = 'linear-gradient(180deg, #95a5a6 0%, #7f8c8d 50%, #95a5a6 100%)';
+            
+            updateStatus('点击"开始演示"按钮，观察数据在各层之间的传递过程');
+        }
+
+        // 页面加载完成后的初始
+        window.onload = function() {
+            updateSpeed();
+        };
+    </script>
+
+
+    
+    
+    
+</body>
+</html>

@@ -17,6 +17,9 @@ const courseWorkspaceRoute = {
     { path: 'questions', name: 'course-questions', component: () => import('@/views/teacher/QuestionManage.vue'), meta: { title: '题库', role: 'teacher' } },
     { path: 'homework', name: 'course-homework', component: () => import('@/views/teacher/HomeworkManage.vue'), meta: { title: '作业', role: 'teacher' } },
     { path: 'exams', name: 'course-exams', component: () => import('@/views/teacher/ExamManage.vue'), meta: { title: '考试', role: 'teacher' } },
+    { path: 'labs', name: 'course-labs', component: () => import('@/views/teacher/LabManage.vue'), meta: { title: '虚拟实验', role: 'teacher' } },
+    { path: 'resources', name: 'course-resources', component: () => import('@/views/teacher/ResourceManage.vue'), meta: { title: '教学资源', role: 'teacher' } },
+    { path: 'resources/viewer', name: 'course-resource-viewer', component: () => import('@/views/common/ResourceViewer.vue'), meta: { title: '资源查看', role: 'teacher' } },
     { path: 'analytics', name: 'course-analytics', component: () => import('@/views/teacher/Analytics.vue'), meta: { title: '学习统计', role: 'teacher' } },
   ],
 }
@@ -32,6 +35,9 @@ const studentCourseWorkspaceRoute = {
     { path: 'materials', name: 'student-course-materials', component: () => import('@/views/student/CourseMaterials.vue'), meta: { title: '课程资料', role: 'student' } },
     { path: 'homework', name: 'student-course-homework', component: () => import('@/views/student/MyHomework.vue'), meta: { title: '我的作业', role: 'student' } },
     { path: 'exams', name: 'student-course-exams', component: () => import('@/views/student/ExamList.vue'), meta: { title: '我的考试', role: 'student' } },
+    { path: 'labs', name: 'student-course-labs', component: () => import('@/views/student/LabList.vue'), meta: { title: '虚拟实验', role: 'student' } },
+    { path: 'resources', name: 'student-course-resources', component: () => import('@/views/student/CourseResources.vue'), meta: { title: '课程资源', role: 'student' } },
+    { path: 'resources/viewer', name: 'student-course-resource-viewer', component: () => import('@/views/common/ResourceViewer.vue'), meta: { title: '资源查看', role: 'student' } },
     { path: 'wrong', name: 'student-course-wrong', component: () => import('@/views/student/WrongBook.vue'), meta: { title: '错题本', role: 'student' } },
   ],
 }

@@ -2,7 +2,15 @@ import os
 
 from rest_framework import serializers
 
-from .models import Catalog, Course, PPTResource, TeachingVideo, VideoWatchProgress
+from .models import (
+    Catalog,
+    Course,
+    CourseResource,
+    CourseVideo,
+    PPTResource,
+    TeachingVideo,
+    VideoWatchProgress,
+)
 
 
 class CourseSerializer(serializers.ModelSerializer):
@@ -126,3 +134,64 @@ class VideoWatchProgressSerializer(serializers.ModelSerializer):
             "status", "status_display", "updated_at",
         ]
         read_only_fields = ["student", "watch_seconds", "status"]
+
+
+class CourseResourceSerializer(serializers.ModelSerializer):
+    kind_display = serializers.CharField(source="get_kind_display", read_only=True)
+    url = serializers.CharField(read_only=True)
+    catalog_title = serializers.CharField(source="catalog.title", read_only=True, default="")
+
+    class Meta:
+        model = CourseResource
+        fields = [
+            "id", "course", "catalog", "catalog_title", "kind", "kind_display",
+            "title", "path", "url", "intro", "is_published", "order",
+        ]
+
+    def validate_path(self, value):
+        # 只允许平台预置静态页的相对路径，防目录穿越与任意外链
+        import re
+
+        value = (value or "").strip().strip("/")
+        if not re.fullmatch(r"(mindmap|demos)/[A-Za-z0-9_\-]+\.html", value):
+            raise serializers.ValidationError("资源路径须为 mindmap/*.html 或 demos/*.html 平台预置页")
+        return value
+
+    def validate(self, attrs):
+        course = attrs.get("course", getattr(self.instance, "course", None))
+        catalog = attrs.get("catalog", getattr(self.instance, "catalog", None))
+        if catalog and course and catalog.course_id != course.id:
+            raise serializers.ValidationError({"catalog": "所选章节不属于当前课程"})
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if user and user.is_authenticated and user.is_teacher:
+            if not course or course.teacher_id != user.id:
+                raise serializers.ValidationError("只能维护自己课程的资源")
+        return attrs
+
+
+class CourseVideoSerializer(serializers.ModelSerializer):
+    catalog_title = serializers.CharField(source="catalog.title", read_only=True, default="")
+    file_url = serializers.FileField(source="file", read_only=True)
+    uploaded_by_name = serializers.CharField(source="course.teacher.real_name", read_only=True, default="")
+
+    class Meta:
+        model = CourseVideo
+        fields = [
+            "id", "course", "catalog", "catalog_title", "title",
+            "file", "file_url", "file_name", "file_size", "duration",
+            "is_published", "order", "uploaded_by_name", "created_at",
+        ]
+        read_only_fields = ["file_name", "file_size"]
+
+    def validate(self, attrs):
+        course = attrs.get("course", getattr(self.instance, "course", None))
+        catalog = attrs.get("catalog", getattr(self.instance, "catalog", None))
+        if catalog and course and catalog.course_id != course.id:
+            raise serializers.ValidationError({"catalog": "所选章节不属于当前课程"})
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if user and user.is_authenticated and user.is_teacher:
+            if not course or course.teacher_id != user.id:
+                raise serializers.ValidationError("只能维护自己课程的视频")
+        return attrs

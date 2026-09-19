@@ -20,3 +20,9 @@ export const listVideos = (params) => get('/videos/', params)
 export const listWatchProgress = (params) => get('/watch-progress/', params)
 export const reportVideoProgress = (videoId, data) =>
   post(`/videos/${videoId}/report-progress/`, data)
+
+// ===== 课程扩展资源（思维导图/交互演示） =====
+export const listCourseResources = (params) => get('/course-resources/', params)
+
+// ===== 数字人视频 =====
+export const listCourseVideos = (params) => get('/course-videos/', params)

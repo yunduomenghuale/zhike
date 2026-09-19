@@ -24,6 +24,15 @@
         <button class="practice-btn" @click.stop="openPractice(row.node)">练习</button>
         <text class="arrow">›</text>
       </view>
+
+      <view class="resource-entry" @click="openResources">
+        <view class="resource-icon">🧩</view>
+        <view class="resource-main">
+          <view class="resource-title">课程资源</view>
+          <view class="resource-sub">思维导图 · 交互演示 · 数字人视频</view>
+        </view>
+        <text class="arrow">›</text>
+      </view>
     </template>
   </view>
 </template>
@@ -89,6 +98,12 @@ function openPractice(node) {
     url: `/pages/course/practice?course=${courseId.value}&catalog=${node.id}&title=${encodeURIComponent(node.title)}`,
   })
 }
+
+function openResources() {
+  uni.navigateTo({
+    url: `/pages/course/resources?id=${courseId.value}&name=${encodeURIComponent(courseName.value)}`,
+  })
+}
 </script>
 
 <style scoped>
@@ -125,6 +140,37 @@ function openPractice(node) {
 
 .chapter.child {
   margin-left: 48rpx;
+}
+
+.resource-entry {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  margin-top: 24rpx;
+  padding: 26rpx 28rpx;
+  border-radius: 20rpx;
+  background: linear-gradient(135deg, #eff6ff, #f5f3ff);
+  border: 1rpx solid #dbeafe;
+}
+
+.resource-entry:active {
+  transform: scale(0.98);
+}
+
+.resource-icon {
+  font-size: 44rpx;
+}
+
+.resource-title {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.resource-sub {
+  margin-top: 4rpx;
+  font-size: 22rpx;
+  color: #94a3b8;
 }
 
 .chapter:active {

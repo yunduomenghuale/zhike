@@ -62,6 +62,7 @@ INSTALLED_APPS = [
     "apps.questions",
     "apps.homework",
     "apps.exams",
+    "apps.labs",
     "apps.ai",
     "apps.analytics",
     "apps.platform_admin",

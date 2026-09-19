@@ -18,6 +18,7 @@ api_patterns = [
     path("", include("apps.questions.urls")),
     path("", include("apps.homework.urls")),
     path("", include("apps.exams.urls")),
+    path("", include("apps.labs.urls")),
 ]
 
 urlpatterns = [

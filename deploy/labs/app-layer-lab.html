@@ -1,0 +1,3379 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>实验六：应用层协议综合实验 - 计算机网络辅助教学平台</title>
+    <script src="lab-bridge.js"></script>
+    
+    
+    
+    
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', Arial, sans-serif; background: #0a0e27; color: #e0e0e0; min-height: 100vh; }
+        .main-layout { display: grid; grid-template-columns: 280px 1fr 300px; grid-template-rows: auto 1fr; height: calc(100vh - 50px); }
+        .top-bar { grid-column: 1/-1; background: linear-gradient(135deg, #1a1f3a 0%, #2d1b4e 100%); padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #4a90e2; }
+        .top-bar h1 { font-size: 18px; color: #38bdf8; }
+        .top-bar .exp-info { font-size: 13px; color: #94a3b8; }
+        .step-panel { background: #111633; border-right: 1px solid #1e2a5a; overflow-y: auto; padding: 10px; }
+        .step-panel h3 { color: #38bdf8; font-size: 14px; padding: 8px; margin-bottom: 5px; border-bottom: 1px solid #1e2a5a; }
+        .float-hint-panel { position: absolute; top: 10px; right: 10px; width: 340px; max-height: 200px; background: rgba(17,22,51,0.6); border: 1px solid rgba(245,158,11,0.4); border-radius: 10px; z-index: 9998; box-shadow: 0 4px 16px rgba(0,0,0,0.3); display: flex; flex-direction: column; overflow: hidden; }
+        .float-hint-panel.hidden { display: none; }
+        .float-hint-header { padding: 8px 12px; background: rgba(245,158,11,0.1); display: flex; justify-content: space-between; align-items: center; cursor: move; user-select: none; border-bottom: 1px solid rgba(245,158,11,0.3); }
+        .float-hint-header span { color: #fbbf24; font-size: 13px; font-weight: bold; }
+        .float-hint-close { background: none; border: none; color: #94a3b8; font-size: 16px; cursor: pointer; padding: 0 4px; line-height: 1; }
+        .float-hint-close:hover { color: #ef4444; }
+        .float-hint-body { padding: 10px 12px; font-size: 12px; color: #fbbf24; line-height: 1.7; overflow-y: auto; max-height: 150px; white-space: pre-line; }
+        .step-item { padding: 10px 12px; margin: 4px 0; border-radius: 8px; cursor: pointer; transition: all 0.3s; font-size: 13px; border-left: 3px solid transparent; line-height: 1.5; }
+        .step-item:hover { background: rgba(56,189,248,0.1); }
+        .step-item.active { background: rgba(56,189,248,0.15); border-left-color: #38bdf8; color: #fff; }
+        .step-item.completed { border-left-color: #22c55e; }
+        .step-item.completed .step-icon { color: #22c55e; }
+        .step-item.failed { border-left-color: #ef4444; }
+        .step-icon { margin-right: 6px; font-size: 14px; }
+        .sim-area { background: #0d1230; position: relative; overflow: hidden; display: flex; flex-direction: column; }
+        .sim-canvas-wrap { height: 320px; min-height: 260px; position: relative; flex-shrink: 0; }
+        #simCanvas { width: 100%; height: 100%; display: block; }
+        .console-area { flex: 1; background: #0b1025; border-top: 1px solid #1e2a5a; display: flex; flex-direction: column; min-height: 220px; }
+        .console-header { padding: 6px 12px; background: #0f1535; font-size: 12px; color: #38bdf8; display: flex; justify-content: space-between; align-items: center; }
+        .console-output { flex: 1; overflow-y: auto; padding: 8px 12px; background: #0a0f22; font-family: 'Consolas', 'Courier New', monospace; font-size: 13px; line-height: 1.6; color: #a3e635; }
+        .console-input-wrap { display: flex; border-top: 1px solid #1e2a5a; background: #0c1128; }
+        .console-prompt { padding: 8px; color: #38bdf8; font-family: 'Consolas', monospace; font-size: 13px; white-space: nowrap; }
+        .console-input { flex: 1; background: transparent; border: none; color: #a3e635; font-family: 'Consolas', monospace; font-size: 13px; padding: 8px 4px; outline: none; }
+        .info-panel { background: #111633; border-left: 1px solid #1e2a5a; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+        .panel-card { background: #0d1230; border: 1px solid #1e2a5a; border-radius: 8px; overflow: hidden; }
+        .panel-card-header { padding: 8px 12px; background: #151b3d; font-size: 13px; font-weight: bold; color: #38bdf8; display: flex; justify-content: space-between; align-items: center; }
+        .panel-card-body { padding: 10px 12px; font-size: 12px; max-height: 200px; overflow-y: auto; }
+        .info-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        .info-table th { background: #1a2150; color: #94a3b8; padding: 6px 8px; text-align: left; font-weight: normal; border-bottom: 1px solid #1e2a5a; }
+        .info-table td { padding: 6px 8px; border-bottom: 1px solid #0d1230; color: #a3e635; font-family: 'Consolas', monospace; font-size: 11px; }
+        .info-table tr.new-entry td { animation: macHighlight 1.5s ease; }
+        @keyframes macHighlight { 0% { background: rgba(56,189,248,0.3); } 100% { background: transparent; } }
+        .frame-info { font-size: 12px; line-height: 1.8; }
+        .frame-info .label { color: #94a3b8; }
+        .frame-info .value { color: #fbbf24; font-family: 'Consolas', monospace; }
+        .eval-result { padding: 8px 12px; border-radius: 6px; font-size: 13px; margin-top: 6px; }
+        .eval-pass { background: rgba(34,197,94,0.15); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); }
+        .eval-fail { background: rgba(239,68,68,0.15); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
+        .btn { padding: 6px 14px; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; font-family: inherit; transition: all 0.3s; }
+        .btn-primary { background: #4a90e2; color: white; }
+        .btn-primary:hover { background: #357abd; }
+        .btn-success { background: #22c55e; color: white; }
+        .btn-success:hover { background: #16a34a; }
+        .btn-warning { background: #f59e0b; color: #1a1a1a; }
+        .btn-warning:hover { background: #d97706; }
+        .btn-sm { padding: 4px 10px; font-size: 11px; }
+        .score-bar { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+        .score-bar-track { flex: 1; height: 8px; background: #1a2150; border-radius: 4px; overflow: hidden; }
+        .score-bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s; background: linear-gradient(90deg, #4a90e2, #22c55e); }
+        .score-text { font-size: 14px; font-weight: bold; color: #38bdf8; min-width: 40px; text-align: right; }
+        .sw-tab { padding: 3px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; border: 1px solid #1e2a5a; background: #0d1230; color: #94a3b8; transition: all 0.3s; }
+        .sw-tab.active { background: #4a90e2; color: #fff; border-color: #4a90e2; }
+        .sw-tab:hover { background: #1a2150; }
+        .sw-tab.active:hover { background: #357abd; }
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 10000; align-items: center; justify-content: center; }
+        .modal-overlay.show { display: flex; }
+        .modal-box { background: #151b3d; border: 2px solid #4a90e2; border-radius: 12px; padding: 30px; max-width: 600px; width: 90%; text-align: center; }
+        .modal-box h2 { color: #38bdf8; margin-bottom: 15px; }
+        .modal-box p { color: #94a3b8; margin-bottom: 20px; line-height: 1.8; }
+        .modal-box .final-score { font-size: 48px; color: #22c55e; font-weight: bold; margin: 15px 0; }
+    </style>
+</head>
+<body>
+    <div class="top-bar">
+        <h1>实验六：应用层协议综合实系统</h1>
+        <div class="exp-info">计算机网络实验教| 虚拟仿真实验 | 配套教材：基于华为eNSP</div>
+    </div>
+
+    <div class="main-layout">
+    <div class="step-panel">
+        <h3>实验步骤</h3>
+        <div id="stepList"></div>
+        <div style="padding:10px; margin-top:10px;">
+            <div style="font-size:12px; color:#94a3b8; margin-bottom:6px;">实验进度</div>
+            <div class="score-bar">
+                <div class="score-bar-track"><div class="score-bar-fill" id="progressFill" style="width:0%"></div></div>
+                <span class="score-text" id="progressText">0%</span>
+            </div>
+        </div>
+        <div style="padding:10px;">
+            <div style="font-size:12px; color:#94a3b8; margin-bottom:6px;">实验评分</div>
+            <div class="score-bar">
+                <div class="score-bar-track"><div class="score-bar-fill" id="scoreFill" style="width:0%"></div></div>
+                <span class="score-text" id="scoreText">0</span>
+            </div>
+        </div>
+        <div style="padding:10px; display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn btn-primary btn-sm" onclick="resetExperiment()">重置实验</button>
+            <button class="btn btn-warning btn-sm" onclick="showDemo()">演示模式</button>
+            <button class="btn btn-success btn-sm" onclick="submitExperiment()">提交报告</button>
+        </div>
+    </div>
+
+    <div class="sim-area">
+        <div class="sim-canvas-wrap">
+            <canvas id="simCanvas"></canvas>
+        </div>
+        <div class="float-hint-panel" id="floatHintPanel">
+            <div class="float-hint-header" id="floatHintHeader">
+                <span>💡 实验提示</span>
+                <button class="float-hint-close" onclick="toggleHintPanel()">×</button>
+            </div>
+            <div class="float-hint-body" id="hintBox">请按照左侧步骤依次完成实验。点击当前步骤可查看详细提示。</div>
+        </div>
+        <div class="console-area">
+            <div class="console-header">
+                <span id="consoleTitle">设备控制台</span>
+                <div style="display:flex;gap:4px;align-items:center;">
+                    <span style="font-size:11px;color:#94a3b8;">切换设备：</span>
+                    <button class="sw-tab active" data-device="Client" onclick="switchDevice('Client')">Client</button>
+                    <button class="sw-tab" data-device="DHCP_Server" onclick="switchDevice('DHCP_Server')">DHCP</button>
+                    <button class="sw-tab" data-device="DNS_Server" onclick="switchDevice('DNS_Server')">DNS</button>
+                    <button class="sw-tab" data-device="Web_Server" onclick="switchDevice('Web_Server')">Web</button>
+                    <button class="sw-tab" data-device="S1" onclick="switchDevice('S1')">S1</button>
+                    <button class="btn btn-sm" style="background:#1a2150;color:#94a3b8;margin-left:6px;" onclick="clearConsole()">清屏</button>
+                </div>
+            </div>
+            <div class="console-output" id="consoleOutput"></div>
+            <div class="console-input-wrap">
+                <span class="console-prompt" id="consolePrompt">Client&gt;</span>
+                <input type="text" class="console-input" id="consoleInput" placeholder="输入命令后按回车..." onkeydown="handleCommand(event)">
+            </div>
+        </div>
+    </div>
+
+    <div class="info-panel">
+        <div class="panel-card">
+            <div class="panel-card-header"><span>DHCP分配表</span></div>
+            <div class="panel-card-body" id="dhcpTableBody">
+                <table class="info-table">
+                    <thead><tr><th>客户端MAC</th><th>分配IP</th><th>租期</th><th>状态</th></tr></thead>
+                    <tbody id="dhcpTableTbody"><tr><td colspan="4" style="color:#94a3b8;text-align:center;">(无分配记录)</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="panel-card">
+            <div class="panel-card-header"><span>DNS缓存/记录</span></div>
+            <div class="panel-card-body" id="dnsInfoBody">
+                <table class="info-table">
+                    <thead><tr><th>域名</th><th>IP地址</th><th>类型</th><th>TTL</th></tr></thead>
+                    <tbody id="dnsTableTbody"><tr><td colspan="4" style="color:#94a3b8;text-align:center;">(无记</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="panel-card">
+            <div class="panel-card-header"><span>HTTP请求/响应详情</span></div>
+            <div class="panel-card-body" id="httpInfoBody">
+                <table class="info-table">
+                    <thead><tr><th>时间</th><th>方法</th><th>URL</th><th>状态</th></tr></thead>
+                    <tbody id="httpTableTbody"><tr><td colspan="4" style="color:#94a3b8;text-align:center;">(无请求)</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="panel-card">
+            <div class="panel-card-header"><span>当前报文信息</span></div>
+            <div class="panel-card-body" id="frameInfoBody">
+                <div class="frame-info" id="frameInfo">
+                    <span class="label">等待报文传输...</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel-card">
+            <div class="panel-card-header"><span>步骤评判</span></div>
+            <div class="panel-card-body" id="evalBody">
+                <div style="color:#94a3b8;font-size:12px;">完成步骤后自动评估</div>
+            </div>
+        </div>
+    </div>
+    </div>
+
+    <div class="modal-overlay" id="resultModal">
+        <div class="modal-box">
+            <h2>实验报告</h2>
+            <p id="resultSummary"></p>
+            <div class="final-score" id="finalScore">0</div>
+            <p style="font-size:14px;">总分（满00分）</p>
+            <div id="resultDetails" style="text-align:left;margin:15px 0;font-size:13px;color:#94a3b8;line-height:2;"></div>
+            <button class="btn btn-primary" onclick="document.getElementById('resultModal').classList.remove('show')">关闭</button>
+            <button class="btn btn-success" onclick="LabReportGenerator.showConclusionDialog()" style="margin-left:10px;">生成实验报告</button>
+        </div>
+    </div>
+
+    <script>
+    var RAND_SUBNET = Math.floor(Math.random() * 9) + 1;
+    var DNS_IP = '192.168.' + RAND_SUBNET + '.53';
+    var DHCP_IP = '192.168.' + RAND_SUBNET + '.54';
+    var WEB_IP = '192.168.' + RAND_SUBNET + '.80';
+    var DHCP_POOL_START = '192.168.' + RAND_SUBNET + '.100';
+    var DHCP_POOL_END = '192.168.' + RAND_SUBNET + '.200';
+    var GATEWAY_IP = '192.168.' + RAND_SUBNET + '.1';
+    var CLIENT_IP = '192.168.' + RAND_SUBNET + '.100';
+
+    var DEVICES = {
+        Client: {
+            type: 'client', name: 'Client',
+            ip: '', mask: '', mac: '5489-9800-0001', gateway: '',
+            dnsCache: {},
+            httpHistory: [],
+            x: 0, y: 0
+        },
+        S1: {
+            type: 'switch', name: 'S1',
+            x: 0, y: 0
+        },
+        DNS_Server: {
+            type: 'dns', name: 'DNS_Server',
+            ip: DNS_IP,
+            records: {
+                'www.example.com': { ip: WEB_IP, type: 'A', ttl: 3600 },
+                'example.com': { ip: WEB_IP, type: 'A', ttl: 3600 },
+                'ns1.example.com': { ip: DNS_IP, type: 'A', ttl: 3600 }
+            },
+            cache: {},
+            x: 0, y: 0
+        },
+        DHCP_Server: {
+            type: 'dhcp', name: 'DHCP_Server',
+            ip: DHCP_IP,
+            pool: { start: DHCP_POOL_START, end: DHCP_POOL_END, mask: '255.255.255.0', gateway: GATEWAY_IP, dns: DNS_IP, lease: 86400 },
+            bindings: {},
+            nextIp: 100,
+            x: 0, y: 0
+        },
+        Web_Server: {
+            type: 'web', name: 'Web_Server',
+            ip: WEB_IP,
+            accessLog: [],
+            pages: {
+                '/index.html': '<html><head><title>Example</title></head><body><h1>Welcome to Example.com</h1><p>This is a test page.</p>\n    <scr' + 'ipt src="../chat-knowledge.js"></scr' + 'ipt>\n    <scr' + 'ipt src="../kb-loader.js"></scr' + 'ipt>\n    <scr' + 'ipt src="../chat-agent.js"></scr' + 'ipt>\n</body></html>'
+            },
+            x: 0, y: 0
+        }
+    };
+
+    var LINKS = [
+        { from: 'Client', to: 'S1' },
+        { from: 'S1', to: 'DNS_Server' },
+        { from: 'S1', to: 'DHCP_Server' },
+        { from: 'S1', to: 'Web_Server' }
+    ];
+
+    var STEPS = [
+        { id:1, title:'查看Client初始IP配置（无IP）', hint:'第1步：切换到Client，输入ipconfig', score:3, evalFn:'evalStep1' },
+        { id:2, title:'Client发送DHCP Discover', hint:'第2步：在Client上，输入 dhcp discover', score:5, evalFn:'evalStep2' },
+        { id:3, title:'DHCP Server回复DHCP Offer', hint:'第3步：观察DHCP Server自动回复Offer报文', score:4, evalFn:'evalStep3' },
+        { id:4, title:'Client发送DHCP Request', hint:'第4步：在Client上，输入 dhcp request', score:4, evalFn:'evalStep4' },
+        { id:5, title:'DHCP Server回复ACK，Client获取IP', hint:'第5步：观察DHCP Server回复ACK，Client自动获取IP地址', score:5, evalFn:'evalStep5' },
+        { id:6, title:'查看Client新IP配置', hint:'第6步：在Client上，输入 ipconfig', score:3, evalFn:'evalStep6' },
+        { id:7, title:'Client发送DNS查询', hint:'第7步：在Client上，输入 nslookup www.example.com', score:5, evalFn:'evalStep7' },
+        { id:8, title:'DNS Server递归查询过程', hint:'第8步：观察DNS Server执行递归查询：根DNS→顶级DNS→权威DNS', score:4, evalFn:'evalStep8' },
+        { id:9, title:'DNS Server返回解析结果', hint:'第9步：观察DNS Server将解析结果返回给Client', score:4, evalFn:'evalStep9' },
+        { id:10, title:'查看DNS缓存', hint:'第10步：在Client上，输入 display dns cache', score:3, evalFn:'evalStep10' },
+        { id:11, title:'再次查询同一域名（命中缓存）', hint:'第11步：在Client上，输入 nslookup www.example.com', score:3, evalFn:'evalStep11' },
+        { id:12, title:'DNS报文格式分析', hint:'第12步：在Client上，输入 dns-format，分析DNS查询和响应报文格式', score:5, evalFn:'evalStep20' },
+        { id:13, title:'Client发起HTTP请求', hint:'第13步：在Client上，输入 http get http://www.example.com/index.html', score:5, evalFn:'evalStep12' },
+        { id:14, title:'DNS解析（若未缓存）', hint:'第14步：观察HTTP请求前的DNS解析过程（若缓存未过期则直接使用缓存）', score:3, evalFn:'evalStep13' },
+        { id:15, title:'TCP三次握手建立连接', hint:'第15步：观察Client与Web Server完成SYN→SYN-ACK→ACK三次握手', score:4, evalFn:'evalStep14' },
+        { id:16, title:'发送HTTP GET请求', hint:'第16步：观察Client向Web Server发送HTTP GET请求报文', score:4, evalFn:'evalStep15' },
+        { id:17, title:'接收HTTP 200 OK响应', hint:'第17步：观察Web Server返回HTTP 200 OK响应和HTML内容', score:4, evalFn:'evalStep16' },
+        { id:18, title:'HTTP报文格式分析', hint:'第18步：在Client上，输入 http-format，分析HTTP请求和响应报文格式', score:5, evalFn:'evalStep21' },
+        { id:19, title:'查看HTTP响应头信息', hint:'第19步：在Client上，输入 display http history', score:3, evalFn:'evalStep17' },
+        { id:20, title:'TCP四次挥手关闭连接', hint:'第20步：观察Client与Web Server完成FIN→ACK→FIN→ACK四次挥手', score:4, evalFn:'evalStep18' },
+        { id:21, title:'DHCP中继代理分析', hint:'第21步：在Client上，输入 dhcp-relay，分析DHCP中继代理工作原理', score:5, evalFn:'evalStep22' },
+        { id:22, title:'综合场景：新Client完整流程', hint:'第22步：在Client上，输入 comprehensive-test', score:5, evalFn:'evalStep19' },
+        { id:23, title:'应用层思考题', hint:'第23步：在Client上，输入 think-app-layer 查看思考题，再用 think-app-layer-answer <题号> <答案> 作答（需答对2题以上）', score:5, evalFn:'evalStep23' },
+        { id:24, title:'完成实验总结', hint:'第24步：总结DHCP、DNS、HTTP三大应用层协议的工作原理，点击提交报告', score:5, evalFn:'evalStep24' }
+    ];
+
+    var currentStep = 1;
+    var stepResults = {};
+    var totalScore = 0;
+    var animating = false;
+    var animFrame = null;
+    var framePackets = [];
+    var demoMode = false;
+    var demoUsed = false;
+    var demoTimer = null;
+
+    var currentDevice = 'Client';
+    var consoleHistory = {};
+
+    var step1Done = false;
+    var step2Done = false;
+    var step3Done = false;
+    var step4Done = false;
+    var step5Done = false;
+    var step6Done = false;
+    var step7Done = false;
+    var step8Done = false;
+    var step9Done = false;
+    var step10Done = false;
+    var step11Done = false;
+    var step12Done = false;
+    var step13Done = false;
+    var step14Done = false;
+    var step15Done = false;
+    var step16Done = false;
+    var step17Done = false;
+    var step18Done = false;
+    var step19Done = false;
+    var step20Done = false;
+    var step21Done = false;
+    var step22Done = false;
+    var step23Done = false;
+    var thinkAppLayerCorrect = {};
+
+    var dhcpState = 'init';
+    var dnsQueryCount = 0;
+    var httpState = 'idle';
+
+    var canvas, ctx;
+
+    function init() {
+        LabScoringEnhance.init(35);
+        canvas = document.getElementById('simCanvas');
+        ctx = canvas.getContext('2d');
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+        renderStepList();
+        drawTopology();
+        switchDevice('Client');
+        updateInfoPanels();
+    }
+
+    function resizeCanvas() {
+        var wrap = canvas.parentElement;
+        canvas.width = wrap.clientWidth;
+        canvas.height = wrap.clientHeight;
+        drawTopology();
+    }
+
+    function drawTopology() {
+        if (!ctx) return;
+        var w = canvas.width, h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+
+        DEVICES.Client.x = w * 0.12; DEVICES.Client.y = h * 0.5;
+        DEVICES.S1.x = w * 0.42; DEVICES.S1.y = h * 0.5;
+        DEVICES.DNS_Server.x = w * 0.78; DEVICES.DNS_Server.y = h * 0.15;
+        DEVICES.DHCP_Server.x = w * 0.78; DEVICES.DHCP_Server.y = h * 0.5;
+        DEVICES.Web_Server.x = w * 0.78; DEVICES.Web_Server.y = h * 0.85;
+
+        for (var i = 0; i < LINKS.length; i++) {
+            var lk = LINKS[i];
+            var fd = DEVICES[lk.from], td = DEVICES[lk.to];
+            drawLink(fd.x, fd.y, td.x, td.y);
+        }
+
+        drawClient(DEVICES.Client.x, DEVICES.Client.y, 'Client', DEVICES.Client);
+        drawSwitch(DEVICES.S1.x, DEVICES.S1.y, 'S1');
+        drawServer(DEVICES.DNS_Server.x, DEVICES.DNS_Server.y, 'DNS_Server', 'DNS服务器', '#1a4a3a', '#22c55e');
+        drawServer(DEVICES.DHCP_Server.x, DEVICES.DHCP_Server.y, 'DHCP_Server', 'DHCP服务器', '#3a2a1a', '#f59e0b');
+        drawServer(DEVICES.Web_Server.x, DEVICES.Web_Server.y, 'Web_Server', 'Web服务器', '#1a2a4a', '#4a90e2');
+
+        drawFramePackets();
+    }
+
+    function drawTextWithShadow(text, x, y, color, font) {
+        ctx.font = font;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 3;
+        ctx.lineJoin = 'round';
+        ctx.strokeText(text, x, y);
+        ctx.fillStyle = color;
+        ctx.fillText(text, x, y);
+    }
+
+    function roundRect(c, x, y, w, h, r) {
+        c.beginPath();
+        c.moveTo(x + r, y);
+        c.lineTo(x + w - r, y);
+        c.quadraticCurveTo(x + w, y, x + w, y + r);
+        c.lineTo(x + w, y + h - r);
+        c.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        c.lineTo(x + r, y + h);
+        c.quadraticCurveTo(x, y + h, x, y + h - r);
+        c.lineTo(x, y + r);
+        c.quadraticCurveTo(x, y, x + r, y);
+        c.closePath();
+    }
+
+    function drawClient(x, y, name, dev) {
+        var pw = 80, ph = 55;
+        ctx.fillStyle = '#1e3355';
+        ctx.strokeStyle = '#5b8dc9';
+        ctx.lineWidth = 1.5;
+        roundRect(ctx, x - pw/2, y - ph/2, pw, ph, 6);
+        ctx.fill(); ctx.stroke();
+
+        drawTextWithShadow(name, x, y - 16, '#ffffff', 'bold 13px Microsoft YaHei');
+        var ipText = dev.ip ? dev.ip : '未获取IP';
+        drawTextWithShadow(ipText, x, y + 2, dev.ip ? '#ffe066' : '#ef4444', '10px Consolas');
+        drawTextWithShadow(dev.mac, x, y + 16, '#94a3b8', '9px Consolas');
+    }
+
+    function drawSwitch(x, y, name) {
+        var sw = 100, sh = 50;
+        ctx.fillStyle = '#1a3a6a';
+        ctx.strokeStyle = '#4a90e2';
+        ctx.lineWidth = 2;
+        roundRect(ctx, x - sw/2, y - sh/2, sw, sh, 8);
+        ctx.fill(); ctx.stroke();
+
+        drawTextWithShadow(name, x, y - 8, '#ffffff', 'bold 14px Microsoft YaHei');
+        drawTextWithShadow('交换机', x, y + 10, '#ffe066', '11px Microsoft YaHei');
+    }
+
+    function drawServer(x, y, name, label, bgColor, borderColor) {
+        var sw = 110, sh = 55;
+        ctx.fillStyle = bgColor;
+        ctx.strokeStyle = borderColor;
+        ctx.lineWidth = 2;
+        roundRect(ctx, x - sw/2, y - sh/2, sw, sh, 8);
+        ctx.fill(); ctx.stroke();
+
+        drawTextWithShadow(label, x, y - 10, '#ffffff', 'bold 12px Microsoft YaHei');
+        drawTextWithShadow(DEVICES[name].ip, x, y + 10, borderColor, '10px Consolas');
+    }
+
+    function drawLink(x1, y1, x2, y2) {
+        ctx.beginPath();
+        ctx.strokeStyle = '#4a6a9a';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([]);
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+    }
+
+    function drawFramePackets() {
+        for (var i = 0; i < framePackets.length; i++) {
+            var p = framePackets[i];
+            ctx.save();
+            ctx.globalAlpha = p.alpha || 1;
+            ctx.fillStyle = p.color || '#fbbf24';
+            ctx.strokeStyle = p.borderColor || '#f59e0b';
+            ctx.lineWidth = 2;
+            var lbl = p.label || 'PKT';
+            ctx.font = 'bold 13px Consolas';
+            var tw = ctx.measureText(lbl).width;
+            var pw = tw + 20, ph = 28;
+            ctx.shadowColor = 'rgba(0,0,0,0.5)';
+            ctx.shadowBlur = 8;
+            ctx.shadowOffsetX = 2;
+            ctx.shadowOffsetY = 2;
+            roundRect(ctx, p.x - pw/2, p.y - ph/2, pw, ph, 6);
+            ctx.fill(); ctx.stroke();
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+            drawTextWithShadow(lbl, p.x, p.y, '#ffffff', 'bold 13px Consolas');
+            ctx.restore();
+        }
+    }
+
+    var deviceViewState = {};
+
+    function switchDevice(devName) {
+        currentDevice = devName;
+
+        var tabs = document.querySelectorAll('.sw-tab');
+        for (var i = 0; i < tabs.length; i++) {
+            tabs[i].classList.toggle('active', tabs[i].getAttribute('data-device') === devName);
+        }
+
+        updatePrompt();
+        updateInfoPanels();
+
+        if (!consoleHistory[devName]) {
+            consoleHistory[devName] = [];
+        }
+        var output = document.getElementById('consoleOutput');
+        output.innerHTML = '';
+        for (var j = 0; j < consoleHistory[devName].length; j++) {
+            var line = document.createElement('div');
+            line.textContent = consoleHistory[devName][j];
+            output.appendChild(line);
+        }
+        output.scrollTop = output.scrollHeight;
+    }
+
+    function updatePrompt() {
+        var prompt = document.getElementById('consolePrompt');
+        prompt.textContent = currentDevice + '>';
+    }
+
+    function consolePrint(text) {
+        var output = document.getElementById('consoleOutput');
+        var line = document.createElement('div');
+        line.textContent = text;
+        output.appendChild(line);
+        output.scrollTop = output.scrollHeight;
+        if (!consoleHistory[currentDevice]) consoleHistory[currentDevice] = [];
+        consoleHistory[currentDevice].push(text);
+    }
+
+    function clearConsole() {
+        document.getElementById('consoleOutput').innerHTML = '';
+        consoleHistory[currentDevice] = [];
+    }
+
+    function handleCommand(event) {
+        if (event.key !== 'Enter') return;
+        var input = document.getElementById('consoleInput');
+        var cmd = input.value.trim();
+        input.value = '';
+        if (!cmd) return;
+
+        var promptText = document.getElementById('consolePrompt').textContent;
+        consolePrint(promptText + cmd);
+
+        if (currentDevice === 'Client') {
+            handleClientCommand(cmd);
+        } else if (currentDevice === 'DHCP_Server') {
+            handleDhcpServerCommand(cmd);
+        } else if (currentDevice === 'DNS_Server') {
+            handleDnsServerCommand(cmd);
+        } else if (currentDevice === 'Web_Server') {
+            handleWebServerCommand(cmd);
+        } else if (currentDevice === 'S1') {
+            handleSwitchCommand(cmd);
+        }
+        autoEvaluate();
+    }
+
+    function handleClientCommand(cmd) {
+        var parts = cmd.split(/\s+/);
+        var base = parts[0].toLowerCase();
+
+        if (base === 'ipconfig') {
+            handleIpconfig();
+        } else if (base === 'dhcp') {
+            handleDhcp(parts);
+        } else if (base === 'nslookup') {
+            handleNslookup(parts);
+        } else if (base === 'display' && parts[1] === 'dns' && parts[2] === 'cache') {
+            handleDisplayDnsCache();
+        } else if (base === 'http') {
+            handleHttp(parts);
+        } else if (base === 'display' && parts[1] === 'http' && parts[2] === 'history') {
+            handleDisplayHttpHistory();
+        } else if (base === 'comprehensive-test') {
+            handleComprehensiveTest();
+        } else if (base === 'dns-format') {
+            handleDnsFormat();
+        } else if (base === 'http-format') {
+            handleHttpFormat();
+        } else if (base === 'dhcp-relay') {
+            handleDhcpRelay();
+        } else if (base === 'think-app-layer') {
+            handleThinkAppLayer();
+        } else if (base === 'think-app-layer-answer') {
+            if (parts.length < 3) { consolePrint('用法: think-app-layer-answer <题号> <答案>'); return; }
+            handleThinkAppLayerAnswer(parts[1], parts[2]);
+        } else if (base === '?' || base === 'help') {
+            consolePrint('可用命令:');
+            consolePrint('  ipconfig                  - 查看IP配置');
+            consolePrint('  dhcp discover             - 发送DHCP Discover');
+            consolePrint('  dhcp request              - 发送DHCP Request');
+            consolePrint('  nslookup <域名>            - DNS查询');
+            consolePrint('  display dns cache         - 查看DNS缓存');
+            consolePrint('  dns-format                - DNS报文格式分析');
+            consolePrint('  http get <URL>            - 发送HTTP请求');
+            consolePrint('  http-format               - HTTP报文格式分析');
+            consolePrint('  display http history      - 查看HTTP历史');
+            consolePrint('  dhcp-relay                - DHCP中继代理分析');
+            consolePrint('  comprehensive-test        - 综合场景测试');
+            consolePrint('  think-app-layer           - 应用层思考题');
+        } else {
+            consolePrint('错误: 无法识别的命"' + cmd + '"');
+            LabScoringEnhance.recordError(currentStep, cmd);
+            consolePrint('输入 ? 查看可用命令');
+        }
+    }
+
+    function handleIpconfig() {
+        var client = DEVICES.Client;
+        if (!client.ip) {
+            consolePrint('以太网适配器信号');
+            consolePrint('  IP 地址 . . . . . . . . . : 未获取');
+            consolePrint('  子网掩码 . . . . . . . . : 未获取');
+            consolePrint('  默认网关 . . . . . . . . : 未获取');
+            consolePrint('  MAC 地址 . . . . . . . . : ' + client.mac);
+            if (!step1Done) step1Done = true;
+        } else {
+            consolePrint('以太网适配器信号');
+            consolePrint('  IP 地址 . . . . . . . . . : ' + client.ip);
+            consolePrint('  子网掩码 . . . . . . . . : ' + client.mask);
+            consolePrint('  默认网关 . . . . . . . . : ' + client.gateway);
+            consolePrint('  DNS 服务器?. . . . . . . : ' + DEVICES.DHCP_Server.pool.dns);
+            consolePrint('  MAC 地址 . . . . . . . . : ' + client.mac);
+            if (step5Done && !step6Done) step6Done = true;
+        }
+    }
+
+    function handleDhcp(parts) {
+        var sub = parts[1] ? parts[1].toLowerCase() : '';
+        var client = DEVICES.Client;
+
+        if (sub === 'discover') {
+            if (client.ip) {
+                consolePrint('已获取IP地址，无需再次DHCP');
+                return;
+            }
+            consolePrint('发送DHCP Discover广播报文...');
+            consolePrint('  源MAC: ' + client.mac);
+            consolePrint('  目的: 255.255.255.255:67');
+            updateFrameInfo('DHCP', client.mac, 'FF:FF:FF:FF:FF:FF', '0.0.0.0', '255.255.255.255', 'DHCP Discover');
+            step2Done = true;
+            animatePacket('Client', 'S1', 'DHCP Disc', '#fbbf24', '#f59e0b', function() {
+                animatePacket('S1', 'DHCP_Server', 'DHCP Disc', '#fbbf24', '#f59e0b', function() {
+                    consolePrint('DHCP Server已收到Discover报文');
+                    step3Done = true;
+                    autoEvaluate();
+                    setTimeout(function() {
+                        consolePrint('');
+                        consolePrint('[DHCP Server] 发送DHCP Offer报文...');
+                        consolePrint('  提供IP: ' + DHCP_POOL_START);
+                        consolePrint('  子网掩码: 255.255.255.0');
+                        consolePrint('  租期: 86400');
+                        updateFrameInfo('DHCP', '00:00:00:00:54:00', client.mac, DHCP_IP, '255.255.255.255', 'DHCP Offer');
+                        animatePacket('DHCP_Server', 'S1', 'DHCP Offer', '#4ade80', '#22c55e', function() {
+                            animatePacket('S1', 'Client', 'DHCP Offer', '#4ade80', '#22c55e', function() {
+                                consolePrint('Client已收到DHCP Offer');
+                                dhcpState = 'offered';
+                                autoEvaluate();
+                            });
+                        });
+                    }, demoMode ? 0 : 500);
+                });
+            });
+        } else if (sub === 'request') {
+            if (client.ip) {
+                consolePrint('已获取IP地址，无需再次Request');
+                return;
+            }
+            if (dhcpState !== 'offered') {
+                consolePrint('请先执行 dhcp discover 获取Offer');
+                return;
+            }
+            consolePrint('发送DHCP Request广播报文...');
+            consolePrint('  请求IP: ' + DHCP_POOL_START);
+            consolePrint('  DHCP Server: ' + DHCP_IP);
+            updateFrameInfo('DHCP', client.mac, 'FF:FF:FF:FF:FF:FF', '0.0.0.0', '255.255.255.255', 'DHCP Request');
+            step4Done = true;
+            animatePacket('Client', 'S1', 'DHCP Req', '#fbbf24', '#f59e0b', function() {
+                animatePacket('S1', 'DHCP_Server', 'DHCP Req', '#fbbf24', '#f59e0b', function() {
+                    setTimeout(function() {
+                        consolePrint('');
+                        consolePrint('[DHCP Server] 发送DHCP ACK报文...');
+                        consolePrint('  确认IP: ' + DHCP_POOL_START);
+                        consolePrint('  子网掩码: 255.255.255.0');
+                        consolePrint('  默认网关: ' + GATEWAY_IP);
+                        consolePrint('  DNS: ' + DNS_IP);
+                        consolePrint('  租期: 86400');
+                        updateFrameInfo('DHCP', '00:00:00:00:54:00', client.mac, DHCP_IP, '255.255.255.255', 'DHCP ACK');
+                        step5Done = true;
+                        animatePacket('DHCP_Server', 'S1', 'DHCP ACK', '#4ade80', '#22c55e', function() {
+                            animatePacket('S1', 'Client', 'DHCP ACK', '#4ade80', '#22c55e', function() {
+                                client.ip = CLIENT_IP;
+                                client.mask = '255.255.255.0';
+                                client.gateway = GATEWAY_IP;
+                                dhcpState = 'bound';
+                                DEVICES.DHCP_Server.bindings[client.mac] = { ip: CLIENT_IP, lease: 86400, status: 'bound' };
+                                consolePrint('');
+                                consolePrint('Client已成功获取IP地址: ' + CLIENT_IP);
+                                drawTopology();
+                                updateInfoPanels();
+                                autoEvaluate();
+                            });
+                        });
+                    }, demoMode ? 0 : 500);
+                });
+            });
+        } else {
+            consolePrint('用法: dhcp discover | dhcp request');
+        }
+    }
+
+    function handleNslookup(parts) {
+        if (parts.length < 2) { consolePrint('用法: nslookup <域名>'); return; }
+        var client = DEVICES.Client;
+        if (!client.ip) { consolePrint('错误: 尚未获取IP地址，请先执行DHCP'); return; }
+
+        var domain = parts[1];
+        consolePrint('查询域名: ' + domain);
+        consolePrint('DNS服务器: ' + DEVICES.DHCP_Server.pool.dns);
+
+        if (client.dnsCache[domain]) {
+            consolePrint('命中DNS缓存!');
+            consolePrint('名称: ' + domain);
+            consolePrint('地址: ' + client.dnsCache[domain].ip);
+            consolePrint('类型: ' + client.dnsCache[domain].type);
+            consolePrint('TTL: ' + client.dnsCache[domain].ttl);
+            if (domain === 'www.example.com') step11Done = true;
+            autoEvaluate();
+            return;
+        }
+
+        if (currentDevice === 'Client' && domain === 'www.example.com') step7Done = true;
+        updateFrameInfo('DNS', client.mac, 'DNS_Server_MAC', client.ip, DNS_IP, 'DNS Query: ' + domain);
+        animatePacket('Client', 'S1', 'DNS Query', '#38bdf8', '#4a90e2', function() {
+            animatePacket('S1', 'DNS_Server', 'DNS Query', '#38bdf8', '#4a90e2', function() {
+                step8Done = true;
+                consolePrint('[DNS Server] 执行递归查询...');
+                consolePrint('  查询根DNS服务器...');
+                setTimeout(function() {
+                    consolePrint('  根DNS返回 .com 顶级域NS');
+                    consolePrint('  查询 .com 顶级DNS服务器...');
+                }, demoMode ? 0 : 400);
+                setTimeout(function() {
+                    consolePrint('  顶级DNS返回 example.com 权威NS');
+                    consolePrint('  查询 example.com 权威DNS服务器...');
+                }, demoMode ? 0 : 800);
+                setTimeout(function() {
+                    consolePrint('  权威DNS返回 www.example.com = ' + WEB_IP);
+                    step9Done = true;
+                    var record = DEVICES.DNS_Server.records[domain];
+                    if (record) {
+                        client.dnsCache[domain] = { ip: record.ip, type: record.type, ttl: record.ttl };
+                        DEVICES.DNS_Server.cache[domain] = { ip: record.ip, type: record.type, ttl: record.ttl };
+                    }
+                    updateFrameInfo('DNS', 'DNS_Server_MAC', client.mac, DNS_IP, client.ip, 'DNS Response: ' + domain + ' ' + (record ? record.ip : 'N/A'));
+                    animatePacket('DNS_Server', 'S1', 'DNS Resp', '#4ade80', '#22c55e', function() {
+                        animatePacket('S1', 'Client', 'DNS Resp', '#4ade80', '#22c55e', function() {
+                            consolePrint('');
+                            consolePrint('DNS查询结果:');
+                            consolePrint('名称: ' + domain);
+                            consolePrint('地址: ' + (record ? record.ip : '未找到'));
+                            consolePrint('类型: ' + (record ? record.type : '-'));
+                            consolePrint('TTL: ' + (record ? record.ttl : '-'));
+                            dnsQueryCount++;
+                            updateInfoPanels();
+                            autoEvaluate();
+                        });
+                    });
+                }, demoMode ? 0 : 1200);
+            });
+        });
+    }
+
+    function handleDisplayDnsCache() {
+        var client = DEVICES.Client;
+        var keys = Object.keys(client.dnsCache);
+        if (keys.length === 0) {
+            consolePrint('DNS缓存为空');
+            return;
+        }
+        consolePrint('DNS缓存');
+        consolePrint('域名                        IP地址            类型  TTL');
+        consolePrint('---------------------------------------------------------------');
+        for (var i = 0; i < keys.length; i++) {
+            var r = client.dnsCache[keys[i]];
+            consolePrint(padRight(keys[i], 28) + padRight(r.ip, 18) + padRight(r.type, 6) + r.ttl);
+        }
+        step10Done = true;
+        updateInfoPanels();
+    }
+
+    function handleHttp(parts) {
+        var sub = parts[1] ? parts[1].toLowerCase() : '';
+        if (sub !== 'get') { consolePrint('用法: http get <URL>'); return; }
+
+        var url = parts[2] || '';
+        if (!url) { consolePrint('用法: http get <URL>'); return; }
+
+        var client = DEVICES.Client;
+        if (!client.ip) { consolePrint('错误: 尚未获取IP地址，请先执行DHCP'); return; }
+
+        var parsed = parseUrl(url);
+        if (!parsed) { consolePrint('错误: 无效的URL格式'); return; }
+
+        if (currentDevice === 'Client' && url.indexOf('www.example.com') >= 0) step12Done = true;
+        consolePrint('发起HTTP请求: GET ' + url);
+
+        var needDns = !client.dnsCache[parsed.host];
+        if (needDns) {
+            step13Done = true;
+            consolePrint('需要DNS解析: ' + parsed.host);
+            consolePrint('发送DNS查询...');
+            updateFrameInfo('DNS', client.mac, 'DNS_Server_MAC', client.ip, DNS_IP, 'DNS Query: ' + parsed.host);
+            animatePacket('Client', 'S1', 'DNS Query', '#38bdf8', '#4a90e2', function() {
+                animatePacket('S1', 'DNS_Server', 'DNS Query', '#38bdf8', '#4a90e2', function() {
+                    var record = DEVICES.DNS_Server.records[parsed.host];
+                    if (record) {
+                        client.dnsCache[parsed.host] = { ip: record.ip, type: record.type, ttl: record.ttl };
+                    }
+                    animatePacket('DNS_Server', 'S1', 'DNS Resp', '#4ade80', '#22c55e', function() {
+                        animatePacket('S1', 'Client', 'DNS Resp', '#4ade80', '#22c55e', function() {
+                            consolePrint('DNS解析完成: ' + parsed.host + ' ' + (record ? record.ip : 'N/A'));
+                            doTcpAndHttp(parsed);
+                        });
+                    });
+                });
+            });
+        } else {
+            step13Done = true;
+            consolePrint('DNS缓存命中: ' + parsed.host + ' ' + client.dnsCache[parsed.host].ip);
+            doTcpAndHttp(parsed);
+        }
+    }
+
+    function doTcpAndHttp(parsed) {
+        var client = DEVICES.Client;
+        consolePrint('');
+        consolePrint('TCP三次握手建立连接...');
+        step14Done = true;
+        updateFrameInfo('TCP', client.mac, 'Web_Server_MAC', client.ip, WEB_IP, 'SYN');
+        animatePacket('Client', 'S1', 'SYN', '#c084fc', '#a855f7', function() {
+            animatePacket('S1', 'Web_Server', 'SYN', '#c084fc', '#a855f7', function() {
+                consolePrint('  SYN seq=0');
+                updateFrameInfo('TCP', 'Web_Server_MAC', client.mac, WEB_IP, client.ip, 'SYN-ACK');
+                animatePacket('Web_Server', 'S1', 'SYN-ACK', '#c084fc', '#a855f7', function() {
+                    animatePacket('S1', 'Client', 'SYN-ACK', '#c084fc', '#a855f7', function() {
+                        consolePrint('  SYN-ACK seq=0 ack=1');
+                        updateFrameInfo('TCP', client.mac, 'Web_Server_MAC', client.ip, WEB_IP, 'ACK');
+                        animatePacket('Client', 'S1', 'ACK', '#c084fc', '#a855f7', function() {
+                            animatePacket('S1', 'Web_Server', 'ACK', '#c084fc', '#a855f7', function() {
+                                consolePrint('  ACK seq=1 ack=1');
+                                consolePrint('TCP连接已建');
+                                consolePrint('');
+                                doHttpExchange(parsed);
+                            });
+                        });
+                    });
+                });
+            });
+        });
+    }
+
+    function doHttpExchange(parsed) {
+        var client = DEVICES.Client;
+        step15Done = true;
+        consolePrint('发送HTTP GET请求...');
+        consolePrint('  GET ' + parsed.path + ' HTTP/1.1');
+        consolePrint('  Host: ' + parsed.host);
+        consolePrint('  User-Agent: LabClient/1.0');
+        consolePrint('  Accept: text/html');
+        updateFrameInfo('HTTP', client.mac, 'Web_Server_MAC', client.ip, WEB_IP, 'HTTP GET ' + parsed.path);
+        animatePacket('Client', 'S1', 'HTTP GET', '#f97316', '#ea580c', function() {
+            animatePacket('S1', 'Web_Server', 'HTTP GET', '#f97316', '#ea580c', function() {
+                var page = DEVICES.Web_Server.pages[parsed.path] || '<html><body><h1>404 Not Found</h1></body></html>';
+                var statusCode = DEVICES.Web_Server.pages[parsed.path] ? '200 OK' : '404 Not Found';
+                step16Done = true;
+
+                var now = new Date();
+                var timeStr = now.getHours() + ':' + padZero(now.getMinutes()) + ':' + padZero(now.getSeconds());
+                client.httpHistory.push({
+                    time: timeStr,
+                    method: 'GET',
+                    url: 'http://' + parsed.host + parsed.path,
+                    status: statusCode,
+                    headers: {
+                        'Content-Type': 'text/html; charset=UTF-8',
+                        'Content-Length': page.length,
+                        'Server': 'LabHTTP/1.0',
+                        'Connection': 'keep-alive',
+                        'Date': now.toUTCString()
+                    },
+                    body: page
+                });
+                DEVICES.Web_Server.accessLog.push({
+                    time: timeStr,
+                    clientIp: client.ip,
+                    method: 'GET',
+                    path: parsed.path,
+                    status: statusCode
+                });
+
+                consolePrint('');
+                consolePrint('收到HTTP响应: ' + statusCode);
+                updateFrameInfo('HTTP', 'Web_Server_MAC', client.mac, WEB_IP, client.ip, 'HTTP ' + statusCode);
+                animatePacket('Web_Server', 'S1', 'HTTP 200', '#4ade80', '#22c55e', function() {
+                    animatePacket('S1', 'Client', 'HTTP 200', '#4ade80', '#22c55e', function() {
+                        consolePrint('  HTTP/1.1 ' + statusCode);
+                        consolePrint('  Content-Type: text/html; charset=UTF-8');
+                        consolePrint('  Content-Length: ' + page.length);
+                        consolePrint('  Server: LabHTTP/1.0');
+                        consolePrint('');
+                        consolePrint('响应内容:');
+                        consolePrint(page);
+                        consolePrint('');
+                        doTcpClose(parsed);
+                    });
+                });
+            });
+        });
+    }
+
+    function doTcpClose(parsed) {
+        var client = DEVICES.Client;
+        step18Done = true;
+        consolePrint('TCP四次挥手关闭连接...');
+        updateFrameInfo('TCP', client.mac, 'Web_Server_MAC', client.ip, WEB_IP, 'FIN');
+        animatePacket('Client', 'S1', 'FIN', '#f472b6', '#ec4899', function() {
+            animatePacket('S1', 'Web_Server', 'FIN', '#f472b6', '#ec4899', function() {
+                consolePrint('  FIN seq=' + (client.httpHistory.length * 100));
+                updateFrameInfo('TCP', 'Web_Server_MAC', client.mac, WEB_IP, client.ip, 'ACK');
+                animatePacket('Web_Server', 'S1', 'ACK', '#f472b6', '#ec4899', function() {
+                    animatePacket('S1', 'Client', 'ACK', '#f472b6', '#ec4899', function() {
+                        consolePrint('  ACK');
+                        updateFrameInfo('TCP', 'Web_Server_MAC', client.mac, WEB_IP, client.ip, 'FIN');
+                        animatePacket('Web_Server', 'S1', 'FIN', '#f472b6', '#ec4899', function() {
+                            animatePacket('S1', 'Client', 'FIN', '#f472b6', '#ec4899', function() {
+                                consolePrint('  FIN');
+                                updateFrameInfo('TCP', client.mac, 'Web_Server_MAC', client.ip, WEB_IP, 'ACK');
+                                animatePacket('Client', 'S1', 'ACK', '#f472b6', '#ec4899', function() {
+                                    animatePacket('S1', 'Web_Server', 'ACK', '#f472b6', '#ec4899', function() {
+                                        consolePrint('  ACK');
+                                        consolePrint('TCP连接已关');
+                                        consolePrint('');
+                                        consolePrint('HTTP请求完成!');
+                                        httpState = 'idle';
+                                        step19Done = true;
+                                        updateInfoPanels();
+                                        autoEvaluate();
+                                    });
+                                });
+                            });
+                        });
+                    });
+                });
+            });
+        });
+    }
+
+    function handleDisplayHttpHistory() {
+        var client = DEVICES.Client;
+        if (client.httpHistory.length === 0) {
+            consolePrint('HTTP历史为空');
+            return;
+        }
+        for (var i = 0; i < client.httpHistory.length; i++) {
+            var h = client.httpHistory[i];
+            consolePrint('--- 请求 #' + (i + 1) + ' ---');
+            consolePrint('时间: ' + h.time);
+            consolePrint('方法: ' + h.method);
+            consolePrint('URL: ' + h.url);
+            consolePrint('状态 ' + h.status);
+            consolePrint('响应');
+            for (var key in h.headers) {
+                consolePrint('  ' + key + ': ' + h.headers[key]);
+            }
+            consolePrint('');
+        }
+        step17Done = true;
+        autoEvaluate();
+    }
+
+    function handleComprehensiveTest() {
+        var client = DEVICES.Client;
+        if (client.ip) {
+            consolePrint('Client已获取IP，跳过DHCP阶段');
+        } else {
+            consolePrint('=== 综合场景测试 ===');
+            consolePrint('');
+            consolePrint('[1] DHCP阶段: 获取IP地址');
+        }
+
+        if (!client.ip) {
+            consolePrint('发送DHCP Discover...');
+            updateFrameInfo('DHCP', client.mac, 'FF:FF:FF:FF:FF:FF', '0.0.0.0', '255.255.255.255', 'DHCP Discover');
+            animatePacket('Client', 'S1', 'DHCP Disc', '#fbbf24', '#f59e0b', function() {
+                animatePacket('S1', 'DHCP_Server', 'DHCP Disc', '#fbbf24', '#f59e0b', function() {
+                    animatePacket('DHCP_Server', 'S1', 'DHCP Offer', '#4ade80', '#22c55e', function() {
+                        animatePacket('S1', 'Client', 'DHCP Offer', '#4ade80', '#22c55e', function() {
+                            consolePrint('收到DHCP Offer');
+                            consolePrint('发送DHCP Request...');
+                            animatePacket('Client', 'S1', 'DHCP Req', '#fbbf24', '#f59e0b', function() {
+                                animatePacket('S1', 'DHCP_Server', 'DHCP Req', '#fbbf24', '#f59e0b', function() {
+                                    animatePacket('DHCP_Server', 'S1', 'DHCP ACK', '#4ade80', '#22c55e', function() {
+                                        animatePacket('S1', 'Client', 'DHCP ACK', '#4ade80', '#22c55e', function() {
+                                            client.ip = CLIENT_IP;
+                                            client.mask = '255.255.255.0';
+                                            client.gateway = GATEWAY_IP;
+                                            dhcpState = 'bound';
+                                            DEVICES.DHCP_Server.bindings[client.mac] = { ip: CLIENT_IP, lease: 86400, status: 'bound' };
+                                            consolePrint('DHCP完成! IP: ' + CLIENT_IP);
+                                            drawTopology();
+                                            step2Done = true; step3Done = true; step4Done = true; step5Done = true;
+                                            doCompDns();
+                                        });
+                                    });
+                                });
+                            });
+                        });
+                    });
+                });
+            });
+        } else {
+            doCompDns();
+        }
+    }
+
+    function handleDnsFormat() {
+        step20Done = true;
+        consolePrint('');
+        consolePrint('=== DNS报文格式分析 ===');
+        consolePrint('');
+        consolePrint('DNS报文由首部和数据两部分组成，首部12字节：');
+        consolePrint('');
+        consolePrint('  +----+----+----+----+----+----+----+----+----+----+----+----+');
+        consolePrint('  | 事务ID |  标志  | 问题数 | 回答数 | 授权数 | 附加数 |');
+        consolePrint('  +----+----+----+----+----+----+----+----+----+----+----+----+');
+        consolePrint('  |  2字节  | 2字节  |  2字节  |  2字节  |  2字节  |  2字节  |');
+        consolePrint('  +----+----+----+----+----+----+----+----+----+----+----+----+');
+        consolePrint('');
+        consolePrint('1. 事务ID（2字节）：客户端生成，服务器响应中复制此值用于匹配');
+        consolePrint('2. 标志（2字节）：QR(查询/响应)、Opcode、AA、TC、RD、RA、RCODE');
+        consolePrint('3. 问题数/回答数/授权数/附加数：各2字节，记录各区域记录数');
+        consolePrint('');
+        consolePrint('DNS查询报文：QR=0，问题区域包含查询的域名和类型');
+        consolePrint('DNS响应报文：QR=1，回答区域包含解析结果（A记录返回IP）');
+        consolePrint('');
+        consolePrint('DNS使用UDP传输（端口53），报文长度受UDP限制（通常≤512字节）');
+        consolePrint('=== DNS报文格式分析完成 ===');
+        autoEvaluate();
+    }
+
+    function handleHttpFormat() {
+        step21Done = true;
+        consolePrint('');
+        consolePrint('=== HTTP报文格式分析 ===');
+        consolePrint('');
+        consolePrint('【HTTP请求报文格式】');
+        consolePrint('  请求行: GET /index.html HTTP/1.1');
+        consolePrint('  首部行: Host: www.example.com');
+        consolePrint('          User-Agent: Mozilla/5.0');
+        consolePrint('          Accept: text/html');
+        consolePrint('  空行: (CRLF)');
+        consolePrint('  实体主体: (GET请求通常无)');
+        consolePrint('');
+        consolePrint('【HTTP响应报文格式】');
+        consolePrint('  状态行: HTTP/1.1 200 OK');
+        consolePrint('  首部行: Content-Type: text/html');
+        consolePrint('          Content-Length: 1024');
+        consolePrint('          Server: Apache/2.4');
+        consolePrint('  空行: (CRLF)');
+        consolePrint('  实体主体: <html>...</html>');
+        consolePrint('');
+        consolePrint('HTTP/1.1默认使用持续连接（keep-alive），多个请求可复用TCP连接');
+        consolePrint('=== HTTP报文格式分析完成 ===');
+        autoEvaluate();
+    }
+
+    function handleDhcpRelay() {
+        step22Done = true;
+        consolePrint('');
+        consolePrint('=== DHCP中继代理分析 ===');
+        consolePrint('');
+        consolePrint('当Client与DHCP Server不在同一网段时，需要DHCP中继代理：');
+        consolePrint('');
+        consolePrint('1. Client发送DHCP Discover广播（目的255.255.255.255）');
+        consolePrint('2. 中继代理（路由器）收到广播，转换为单播转发给DHCP Server');
+        consolePrint('   中继代理在报文中填入自己的IP作为giaddr字段');
+        consolePrint('3. DHCP Server根据giaddr选择合适的地址池，单播回复Offer');
+        consolePrint('4. 中继代理将Offer转发给Client（广播或单播）');
+        consolePrint('5. Request和ACK同样通过中继代理转发');
+        consolePrint('');
+        consolePrint('DHCP中继代理配置（华为路由器）：');
+        consolePrint('  interface GigabitEthernet0/0/1');
+        consolePrint('    dhcp select relay');
+        consolePrint('    dhcp relay server-ip ' + DHCP_IP);
+        consolePrint('');
+        consolePrint('DHCP四阶段：Discover→Offer→Request→ACK');
+        consolePrint('=== DHCP中继代理分析完成 ===');
+        autoEvaluate();
+    }
+
+    function handleThinkAppLayer() {
+        consolePrint('');
+        consolePrint('=== 应用层思考题 ===');
+        consolePrint('');
+        consolePrint('请思考以下问题，使用 think-app-layer-answer <题号> <答案> 作答');
+        consolePrint('');
+        consolePrint('题1：若不使用PUSH操作，两个连续的HTTP响应报文能否封装在一个TCP报文段中？');
+        consolePrint('  A. 不能，每个HTTP响应必须单独封装');
+        consolePrint('  B. 能，TCP面向字节流，浏览器通过Content-Length识别边界');
+        consolePrint('  C. 不能，TCP保证每个报文段只包含一个应用层报文');
+        consolePrint('  D. 能，但会导致数据丢失');
+        consolePrint('');
+        consolePrint('题2：若一个局域网中配置了多个DHCP服务器，应注意什么？');
+        consolePrint('  A. 不需要注意，多个DHCP服务器可以正常共存');
+        consolePrint('  B. 需要确保各DHCP服务器的地址池不重叠，避免IP冲突');
+        consolePrint('  C. 需要关闭其中所有DHCP服务器，只保留一个');
+        consolePrint('  D. 需要将所有DHCP服务器配置为相同的地址池');
+        consolePrint('');
+        consolePrint('题3：若利用UDP来实现文件传输，与TCP的主要不同是什么？');
+        consolePrint('  A. UDP更快，不需要任何额外处理');
+        consolePrint('  B. UDP不保证可靠传输，需在应用层实现序号、确认和重传机制');
+        consolePrint('  C. UDP和TCP完全相同，只是协议名不同');
+        consolePrint('  D. UDP不能用于文件传输');
+        consolePrint('');
+    }
+
+    function handleThinkAppLayerAnswer(qNum, answer) {
+        var answers = { '1': 'B', '2': 'B', '3': 'B' };
+        if (!answers[qNum]) { consolePrint('错误: 无效题号'); return; }
+        if (answer.toUpperCase() === answers[qNum]) {
+            consolePrint('题' + qNum + ' 回答正确！');
+            thinkAppLayerCorrect[qNum] = true;
+            var correctCount = 0;
+            for (var k in thinkAppLayerCorrect) correctCount++;
+            if (correctCount >= 2) {
+                step23Done = true;
+                consolePrint('思考题完成（答对' + correctCount + '题）！');
+                autoEvaluate();
+            }
+        } else {
+            consolePrint('题' + qNum + ' 回答错误，正确答案是 ' + answers[qNum]);
+        }
+    }
+
+    function doCompDns() {
+        var client = DEVICES.Client;
+        consolePrint('');
+        consolePrint('[2] DNS阶段: 解析域名');
+        if (client.dnsCache['www.example.com']) {
+            consolePrint('DNS缓存命中: www.example.com ' + WEB_IP);
+            doCompHttp();
+            return;
+        }
+        consolePrint('发送DNS查询: www.example.com');
+        updateFrameInfo('DNS', client.mac, 'DNS_Server_MAC', client.ip, DNS_IP, 'DNS Query');
+        animatePacket('Client', 'S1', 'DNS Query', '#38bdf8', '#4a90e2', function() {
+            animatePacket('S1', 'DNS_Server', 'DNS Query', '#38bdf8', '#4a90e2', function() {
+                var record = DEVICES.DNS_Server.records['www.example.com'];
+                if (record) {
+                    client.dnsCache['www.example.com'] = { ip: record.ip, type: record.type, ttl: record.ttl };
+                }
+                animatePacket('DNS_Server', 'S1', 'DNS Resp', '#4ade80', '#22c55e', function() {
+                    animatePacket('S1', 'Client', 'DNS Resp', '#4ade80', '#22c55e', function() {
+                        consolePrint('DNS解析完成: www.example.com ' + WEB_IP);
+                        step7Done = true; step8Done = true; step9Done = true;
+                        doCompHttp();
+                    });
+                });
+            });
+        });
+    }
+
+    function doCompHttp() {
+        var client = DEVICES.Client;
+        consolePrint('');
+        consolePrint('[3] HTTP阶段: 访问网页');
+        step12Done = true;
+        step13Done = true;
+        doTcpAndHttp({ host: 'www.example.com', path: '/index.html' });
+    }
+
+    function handleDhcpServerCommand(cmd) {
+        var parts = cmd.split(/\s+/);
+        var base = parts[0].toLowerCase();
+
+        if (base === 'display' && parts[1] === 'dhcp' && parts[2] === 'binding') {
+            var keys = Object.keys(DEVICES.DHCP_Server.bindings);
+            if (keys.length === 0) {
+                consolePrint('DHCP分配记录为空');
+            } else {
+                consolePrint('DHCP分配的IP地址');
+                consolePrint('客户端MAC             分配IP            租期     状态');
+                consolePrint('---------------------------------------------------------------');
+                for (var i = 0; i < keys.length; i++) {
+                    var b = DEVICES.DHCP_Server.bindings[keys[i]];
+                    consolePrint(padRight(keys[i], 22) + padRight(b.ip, 18) + padRight(String(b.lease), 9) + b.status);
+                }
+            }
+        } else if (base === 'display' && parts[1] === 'dhcp' && parts[2] === 'pool') {
+            var pool = DEVICES.DHCP_Server.pool;
+            consolePrint('DHCP地址池信号');
+            consolePrint('  起始IP: ' + pool.start);
+            consolePrint('  结束IP: ' + pool.end);
+            consolePrint('  子网掩码: ' + pool.mask);
+            consolePrint('  默认网关: ' + pool.gateway);
+            consolePrint('  DNS服务器: ' + pool.dns);
+            consolePrint('  租期: ' + pool.lease + '');
+        } else if (base === '?' || base === 'help') {
+            consolePrint('可用命令:');
+            consolePrint('  display dhcp binding  - 查看DHCP分配记录');
+            consolePrint('  display dhcp pool     - 查看地址');
+        } else {
+            consolePrint('错误: 无法识别的命"' + cmd + '"');
+            LabScoringEnhance.recordError(currentStep, cmd);
+            consolePrint('输入 ? 查看可用命令');
+        }
+    }
+
+    function handleDnsServerCommand(cmd) {
+        var parts = cmd.split(/\s+/);
+        var base = parts[0].toLowerCase();
+
+        if (base === 'display' && parts[1] === 'dns' && parts[2] === 'records') {
+            var records = DEVICES.DNS_Server.records;
+            var keys = Object.keys(records);
+            consolePrint('DNS记录');
+            consolePrint('域名                     IP地址            类型  TTL');
+            consolePrint('---------------------------------------------------------------');
+            for (var i = 0; i < keys.length; i++) {
+                var r = records[keys[i]];
+                consolePrint(padRight(keys[i], 26) + padRight(r.ip, 18) + padRight(r.type, 6) + r.ttl);
+            }
+        } else if (base === 'display' && parts[1] === 'dns' && parts[2] === 'cache') {
+            var cache = DEVICES.DNS_Server.cache;
+            var ckeys = Object.keys(cache);
+            if (ckeys.length === 0) {
+                consolePrint('DNS缓存为空');
+            } else {
+                consolePrint('DNS缓存');
+                consolePrint('域名                     IP地址            类型  TTL');
+                consolePrint('---------------------------------------------------------------');
+                for (var j = 0; j < ckeys.length; j++) {
+                    var cr = cache[ckeys[j]];
+                    consolePrint(padRight(ckeys[j], 26) + padRight(cr.ip, 18) + padRight(cr.type, 6) + cr.ttl);
+                }
+            }
+        } else if (base === '?' || base === 'help') {
+            consolePrint('可用命令:');
+            consolePrint('  display dns records  - 查看DNS记录');
+            consolePrint('  display dns cache    - 查看DNS缓存');
+        } else {
+            consolePrint('错误: 无法识别的命"' + cmd + '"');
+            LabScoringEnhance.recordError(currentStep, cmd);
+            consolePrint('输入 ? 查看可用命令');
+        }
+    }
+
+    function handleWebServerCommand(cmd) {
+        var parts = cmd.split(/\s+/);
+        var base = parts[0].toLowerCase();
+
+        if (base === 'display' && parts[1] === 'http' && parts[2] === 'access-log') {
+            var log = DEVICES.Web_Server.accessLog;
+            if (log.length === 0) {
+                consolePrint('访问日志为空');
+            } else {
+                consolePrint('HTTP访问日志:');
+                consolePrint('时间     客户端IP          方法  路径             状态');
+                consolePrint('---------------------------------------------------------------');
+                for (var i = 0; i < log.length; i++) {
+                    var e = log[i];
+                    consolePrint(padRight(e.time, 9) + padRight(e.clientIp, 18) + padRight(e.method, 6) + padRight(e.path, 17) + e.status);
+                }
+            }
+        } else if (base === '?' || base === 'help') {
+            consolePrint('可用命令:');
+            consolePrint('  display http access-log  - 查看访问日志');
+        } else {
+            consolePrint('错误: 无法识别的命"' + cmd + '"');
+            LabScoringEnhance.recordError(currentStep, cmd);
+            consolePrint('输入 ? 查看可用命令');
+        }
+    }
+
+    function handleSwitchCommand(cmd) {
+        var parts = cmd.split(/\s+/);
+        var base = parts[0].toLowerCase();
+        if (base === '?' || base === 'help') {
+            consolePrint('S1为透明交换机，无需配置');
+            consolePrint('报文自动转发');
+        } else {
+            consolePrint('S1为透明交换机，无需配置命令');
+        }
+    }
+
+    function parseUrl(url) {
+        var match = url.match(/^http:\/\/([^\/]+)(\/.*)?$/);
+        if (!match) return null;
+        return { host: match[1], path: match[2] || '/index.html' };
+    }
+
+    function padRight(str, len) {
+        while (str.length < len) str += ' ';
+        return str;
+    }
+
+    function padZero(n) {
+        return n < 10 ? '0' + n : '' + n;
+    }
+
+    function animatePacket(from, via, label, color, borderColor, callback) {
+        if (demoMode) { if (callback) callback(); return; }
+        if (animating) { if (callback) setTimeout(function() { callback(); }, 100); return; }
+        animating = true;
+
+        var fd = DEVICES[from], vd = DEVICES[via];
+        var packet = { x: fd.x, y: fd.y, color: color, borderColor: borderColor, label: label, alpha: 1 };
+        framePackets = [packet];
+
+        var stepsPerSegment = 25;
+        var step = 0;
+
+        function animate() {
+            step++;
+            var t = easeInOut(step / stepsPerSegment);
+            packet.x = fd.x + (vd.x - fd.x) * t;
+            packet.y = fd.y + (vd.y - fd.y) * t;
+            drawTopology();
+
+            if (step >= stepsPerSegment) {
+                var pauseMs = (vd.type === 'switch' || vd.type === 'router') ? 1000 : 200;
+                setTimeout(function() {
+                    framePackets = [];
+                    drawTopology();
+                    animating = false;
+                    if (callback) callback();
+                }, pauseMs);
+                return;
+            }
+            animFrame = requestAnimationFrame(animate);
+        }
+        animFrame = requestAnimationFrame(animate);
+    }
+
+    function easeInOut(t) { return t < 0.5 ? 2*t*t : -1+(4-2*t)*t; }
+
+    function updateFrameInfo(proto, srcMac, dstMac, srcIp, dstIp, action) {
+        document.getElementById('frameInfo').innerHTML =
+            '<div class="frame-info">' +
+            '<div><span class="label">协议：</span><span class="value">' + proto + '</span></div>' +
+            '<div><span class="label">源MAC：</span><span class="value">' + srcMac + '</span></div>' +
+            '<div><span class="label">目的MAC：</span><span class="value">' + dstMac + '</span></div>' +
+            '<div><span class="label">源IP：</span><span class="value">' + srcIp + '</span></div>' +
+            '<div><span class="label">目的IP：</span><span class="value">' + dstIp + '</span></div>' +
+            '<div><span class="label">动作：</span><span class="value">' + action + '</span></div>' +
+            '</div>';
+    }
+
+    function updateInfoPanels() {
+        var dhcpTbody = document.getElementById('dhcpTableTbody');
+        var bkeys = Object.keys(DEVICES.DHCP_Server.bindings);
+        if (bkeys.length === 0) {
+            dhcpTbody.innerHTML = '<tr><td colspan="4" style="color:#94a3b8;text-align:center;">(无分配记录)</td></tr>';
+        } else {
+            var dhtml = '';
+            for (var i = 0; i < bkeys.length; i++) {
+                var b = DEVICES.DHCP_Server.bindings[bkeys[i]];
+                dhtml += '<tr class="new-entry"><td>' + bkeys[i] + '</td><td>' + b.ip + '</td><td>' + b.lease + 's</td><td>' + b.status + '</td></tr>';
+            }
+            dhcpTbody.innerHTML = dhtml;
+        }
+
+        var dnsTbody = document.getElementById('dnsTableTbody');
+        var allDns = {};
+        for (var dk in DEVICES.DNS_Server.records) { allDns[dk] = DEVICES.DNS_Server.records[dk]; }
+        for (var dck in DEVICES.Client.dnsCache) { if (!allDns[dck]) allDns[dck] = DEVICES.Client.dnsCache[dck]; }
+        var dnsKeys = Object.keys(allDns);
+        if (dnsKeys.length === 0) {
+            dnsTbody.innerHTML = '<tr><td colspan="4" style="color:#94a3b8;text-align:center;">(无记</td></tr>';
+        } else {
+            var dnhtml = '';
+            for (var di = 0; di < dnsKeys.length; di++) {
+                var dr = allDns[dnsKeys[di]];
+                dnhtml += '<tr class="new-entry"><td>' + dnsKeys[di] + '</td><td>' + dr.ip + '</td><td>' + dr.type + '</td><td>' + dr.ttl + '</td></tr>';
+            }
+            dnsTbody.innerHTML = dnhtml;
+        }
+
+        var httpTbody = document.getElementById('httpTableTbody');
+        var httpHist = DEVICES.Client.httpHistory;
+        if (httpHist.length === 0) {
+            httpTbody.innerHTML = '<tr><td colspan="4" style="color:#94a3b8;text-align:center;">(无请求)</td></tr>';
+        } else {
+            var hhtml = '';
+            for (var hi = 0; hi < httpHist.length; hi++) {
+                var hh = httpHist[hi];
+                hhtml += '<tr class="new-entry"><td>' + hh.time + '</td><td>' + hh.method + '</td><td style="font-size:10px;">' + hh.url + '</td><td>' + hh.status + '</td></tr>';
+            }
+            httpTbody.innerHTML = hhtml;
+        }
+    }
+
+    function renderStepList() {
+        var html = '';
+        for (var i = 0; i < STEPS.length; i++) {
+            var s = STEPS[i];
+            var cls = '';
+            if (s.id === currentStep) cls = 'active';
+            if (stepResults[s.id] === 'pass') cls += ' completed';
+            if (stepResults[s.id] === 'fail') cls += ' failed';
+            var icon = stepResults[s.id] === 'pass' ? '✅' : stepResults[s.id] === 'fail' ? '❌' : (s.id === currentStep ? '▶️' : '⏳');
+            html += '<div class="step-item ' + cls + '" onclick="selectStep(' + s.id + ')">';
+            html += '<span class="step-icon">' + icon + '</span>';
+            html += '步骤' + s.id + '. ' + s.title;
+            html += '</div>';
+        }
+        document.getElementById('stepList').innerHTML = html;
+    }
+
+    function selectStep(id) {
+        currentStep = id;
+        var step = STEPS[id - 1];
+        document.getElementById('hintBox').textContent = step.hint;
+        renderStepList();
+    }
+
+    function autoEvaluate() {
+        var changed = false;
+        for (var i = 0; i < STEPS.length; i++) {
+            var s = STEPS[i];
+            if (stepResults[s.id]) continue;
+            var result = window[s.evalFn]();
+            if (result === 'pass' || result === 'fail') {
+                stepResults[s.id] = result;
+                showEvalResult(s.id, result);
+                changed = true;
+            }
+        }
+        if (changed) {
+            var nextStep = 0;
+            for (var j = 0; j < STEPS.length; j++) {
+                if (!stepResults[STEPS[j].id]) { nextStep = STEPS[j].id; break; }
+            }
+            if (nextStep) { currentStep = nextStep; document.getElementById('hintBox').textContent = STEPS[nextStep - 1].hint; }
+        }
+        updateProgress();
+        renderStepList();
+    }
+
+    function evalStep1() { return step1Done ? 'pass' : ''; }
+    function evalStep2() { return step2Done ? 'pass' : ''; }
+    function evalStep3() { return step3Done ? 'pass' : ''; }
+    function evalStep4() { return step4Done ? 'pass' : ''; }
+    function evalStep5() { return step5Done ? 'pass' : ''; }
+    function evalStep6() { return step6Done ? 'pass' : ''; }
+    function evalStep7() { return step7Done ? 'pass' : ''; }
+    function evalStep8() { return step8Done ? 'pass' : ''; }
+    function evalStep9() { return step9Done ? 'pass' : ''; }
+    function evalStep10() { return step10Done ? 'pass' : ''; }
+    function evalStep11() { return step11Done ? 'pass' : ''; }
+    function evalStep12() { return step12Done ? 'pass' : ''; }
+    function evalStep13() { return step13Done ? 'pass' : ''; }
+    function evalStep14() { return step14Done ? 'pass' : ''; }
+    function evalStep15() { return step15Done ? 'pass' : ''; }
+    function evalStep16() { return step16Done ? 'pass' : ''; }
+    function evalStep17() { return step17Done ? 'pass' : ''; }
+    function evalStep18() { return step18Done ? 'pass' : ''; }
+    function evalStep19() { return step19Done ? 'pass' : ''; }
+    function evalStep20() { return step20Done ? 'pass' : ''; }
+    function evalStep21() { return step21Done ? 'pass' : ''; }
+    function evalStep22() { return step22Done ? 'pass' : ''; }
+    function evalStep23() { return step23Done ? 'pass' : ''; }
+    function evalStep24() {
+        var passed = 0;
+        for (var id in stepResults) { if (stepResults[id] === 'pass') passed++; }
+        return passed >= STEPS.length - 1 ? 'pass' : '';
+    }
+
+    function showEvalResult(stepId, result) {
+        var body = document.getElementById('evalBody');
+        var html = '';
+        for (var id in stepResults) {
+            var s = STEPS[id - 1];
+            var cls = stepResults[id] === 'pass' ? 'eval-pass' : 'eval-fail';
+            var txt = stepResults[id] === 'pass' ? '通过 (+' + s.score + '分)' : '未通过';
+            html += '<div class="eval-result ' + cls + '">步骤' + id + '. ' + txt + '</div>';
+        }
+        body.innerHTML = html;
+    }
+
+    function updateProgress() {
+        var completed = 0;
+        totalScore = 0;
+        for (var id in stepResults) {
+            if (stepResults[id] === 'pass') {
+                completed++;
+                totalScore += STEPS[id - 1].score;
+            }
+        }
+        var pct = Math.round(completed / STEPS.length * 100);
+        document.getElementById('progressFill').style.width = pct + '%';
+        document.getElementById('progressText').textContent = pct + '%';
+        document.getElementById('scoreFill').style.width = Math.round(totalScore * 0.8) + '%';
+        document.getElementById('scoreText').textContent = Math.round(totalScore * 0.8) + '/80';
+
+        var nextStep = null;
+        for (var i = 0; i < STEPS.length; i++) {
+            if (!stepResults[STEPS[i].id]) { nextStep = STEPS[i].id; break; }
+        }
+        if (nextStep) {
+            currentStep = nextStep;
+            document.getElementById('hintBox').textContent = STEPS[nextStep - 1].hint;
+        }
+    }
+
+    function resetExperiment() {
+        LabScoringEnhance.init(35);
+        RAND_SUBNET = Math.floor(Math.random() * 9) + 1;
+        DNS_IP = '192.168.' + RAND_SUBNET + '.53';
+        DHCP_IP = '192.168.' + RAND_SUBNET + '.54';
+        WEB_IP = '192.168.' + RAND_SUBNET + '.80';
+        DHCP_POOL_START = '192.168.' + RAND_SUBNET + '.100';
+        DHCP_POOL_END = '192.168.' + RAND_SUBNET + '.200';
+        GATEWAY_IP = '192.168.' + RAND_SUBNET + '.1';
+        CLIENT_IP = '192.168.' + RAND_SUBNET + '.100';
+        DEVICES.DNS_Server.ip = DNS_IP;
+        DEVICES.DNS_Server.records = {
+            'www.example.com': { ip: WEB_IP, type: 'A', ttl: 3600 },
+            'example.com': { ip: WEB_IP, type: 'A', ttl: 3600 },
+            'ns1.example.com': { ip: DNS_IP, type: 'A', ttl: 3600 }
+        };
+        DEVICES.DHCP_Server.ip = DHCP_IP;
+        DEVICES.DHCP_Server.pool = { start: DHCP_POOL_START, end: DHCP_POOL_END, mask: '255.255.255.0', gateway: GATEWAY_IP, dns: DNS_IP, lease: 86400 };
+        DEVICES.Web_Server.ip = WEB_IP;
+        DEVICES.Client.ip = '';
+        DEVICES.Client.mask = '';
+        DEVICES.Client.gateway = '';
+        DEVICES.Client.dnsCache = {};
+        DEVICES.Client.httpHistory = [];
+        DEVICES.DHCP_Server.bindings = {};
+        DEVICES.DHCP_Server.nextIp = 100;
+        DEVICES.DNS_Server.cache = {};
+        DEVICES.Web_Server.accessLog = [];
+
+        stepResults = {};
+        demoMode = false;
+        demoUsed = false;
+        totalScore = 0;
+        currentStep = 1;
+        consoleHistory = {};
+        deviceViewState = {};
+        dhcpState = 'init';
+        dnsQueryCount = 0;
+        httpState = 'idle';
+
+        step1Done = false; step2Done = false; step3Done = false; step4Done = false;
+        step5Done = false; step6Done = false; step7Done = false; step8Done = false;
+        step9Done = false; step10Done = false; step11Done = false; step12Done = false;
+        step13Done = false; step14Done = false; step15Done = false; step16Done = false;
+        step17Done = false; step18Done = false; step19Done = false;
+        step20Done = false; step21Done = false; step22Done = false; step23Done = false;
+        thinkAppLayerCorrect = {};
+
+        framePackets = [];
+        animating = false;
+        switchDevice('Client');
+        renderStepList();
+        updateProgress();
+        updateInfoPanels();
+        document.getElementById('evalBody').innerHTML = '<div style="color:#94a3b8;font-size:12px;">完成步骤后自动评估</div>';
+        document.getElementById('frameInfo').innerHTML = '<span class="label">等待报文传输...</span>';
+        document.getElementById('hintBox').textContent = STEPS[0].hint;
+        clearConsole();
+        consolePrint('实验已重传');
+        drawTopology();
+    }
+
+    function showDemo() {
+        if (demoMode) { stopDemo(); return; }
+        resetExperiment();
+        demoMode = true;
+        demoUsed = true;
+        consolePrint('[演示模式] 演示开始，自动执行所有步骤..');
+
+        var actions = [
+            function() { switchDevice('Client'); setInput('ipconfig'); handleCommand({key:'Enter'}); },
+            function() { setInput('dhcp discover'); handleCommand({key:'Enter'}); },
+            function() { setInput('dhcp request'); handleCommand({key:'Enter'}); },
+            function() { setInput('ipconfig'); handleCommand({key:'Enter'}); },
+            function() { setInput('nslookup www.example.com'); handleCommand({key:'Enter'}); },
+            function() { setInput('display dns cache'); handleCommand({key:'Enter'}); },
+            function() { setInput('nslookup www.example.com'); handleCommand({key:'Enter'}); },
+            function() { setInput('http get http://www.example.com/index.html'); handleCommand({key:'Enter'}); },
+            function() { setInput('display http history'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('DHCP_Server'); setInput('display dhcp binding'); handleCommand({key:'Enter'}); },
+            function() { setInput('display dhcp pool'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('DNS_Server'); setInput('display dns records'); handleCommand({key:'Enter'}); },
+            function() { setInput('display dns cache'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('Web_Server'); setInput('display http access-log'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('Client'); setInput('dns-format'); handleCommand({key:'Enter'}); },
+            function() { setInput('http-format'); handleCommand({key:'Enter'}); },
+            function() { setInput('dhcp-relay'); handleCommand({key:'Enter'}); },
+            function() { setInput('comprehensive-test'); handleCommand({key:'Enter'}); },
+            function() { setInput('think-app-layer'); handleCommand({key:'Enter'}); },
+            function() { setInput('think-app-layer-answer 1 B'); handleCommand({key:'Enter'}); },
+            function() { setInput('think-app-layer-answer 2 B'); handleCommand({key:'Enter'}); }
+        ];
+
+        var idx = 0;
+        function nextAction() {
+            if (idx >= actions.length || !demoMode) { demoMode = false; return; }
+            if (animating) { if (demoTimer) clearTimeout(demoTimer); demoTimer = setTimeout(nextAction, 300); return; }
+            actions[idx]();
+            idx++;
+            demoTimer = setTimeout(nextAction, 800);
+        }
+        nextAction();
+    }
+
+    function setInput(cmd) {
+        document.getElementById('consoleInput').value = cmd;
+    }
+
+    function stopDemo() {
+        demoMode = false;
+
+        if (demoTimer) clearTimeout(demoTimer);
+        consolePrint('[演示模式] 已停');
+    }
+
+    async function submitExperiment() {
+        if (labScheduleState === 'not_started') { alert('实验未开放，不能提交报告'); return; }
+        if (labScheduleState === 'ended') { alert('实验已结束，不能再提交报告'); return; }
+        if (demoMode || demoUsed) {
+            consolePrint('[提示] 演示模式下无法提交实验报告，请手动完成实验后提交换');
+            return;
+        }
+        autoEvaluate();
+        var passed = 0;
+        var stepScore = 0;
+        var details = '';
+        for (var i = 0; i < STEPS.length; i++) {
+            var s = STEPS[i];
+            if (stepResults[s.id] === 'pass') {
+                passed++;
+                stepScore += s.score;
+                details += '步骤' + s.id + '. ' + s.title + ' ' + s.score + '<br>';
+            } else {
+                details += '步骤' + s.id + '. ' + s.title + ' 0<br>';
+            }
+        }
+
+        var scoreResult = LabScoringEnhance.getFinalScore(stepScore, 100);
+        details += '<br>--- 综合评价 ---<br>';
+        details += LabScoringEnhance.formatDetails(scoreResult);
+
+        document.getElementById('resultSummary').textContent = '共完成' + passed + '/' + STEPS.length + ' 个实验步骤';
+        document.getElementById('finalScore').textContent = scoreResult.totalScore;
+        document.getElementById('finalScore').style.color = scoreResult.totalScore >= 60 ? '#22c55e' : '#ef4444';
+        document.getElementById('resultDetails').innerHTML = details;
+
+        var currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
+        if (currentUser.username && currentUser.type === 'student') {
+            try {
+                var labTitle = document.querySelector('.top-bar h1').textContent.trim();
+                var reportEntry = {
+                    labTitle: labTitle,
+                    score: scoreResult.totalScore,
+                    maxScore: 100,
+                    submitTime: new Date().toISOString(),
+                    mode: 'manual',
+                    details: details,
+                    baseScore: scoreResult.baseScore,
+                    accuracyScore: scoreResult.accuracyScore,
+                    efficiencyScore: scoreResult.efficiencyScore,
+                    errorCount: scoreResult.errorCount,
+                    elapsedMinutes: scoreResult.elapsedMinutes
+                };
+                var token = localStorage.getItem('authToken') || '';
+                var res = await fetch(API_BASE + '/api/lab-reports', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                    body: JSON.stringify({ studentId: currentUser.username, report: reportEntry })
+                });
+                var result = await res.json();
+                if (result.error) console.error('提交报告失败:', result.error);
+            } catch (e) { console.error('提交报告失败:', e); }
+        }
+        document.getElementById('resultModal').classList.add('show');
+
+        stepResults[24] = passed >= STEPS.length - 1 ? 'pass' : 'fail';
+        showEvalResult(24, stepResults[24]);
+        updateProgress();
+        renderStepList();
+    }
+
+    window.addEventListener('load', init);
+    </script>
+
+
+    <script>
+    (async function() {
+    var THIS_LAB_ID = 'app-layer-lab';
+    var user = JSON.parse(localStorage.getItem('currentUser') || '{}');
+    var schedules = {};
+    try {
+        var res = await fetch(API_BASE + '/api/lab-schedules', {headers:{'Authorization':'Bearer '+(localStorage.getItem('authToken')||'')}});
+        var data = await res.json();
+        schedules = data.schedules || {};
+    } catch(e) {}
+    var s = schedules[THIS_LAB_ID] || {};
+    var now = new Date().getTime();
+    window.labScheduleState = 'not_started';
+    if (s.alwaysOpen) window.labScheduleState = 'open';
+    else if (s.startTime && now < new Date(s.startTime).getTime()) window.labScheduleState = 'not_started';
+    else if (s.endTime && now > new Date(s.endTime).getTime()) window.labScheduleState = 'ended';
+    else if (s.startTime || s.endTime) window.labScheduleState = 'open';
+
+    if (user.type === 'student' && labScheduleState === 'not_started') {
+        var startStr = s.startTime ? new Date(s.startTime).toLocaleString('zh-CN') : '';
+        var endStr = s.endTime ? new Date(s.endTime).toLocaleString('zh-CN') : '';
+        var overlay = document.createElement('div');
+        overlay.id = 'labScheduleOverlay';
+        overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:99999;display:flex;align-items:center;justify-content:center;';
+        overlay.innerHTML = '<div style="background:white;border-radius:20px;padding:40px 50px;text-align:center;max-width:500px;box-shadow:0 20px 60px rgba(0,0,0,0.3);">' +
+            '<div style="font-size:60px;margin-bottom:20px;">⏰</div>' +
+            '<h2 style="color:#e74c3c;margin-bottom:15px;">实验未开放</h2>' +
+            '<p style="color:#666;font-size:16px;line-height:1.8;">该实验尚未到开放时间，暂时无法操作</p>' +
+            (startStr ? '<p style="color:#333;font-size:15px;margin-top:10px;">开放时间：' + startStr + ' — ' + endStr + '</p>' : '') +
+            '<button onclick="window.location.href=\'../index.html\'" style="margin-top:25px;padding:12px 40px;background:linear-gradient(135deg,#4a90e2,#357abd);color:white;border:none;border-radius:10px;font-size:16px;cursor:pointer;transition:all 0.3s;">返回首页</button>' +
+            '</div>';
+        document.body.appendChild(overlay);
+        var cmdInput = document.getElementById('commandInput');
+        if (cmdInput) cmdInput.disabled = true;
+        var demoBtn = document.querySelector('.btn-demo');
+        if (demoBtn) demoBtn.disabled = true;
+        var submitBtn = document.querySelector('.btn-submit');
+        if (submitBtn) submitBtn.disabled = true;
+    } else if (user.type === 'student' && labScheduleState === 'ended') {
+        var submitBtn2 = document.querySelector('.btn-submit');
+        if (submitBtn2) {
+            submitBtn2.disabled = true;
+            submitBtn2.title = '实验已结束，不能再提交报告';
+            submitBtn2.style.opacity = '0.5';
+            submitBtn2.style.cursor = 'not-allowed';
+        }
+        var banner = document.createElement('div');
+        banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:linear-gradient(135deg,#f39c12,#e67e22);color:white;text-align:center;padding:12px;font-size:15px;z-index:9998;box-shadow:0 -2px 10px rgba(0,0,0,0.2);';
+        banner.innerHTML = '⚠️ 实验已结束，您可以查看实验内容，但不能再提交实验报告';
+        document.body.appendChild(banner);
+        document.body.style.paddingBottom = '50px';
+    }
+
+    function toggleHintPanel() {
+        var panel = document.getElementById('floatHintPanel');
+        if (panel.classList.contains('hidden')) {
+            panel.classList.remove('hidden');
+        } else {
+            panel.classList.add('hidden');
+        }
+    }
+
+    (function() {
+        var header = document.getElementById('floatHintHeader');
+        var panel = document.getElementById('floatHintPanel');
+        if (!header || !panel) return;
+        var dragging = false, offsetX = 0, offsetY = 0;
+        header.addEventListener('mousedown', function(e) {
+            dragging = true;
+            var rect = panel.getBoundingClientRect();
+            var parentRect = panel.parentElement.getBoundingClientRect();
+            offsetX = e.clientX - rect.left;
+            offsetY = e.clientY - rect.top;
+            panel.style.left = (rect.left - parentRect.left) + 'px';
+            panel.style.top = (rect.top - parentRect.top) + 'px';
+            panel.style.right = 'auto';
+            panel.style.bottom = 'auto';
+            e.preventDefault();
+        });
+        document.addEventListener('mousemove', function(e) {
+            if (!dragging) return;
+            var parentRect = panel.parentElement.getBoundingClientRect();
+            panel.style.left = (e.clientX - parentRect.left - offsetX) + 'px';
+            panel.style.top = (e.clientY - parentRect.top - offsetY) + 'px';
+        });
+        document.addEventListener('mouseup', function() { dragging = false; });
+    })();
+    })();
+    </script>
+
+
+    
+    <script>
+    var RAND_SUBNET = Math.floor(Math.random() * 9) + 1;
+    var DNS_IP = '192.168.' + RAND_SUBNET + '.53';
+    var DHCP_IP = '192.168.' + RAND_SUBNET + '.54';
+    var WEB_IP = '192.168.' + RAND_SUBNET + '.80';
+    var DHCP_POOL_START = '192.168.' + RAND_SUBNET + '.100';
+    var DHCP_POOL_END = '192.168.' + RAND_SUBNET + '.200';
+    var GATEWAY_IP = '192.168.' + RAND_SUBNET + '.1';
+    var CLIENT_IP = '192.168.' + RAND_SUBNET + '.100';
+
+    var DEVICES = {
+        Client: {
+            type: 'client', name: 'Client',
+            ip: '', mask: '', mac: '5489-9800-0001', gateway: '',
+            dnsCache: {},
+            httpHistory: [],
+            x: 0, y: 0
+        },
+        S1: {
+            type: 'switch', name: 'S1',
+            x: 0, y: 0
+        },
+        DNS_Server: {
+            type: 'dns', name: 'DNS_Server',
+            ip: DNS_IP,
+            records: {
+                'www.example.com': { ip: WEB_IP, type: 'A', ttl: 3600 },
+                'example.com': { ip: WEB_IP, type: 'A', ttl: 3600 },
+                'ns1.example.com': { ip: DNS_IP, type: 'A', ttl: 3600 }
+            },
+            cache: {},
+            x: 0, y: 0
+        },
+        DHCP_Server: {
+            type: 'dhcp', name: 'DHCP_Server',
+            ip: DHCP_IP,
+            pool: { start: DHCP_POOL_START, end: DHCP_POOL_END, mask: '255.255.255.0', gateway: GATEWAY_IP, dns: DNS_IP, lease: 86400 },
+            bindings: {},
+            nextIp: 100,
+            x: 0, y: 0
+        },
+        Web_Server: {
+            type: 'web', name: 'Web_Server',
+            ip: WEB_IP,
+            accessLog: [],
+            pages: {
+                '/index.html': '<html><head><title>Example</title></head><body><h1>Welcome to Example.com</h1><p>This is a test page.</p>\n    <scr' + 'ipt src="../chat-knowledge.js"></scr' + 'ipt>\n    <scr' + 'ipt src="../kb-loader.js"></scr' + 'ipt>\n    <scr' + 'ipt src="../chat-agent.js"></scr' + 'ipt>\n</body></html>'
+            },
+            x: 0, y: 0
+        }
+    };
+
+    var LINKS = [
+        { from: 'Client', to: 'S1' },
+        { from: 'S1', to: 'DNS_Server' },
+        { from: 'S1', to: 'DHCP_Server' },
+        { from: 'S1', to: 'Web_Server' }
+    ];
+
+    var STEPS = [
+        { id:1, title:'查看Client初始IP配置（无IP）', hint:'第1步：切换到Client，输入ipconfig', score:3, evalFn:'evalStep1' },
+        { id:2, title:'Client发送DHCP Discover', hint:'第2步：在Client上，输入 dhcp discover', score:5, evalFn:'evalStep2' },
+        { id:3, title:'DHCP Server回复DHCP Offer', hint:'第3步：观察DHCP Server自动回复Offer报文', score:4, evalFn:'evalStep3' },
+        { id:4, title:'Client发送DHCP Request', hint:'第4步：在Client上，输入 dhcp request', score:4, evalFn:'evalStep4' },
+        { id:5, title:'DHCP Server回复ACK，Client获取IP', hint:'第5步：观察DHCP Server回复ACK，Client自动获取IP地址', score:5, evalFn:'evalStep5' },
+        { id:6, title:'查看Client新IP配置', hint:'第6步：在Client上，输入 ipconfig', score:3, evalFn:'evalStep6' },
+        { id:7, title:'Client发送DNS查询', hint:'第7步：在Client上，输入 nslookup www.example.com', score:5, evalFn:'evalStep7' },
+        { id:8, title:'DNS Server递归查询过程', hint:'第8步：观察DNS Server执行递归查询：根DNS→顶级DNS→权威DNS', score:4, evalFn:'evalStep8' },
+        { id:9, title:'DNS Server返回解析结果', hint:'第9步：观察DNS Server将解析结果返回给Client', score:4, evalFn:'evalStep9' },
+        { id:10, title:'查看DNS缓存', hint:'第10步：在Client上，输入 display dns cache', score:3, evalFn:'evalStep10' },
+        { id:11, title:'再次查询同一域名（命中缓存）', hint:'第11步：在Client上，输入 nslookup www.example.com', score:3, evalFn:'evalStep11' },
+        { id:12, title:'DNS报文格式分析', hint:'第12步：在Client上，输入 dns-format，分析DNS查询和响应报文格式', score:5, evalFn:'evalStep20' },
+        { id:13, title:'Client发起HTTP请求', hint:'第13步：在Client上，输入 http get http://www.example.com/index.html', score:5, evalFn:'evalStep12' },
+        { id:14, title:'DNS解析（若未缓存）', hint:'第14步：观察HTTP请求前的DNS解析过程（若缓存未过期则直接使用缓存）', score:3, evalFn:'evalStep13' },
+        { id:15, title:'TCP三次握手建立连接', hint:'第15步：观察Client与Web Server完成SYN→SYN-ACK→ACK三次握手', score:4, evalFn:'evalStep14' },
+        { id:16, title:'发送HTTP GET请求', hint:'第16步：观察Client向Web Server发送HTTP GET请求报文', score:4, evalFn:'evalStep15' },
+        { id:17, title:'接收HTTP 200 OK响应', hint:'第17步：观察Web Server返回HTTP 200 OK响应和HTML内容', score:4, evalFn:'evalStep16' },
+        { id:18, title:'HTTP报文格式分析', hint:'第18步：在Client上，输入 http-format，分析HTTP请求和响应报文格式', score:5, evalFn:'evalStep21' },
+        { id:19, title:'查看HTTP响应头信息', hint:'第19步：在Client上，输入 display http history', score:3, evalFn:'evalStep17' },
+        { id:20, title:'TCP四次挥手关闭连接', hint:'第20步：观察Client与Web Server完成FIN→ACK→FIN→ACK四次挥手', score:4, evalFn:'evalStep18' },
+        { id:21, title:'DHCP中继代理分析', hint:'第21步：在Client上，输入 dhcp-relay，分析DHCP中继代理工作原理', score:5, evalFn:'evalStep22' },
+        { id:22, title:'综合场景：新Client完整流程', hint:'第22步：在Client上，输入 comprehensive-test', score:5, evalFn:'evalStep19' },
+        { id:23, title:'应用层思考题', hint:'第23步：在Client上，输入 think-app-layer 查看思考题，再用 think-app-layer-answer <题号> <答案> 作答（需答对2题以上）', score:5, evalFn:'evalStep23' },
+        { id:24, title:'完成实验总结', hint:'第24步：总结DHCP、DNS、HTTP三大应用层协议的工作原理，点击提交报告', score:5, evalFn:'evalStep24' }
+    ];
+
+    var currentStep = 1;
+    var stepResults = {};
+    var totalScore = 0;
+    var animating = false;
+    var animFrame = null;
+    var framePackets = [];
+    var demoMode = false;
+    var demoUsed = false;
+    var demoTimer = null;
+
+    var currentDevice = 'Client';
+    var consoleHistory = {};
+
+    var step1Done = false;
+    var step2Done = false;
+    var step3Done = false;
+    var step4Done = false;
+    var step5Done = false;
+    var step6Done = false;
+    var step7Done = false;
+    var step8Done = false;
+    var step9Done = false;
+    var step10Done = false;
+    var step11Done = false;
+    var step12Done = false;
+    var step13Done = false;
+    var step14Done = false;
+    var step15Done = false;
+    var step16Done = false;
+    var step17Done = false;
+    var step18Done = false;
+    var step19Done = false;
+    var step20Done = false;
+    var step21Done = false;
+    var step22Done = false;
+    var step23Done = false;
+    var thinkAppLayerCorrect = {};
+
+    var dhcpState = 'init';
+    var dnsQueryCount = 0;
+    var httpState = 'idle';
+
+    var canvas, ctx;
+
+    function init() {
+        LabScoringEnhance.init(35);
+        canvas = document.getElementById('simCanvas');
+        ctx = canvas.getContext('2d');
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+        renderStepList();
+        drawTopology();
+        switchDevice('Client');
+        updateInfoPanels();
+    }
+
+    function resizeCanvas() {
+        var wrap = canvas.parentElement;
+        canvas.width = wrap.clientWidth;
+        canvas.height = wrap.clientHeight;
+        drawTopology();
+    }
+
+    function drawTopology() {
+        if (!ctx) return;
+        var w = canvas.width, h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+
+        DEVICES.Client.x = w * 0.12; DEVICES.Client.y = h * 0.5;
+        DEVICES.S1.x = w * 0.42; DEVICES.S1.y = h * 0.5;
+        DEVICES.DNS_Server.x = w * 0.78; DEVICES.DNS_Server.y = h * 0.15;
+        DEVICES.DHCP_Server.x = w * 0.78; DEVICES.DHCP_Server.y = h * 0.5;
+        DEVICES.Web_Server.x = w * 0.78; DEVICES.Web_Server.y = h * 0.85;
+
+        for (var i = 0; i < LINKS.length; i++) {
+            var lk = LINKS[i];
+            var fd = DEVICES[lk.from], td = DEVICES[lk.to];
+            drawLink(fd.x, fd.y, td.x, td.y);
+        }
+
+        drawClient(DEVICES.Client.x, DEVICES.Client.y, 'Client', DEVICES.Client);
+        drawSwitch(DEVICES.S1.x, DEVICES.S1.y, 'S1');
+        drawServer(DEVICES.DNS_Server.x, DEVICES.DNS_Server.y, 'DNS_Server', 'DNS服务器', '#1a4a3a', '#22c55e');
+        drawServer(DEVICES.DHCP_Server.x, DEVICES.DHCP_Server.y, 'DHCP_Server', 'DHCP服务器', '#3a2a1a', '#f59e0b');
+        drawServer(DEVICES.Web_Server.x, DEVICES.Web_Server.y, 'Web_Server', 'Web服务器', '#1a2a4a', '#4a90e2');
+
+        drawFramePackets();
+    }
+
+    function drawTextWithShadow(text, x, y, color, font) {
+        ctx.font = font;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 3;
+        ctx.lineJoin = 'round';
+        ctx.strokeText(text, x, y);
+        ctx.fillStyle = color;
+        ctx.fillText(text, x, y);
+    }
+
+    function roundRect(c, x, y, w, h, r) {
+        c.beginPath();
+        c.moveTo(x + r, y);
+        c.lineTo(x + w - r, y);
+        c.quadraticCurveTo(x + w, y, x + w, y + r);
+        c.lineTo(x + w, y + h - r);
+        c.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        c.lineTo(x + r, y + h);
+        c.quadraticCurveTo(x, y + h, x, y + h - r);
+        c.lineTo(x, y + r);
+        c.quadraticCurveTo(x, y, x + r, y);
+        c.closePath();
+    }
+
+    function drawClient(x, y, name, dev) {
+        var pw = 80, ph = 55;
+        ctx.fillStyle = '#1e3355';
+        ctx.strokeStyle = '#5b8dc9';
+        ctx.lineWidth = 1.5;
+        roundRect(ctx, x - pw/2, y - ph/2, pw, ph, 6);
+        ctx.fill(); ctx.stroke();
+
+        drawTextWithShadow(name, x, y - 16, '#ffffff', 'bold 13px Microsoft YaHei');
+        var ipText = dev.ip ? dev.ip : '未获取IP';
+        drawTextWithShadow(ipText, x, y + 2, dev.ip ? '#ffe066' : '#ef4444', '10px Consolas');
+        drawTextWithShadow(dev.mac, x, y + 16, '#94a3b8', '9px Consolas');
+    }
+
+    function drawSwitch(x, y, name) {
+        var sw = 100, sh = 50;
+        ctx.fillStyle = '#1a3a6a';
+        ctx.strokeStyle = '#4a90e2';
+        ctx.lineWidth = 2;
+        roundRect(ctx, x - sw/2, y - sh/2, sw, sh, 8);
+        ctx.fill(); ctx.stroke();
+
+        drawTextWithShadow(name, x, y - 8, '#ffffff', 'bold 14px Microsoft YaHei');
+        drawTextWithShadow('交换机', x, y + 10, '#ffe066', '11px Microsoft YaHei');
+    }
+
+    function drawServer(x, y, name, label, bgColor, borderColor) {
+        var sw = 110, sh = 55;
+        ctx.fillStyle = bgColor;
+        ctx.strokeStyle = borderColor;
+        ctx.lineWidth = 2;
+        roundRect(ctx, x - sw/2, y - sh/2, sw, sh, 8);
+        ctx.fill(); ctx.stroke();
+
+        drawTextWithShadow(label, x, y - 10, '#ffffff', 'bold 12px Microsoft YaHei');
+        drawTextWithShadow(DEVICES[name].ip, x, y + 10, borderColor, '10px Consolas');
+    }
+
+    function drawLink(x1, y1, x2, y2) {
+        ctx.beginPath();
+        ctx.strokeStyle = '#4a6a9a';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([]);
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+    }
+
+    function drawFramePackets() {
+        for (var i = 0; i < framePackets.length; i++) {
+            var p = framePackets[i];
+            ctx.save();
+            ctx.globalAlpha = p.alpha || 1;
+            ctx.fillStyle = p.color || '#fbbf24';
+            ctx.strokeStyle = p.borderColor || '#f59e0b';
+            ctx.lineWidth = 2;
+            var lbl = p.label || 'PKT';
+            ctx.font = 'bold 13px Consolas';
+            var tw = ctx.measureText(lbl).width;
+            var pw = tw + 20, ph = 28;
+            ctx.shadowColor = 'rgba(0,0,0,0.5)';
+            ctx.shadowBlur = 8;
+            ctx.shadowOffsetX = 2;
+            ctx.shadowOffsetY = 2;
+            roundRect(ctx, p.x - pw/2, p.y - ph/2, pw, ph, 6);
+            ctx.fill(); ctx.stroke();
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+            drawTextWithShadow(lbl, p.x, p.y, '#ffffff', 'bold 13px Consolas');
+            ctx.restore();
+        }
+    }
+
+    var deviceViewState = {};
+
+    function switchDevice(devName) {
+        currentDevice = devName;
+
+        var tabs = document.querySelectorAll('.sw-tab');
+        for (var i = 0; i < tabs.length; i++) {
+            tabs[i].classList.toggle('active', tabs[i].getAttribute('data-device') === devName);
+        }
+
+        updatePrompt();
+        updateInfoPanels();
+
+        if (!consoleHistory[devName]) {
+            consoleHistory[devName] = [];
+        }
+        var output = document.getElementById('consoleOutput');
+        output.innerHTML = '';
+        for (var j = 0; j < consoleHistory[devName].length; j++) {
+            var line = document.createElement('div');
+            line.textContent = consoleHistory[devName][j];
+            output.appendChild(line);
+        }
+        output.scrollTop = output.scrollHeight;
+    }
+
+    function updatePrompt() {
+        var prompt = document.getElementById('consolePrompt');
+        prompt.textContent = currentDevice + '>';
+    }
+
+    function consolePrint(text) {
+        var output = document.getElementById('consoleOutput');
+        var line = document.createElement('div');
+        line.textContent = text;
+        output.appendChild(line);
+        output.scrollTop = output.scrollHeight;
+        if (!consoleHistory[currentDevice]) consoleHistory[currentDevice] = [];
+        consoleHistory[currentDevice].push(text);
+    }
+
+    function clearConsole() {
+        document.getElementById('consoleOutput').innerHTML = '';
+        consoleHistory[currentDevice] = [];
+    }
+
+    function handleCommand(event) {
+        if (event.key !== 'Enter') return;
+        var input = document.getElementById('consoleInput');
+        var cmd = input.value.trim();
+        input.value = '';
+        if (!cmd) return;
+
+        var promptText = document.getElementById('consolePrompt').textContent;
+        consolePrint(promptText + cmd);
+
+        if (currentDevice === 'Client') {
+            handleClientCommand(cmd);
+        } else if (currentDevice === 'DHCP_Server') {
+            handleDhcpServerCommand(cmd);
+        } else if (currentDevice === 'DNS_Server') {
+            handleDnsServerCommand(cmd);
+        } else if (currentDevice === 'Web_Server') {
+            handleWebServerCommand(cmd);
+        } else if (currentDevice === 'S1') {
+            handleSwitchCommand(cmd);
+        }
+        autoEvaluate();
+    }
+
+    function handleClientCommand(cmd) {
+        var parts = cmd.split(/\s+/);
+        var base = parts[0].toLowerCase();
+
+        if (base === 'ipconfig') {
+            handleIpconfig();
+        } else if (base === 'dhcp') {
+            handleDhcp(parts);
+        } else if (base === 'nslookup') {
+            handleNslookup(parts);
+        } else if (base === 'display' && parts[1] === 'dns' && parts[2] === 'cache') {
+            handleDisplayDnsCache();
+        } else if (base === 'http') {
+            handleHttp(parts);
+        } else if (base === 'display' && parts[1] === 'http' && parts[2] === 'history') {
+            handleDisplayHttpHistory();
+        } else if (base === 'comprehensive-test') {
+            handleComprehensiveTest();
+        } else if (base === 'dns-format') {
+            handleDnsFormat();
+        } else if (base === 'http-format') {
+            handleHttpFormat();
+        } else if (base === 'dhcp-relay') {
+            handleDhcpRelay();
+        } else if (base === 'think-app-layer') {
+            handleThinkAppLayer();
+        } else if (base === 'think-app-layer-answer') {
+            if (parts.length < 3) { consolePrint('用法: think-app-layer-answer <题号> <答案>'); return; }
+            handleThinkAppLayerAnswer(parts[1], parts[2]);
+        } else if (base === '?' || base === 'help') {
+            consolePrint('可用命令:');
+            consolePrint('  ipconfig                  - 查看IP配置');
+            consolePrint('  dhcp discover             - 发送DHCP Discover');
+            consolePrint('  dhcp request              - 发送DHCP Request');
+            consolePrint('  nslookup <域名>            - DNS查询');
+            consolePrint('  display dns cache         - 查看DNS缓存');
+            consolePrint('  dns-format                - DNS报文格式分析');
+            consolePrint('  http get <URL>            - 发送HTTP请求');
+            consolePrint('  http-format               - HTTP报文格式分析');
+            consolePrint('  display http history      - 查看HTTP历史');
+            consolePrint('  dhcp-relay                - DHCP中继代理分析');
+            consolePrint('  comprehensive-test        - 综合场景测试');
+            consolePrint('  think-app-layer           - 应用层思考题');
+        } else {
+            consolePrint('错误: 无法识别的命"' + cmd + '"');
+            LabScoringEnhance.recordError(currentStep, cmd);
+            consolePrint('输入 ? 查看可用命令');
+        }
+    }
+
+    function handleIpconfig() {
+        var client = DEVICES.Client;
+        if (!client.ip) {
+            consolePrint('以太网适配器信号');
+            consolePrint('  IP 地址 . . . . . . . . . : 未获取');
+            consolePrint('  子网掩码 . . . . . . . . : 未获取');
+            consolePrint('  默认网关 . . . . . . . . : 未获取');
+            consolePrint('  MAC 地址 . . . . . . . . : ' + client.mac);
+            if (!step1Done) step1Done = true;
+        } else {
+            consolePrint('以太网适配器信号');
+            consolePrint('  IP 地址 . . . . . . . . . : ' + client.ip);
+            consolePrint('  子网掩码 . . . . . . . . : ' + client.mask);
+            consolePrint('  默认网关 . . . . . . . . : ' + client.gateway);
+            consolePrint('  DNS 服务器?. . . . . . . : ' + DEVICES.DHCP_Server.pool.dns);
+            consolePrint('  MAC 地址 . . . . . . . . : ' + client.mac);
+            if (step5Done && !step6Done) step6Done = true;
+        }
+    }
+
+    function handleDhcp(parts) {
+        var sub = parts[1] ? parts[1].toLowerCase() : '';
+        var client = DEVICES.Client;
+
+        if (sub === 'discover') {
+            if (client.ip) {
+                consolePrint('已获取IP地址，无需再次DHCP');
+                return;
+            }
+            consolePrint('发送DHCP Discover广播报文...');
+            consolePrint('  源MAC: ' + client.mac);
+            consolePrint('  目的: 255.255.255.255:67');
+            updateFrameInfo('DHCP', client.mac, 'FF:FF:FF:FF:FF:FF', '0.0.0.0', '255.255.255.255', 'DHCP Discover');
+            step2Done = true;
+            animatePacket('Client', 'S1', 'DHCP Disc', '#fbbf24', '#f59e0b', function() {
+                animatePacket('S1', 'DHCP_Server', 'DHCP Disc', '#fbbf24', '#f59e0b', function() {
+                    consolePrint('DHCP Server已收到Discover报文');
+                    step3Done = true;
+                    autoEvaluate();
+                    setTimeout(function() {
+                        consolePrint('');
+                        consolePrint('[DHCP Server] 发送DHCP Offer报文...');
+                        consolePrint('  提供IP: ' + DHCP_POOL_START);
+                        consolePrint('  子网掩码: 255.255.255.0');
+                        consolePrint('  租期: 86400');
+                        updateFrameInfo('DHCP', '00:00:00:00:54:00', client.mac, DHCP_IP, '255.255.255.255', 'DHCP Offer');
+                        animatePacket('DHCP_Server', 'S1', 'DHCP Offer', '#4ade80', '#22c55e', function() {
+                            animatePacket('S1', 'Client', 'DHCP Offer', '#4ade80', '#22c55e', function() {
+                                consolePrint('Client已收到DHCP Offer');
+                                dhcpState = 'offered';
+                                autoEvaluate();
+                            });
+                        });
+                    }, demoMode ? 0 : 500);
+                });
+            });
+        } else if (sub === 'request') {
+            if (client.ip) {
+                consolePrint('已获取IP地址，无需再次Request');
+                return;
+            }
+            if (dhcpState !== 'offered') {
+                consolePrint('请先执行 dhcp discover 获取Offer');
+                return;
+            }
+            consolePrint('发送DHCP Request广播报文...');
+            consolePrint('  请求IP: ' + DHCP_POOL_START);
+            consolePrint('  DHCP Server: ' + DHCP_IP);
+            updateFrameInfo('DHCP', client.mac, 'FF:FF:FF:FF:FF:FF', '0.0.0.0', '255.255.255.255', 'DHCP Request');
+            step4Done = true;
+            animatePacket('Client', 'S1', 'DHCP Req', '#fbbf24', '#f59e0b', function() {
+                animatePacket('S1', 'DHCP_Server', 'DHCP Req', '#fbbf24', '#f59e0b', function() {
+                    setTimeout(function() {
+                        consolePrint('');
+                        consolePrint('[DHCP Server] 发送DHCP ACK报文...');
+                        consolePrint('  确认IP: ' + DHCP_POOL_START);
+                        consolePrint('  子网掩码: 255.255.255.0');
+                        consolePrint('  默认网关: ' + GATEWAY_IP);
+                        consolePrint('  DNS: ' + DNS_IP);
+                        consolePrint('  租期: 86400');
+                        updateFrameInfo('DHCP', '00:00:00:00:54:00', client.mac, DHCP_IP, '255.255.255.255', 'DHCP ACK');
+                        step5Done = true;
+                        animatePacket('DHCP_Server', 'S1', 'DHCP ACK', '#4ade80', '#22c55e', function() {
+                            animatePacket('S1', 'Client', 'DHCP ACK', '#4ade80', '#22c55e', function() {
+                                client.ip = CLIENT_IP;
+                                client.mask = '255.255.255.0';
+                                client.gateway = GATEWAY_IP;
+                                dhcpState = 'bound';
+                                DEVICES.DHCP_Server.bindings[client.mac] = { ip: CLIENT_IP, lease: 86400, status: 'bound' };
+                                consolePrint('');
+                                consolePrint('Client已成功获取IP地址: ' + CLIENT_IP);
+                                drawTopology();
+                                updateInfoPanels();
+                                autoEvaluate();
+                            });
+                        });
+                    }, demoMode ? 0 : 500);
+                });
+            });
+        } else {
+            consolePrint('用法: dhcp discover | dhcp request');
+        }
+    }
+
+    function handleNslookup(parts) {
+        if (parts.length < 2) { consolePrint('用法: nslookup <域名>'); return; }
+        var client = DEVICES.Client;
+        if (!client.ip) { consolePrint('错误: 尚未获取IP地址，请先执行DHCP'); return; }
+
+        var domain = parts[1];
+        consolePrint('查询域名: ' + domain);
+        consolePrint('DNS服务器: ' + DEVICES.DHCP_Server.pool.dns);
+
+        if (client.dnsCache[domain]) {
+            consolePrint('命中DNS缓存!');
+            consolePrint('名称: ' + domain);
+            consolePrint('地址: ' + client.dnsCache[domain].ip);
+            consolePrint('类型: ' + client.dnsCache[domain].type);
+            consolePrint('TTL: ' + client.dnsCache[domain].ttl);
+            if (domain === 'www.example.com') step11Done = true;
+            autoEvaluate();
+            return;
+        }
+
+        if (currentDevice === 'Client' && domain === 'www.example.com') step7Done = true;
+        updateFrameInfo('DNS', client.mac, 'DNS_Server_MAC', client.ip, DNS_IP, 'DNS Query: ' + domain);
+        animatePacket('Client', 'S1', 'DNS Query', '#38bdf8', '#4a90e2', function() {
+            animatePacket('S1', 'DNS_Server', 'DNS Query', '#38bdf8', '#4a90e2', function() {
+                step8Done = true;
+                consolePrint('[DNS Server] 执行递归查询...');
+                consolePrint('  查询根DNS服务器...');
+                setTimeout(function() {
+                    consolePrint('  根DNS返回 .com 顶级域NS');
+                    consolePrint('  查询 .com 顶级DNS服务器...');
+                }, demoMode ? 0 : 400);
+                setTimeout(function() {
+                    consolePrint('  顶级DNS返回 example.com 权威NS');
+                    consolePrint('  查询 example.com 权威DNS服务器...');
+                }, demoMode ? 0 : 800);
+                setTimeout(function() {
+                    consolePrint('  权威DNS返回 www.example.com = ' + WEB_IP);
+                    step9Done = true;
+                    var record = DEVICES.DNS_Server.records[domain];
+                    if (record) {
+                        client.dnsCache[domain] = { ip: record.ip, type: record.type, ttl: record.ttl };
+                        DEVICES.DNS_Server.cache[domain] = { ip: record.ip, type: record.type, ttl: record.ttl };
+                    }
+                    updateFrameInfo('DNS', 'DNS_Server_MAC', client.mac, DNS_IP, client.ip, 'DNS Response: ' + domain + ' ' + (record ? record.ip : 'N/A'));
+                    animatePacket('DNS_Server', 'S1', 'DNS Resp', '#4ade80', '#22c55e', function() {
+                        animatePacket('S1', 'Client', 'DNS Resp', '#4ade80', '#22c55e', function() {
+                            consolePrint('');
+                            consolePrint('DNS查询结果:');
+                            consolePrint('名称: ' + domain);
+                            consolePrint('地址: ' + (record ? record.ip : '未找到'));
+                            consolePrint('类型: ' + (record ? record.type : '-'));
+                            consolePrint('TTL: ' + (record ? record.ttl : '-'));
+                            dnsQueryCount++;
+                            updateInfoPanels();
+                            autoEvaluate();
+                        });
+                    });
+                }, demoMode ? 0 : 1200);
+            });
+        });
+    }
+
+    function handleDisplayDnsCache() {
+        var client = DEVICES.Client;
+        var keys = Object.keys(client.dnsCache);
+        if (keys.length === 0) {
+            consolePrint('DNS缓存为空');
+            return;
+        }
+        consolePrint('DNS缓存');
+        consolePrint('域名                        IP地址            类型  TTL');
+        consolePrint('---------------------------------------------------------------');
+        for (var i = 0; i < keys.length; i++) {
+            var r = client.dnsCache[keys[i]];
+            consolePrint(padRight(keys[i], 28) + padRight(r.ip, 18) + padRight(r.type, 6) + r.ttl);
+        }
+        step10Done = true;
+        updateInfoPanels();
+    }
+
+    function handleHttp(parts) {
+        var sub = parts[1] ? parts[1].toLowerCase() : '';
+        if (sub !== 'get') { consolePrint('用法: http get <URL>'); return; }
+
+        var url = parts[2] || '';
+        if (!url) { consolePrint('用法: http get <URL>'); return; }
+
+        var client = DEVICES.Client;
+        if (!client.ip) { consolePrint('错误: 尚未获取IP地址，请先执行DHCP'); return; }
+
+        var parsed = parseUrl(url);
+        if (!parsed) { consolePrint('错误: 无效的URL格式'); return; }
+
+        if (currentDevice === 'Client' && url.indexOf('www.example.com') >= 0) step12Done = true;
+        consolePrint('发起HTTP请求: GET ' + url);
+
+        var needDns = !client.dnsCache[parsed.host];
+        if (needDns) {
+            step13Done = true;
+            consolePrint('需要DNS解析: ' + parsed.host);
+            consolePrint('发送DNS查询...');
+            updateFrameInfo('DNS', client.mac, 'DNS_Server_MAC', client.ip, DNS_IP, 'DNS Query: ' + parsed.host);
+            animatePacket('Client', 'S1', 'DNS Query', '#38bdf8', '#4a90e2', function() {
+                animatePacket('S1', 'DNS_Server', 'DNS Query', '#38bdf8', '#4a90e2', function() {
+                    var record = DEVICES.DNS_Server.records[parsed.host];
+                    if (record) {
+                        client.dnsCache[parsed.host] = { ip: record.ip, type: record.type, ttl: record.ttl };
+                    }
+                    animatePacket('DNS_Server', 'S1', 'DNS Resp', '#4ade80', '#22c55e', function() {
+                        animatePacket('S1', 'Client', 'DNS Resp', '#4ade80', '#22c55e', function() {
+                            consolePrint('DNS解析完成: ' + parsed.host + ' ' + (record ? record.ip : 'N/A'));
+                            doTcpAndHttp(parsed);
+                        });
+                    });
+                });
+            });
+        } else {
+            step13Done = true;
+            consolePrint('DNS缓存命中: ' + parsed.host + ' ' + client.dnsCache[parsed.host].ip);
+            doTcpAndHttp(parsed);
+        }
+    }
+
+    function doTcpAndHttp(parsed) {
+        var client = DEVICES.Client;
+        consolePrint('');
+        consolePrint('TCP三次握手建立连接...');
+        step14Done = true;
+        updateFrameInfo('TCP', client.mac, 'Web_Server_MAC', client.ip, WEB_IP, 'SYN');
+        animatePacket('Client', 'S1', 'SYN', '#c084fc', '#a855f7', function() {
+            animatePacket('S1', 'Web_Server', 'SYN', '#c084fc', '#a855f7', function() {
+                consolePrint('  SYN seq=0');
+                updateFrameInfo('TCP', 'Web_Server_MAC', client.mac, WEB_IP, client.ip, 'SYN-ACK');
+                animatePacket('Web_Server', 'S1', 'SYN-ACK', '#c084fc', '#a855f7', function() {
+                    animatePacket('S1', 'Client', 'SYN-ACK', '#c084fc', '#a855f7', function() {
+                        consolePrint('  SYN-ACK seq=0 ack=1');
+                        updateFrameInfo('TCP', client.mac, 'Web_Server_MAC', client.ip, WEB_IP, 'ACK');
+                        animatePacket('Client', 'S1', 'ACK', '#c084fc', '#a855f7', function() {
+                            animatePacket('S1', 'Web_Server', 'ACK', '#c084fc', '#a855f7', function() {
+                                consolePrint('  ACK seq=1 ack=1');
+                                consolePrint('TCP连接已建');
+                                consolePrint('');
+                                doHttpExchange(parsed);
+                            });
+                        });
+                    });
+                });
+            });
+        });
+    }
+
+    function doHttpExchange(parsed) {
+        var client = DEVICES.Client;
+        step15Done = true;
+        consolePrint('发送HTTP GET请求...');
+        consolePrint('  GET ' + parsed.path + ' HTTP/1.1');
+        consolePrint('  Host: ' + parsed.host);
+        consolePrint('  User-Agent: LabClient/1.0');
+        consolePrint('  Accept: text/html');
+        updateFrameInfo('HTTP', client.mac, 'Web_Server_MAC', client.ip, WEB_IP, 'HTTP GET ' + parsed.path);
+        animatePacket('Client', 'S1', 'HTTP GET', '#f97316', '#ea580c', function() {
+            animatePacket('S1', 'Web_Server', 'HTTP GET', '#f97316', '#ea580c', function() {
+                var page = DEVICES.Web_Server.pages[parsed.path] || '<html><body><h1>404 Not Found</h1></body></html>';
+                var statusCode = DEVICES.Web_Server.pages[parsed.path] ? '200 OK' : '404 Not Found';
+                step16Done = true;
+
+                var now = new Date();
+                var timeStr = now.getHours() + ':' + padZero(now.getMinutes()) + ':' + padZero(now.getSeconds());
+                client.httpHistory.push({
+                    time: timeStr,
+                    method: 'GET',
+                    url: 'http://' + parsed.host + parsed.path,
+                    status: statusCode,
+                    headers: {
+                        'Content-Type': 'text/html; charset=UTF-8',
+                        'Content-Length': page.length,
+                        'Server': 'LabHTTP/1.0',
+                        'Connection': 'keep-alive',
+                        'Date': now.toUTCString()
+                    },
+                    body: page
+                });
+                DEVICES.Web_Server.accessLog.push({
+                    time: timeStr,
+                    clientIp: client.ip,
+                    method: 'GET',
+                    path: parsed.path,
+                    status: statusCode
+                });
+
+                consolePrint('');
+                consolePrint('收到HTTP响应: ' + statusCode);
+                updateFrameInfo('HTTP', 'Web_Server_MAC', client.mac, WEB_IP, client.ip, 'HTTP ' + statusCode);
+                animatePacket('Web_Server', 'S1', 'HTTP 200', '#4ade80', '#22c55e', function() {
+                    animatePacket('S1', 'Client', 'HTTP 200', '#4ade80', '#22c55e', function() {
+                        consolePrint('  HTTP/1.1 ' + statusCode);
+                        consolePrint('  Content-Type: text/html; charset=UTF-8');
+                        consolePrint('  Content-Length: ' + page.length);
+                        consolePrint('  Server: LabHTTP/1.0');
+                        consolePrint('');
+                        consolePrint('响应内容:');
+                        consolePrint(page);
+                        consolePrint('');
+                        doTcpClose(parsed);
+                    });
+                });
+            });
+        });
+    }
+
+    function doTcpClose(parsed) {
+        var client = DEVICES.Client;
+        step18Done = true;
+        consolePrint('TCP四次挥手关闭连接...');
+        updateFrameInfo('TCP', client.mac, 'Web_Server_MAC', client.ip, WEB_IP, 'FIN');
+        animatePacket('Client', 'S1', 'FIN', '#f472b6', '#ec4899', function() {
+            animatePacket('S1', 'Web_Server', 'FIN', '#f472b6', '#ec4899', function() {
+                consolePrint('  FIN seq=' + (client.httpHistory.length * 100));
+                updateFrameInfo('TCP', 'Web_Server_MAC', client.mac, WEB_IP, client.ip, 'ACK');
+                animatePacket('Web_Server', 'S1', 'ACK', '#f472b6', '#ec4899', function() {
+                    animatePacket('S1', 'Client', 'ACK', '#f472b6', '#ec4899', function() {
+                        consolePrint('  ACK');
+                        updateFrameInfo('TCP', 'Web_Server_MAC', client.mac, WEB_IP, client.ip, 'FIN');
+                        animatePacket('Web_Server', 'S1', 'FIN', '#f472b6', '#ec4899', function() {
+                            animatePacket('S1', 'Client', 'FIN', '#f472b6', '#ec4899', function() {
+                                consolePrint('  FIN');
+                                updateFrameInfo('TCP', client.mac, 'Web_Server_MAC', client.ip, WEB_IP, 'ACK');
+                                animatePacket('Client', 'S1', 'ACK', '#f472b6', '#ec4899', function() {
+                                    animatePacket('S1', 'Web_Server', 'ACK', '#f472b6', '#ec4899', function() {
+                                        consolePrint('  ACK');
+                                        consolePrint('TCP连接已关');
+                                        consolePrint('');
+                                        consolePrint('HTTP请求完成!');
+                                        httpState = 'idle';
+                                        step19Done = true;
+                                        updateInfoPanels();
+                                        autoEvaluate();
+                                    });
+                                });
+                            });
+                        });
+                    });
+                });
+            });
+        });
+    }
+
+    function handleDisplayHttpHistory() {
+        var client = DEVICES.Client;
+        if (client.httpHistory.length === 0) {
+            consolePrint('HTTP历史为空');
+            return;
+        }
+        for (var i = 0; i < client.httpHistory.length; i++) {
+            var h = client.httpHistory[i];
+            consolePrint('--- 请求 #' + (i + 1) + ' ---');
+            consolePrint('时间: ' + h.time);
+            consolePrint('方法: ' + h.method);
+            consolePrint('URL: ' + h.url);
+            consolePrint('状态 ' + h.status);
+            consolePrint('响应');
+            for (var key in h.headers) {
+                consolePrint('  ' + key + ': ' + h.headers[key]);
+            }
+            consolePrint('');
+        }
+        step17Done = true;
+        autoEvaluate();
+    }
+
+    function handleComprehensiveTest() {
+        var client = DEVICES.Client;
+        if (client.ip) {
+            consolePrint('Client已获取IP，跳过DHCP阶段');
+        } else {
+            consolePrint('=== 综合场景测试 ===');
+            consolePrint('');
+            consolePrint('[1] DHCP阶段: 获取IP地址');
+        }
+
+        if (!client.ip) {
+            consolePrint('发送DHCP Discover...');
+            updateFrameInfo('DHCP', client.mac, 'FF:FF:FF:FF:FF:FF', '0.0.0.0', '255.255.255.255', 'DHCP Discover');
+            animatePacket('Client', 'S1', 'DHCP Disc', '#fbbf24', '#f59e0b', function() {
+                animatePacket('S1', 'DHCP_Server', 'DHCP Disc', '#fbbf24', '#f59e0b', function() {
+                    animatePacket('DHCP_Server', 'S1', 'DHCP Offer', '#4ade80', '#22c55e', function() {
+                        animatePacket('S1', 'Client', 'DHCP Offer', '#4ade80', '#22c55e', function() {
+                            consolePrint('收到DHCP Offer');
+                            consolePrint('发送DHCP Request...');
+                            animatePacket('Client', 'S1', 'DHCP Req', '#fbbf24', '#f59e0b', function() {
+                                animatePacket('S1', 'DHCP_Server', 'DHCP Req', '#fbbf24', '#f59e0b', function() {
+                                    animatePacket('DHCP_Server', 'S1', 'DHCP ACK', '#4ade80', '#22c55e', function() {
+                                        animatePacket('S1', 'Client', 'DHCP ACK', '#4ade80', '#22c55e', function() {
+                                            client.ip = CLIENT_IP;
+                                            client.mask = '255.255.255.0';
+                                            client.gateway = GATEWAY_IP;
+                                            dhcpState = 'bound';
+                                            DEVICES.DHCP_Server.bindings[client.mac] = { ip: CLIENT_IP, lease: 86400, status: 'bound' };
+                                            consolePrint('DHCP完成! IP: ' + CLIENT_IP);
+                                            drawTopology();
+                                            step2Done = true; step3Done = true; step4Done = true; step5Done = true;
+                                            doCompDns();
+                                        });
+                                    });
+                                });
+                            });
+                        });
+                    });
+                });
+            });
+        } else {
+            doCompDns();
+        }
+    }
+
+    function handleDnsFormat() {
+        step20Done = true;
+        consolePrint('');
+        consolePrint('=== DNS报文格式分析 ===');
+        consolePrint('');
+        consolePrint('DNS报文由首部和数据两部分组成，首部12字节：');
+        consolePrint('');
+        consolePrint('  +----+----+----+----+----+----+----+----+----+----+----+----+');
+        consolePrint('  | 事务ID |  标志  | 问题数 | 回答数 | 授权数 | 附加数 |');
+        consolePrint('  +----+----+----+----+----+----+----+----+----+----+----+----+');
+        consolePrint('  |  2字节  | 2字节  |  2字节  |  2字节  |  2字节  |  2字节  |');
+        consolePrint('  +----+----+----+----+----+----+----+----+----+----+----+----+');
+        consolePrint('');
+        consolePrint('1. 事务ID（2字节）：客户端生成，服务器响应中复制此值用于匹配');
+        consolePrint('2. 标志（2字节）：QR(查询/响应)、Opcode、AA、TC、RD、RA、RCODE');
+        consolePrint('3. 问题数/回答数/授权数/附加数：各2字节，记录各区域记录数');
+        consolePrint('');
+        consolePrint('DNS查询报文：QR=0，问题区域包含查询的域名和类型');
+        consolePrint('DNS响应报文：QR=1，回答区域包含解析结果（A记录返回IP）');
+        consolePrint('');
+        consolePrint('DNS使用UDP传输（端口53），报文长度受UDP限制（通常≤512字节）');
+        consolePrint('=== DNS报文格式分析完成 ===');
+        autoEvaluate();
+    }
+
+    function handleHttpFormat() {
+        step21Done = true;
+        consolePrint('');
+        consolePrint('=== HTTP报文格式分析 ===');
+        consolePrint('');
+        consolePrint('【HTTP请求报文格式】');
+        consolePrint('  请求行: GET /index.html HTTP/1.1');
+        consolePrint('  首部行: Host: www.example.com');
+        consolePrint('          User-Agent: Mozilla/5.0');
+        consolePrint('          Accept: text/html');
+        consolePrint('  空行: (CRLF)');
+        consolePrint('  实体主体: (GET请求通常无)');
+        consolePrint('');
+        consolePrint('【HTTP响应报文格式】');
+        consolePrint('  状态行: HTTP/1.1 200 OK');
+        consolePrint('  首部行: Content-Type: text/html');
+        consolePrint('          Content-Length: 1024');
+        consolePrint('          Server: Apache/2.4');
+        consolePrint('  空行: (CRLF)');
+        consolePrint('  实体主体: <html>...</html>');
+        consolePrint('');
+        consolePrint('HTTP/1.1默认使用持续连接（keep-alive），多个请求可复用TCP连接');
+        consolePrint('=== HTTP报文格式分析完成 ===');
+        autoEvaluate();
+    }
+
+    function handleDhcpRelay() {
+        step22Done = true;
+        consolePrint('');
+        consolePrint('=== DHCP中继代理分析 ===');
+        consolePrint('');
+        consolePrint('当Client与DHCP Server不在同一网段时，需要DHCP中继代理：');
+        consolePrint('');
+        consolePrint('1. Client发送DHCP Discover广播（目的255.255.255.255）');
+        consolePrint('2. 中继代理（路由器）收到广播，转换为单播转发给DHCP Server');
+        consolePrint('   中继代理在报文中填入自己的IP作为giaddr字段');
+        consolePrint('3. DHCP Server根据giaddr选择合适的地址池，单播回复Offer');
+        consolePrint('4. 中继代理将Offer转发给Client（广播或单播）');
+        consolePrint('5. Request和ACK同样通过中继代理转发');
+        consolePrint('');
+        consolePrint('DHCP中继代理配置（华为路由器）：');
+        consolePrint('  interface GigabitEthernet0/0/1');
+        consolePrint('    dhcp select relay');
+        consolePrint('    dhcp relay server-ip ' + DHCP_IP);
+        consolePrint('');
+        consolePrint('DHCP四阶段：Discover→Offer→Request→ACK');
+        consolePrint('=== DHCP中继代理分析完成 ===');
+        autoEvaluate();
+    }
+
+    function handleThinkAppLayer() {
+        consolePrint('');
+        consolePrint('=== 应用层思考题 ===');
+        consolePrint('');
+        consolePrint('请思考以下问题，使用 think-app-layer-answer <题号> <答案> 作答');
+        consolePrint('');
+        consolePrint('题1：若不使用PUSH操作，两个连续的HTTP响应报文能否封装在一个TCP报文段中？');
+        consolePrint('  A. 不能，每个HTTP响应必须单独封装');
+        consolePrint('  B. 能，TCP面向字节流，浏览器通过Content-Length识别边界');
+        consolePrint('  C. 不能，TCP保证每个报文段只包含一个应用层报文');
+        consolePrint('  D. 能，但会导致数据丢失');
+        consolePrint('');
+        consolePrint('题2：若一个局域网中配置了多个DHCP服务器，应注意什么？');
+        consolePrint('  A. 不需要注意，多个DHCP服务器可以正常共存');
+        consolePrint('  B. 需要确保各DHCP服务器的地址池不重叠，避免IP冲突');
+        consolePrint('  C. 需要关闭其中所有DHCP服务器，只保留一个');
+        consolePrint('  D. 需要将所有DHCP服务器配置为相同的地址池');
+        consolePrint('');
+        consolePrint('题3：若利用UDP来实现文件传输，与TCP的主要不同是什么？');
+        consolePrint('  A. UDP更快，不需要任何额外处理');
+        consolePrint('  B. UDP不保证可靠传输，需在应用层实现序号、确认和重传机制');
+        consolePrint('  C. UDP和TCP完全相同，只是协议名不同');
+        consolePrint('  D. UDP不能用于文件传输');
+        consolePrint('');
+    }
+
+    function handleThinkAppLayerAnswer(qNum, answer) {
+        var answers = { '1': 'B', '2': 'B', '3': 'B' };
+        if (!answers[qNum]) { consolePrint('错误: 无效题号'); return; }
+        if (answer.toUpperCase() === answers[qNum]) {
+            consolePrint('题' + qNum + ' 回答正确！');
+            thinkAppLayerCorrect[qNum] = true;
+            var correctCount = 0;
+            for (var k in thinkAppLayerCorrect) correctCount++;
+            if (correctCount >= 2) {
+                step23Done = true;
+                consolePrint('思考题完成（答对' + correctCount + '题）！');
+                autoEvaluate();
+            }
+        } else {
+            consolePrint('题' + qNum + ' 回答错误，正确答案是 ' + answers[qNum]);
+        }
+    }
+
+    function doCompDns() {
+        var client = DEVICES.Client;
+        consolePrint('');
+        consolePrint('[2] DNS阶段: 解析域名');
+        if (client.dnsCache['www.example.com']) {
+            consolePrint('DNS缓存命中: www.example.com ' + WEB_IP);
+            doCompHttp();
+            return;
+        }
+        consolePrint('发送DNS查询: www.example.com');
+        updateFrameInfo('DNS', client.mac, 'DNS_Server_MAC', client.ip, DNS_IP, 'DNS Query');
+        animatePacket('Client', 'S1', 'DNS Query', '#38bdf8', '#4a90e2', function() {
+            animatePacket('S1', 'DNS_Server', 'DNS Query', '#38bdf8', '#4a90e2', function() {
+                var record = DEVICES.DNS_Server.records['www.example.com'];
+                if (record) {
+                    client.dnsCache['www.example.com'] = { ip: record.ip, type: record.type, ttl: record.ttl };
+                }
+                animatePacket('DNS_Server', 'S1', 'DNS Resp', '#4ade80', '#22c55e', function() {
+                    animatePacket('S1', 'Client', 'DNS Resp', '#4ade80', '#22c55e', function() {
+                        consolePrint('DNS解析完成: www.example.com ' + WEB_IP);
+                        step7Done = true; step8Done = true; step9Done = true;
+                        doCompHttp();
+                    });
+                });
+            });
+        });
+    }
+
+    function doCompHttp() {
+        var client = DEVICES.Client;
+        consolePrint('');
+        consolePrint('[3] HTTP阶段: 访问网页');
+        step12Done = true;
+        step13Done = true;
+        doTcpAndHttp({ host: 'www.example.com', path: '/index.html' });
+    }
+
+    function handleDhcpServerCommand(cmd) {
+        var parts = cmd.split(/\s+/);
+        var base = parts[0].toLowerCase();
+
+        if (base === 'display' && parts[1] === 'dhcp' && parts[2] === 'binding') {
+            var keys = Object.keys(DEVICES.DHCP_Server.bindings);
+            if (keys.length === 0) {
+                consolePrint('DHCP分配记录为空');
+            } else {
+                consolePrint('DHCP分配的IP地址');
+                consolePrint('客户端MAC             分配IP            租期     状态');
+                consolePrint('---------------------------------------------------------------');
+                for (var i = 0; i < keys.length; i++) {
+                    var b = DEVICES.DHCP_Server.bindings[keys[i]];
+                    consolePrint(padRight(keys[i], 22) + padRight(b.ip, 18) + padRight(String(b.lease), 9) + b.status);
+                }
+            }
+        } else if (base === 'display' && parts[1] === 'dhcp' && parts[2] === 'pool') {
+            var pool = DEVICES.DHCP_Server.pool;
+            consolePrint('DHCP地址池信号');
+            consolePrint('  起始IP: ' + pool.start);
+            consolePrint('  结束IP: ' + pool.end);
+            consolePrint('  子网掩码: ' + pool.mask);
+            consolePrint('  默认网关: ' + pool.gateway);
+            consolePrint('  DNS服务器: ' + pool.dns);
+            consolePrint('  租期: ' + pool.lease + '');
+        } else if (base === '?' || base === 'help') {
+            consolePrint('可用命令:');
+            consolePrint('  display dhcp binding  - 查看DHCP分配记录');
+            consolePrint('  display dhcp pool     - 查看地址');
+        } else {
+            consolePrint('错误: 无法识别的命"' + cmd + '"');
+            LabScoringEnhance.recordError(currentStep, cmd);
+            consolePrint('输入 ? 查看可用命令');
+        }
+    }
+
+    function handleDnsServerCommand(cmd) {
+        var parts = cmd.split(/\s+/);
+        var base = parts[0].toLowerCase();
+
+        if (base === 'display' && parts[1] === 'dns' && parts[2] === 'records') {
+            var records = DEVICES.DNS_Server.records;
+            var keys = Object.keys(records);
+            consolePrint('DNS记录');
+            consolePrint('域名                     IP地址            类型  TTL');
+            consolePrint('---------------------------------------------------------------');
+            for (var i = 0; i < keys.length; i++) {
+                var r = records[keys[i]];
+                consolePrint(padRight(keys[i], 26) + padRight(r.ip, 18) + padRight(r.type, 6) + r.ttl);
+            }
+        } else if (base === 'display' && parts[1] === 'dns' && parts[2] === 'cache') {
+            var cache = DEVICES.DNS_Server.cache;
+            var ckeys = Object.keys(cache);
+            if (ckeys.length === 0) {
+                consolePrint('DNS缓存为空');
+            } else {
+                consolePrint('DNS缓存');
+                consolePrint('域名                     IP地址            类型  TTL');
+                consolePrint('---------------------------------------------------------------');
+                for (var j = 0; j < ckeys.length; j++) {
+                    var cr = cache[ckeys[j]];
+                    consolePrint(padRight(ckeys[j], 26) + padRight(cr.ip, 18) + padRight(cr.type, 6) + cr.ttl);
+                }
+            }
+        } else if (base === '?' || base === 'help') {
+            consolePrint('可用命令:');
+            consolePrint('  display dns records  - 查看DNS记录');
+            consolePrint('  display dns cache    - 查看DNS缓存');
+        } else {
+            consolePrint('错误: 无法识别的命"' + cmd + '"');
+            LabScoringEnhance.recordError(currentStep, cmd);
+            consolePrint('输入 ? 查看可用命令');
+        }
+    }
+
+    function handleWebServerCommand(cmd) {
+        var parts = cmd.split(/\s+/);
+        var base = parts[0].toLowerCase();
+
+        if (base === 'display' && parts[1] === 'http' && parts[2] === 'access-log') {
+            var log = DEVICES.Web_Server.accessLog;
+            if (log.length === 0) {
+                consolePrint('访问日志为空');
+            } else {
+                consolePrint('HTTP访问日志:');
+                consolePrint('时间     客户端IP          方法  路径             状态');
+                consolePrint('---------------------------------------------------------------');
+                for (var i = 0; i < log.length; i++) {
+                    var e = log[i];
+                    consolePrint(padRight(e.time, 9) + padRight(e.clientIp, 18) + padRight(e.method, 6) + padRight(e.path, 17) + e.status);
+                }
+            }
+        } else if (base === '?' || base === 'help') {
+            consolePrint('可用命令:');
+            consolePrint('  display http access-log  - 查看访问日志');
+        } else {
+            consolePrint('错误: 无法识别的命"' + cmd + '"');
+            LabScoringEnhance.recordError(currentStep, cmd);
+            consolePrint('输入 ? 查看可用命令');
+        }
+    }
+
+    function handleSwitchCommand(cmd) {
+        var parts = cmd.split(/\s+/);
+        var base = parts[0].toLowerCase();
+        if (base === '?' || base === 'help') {
+            consolePrint('S1为透明交换机，无需配置');
+            consolePrint('报文自动转发');
+        } else {
+            consolePrint('S1为透明交换机，无需配置命令');
+        }
+    }
+
+    function parseUrl(url) {
+        var match = url.match(/^http:\/\/([^\/]+)(\/.*)?$/);
+        if (!match) return null;
+        return { host: match[1], path: match[2] || '/index.html' };
+    }
+
+    function padRight(str, len) {
+        while (str.length < len) str += ' ';
+        return str;
+    }
+
+    function padZero(n) {
+        return n < 10 ? '0' + n : '' + n;
+    }
+
+    function animatePacket(from, via, label, color, borderColor, callback) {
+        if (demoMode) { if (callback) callback(); return; }
+        if (animating) { if (callback) setTimeout(function() { callback(); }, 100); return; }
+        animating = true;
+
+        var fd = DEVICES[from], vd = DEVICES[via];
+        var packet = { x: fd.x, y: fd.y, color: color, borderColor: borderColor, label: label, alpha: 1 };
+        framePackets = [packet];
+
+        var stepsPerSegment = 25;
+        var step = 0;
+
+        function animate() {
+            step++;
+            var t = easeInOut(step / stepsPerSegment);
+            packet.x = fd.x + (vd.x - fd.x) * t;
+            packet.y = fd.y + (vd.y - fd.y) * t;
+            drawTopology();
+
+            if (step >= stepsPerSegment) {
+                var pauseMs = (vd.type === 'switch' || vd.type === 'router') ? 1000 : 200;
+                setTimeout(function() {
+                    framePackets = [];
+                    drawTopology();
+                    animating = false;
+                    if (callback) callback();
+                }, pauseMs);
+                return;
+            }
+            animFrame = requestAnimationFrame(animate);
+        }
+        animFrame = requestAnimationFrame(animate);
+    }
+
+    function easeInOut(t) { return t < 0.5 ? 2*t*t : -1+(4-2*t)*t; }
+
+    function updateFrameInfo(proto, srcMac, dstMac, srcIp, dstIp, action) {
+        document.getElementById('frameInfo').innerHTML =
+            '<div class="frame-info">' +
+            '<div><span class="label">协议：</span><span class="value">' + proto + '</span></div>' +
+            '<div><span class="label">源MAC：</span><span class="value">' + srcMac + '</span></div>' +
+            '<div><span class="label">目的MAC：</span><span class="value">' + dstMac + '</span></div>' +
+            '<div><span class="label">源IP：</span><span class="value">' + srcIp + '</span></div>' +
+            '<div><span class="label">目的IP：</span><span class="value">' + dstIp + '</span></div>' +
+            '<div><span class="label">动作：</span><span class="value">' + action + '</span></div>' +
+            '</div>';
+    }
+
+    function updateInfoPanels() {
+        var dhcpTbody = document.getElementById('dhcpTableTbody');
+        var bkeys = Object.keys(DEVICES.DHCP_Server.bindings);
+        if (bkeys.length === 0) {
+            dhcpTbody.innerHTML = '<tr><td colspan="4" style="color:#94a3b8;text-align:center;">(无分配记录)</td></tr>';
+        } else {
+            var dhtml = '';
+            for (var i = 0; i < bkeys.length; i++) {
+                var b = DEVICES.DHCP_Server.bindings[bkeys[i]];
+                dhtml += '<tr class="new-entry"><td>' + bkeys[i] + '</td><td>' + b.ip + '</td><td>' + b.lease + 's</td><td>' + b.status + '</td></tr>';
+            }
+            dhcpTbody.innerHTML = dhtml;
+        }
+
+        var dnsTbody = document.getElementById('dnsTableTbody');
+        var allDns = {};
+        for (var dk in DEVICES.DNS_Server.records) { allDns[dk] = DEVICES.DNS_Server.records[dk]; }
+        for (var dck in DEVICES.Client.dnsCache) { if (!allDns[dck]) allDns[dck] = DEVICES.Client.dnsCache[dck]; }
+        var dnsKeys = Object.keys(allDns);
+        if (dnsKeys.length === 0) {
+            dnsTbody.innerHTML = '<tr><td colspan="4" style="color:#94a3b8;text-align:center;">(无记</td></tr>';
+        } else {
+            var dnhtml = '';
+            for (var di = 0; di < dnsKeys.length; di++) {
+                var dr = allDns[dnsKeys[di]];
+                dnhtml += '<tr class="new-entry"><td>' + dnsKeys[di] + '</td><td>' + dr.ip + '</td><td>' + dr.type + '</td><td>' + dr.ttl + '</td></tr>';
+            }
+            dnsTbody.innerHTML = dnhtml;
+        }
+
+        var httpTbody = document.getElementById('httpTableTbody');
+        var httpHist = DEVICES.Client.httpHistory;
+        if (httpHist.length === 0) {
+            httpTbody.innerHTML = '<tr><td colspan="4" style="color:#94a3b8;text-align:center;">(无请求)</td></tr>';
+        } else {
+            var hhtml = '';
+            for (var hi = 0; hi < httpHist.length; hi++) {
+                var hh = httpHist[hi];
+                hhtml += '<tr class="new-entry"><td>' + hh.time + '</td><td>' + hh.method + '</td><td style="font-size:10px;">' + hh.url + '</td><td>' + hh.status + '</td></tr>';
+            }
+            httpTbody.innerHTML = hhtml;
+        }
+    }
+
+    function renderStepList() {
+        var html = '';
+        for (var i = 0; i < STEPS.length; i++) {
+            var s = STEPS[i];
+            var cls = '';
+            if (s.id === currentStep) cls = 'active';
+            if (stepResults[s.id] === 'pass') cls += ' completed';
+            if (stepResults[s.id] === 'fail') cls += ' failed';
+            var icon = stepResults[s.id] === 'pass' ? '✅' : stepResults[s.id] === 'fail' ? '❌' : (s.id === currentStep ? '▶️' : '⏳');
+            html += '<div class="step-item ' + cls + '" onclick="selectStep(' + s.id + ')">';
+            html += '<span class="step-icon">' + icon + '</span>';
+            html += '步骤' + s.id + '. ' + s.title;
+            html += '</div>';
+        }
+        document.getElementById('stepList').innerHTML = html;
+    }
+
+    function selectStep(id) {
+        currentStep = id;
+        var step = STEPS[id - 1];
+        document.getElementById('hintBox').textContent = step.hint;
+        renderStepList();
+    }
+
+    function autoEvaluate() {
+        var changed = false;
+        for (var i = 0; i < STEPS.length; i++) {
+            var s = STEPS[i];
+            if (stepResults[s.id]) continue;
+            var result = window[s.evalFn]();
+            if (result === 'pass' || result === 'fail') {
+                stepResults[s.id] = result;
+                showEvalResult(s.id, result);
+                changed = true;
+            }
+        }
+        if (changed) {
+            var nextStep = 0;
+            for (var j = 0; j < STEPS.length; j++) {
+                if (!stepResults[STEPS[j].id]) { nextStep = STEPS[j].id; break; }
+            }
+            if (nextStep) { currentStep = nextStep; document.getElementById('hintBox').textContent = STEPS[nextStep - 1].hint; }
+        }
+        updateProgress();
+        renderStepList();
+    }
+
+    function evalStep1() { return step1Done ? 'pass' : ''; }
+    function evalStep2() { return step2Done ? 'pass' : ''; }
+    function evalStep3() { return step3Done ? 'pass' : ''; }
+    function evalStep4() { return step4Done ? 'pass' : ''; }
+    function evalStep5() { return step5Done ? 'pass' : ''; }
+    function evalStep6() { return step6Done ? 'pass' : ''; }
+    function evalStep7() { return step7Done ? 'pass' : ''; }
+    function evalStep8() { return step8Done ? 'pass' : ''; }
+    function evalStep9() { return step9Done ? 'pass' : ''; }
+    function evalStep10() { return step10Done ? 'pass' : ''; }
+    function evalStep11() { return step11Done ? 'pass' : ''; }
+    function evalStep12() { return step12Done ? 'pass' : ''; }
+    function evalStep13() { return step13Done ? 'pass' : ''; }
+    function evalStep14() { return step14Done ? 'pass' : ''; }
+    function evalStep15() { return step15Done ? 'pass' : ''; }
+    function evalStep16() { return step16Done ? 'pass' : ''; }
+    function evalStep17() { return step17Done ? 'pass' : ''; }
+    function evalStep18() { return step18Done ? 'pass' : ''; }
+    function evalStep19() { return step19Done ? 'pass' : ''; }
+    function evalStep20() { return step20Done ? 'pass' : ''; }
+    function evalStep21() { return step21Done ? 'pass' : ''; }
+    function evalStep22() { return step22Done ? 'pass' : ''; }
+    function evalStep23() { return step23Done ? 'pass' : ''; }
+    function evalStep24() {
+        var passed = 0;
+        for (var id in stepResults) { if (stepResults[id] === 'pass') passed++; }
+        return passed >= STEPS.length - 1 ? 'pass' : '';
+    }
+
+    function showEvalResult(stepId, result) {
+        var body = document.getElementById('evalBody');
+        var html = '';
+        for (var id in stepResults) {
+            var s = STEPS[id - 1];
+            var cls = stepResults[id] === 'pass' ? 'eval-pass' : 'eval-fail';
+            var txt = stepResults[id] === 'pass' ? '通过 (+' + s.score + '分)' : '未通过';
+            html += '<div class="eval-result ' + cls + '">步骤' + id + '. ' + txt + '</div>';
+        }
+        body.innerHTML = html;
+    }
+
+    function updateProgress() {
+        var completed = 0;
+        totalScore = 0;
+        for (var id in stepResults) {
+            if (stepResults[id] === 'pass') {
+                completed++;
+                totalScore += STEPS[id - 1].score;
+            }
+        }
+        var pct = Math.round(completed / STEPS.length * 100);
+        document.getElementById('progressFill').style.width = pct + '%';
+        document.getElementById('progressText').textContent = pct + '%';
+        document.getElementById('scoreFill').style.width = Math.round(totalScore * 0.8) + '%';
+        document.getElementById('scoreText').textContent = Math.round(totalScore * 0.8) + '/80';
+
+        var nextStep = null;
+        for (var i = 0; i < STEPS.length; i++) {
+            if (!stepResults[STEPS[i].id]) { nextStep = STEPS[i].id; break; }
+        }
+        if (nextStep) {
+            currentStep = nextStep;
+            document.getElementById('hintBox').textContent = STEPS[nextStep - 1].hint;
+        }
+    }
+
+    function resetExperiment() {
+        LabScoringEnhance.init(35);
+        RAND_SUBNET = Math.floor(Math.random() * 9) + 1;
+        DNS_IP = '192.168.' + RAND_SUBNET + '.53';
+        DHCP_IP = '192.168.' + RAND_SUBNET + '.54';
+        WEB_IP = '192.168.' + RAND_SUBNET + '.80';
+        DHCP_POOL_START = '192.168.' + RAND_SUBNET + '.100';
+        DHCP_POOL_END = '192.168.' + RAND_SUBNET + '.200';
+        GATEWAY_IP = '192.168.' + RAND_SUBNET + '.1';
+        CLIENT_IP = '192.168.' + RAND_SUBNET + '.100';
+        DEVICES.DNS_Server.ip = DNS_IP;
+        DEVICES.DNS_Server.records = {
+            'www.example.com': { ip: WEB_IP, type: 'A', ttl: 3600 },
+            'example.com': { ip: WEB_IP, type: 'A', ttl: 3600 },
+            'ns1.example.com': { ip: DNS_IP, type: 'A', ttl: 3600 }
+        };
+        DEVICES.DHCP_Server.ip = DHCP_IP;
+        DEVICES.DHCP_Server.pool = { start: DHCP_POOL_START, end: DHCP_POOL_END, mask: '255.255.255.0', gateway: GATEWAY_IP, dns: DNS_IP, lease: 86400 };
+        DEVICES.Web_Server.ip = WEB_IP;
+        DEVICES.Client.ip = '';
+        DEVICES.Client.mask = '';
+        DEVICES.Client.gateway = '';
+        DEVICES.Client.dnsCache = {};
+        DEVICES.Client.httpHistory = [];
+        DEVICES.DHCP_Server.bindings = {};
+        DEVICES.DHCP_Server.nextIp = 100;
+        DEVICES.DNS_Server.cache = {};
+        DEVICES.Web_Server.accessLog = [];
+
+        stepResults = {};
+        demoMode = false;
+        demoUsed = false;
+        totalScore = 0;
+        currentStep = 1;
+        consoleHistory = {};
+        deviceViewState = {};
+        dhcpState = 'init';
+        dnsQueryCount = 0;
+        httpState = 'idle';
+
+        step1Done = false; step2Done = false; step3Done = false; step4Done = false;
+        step5Done = false; step6Done = false; step7Done = false; step8Done = false;
+        step9Done = false; step10Done = false; step11Done = false; step12Done = false;
+        step13Done = false; step14Done = false; step15Done = false; step16Done = false;
+        step17Done = false; step18Done = false; step19Done = false;
+        step20Done = false; step21Done = false; step22Done = false; step23Done = false;
+        thinkAppLayerCorrect = {};
+
+        framePackets = [];
+        animating = false;
+        switchDevice('Client');
+        renderStepList();
+        updateProgress();
+        updateInfoPanels();
+        document.getElementById('evalBody').innerHTML = '<div style="color:#94a3b8;font-size:12px;">完成步骤后自动评估</div>';
+        document.getElementById('frameInfo').innerHTML = '<span class="label">等待报文传输...</span>';
+        document.getElementById('hintBox').textContent = STEPS[0].hint;
+        clearConsole();
+        consolePrint('实验已重传');
+        drawTopology();
+    }
+
+    function showDemo() {
+        if (demoMode) { stopDemo(); return; }
+        resetExperiment();
+        demoMode = true;
+        demoUsed = true;
+        consolePrint('[演示模式] 演示开始，自动执行所有步骤..');
+
+        var actions = [
+            function() { switchDevice('Client'); setInput('ipconfig'); handleCommand({key:'Enter'}); },
+            function() { setInput('dhcp discover'); handleCommand({key:'Enter'}); },
+            function() { setInput('dhcp request'); handleCommand({key:'Enter'}); },
+            function() { setInput('ipconfig'); handleCommand({key:'Enter'}); },
+            function() { setInput('nslookup www.example.com'); handleCommand({key:'Enter'}); },
+            function() { setInput('display dns cache'); handleCommand({key:'Enter'}); },
+            function() { setInput('nslookup www.example.com'); handleCommand({key:'Enter'}); },
+            function() { setInput('http get http://www.example.com/index.html'); handleCommand({key:'Enter'}); },
+            function() { setInput('display http history'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('DHCP_Server'); setInput('display dhcp binding'); handleCommand({key:'Enter'}); },
+            function() { setInput('display dhcp pool'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('DNS_Server'); setInput('display dns records'); handleCommand({key:'Enter'}); },
+            function() { setInput('display dns cache'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('Web_Server'); setInput('display http access-log'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('Client'); setInput('dns-format'); handleCommand({key:'Enter'}); },
+            function() { setInput('http-format'); handleCommand({key:'Enter'}); },
+            function() { setInput('dhcp-relay'); handleCommand({key:'Enter'}); },
+            function() { setInput('comprehensive-test'); handleCommand({key:'Enter'}); },
+            function() { setInput('think-app-layer'); handleCommand({key:'Enter'}); },
+            function() { setInput('think-app-layer-answer 1 B'); handleCommand({key:'Enter'}); },
+            function() { setInput('think-app-layer-answer 2 B'); handleCommand({key:'Enter'}); }
+        ];
+
+        var idx = 0;
+        function nextAction() {
+            if (idx >= actions.length || !demoMode) { demoMode = false; return; }
+            if (animating) { if (demoTimer) clearTimeout(demoTimer); demoTimer = setTimeout(nextAction, 300); return; }
+            actions[idx]();
+            idx++;
+            demoTimer = setTimeout(nextAction, 800);
+        }
+        nextAction();
+    }
+
+    function setInput(cmd) {
+        document.getElementById('consoleInput').value = cmd;
+    }
+
+    function stopDemo() {
+        demoMode = false;
+
+        if (demoTimer) clearTimeout(demoTimer);
+        consolePrint('[演示模式] 已停');
+    }
+
+    async function submitExperiment() {
+        if (labScheduleState === 'not_started') { alert('实验未开放，不能提交报告'); return; }
+        if (labScheduleState === 'ended') { alert('实验已结束，不能再提交报告'); return; }
+        if (demoMode || demoUsed) {
+            consolePrint('[提示] 演示模式下无法提交实验报告，请手动完成实验后提交换');
+            return;
+        }
+        autoEvaluate();
+        var passed = 0;
+        var stepScore = 0;
+        var details = '';
+        for (var i = 0; i < STEPS.length; i++) {
+            var s = STEPS[i];
+            if (stepResults[s.id] === 'pass') {
+                passed++;
+                stepScore += s.score;
+                details += '步骤' + s.id + '. ' + s.title + ' ' + s.score + '<br>';
+            } else {
+                details += '步骤' + s.id + '. ' + s.title + ' 0<br>';
+            }
+        }
+
+        var scoreResult = LabScoringEnhance.getFinalScore(stepScore, 100);
+        details += '<br>--- 综合评价 ---<br>';
+        details += LabScoringEnhance.formatDetails(scoreResult);
+
+        document.getElementById('resultSummary').textContent = '共完成' + passed + '/' + STEPS.length + ' 个实验步骤';
+        document.getElementById('finalScore').textContent = scoreResult.totalScore;
+        document.getElementById('finalScore').style.color = scoreResult.totalScore >= 60 ? '#22c55e' : '#ef4444';
+        document.getElementById('resultDetails').innerHTML = details;
+
+        var currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
+        if (currentUser.username && currentUser.type === 'student') {
+            try {
+                var labTitle = document.querySelector('.top-bar h1').textContent.trim();
+                var reportEntry = {
+                    labTitle: labTitle,
+                    score: scoreResult.totalScore,
+                    maxScore: 100,
+                    submitTime: new Date().toISOString(),
+                    mode: 'manual',
+                    details: details,
+                    baseScore: scoreResult.baseScore,
+                    accuracyScore: scoreResult.accuracyScore,
+                    efficiencyScore: scoreResult.efficiencyScore,
+                    errorCount: scoreResult.errorCount,
+                    elapsedMinutes: scoreResult.elapsedMinutes
+                };
+                var token = localStorage.getItem('authToken') || '';
+                var res = await fetch(API_BASE + '/api/lab-reports', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                    body: JSON.stringify({ studentId: currentUser.username, report: reportEntry })
+                });
+                var result = await res.json();
+                if (result.error) console.error('提交报告失败:', result.error);
+            } catch (e) { console.error('提交报告失败:', e); }
+        }
+        document.getElementById('resultModal').classList.add('show');
+
+        stepResults[24] = passed >= STEPS.length - 1 ? 'pass' : 'fail';
+        showEvalResult(24, stepResults[24]);
+        updateProgress();
+        renderStepList();
+    }
+
+    window.addEventListener('load', init);
+    </script>
+
+
+    <script>
+    var THIS_LAB_ID = 'app-layer-lab';
+    var labScheduleState = (async function() {
+        var schedules = await (await fetch(API_BASE + '/api/lab-schedules', {headers:{'Authorization':'Bearer '+(localStorage.getItem('authToken')||'')}})).json().then(r=>r.schedules||{}).catch(()=>({}));
+        var s = schedules[THIS_LAB_ID] || {};
+        var now = new Date().getTime();
+        if (s.alwaysOpen) return 'open';
+        if (s.startTime && now < new Date(s.startTime).getTime()) return 'not_started';
+        if (s.endTime && now > new Date(s.endTime).getTime()) return 'ended';
+        if (s.startTime || s.endTime) return 'open';
+        return 'not_started';
+    })();
+
+    
+    (async function() {
+        var user = JSON.parse(localStorage.getItem('currentUser') || '{}');
+        if (user.type !== 'student') return;
+        if (labScheduleState === 'not_started') {
+            var schedules = await (await fetch(API_BASE + '/api/lab-schedules', {headers:{'Authorization':'Bearer '+(localStorage.getItem('authToken')||'')}})).json().then(r=>r.schedules||{}).catch(()=>({}));
+        var s = schedules[THIS_LAB_ID] || {};
+            var startStr = s.startTime ? new Date(s.startTime).toLocaleString('zh-CN') : '';
+            var endStr = s.endTime ? new Date(s.endTime).toLocaleString('zh-CN') : '';
+            var overlay = document.createElement('div');
+            overlay.id = 'labScheduleOverlay';
+            overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:99999;display:flex;align-items:center;justify-content:center;';
+            overlay.innerHTML = '<div style="background:white;border-radius:20px;padding:40px 50px;text-align:center;max-width:500px;box-shadow:0 20px 60px rgba(0,0,0,0.3);">' +
+                '<div style="font-size:60px;margin-bottom:20px;">\u23F0</div>' +
+                '<h2 style="color:#e74c3c;margin-bottom:15px;">\u5B9E\u9A8C\u672A\u5F00\u653E</h2>' +
+                '<p style="color:#666;font-size:16px;line-height:1.8;">\u8BE5\u5B9E\u9A8C\u5C1A\u672A\u5230\u5F00\u653E\u65F6\u95F4\uFF0C\u6682\u65F6\u65E0\u6CD5\u64CD\u4F5C</p>' +
+                (startStr ? '<p style="color:#333;font-size:15px;margin-top:10px;">\u5F00\u653E\u65F6\u95F4\uFF1A' + startStr + ' \u2014 ' + endStr + '</p>' : '') +
+                '<button onclick="window.location.href=\'../index.html\'" style="margin-top:25px;padding:12px 40px;background:linear-gradient(135deg,#4a90e2,#357abd);color:white;border:none;border-radius:10px;font-size:16px;cursor:pointer;transition:all 0.3s;">\u8FD4\u56DE\u9996\u9875</button>' +
+                '</div>';
+            document.body.appendChild(overlay);
+            var cmdInput = document.getElementById('commandInput');
+            if (cmdInput) cmdInput.disabled = true;
+            var demoBtn = document.querySelector('.btn-demo');
+            if (demoBtn) demoBtn.disabled = true;
+            var submitBtn = document.querySelector('.btn-submit');
+            if (submitBtn) submitBtn.disabled = true;
+        } else if (labScheduleState === 'ended') {
+            var submitBtn2 = document.querySelector('.btn-submit');
+            if (submitBtn2) {
+                submitBtn2.disabled = true;
+                submitBtn2.title = '\u5B9E\u9A8C\u5DF2\u7ED3\u675F\uFF0C\u4E0D\u80FD\u518D\u63D0\u4EA4\u62A5\u544A';
+                submitBtn2.style.opacity = '0.5';
+                submitBtn2.style.cursor = 'not-allowed';
+            }
+            var banner = document.createElement('div');
+            banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:linear-gradient(135deg,#f39c12,#e67e22);color:white;text-align:center;padding:12px;font-size:15px;z-index:9998;box-shadow:0 -2px 10px rgba(0,0,0,0.2);';
+            banner.innerHTML = '\u26A0\uFE0F \u5B9E\u9A8C\u5DF2\u7ED3\u675F\uFF0C\u60A8\u53EF\u4EE5\u67E5\u770B\u5B9E\u9A8C\u5185\u5BB9\uFF0C\u4F46\u4E0D\u80FD\u518D\u63D0\u4EA4\u5B9E\u9A8C\u62A5\u544A';
+            document.body.appendChild(banner);
+            document.body.style.paddingBottom = '50px';
+        }
+    })();
+
+    function toggleHintPanel() {
+        var panel = document.getElementById('floatHintPanel');
+        if (panel.classList.contains('hidden')) {
+            panel.classList.remove('hidden');
+        } else {
+            panel.classList.add('hidden');
+        }
+    }
+
+    (function() {
+        var header = document.getElementById('floatHintHeader');
+        var panel = document.getElementById('floatHintPanel');
+        if (!header || !panel) return;
+        var dragging = false, offsetX = 0, offsetY = 0;
+        header.addEventListener('mousedown', function(e) {
+            dragging = true;
+            var rect = panel.getBoundingClientRect();
+            var parentRect = panel.parentElement.getBoundingClientRect();
+            offsetX = e.clientX - rect.left;
+            offsetY = e.clientY - rect.top;
+            panel.style.left = (rect.left - parentRect.left) + 'px';
+            panel.style.top = (rect.top - parentRect.top) + 'px';
+            panel.style.right = 'auto';
+            panel.style.bottom = 'auto';
+            e.preventDefault();
+        });
+        document.addEventListener('mousemove', function(e) {
+            if (!dragging) return;
+            var parentRect = panel.parentElement.getBoundingClientRect();
+            panel.style.left = (e.clientX - parentRect.left - offsetX) + 'px';
+            panel.style.top = (e.clientY - parentRect.top - offsetY) + 'px';
+        });
+        document.addEventListener('mouseup', function() { dragging = false; });
+    })();
+    </script>
+
+    <script>
+    document.addEventListener('paste', function(e) {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+            e.preventDefault();
+        }
+    }, true);
+    </script>
+
+</body>
+</html>

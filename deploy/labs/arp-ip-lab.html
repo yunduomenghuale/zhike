@@ -1,0 +1,1797 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>实验二：ARP与IP子网综合实验 - 计算机网络辅助教学平台</title>
+    <script src="lab-bridge.js"></script>
+    
+    
+    
+    
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', Arial, sans-serif; background: #0a0e27; color: #e0e0e0; min-height: 100vh; }
+        .main-layout { display: grid; grid-template-columns: 280px 1fr 300px; grid-template-rows: auto 1fr; height: calc(100vh - 50px); }
+        .top-bar { grid-column: 1/-1; background: linear-gradient(135deg, #1a1f3a 0%, #2d1b4e 100%); padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #4a90e2; }
+        .top-bar h1 { font-size: 18px; color: #38bdf8; }
+        .top-bar .exp-info { font-size: 13px; color: #94a3b8; }
+        .step-panel { background: #111633; border-right: 1px solid #1e2a5a; overflow-y: auto; padding: 10px; }
+        .step-panel h3 { color: #38bdf8; font-size: 14px; padding: 8px; margin-bottom: 5px; border-bottom: 1px solid #1e2a5a; }
+        .float-hint-panel { position: absolute; top: 10px; right: 10px; width: 340px; max-height: 200px; background: rgba(17,22,51,0.6); border: 1px solid rgba(245,158,11,0.4); border-radius: 10px; z-index: 9998; box-shadow: 0 4px 16px rgba(0,0,0,0.3); display: flex; flex-direction: column; overflow: hidden; }
+        .float-hint-panel.hidden { display: none; }
+        .float-hint-header { padding: 8px 12px; background: rgba(245,158,11,0.1); display: flex; justify-content: space-between; align-items: center; cursor: move; user-select: none; border-bottom: 1px solid rgba(245,158,11,0.3); }
+        .float-hint-header span { color: #fbbf24; font-size: 13px; font-weight: bold; }
+        .float-hint-close { background: none; border: none; color: #94a3b8; font-size: 16px; cursor: pointer; padding: 0 4px; line-height: 1; }
+        .float-hint-close:hover { color: #ef4444; }
+        .float-hint-body { padding: 10px 12px; font-size: 12px; color: #fbbf24; line-height: 1.7; overflow-y: auto; max-height: 150px; white-space: pre-line; }
+        .step-item { padding: 10px 12px; margin: 4px 0; border-radius: 8px; cursor: pointer; transition: all 0.3s; font-size: 13px; border-left: 3px solid transparent; line-height: 1.5; }
+        .step-item:hover { background: rgba(56,189,248,0.1); }
+        .step-item.active { background: rgba(56,189,248,0.15); border-left-color: #38bdf8; color: #fff; }
+        .step-item.completed { border-left-color: #22c55e; }
+        .step-item.completed .step-icon { color: #22c55e; }
+        .step-item.failed { border-left-color: #ef4444; }
+        .step-icon { margin-right: 6px; font-size: 14px; }
+        .sim-area { background: #0d1230; position: relative; overflow: hidden; display: flex; flex-direction: column; }
+        .sim-canvas-wrap { height: 320px; min-height: 260px; position: relative; flex-shrink: 0; }
+        #simCanvas { width: 100%; height: 100%; display: block; }
+        .console-area { flex: 1; background: #0b1025; border-top: 1px solid #1e2a5a; display: flex; flex-direction: column; min-height: 220px; }
+        .console-header { padding: 6px 12px; background: #0f1535; font-size: 12px; color: #38bdf8; display: flex; justify-content: space-between; align-items: center; }
+        .console-output { flex: 1; overflow-y: auto; padding: 8px 12px; background: #0a0f22; font-family: 'Consolas', 'Courier New', monospace; font-size: 13px; line-height: 1.6; color: #a3e635; }
+        .console-input-wrap { display: flex; border-top: 1px solid #1e2a5a; background: #0c1128; }
+        .console-prompt { padding: 8px; color: #38bdf8; font-family: 'Consolas', monospace; font-size: 13px; white-space: nowrap; }
+        .console-input { flex: 1; background: transparent; border: none; color: #a3e635; font-family: 'Consolas', monospace; font-size: 13px; padding: 8px 4px; outline: none; }
+        .info-panel { background: #111633; border-left: 1px solid #1e2a5a; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+        .panel-card { background: #0d1230; border: 1px solid #1e2a5a; border-radius: 8px; overflow: hidden; }
+        .panel-card-header { padding: 8px 12px; background: #151b3d; font-size: 13px; font-weight: bold; color: #38bdf8; display: flex; justify-content: space-between; align-items: center; }
+        .panel-card-body { padding: 10px 12px; font-size: 12px; max-height: 200px; overflow-y: auto; }
+        .arp-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        .arp-table th { background: #1a2150; color: #94a3b8; padding: 6px 8px; text-align: left; font-weight: normal; border-bottom: 1px solid #1e2a5a; }
+        .arp-table td { padding: 6px 8px; border-bottom: 1px solid #0d1230; color: #a3e635; }
+        .arp-table tr.new-entry td { animation: arpHighlight 1.5s ease; }
+        @keyframes arpHighlight { 0% { background: rgba(56,189,248,0.3); } 100% { background: transparent; } }
+        .frame-info { font-size: 12px; line-height: 1.8; }
+        .frame-info .label { color: #94a3b8; }
+        .frame-info .value { color: #fbbf24; font-family: 'Consolas', monospace; }
+        .eval-result { padding: 8px 12px; border-radius: 6px; font-size: 13px; margin-top: 6px; }
+        .eval-pass { background: rgba(34,197,94,0.15); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); }
+        .eval-fail { background: rgba(239,68,68,0.15); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
+        .btn { padding: 6px 14px; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; font-family: inherit; transition: all 0.3s; }
+        .btn-primary { background: #4a90e2; color: white; }
+        .btn-primary:hover { background: #357abd; }
+        .btn-success { background: #22c55e; color: white; }
+        .btn-success:hover { background: #16a34a; }
+        .btn-warning { background: #f59e0b; color: #1a1a1a; }
+        .btn-warning:hover { background: #d97706; }
+        .btn-sm { padding: 4px 10px; font-size: 11px; }
+        .score-bar { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+        .score-bar-track { flex: 1; height: 8px; background: #1a2150; border-radius: 4px; overflow: hidden; }
+        .score-bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s; background: linear-gradient(90deg, #4a90e2, #22c55e); }
+        .score-text { font-size: 14px; font-weight: bold; color: #38bdf8; min-width: 40px; text-align: right; }
+        .subnet-info { font-size: 12px; line-height: 1.8; }
+        .subnet-info .label { color: #94a3b8; }
+        .subnet-info .value { color: #a3e635; font-family: 'Consolas', monospace; }
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 10000; align-items: center; justify-content: center; }
+        .modal-overlay.show { display: flex; }
+        .modal-box { background: #151b3d; border: 2px solid #4a90e2; border-radius: 12px; padding: 30px; max-width: 600px; width: 90%; text-align: center; }
+        .modal-box h2 { color: #38bdf8; margin-bottom: 15px; }
+        .modal-box p { color: #94a3b8; margin-bottom: 20px; line-height: 1.8; }
+        .modal-box .final-score { font-size: 48px; color: #22c55e; font-weight: bold; margin: 15px 0; }
+        .sw-tab { padding: 3px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; border: 1px solid #1e2a5a; background: #0d1230; color: #94a3b8; transition: all 0.3s; }
+        .sw-tab.active { background: #4a90e2; color: #fff; border-color: #4a90e2; }
+        .sw-tab:hover { background: #1a2150; }
+        .sw-tab.active:hover { background: #357abd; }
+    </style>
+</head>
+<body>
+    <div class="top-bar">
+        <h1>实验二：ARP与IP子网综合实验</h1>
+        <div class="exp-info">计算机网络实验教| 虚拟仿真实验 | 配套教材：基于华为eNSP</div>
+    </div>
+
+    <div class="main-layout">
+    <div class="step-panel">
+        <h3>实验步骤</h3>
+        <div id="stepList"></div>
+        <div style="padding:10px; margin-top:10px;">
+            <div style="font-size:12px; color:#94a3b8; margin-bottom:6px;">实验进度</div>
+            <div class="score-bar">
+                <div class="score-bar-track"><div class="score-bar-fill" id="progressFill" style="width:0%"></div></div>
+                <span class="score-text" id="progressText">0%</span>
+            </div>
+        </div>
+        <div style="padding:10px;">
+            <div style="font-size:12px; color:#94a3b8; margin-bottom:6px;">实验评分</div>
+            <div class="score-bar">
+                <div class="score-bar-track"><div class="score-bar-fill" id="scoreFill" style="width:0%"></div></div>
+                <span class="score-text" id="scoreText">0</span>
+            </div>
+        </div>
+        <div style="padding:10px; display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn btn-primary btn-sm" onclick="resetExperiment()">重置实验</button>
+            <button class="btn btn-warning btn-sm" onclick="showDemo()">演示模式</button>
+            <button class="btn btn-success btn-sm" onclick="submitExperiment()">提交报告</button>
+        </div>
+    </div>
+
+    <div class="sim-area">
+        <div class="sim-canvas-wrap">
+            <canvas id="simCanvas"></canvas>
+        </div>
+        <div class="float-hint-panel" id="floatHintPanel">
+            <div class="float-hint-header" id="floatHintHeader">
+                <span>💡 实验提示</span>
+                <button class="float-hint-close" onclick="toggleHintPanel()">×</button>
+            </div>
+            <div class="float-hint-body" id="hintBox">请按照左侧步骤依次完成实验。点击当前步骤可查看详细提示。</div>
+        </div>
+        <div class="console-area">
+            <div class="console-header">
+                <span id="consoleTitle">设备控制台</span>
+                <div style="display:flex;gap:4px;align-items:center;">
+                    <span style="font-size:11px;color:#94a3b8;">切换设备：</span>
+                    <button class="sw-tab active" data-device="PC1" onclick="switchDevice('PC1')">PC1</button>
+                    <button class="sw-tab" data-device="PC2" onclick="switchDevice('PC2')">PC2</button>
+                    <button class="sw-tab" data-device="PC3" onclick="switchDevice('PC3')">PC3</button>
+                    <button class="sw-tab" data-device="PC4" onclick="switchDevice('PC4')">PC4</button>
+                    <button class="sw-tab" data-device="AR1" onclick="switchDevice('AR1')">AR1</button>
+                    <button class="btn btn-sm" style="background:#1a2150;color:#94a3b8;margin-left:6px;" onclick="clearConsole()">清屏</button>
+                </div>
+            </div>
+            <div class="console-output" id="consoleOutput"></div>
+            <div class="console-input-wrap">
+                <span class="console-prompt" id="consolePrompt">PC1></span>
+                <input type="text" class="console-input" id="consoleInput" placeholder="输入命令后按回车..." onkeydown="handleCommand(event)">
+            </div>
+        </div>
+    </div>
+
+    <div class="info-panel">
+        <div class="panel-card">
+            <div class="panel-card-header">
+                <span>ARP缓存表</span>
+                <span id="arpTableDevice" style="font-size:11px;color:#94a3b8;">PC1</span>
+            </div>
+            <div class="panel-card-body" id="arpTableBody">
+                <table class="arp-table">
+                    <thead><tr><th>IP地址</th><th>MAC地址</th><th>类型</th></tr></thead>
+                    <tbody id="arpTableTbody"><tr><td colspan="3" style="color:#94a3b8;text-align:center;">(空表)</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="panel-card">
+            <div class="panel-card-header"><span>子网信息</span></div>
+            <div class="panel-card-body" id="subnetInfoBody">
+                <div class="subnet-info" id="subnetInfo">
+                    <span class="label">尚未进行子网划分</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel-card">
+            <div class="panel-card-header"><span>当前帧信息</span></div>
+            <div class="panel-card-body" id="frameInfoBody">
+                <div class="frame-info" id="frameInfo">
+                    <span class="label">等待帧传输..</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel-card">
+            <div class="panel-card-header"><span>步骤评判</span></div>
+            <div class="panel-card-body" id="evalBody">
+                <div style="color:#94a3b8;font-size:12px;">完成步骤后自动评估</div>
+            </div>
+        </div>
+    </div>
+    </div>
+
+    <div class="modal-overlay" id="resultModal">
+        <div class="modal-box">
+            <h2>实验报告</h2>
+            <p id="resultSummary"></p>
+            <div class="final-score" id="finalScore">0</div>
+            <p style="font-size:14px;">总分（满00分）</p>
+            <div id="resultDetails" style="text-align:left;margin:15px 0;font-size:13px;color:#94a3b8;line-height:2;"></div>
+            <button class="btn btn-primary" onclick="document.getElementById('resultModal').classList.remove('show')">关闭</button>
+            <button class="btn btn-success" onclick="LabReportGenerator.showConclusionDialog()" style="margin-left:10px;">生成实验报告</button>
+        </div>
+    </div>
+
+    <script>
+    // 随机化网络参数
+    var RAND_S1 = Math.floor(Math.random() * 9) + 1;
+    var RAND_S2 = Math.floor(Math.random() * 9) + 1;
+    while (RAND_S2 === RAND_S1) RAND_S2 = Math.floor(Math.random() * 9) + 1;
+    var PC1_IP = '192.168.' + RAND_S1 + '.1';
+    var PC2_IP = '192.168.' + RAND_S1 + '.2';
+    var PC3_IP = '192.168.' + RAND_S2 + '.1';
+    var PC4_IP = '192.168.' + RAND_S2 + '.2';
+    var AR1_G0_IP = '192.168.' + RAND_S1 + '.254';
+    var AR1_G1_IP = '192.168.' + RAND_S2 + '.254';
+    var STATIC_ARP_IP = '192.168.' + RAND_S1 + '.100';
+    var SUBNET1 = '192.168.' + RAND_S1 + '.0';
+    var SUBNET2 = '192.168.' + RAND_S2 + '.0';
+
+    var DEVICES = {
+        AR1: {
+            type: 'router', name: 'AR1',
+            interfaces: {
+                'G0/0/0': { ip: '', mask: '', status: 'up' },
+                'G0/0/1': { ip: '', mask: '', status: 'up' }
+            },
+            arpTable: {},
+            x: 0, y: 0
+        },
+        S1: { type: 'switch', name: 'S1', x: 0, y: 0 },
+        S2: { type: 'switch', name: 'S2', x: 0, y: 0 },
+        PC1: { type:'pc', name:'PC1', ip:PC1_IP, mask:'255.255.255.0', mac:'5489-9800-0001', gateway:AR1_G0_IP, switch:'S1', arpTable:{}, x:0, y:0 },
+        PC2: { type:'pc', name:'PC2', ip:PC2_IP, mask:'255.255.255.0', mac:'5489-9800-0002', gateway:AR1_G0_IP, switch:'S1', arpTable:{}, x:0, y:0 },
+        PC3: { type:'pc', name:'PC3', ip:PC3_IP, mask:'255.255.255.0', mac:'5489-9800-0003', gateway:AR1_G1_IP, switch:'S2', arpTable:{}, x:0, y:0 },
+        PC4: { type:'pc', name:'PC4', ip:PC4_IP, mask:'255.255.255.0', mac:'5489-9800-0004', gateway:AR1_G1_IP, switch:'S2', arpTable:{}, x:0, y:0 }
+    };
+
+    var LINKS = [
+        { from:'AR1', fromPort:'G0/0/0', to:'S1', toPort:'' },
+        { from:'AR1', fromPort:'G0/0/1', to:'S2', toPort:'' },
+        { from:'S1', fromPort:'', to:'PC1', toPort:'' },
+        { from:'S1', fromPort:'', to:'PC2', toPort:'' },
+        { from:'S2', fromPort:'', to:'PC3', toPort:'' },
+        { from:'S2', fromPort:'', to:'PC4', toPort:'' }
+    ];
+
+    var STEPS = [
+        { id:1, title:'查看PC1初始ARP表', hint:'第1步：切换到PC1，输入arp -a', score:3, evalFn:'evalStep1' },
+        { id:2, title:'配置AR1的G0/0/0接口IP', hint:'第2步：切换到AR1，依次输入以下命令：\n1. system-view\n2. interface G0/0/0\n3. ip address ' + AR1_G0_IP + ' 255.255.255.0\n4. quit', score:6, evalFn:'evalStep2' },
+        { id:3, title:'配置AR1的G0/0/1接口IP', hint:'第3步：在AR1上，依次输入以下命令：\n1. interface G0/0/1\n2. ip address ' + AR1_G1_IP + ' 255.255.255.0\n3. quit\n4. quit', score:5, evalFn:'evalStep3' },
+        { id:4, title:'PC1 ping PC2观察同网段ARP', hint:'第4步：切换到PC1，输入ping ' + PC2_IP, score:7, evalFn:'evalStep4' },
+        { id:5, title:'查看PC1的ARP表确认PC2的MAC', hint:'第5步：在PC1上，输入 arp -a', score:3, evalFn:'evalStep5' },
+        { id:6, title:'理解ARP请求广播与响应单播', hint:'第6步：在PC1上输入 arp -broadcast 查看ARP请求广播和响应单播的详细过程', score:5, evalFn:'evalStep6' },
+        { id:7, title:'PC2 ping PC1观察ARP缓存命中', hint:'第7步：切换到PC2，输入ping ' + PC1_IP, score:3, evalFn:'evalStep7' },
+        { id:8, title:'理解直接交付与间接交付', hint:'第8步：在PC1上输入 deliver-mode 查看直接交付与间接交付的区别', score:5, evalFn:'evalStep8' },
+        { id:9, title:'PC1 ping PC3观察跨网段ARP', hint:'第9步：切换到PC1，输入ping ' + PC3_IP, score:10, evalFn:'evalStep9' },
+        { id:10, title:'查看PC1的ARP表确认网关MAC', hint:'第10步：在PC1上，输入 arp -a', score:3, evalFn:'evalStep10' },
+        { id:11, title:'查看AR1直连路由表', hint:'第11步：切换到AR1，输入 display ip routing-table 查看直连路由', score:5, evalFn:'evalStep11' },
+        { id:12, title:'查看AR1的ARP表', hint:'第12步：在AR1上，输入 display arp', score:3, evalFn:'evalStep12' },
+        { id:13, title:'PC3 ping PC4观察另一网段ARP', hint:'第13步：切换到PC3，输入ping ' + PC4_IP, score:3, evalFn:'evalStep13' },
+        { id:14, title:'在PC1上添加静态ARP', hint:'第14步：切换到PC1，输入arp -s ' + STATIC_ARP_IP + ' 5489-9800-0099', score:4, evalFn:'evalStep14' },
+        { id:15, title:'查看PC1的ARP表验证静态条目', hint:'第15步：在PC1上，输入 arp -a', score:3, evalFn:'evalStep15' },
+        { id:16, title:'删除静态ARP', hint:'第16步：在PC1上，输入 arp -d ' + STATIC_ARP_IP, score:3, evalFn:'evalStep16' },
+        { id:17, title:'子网划分：将' + SUBNET1 + '/24划为2个子网', hint:'第17步：输入 subnet ' + SUBNET1 + ' 255.255.255.128', score:5, evalFn:'evalStep17' },
+        { id:18, title:'子网划分：将' + SUBNET2 + '/24划为4个子网', hint:'第18步：输入 subnet ' + SUBNET2 + ' 255.255.255.192', score:4, evalFn:'evalStep18' },
+        { id:19, title:'路由聚合与最长前缀匹配', hint:'第19步：在AR1上输入 route-summary 查看路由聚合与最长前缀匹配原理', score:8, evalFn:'evalStep19' },
+        { id:20, title:'验证子网掩码对通信的影响', hint:'第20步：在PC1上，输入 ipconfig', score:4, evalFn:'evalStep20' },
+        { id:21, title:'ARP思考题', hint:'第21步：切换到PC1，输入 think-arp 查看思考题，再用 think-arp-answer <题号> <答案> 作答（需答对3题以上）', score:5, evalFn:'evalStep21' },
+        { id:22, title:'完成实验总结', hint:'第22步：总结ARP工作原理、静态与动态ARP区别、子网划分方法，点击提交报告', score:3, evalFn:'evalStep22' }
+    ];
+
+    var currentStep = 1;
+    var stepResults = {};
+    var totalScore = 0;
+    var animating = false;
+    var animFrame = null;
+    var framePackets = [];
+    var demoMode = false;
+    var demoUsed = false;
+    var demoTimer = null;
+
+    var currentDevice = 'PC1';
+    var viewMode = 'user';
+    var currentInterface = '';
+    var consoleHistory = {};
+
+    var step1Done = false;
+    var step2Done = false;
+    var step3Done = false;
+    var step4Done = false;
+    var step5Done = false;
+    var step6Done = false;
+    var step7Done = false;
+    var step8Done = false;
+    var step9Done = false;
+    var step10Done = false;
+    var step11Done = false;
+    var step12Done = false;
+    var step13Done = false;
+    var step14Done = false;
+    var step15Done = false;
+    var step16Done = false;
+    var step17Done = false;
+    var step18Done = false;
+    var step19Done = false;
+    var step20Done = false;
+    var step21Done = false;
+    var thinkArpAnswers = {};
+
+    var subnetResults = [];
+    var viewedArpDevices = {};
+
+    var canvas, ctx;
+
+    function init() {
+        LabScoringEnhance.init(30);
+        canvas = document.getElementById('simCanvas');
+        ctx = canvas.getContext('2d');
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+        renderStepList();
+        drawTopology();
+        switchDevice('PC1');
+        updateInfoPanels();
+    }
+
+    function resizeCanvas() {
+        var wrap = canvas.parentElement;
+        canvas.width = wrap.clientWidth;
+        canvas.height = wrap.clientHeight;
+        drawTopology();
+    }
+
+    function drawTopology() {
+        if (!ctx) return;
+        var w = canvas.width, h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+
+        DEVICES.AR1.x = w * 0.5;  DEVICES.AR1.y = h * 0.15;
+        DEVICES.S1.x = w * 0.25;  DEVICES.S1.y = h * 0.45;
+        DEVICES.S2.x = w * 0.75;  DEVICES.S2.y = h * 0.45;
+        DEVICES.PC1.x = w * 0.1;  DEVICES.PC1.y = h * 0.82;
+        DEVICES.PC2.x = w * 0.35; DEVICES.PC2.y = h * 0.82;
+        DEVICES.PC3.x = w * 0.65; DEVICES.PC3.y = h * 0.82;
+        DEVICES.PC4.x = w * 0.9;  DEVICES.PC4.y = h * 0.82;
+
+        for (var i = 0; i < LINKS.length; i++) {
+            var lk = LINKS[i];
+            var fd = DEVICES[lk.from], td = DEVICES[lk.to];
+            drawLink(fd.x, fd.y, td.x, td.y, lk.fromPort);
+        }
+
+        drawRouter(DEVICES.AR1.x, DEVICES.AR1.y, 'AR1');
+        drawSwitch(DEVICES.S1.x, DEVICES.S1.y, 'S1');
+        drawSwitch(DEVICES.S2.x, DEVICES.S2.y, 'S2');
+        drawPC(DEVICES.PC1.x, DEVICES.PC1.y, 'PC1', DEVICES.PC1);
+        drawPC(DEVICES.PC2.x, DEVICES.PC2.y, 'PC2', DEVICES.PC2);
+        drawPC(DEVICES.PC3.x, DEVICES.PC3.y, 'PC3', DEVICES.PC3);
+        drawPC(DEVICES.PC4.x, DEVICES.PC4.y, 'PC4', DEVICES.PC4);
+
+        drawFramePackets();
+    }
+
+    function drawTextWithShadow(text, x, y, color, font) {
+        ctx.font = font;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 3;
+        ctx.lineJoin = 'round';
+        ctx.strokeText(text, x, y);
+        ctx.fillStyle = color;
+        ctx.fillText(text, x, y);
+    }
+
+    function drawRouter(x, y, name) {
+        var rw = 120, rh = 55;
+        ctx.fillStyle = '#1a3a6a';
+        ctx.strokeStyle = '#f59e0b';
+        ctx.lineWidth = 2;
+        roundRect(ctx, x - rw/2, y - rh/2, rw, rh, 8);
+        ctx.fill(); ctx.stroke();
+
+        drawTextWithShadow(name, x, y - 12, '#ffffff', 'bold 14px Microsoft YaHei');
+        var g000 = DEVICES.AR1.interfaces['G0/0/0'];
+        var g001 = DEVICES.AR1.interfaces['G0/0/1'];
+        var g000Ip = g000.ip ? g000.ip : '未配置';
+        var g001Ip = g001.ip ? g001.ip : '未配置';
+        drawTextWithShadow('G0/0/0:' + g000Ip, x, y + 4, '#ffe066', '9px Consolas');
+        drawTextWithShadow('G0/0/1:' + g001Ip, x, y + 16, '#ffe066', '9px Consolas');
+    }
+
+    function drawSwitch(x, y, name) {
+        var sw = 90, sh = 45;
+        ctx.fillStyle = '#1a3a6a';
+        ctx.strokeStyle = '#4a90e2';
+        ctx.lineWidth = 2;
+        roundRect(ctx, x - sw/2, y - sh/2, sw, sh, 8);
+        ctx.fill(); ctx.stroke();
+
+        drawTextWithShadow(name, x, y - 6, '#ffffff', 'bold 13px Microsoft YaHei');
+        drawTextWithShadow('交换机', x, y + 10, '#ffe066', '11px Microsoft YaHei');
+    }
+
+    function drawPC(x, y, name, pc) {
+        var pw = 65, ph = 50;
+        ctx.fillStyle = '#1e3355';
+        ctx.strokeStyle = '#5b8dc9';
+        ctx.lineWidth = 1.5;
+        roundRect(ctx, x - pw/2, y - ph/2, pw, ph, 6);
+        ctx.fill(); ctx.stroke();
+
+        drawTextWithShadow(name, x, y - 16, '#ffffff', 'bold 12px Microsoft YaHei');
+        drawTextWithShadow(pc.ip, x, y, '#ffe066', '9px Consolas');
+        drawTextWithShadow(pc.mac, x, y + 12, '#ffe066', '9px Consolas');
+    }
+
+    function drawLink(x1, y1, x2, y2, port) {
+        ctx.beginPath();
+        ctx.strokeStyle = '#4a6a9a';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([]);
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+
+        if (port) {
+            var mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+            drawTextWithShadow(port, mx, my - 8, '#ffe066', 'bold 9px Consolas');
+        }
+    }
+
+    function roundRect(c, x, y, w, h, r) {
+        c.beginPath();
+        c.moveTo(x + r, y);
+        c.lineTo(x + w - r, y);
+        c.quadraticCurveTo(x + w, y, x + w, y + r);
+        c.lineTo(x + w, y + h - r);
+        c.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        c.lineTo(x + r, y + h);
+        c.quadraticCurveTo(x, y + h, x, y + h - r);
+        c.lineTo(x, y + r);
+        c.quadraticCurveTo(x, y, x + r, y);
+        c.closePath();
+    }
+
+    function drawFramePackets() {
+        for (var i = 0; i < framePackets.length; i++) {
+            var p = framePackets[i];
+            ctx.save();
+            ctx.globalAlpha = p.alpha || 1;
+            ctx.fillStyle = p.color || '#fbbf24';
+            ctx.strokeStyle = p.borderColor || '#f59e0b';
+            ctx.lineWidth = 2;
+            var lbl = p.label || 'FRAME';
+            ctx.font = 'bold 13px Consolas';
+            var tw = ctx.measureText(lbl).width;
+            var pw = tw + 20, ph = 28;
+            ctx.shadowColor = 'rgba(0,0,0,0.5)';
+            ctx.shadowBlur = 8;
+            ctx.shadowOffsetX = 2;
+            ctx.shadowOffsetY = 2;
+            roundRect(ctx, p.x - pw/2, p.y - ph/2, pw, ph, 6);
+            ctx.fill(); ctx.stroke();
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+            drawTextWithShadow(lbl, p.x, p.y, '#ffffff', 'bold 13px Consolas');
+            ctx.restore();
+        }
+    }
+
+    var deviceViewState = {};
+
+    function switchDevice(devName) {
+        if (currentDevice && currentDevice !== devName) {
+            deviceViewState[currentDevice] = { viewMode: viewMode, currentInterface: currentInterface };
+        }
+        currentDevice = devName;
+        if (deviceViewState[devName]) {
+            viewMode = deviceViewState[devName].viewMode;
+            currentInterface = deviceViewState[devName].currentInterface;
+        } else {
+            viewMode = 'user';
+            currentInterface = '';
+        }
+
+        var tabs = document.querySelectorAll('.sw-tab');
+        for (var i = 0; i < tabs.length; i++) {
+            tabs[i].classList.toggle('active', tabs[i].getAttribute('data-device') === devName);
+        }
+
+        updatePrompt();
+        updateInfoPanels();
+
+        if (!consoleHistory[devName]) {
+            consoleHistory[devName] = [];
+        }
+        var output = document.getElementById('consoleOutput');
+        output.innerHTML = '';
+        for (var j = 0; j < consoleHistory[devName].length; j++) {
+            var line = document.createElement('div');
+            line.textContent = consoleHistory[devName][j];
+            output.appendChild(line);
+        }
+        output.scrollTop = output.scrollHeight;
+    }
+
+    function updatePrompt() {
+        var prompt = document.getElementById('consolePrompt');
+        var dev = DEVICES[currentDevice];
+        if (dev.type === 'pc') {
+            prompt.textContent = currentDevice + '>';
+        } else if (dev.type === 'switch') {
+            prompt.textContent = '<' + currentDevice + '>';
+        } else if (dev.type === 'router') {
+            if (viewMode === 'user') {
+                prompt.textContent = '<' + currentDevice + '>';
+            } else if (viewMode === 'system') {
+                if (currentInterface) {
+                    prompt.textContent = '[' + currentDevice + '-' + currentInterface + ']';
+                } else {
+                    prompt.textContent = '[' + currentDevice + ']';
+                }
+            }
+        }
+    }
+
+    function consolePrint(text) {
+        var output = document.getElementById('consoleOutput');
+        var line = document.createElement('div');
+        line.textContent = text;
+        output.appendChild(line);
+        output.scrollTop = output.scrollHeight;
+        if (!consoleHistory[currentDevice]) consoleHistory[currentDevice] = [];
+        consoleHistory[currentDevice].push(text);
+    }
+
+    function clearConsole() {
+        document.getElementById('consoleOutput').innerHTML = '';
+        consoleHistory[currentDevice] = [];
+    }
+
+    function handleCommand(event) {
+        if (event.key !== 'Enter') return;
+        var input = document.getElementById('consoleInput');
+        var cmd = input.value.trim();
+        input.value = '';
+        if (!cmd) return;
+
+        var dev = DEVICES[currentDevice];
+        var promptText = document.getElementById('consolePrompt').textContent;
+        consolePrint(promptText + cmd);
+
+        var preParts = cmd.split(/\s+/);
+        if (preParts[0].toLowerCase() === 'subnet') {
+            if (preParts.length < 3) { consolePrint('用法: subnet <网络地址> <子网掩码>'); }
+            else { handleSubnet(preParts[1], preParts[2]); }
+            autoEvaluate();
+            return;
+        }
+
+        if (dev.type === 'pc') {
+            handlePCCommand(cmd);
+        } else if (dev.type === 'router') {
+            handleRouterCommand(cmd);
+        } else {
+            consolePrint('交换机仅作为二层转发设备，无需配置');
+        }
+        autoEvaluate();
+    }
+
+    function handlePCCommand(cmd) {
+        var pc = DEVICES[currentDevice];
+        var parts = cmd.split(/\s+/);
+        var base = parts[0].toLowerCase();
+
+        if (base === 'arp') {
+            if (parts[1] === '-a') {
+                handleArpA(currentDevice);
+            } else if (parts[1] === '-s') {
+                if (parts.length < 4) { consolePrint('用法: arp -s <IP地址> <MAC地址>'); return; }
+                handleArpS(currentDevice, parts[2], parts[3]);
+            } else if (parts[1] === '-d') {
+                if (parts.length < 3) { consolePrint('用法: arp -d <IP地址>'); return; }
+                handleArpD(currentDevice, parts[2]);
+            } else if (parts[1] === '-broadcast') {
+                handleArpBroadcast(currentDevice);
+            } else {
+                consolePrint('用法: arp -a | arp -s IP MAC | arp -d IP | arp -broadcast');
+            }
+        } else if (base === 'ping') {
+            if (parts.length < 2) { consolePrint('用法: ping <IP地址>'); return; }
+            handlePing(currentDevice, parts[1]);
+        } else if (base === 'ipconfig') {
+            consolePrint('以太网适配器信号');
+            consolePrint('  IP 地址 . . . . . . . . . : ' + pc.ip);
+            consolePrint('  子网掩码 . . . . . . . . : ' + pc.mask);
+            consolePrint('  默认网关 . . . . . . . . : ' + pc.gateway);
+            consolePrint('  MAC 地址 . . . . . . . . : ' + pc.mac);
+            if (currentDevice === 'PC1') step20Done = true;
+
+        } else if (base === 'deliver-mode') {
+            handleDeliverMode(currentDevice);
+        } else if (base === 'think-arp') {
+            handleThinkArp();
+        } else if (base === 'think-arp-answer') {
+            if (parts.length < 3) { consolePrint('用法: think-arp-answer <题号> <答案>'); return; }
+            handleThinkArpAnswer(parts[1], parts[2]);
+        } else if (base === '?' || base === 'help') {
+            consolePrint('可用命令:');
+            consolePrint('  ping <IP>          - 发送ping请求');
+            consolePrint('  arp -a             - 查看ARP');
+            consolePrint('  arp -s IP MAC      - 添加静态ARP');
+            consolePrint('  arp -d IP          - 删除ARP条目');
+            consolePrint('  arp -broadcast     - 查看ARP广播/单播过程');
+            consolePrint('  ipconfig           - 查看IP配置');
+            consolePrint('  subnet IP MASK     - 子网划分验证');
+            consolePrint('  deliver-mode       - 直接交付与间接交付');
+            consolePrint('  think-arp          - 查看ARP思考题');
+            consolePrint('  think-arp-answer N ANS - 回答思考题');
+        } else {
+            consolePrint('错误: 无法识别的命令"' + cmd + '"');
+            consolePrint('输入 ? 查看可用命令');
+            LabScoringEnhance.recordError(currentStep, cmd);
+        }
+    }
+
+    function handleArpA(pcName) {
+        var pc = DEVICES[pcName];
+        var keys = Object.keys(pc.arpTable);
+        if (keys.length === 0) {
+            consolePrint('ARP表为');
+        } else {
+            consolePrint('接口: ' + pc.ip + ' --- 0x3');
+            consolePrint('  Internet 地址         物理地址           类型');
+            for (var ip in pc.arpTable) {
+                var entry = pc.arpTable[ip];
+                var type = entry.type || '动态';
+                consolePrint('  ' + padRight(ip, 22) + padRight(entry.mac, 18) + type);
+            }
+        }
+        if (pcName === 'PC1' && keys.length === 0) step1Done = true;
+        if (pcName === 'PC1' && pc.arpTable[PC2_IP]) step5Done = true;
+        if (pcName === 'PC1' && pc.arpTable[AR1_G0_IP]) step10Done = true;
+        if (pcName === 'PC1' && pc.arpTable[STATIC_ARP_IP] && pc.arpTable[STATIC_ARP_IP].type === '静态') step15Done = true;
+        viewedArpDevices[pcName] = true;
+        updateInfoPanels();
+    }
+
+    function handleArpS(pcName, ip, mac) {
+        var pc = DEVICES[pcName];
+        pc.arpTable[ip] = { mac: mac, type: '静态' };
+        consolePrint('已添加静态ARP条目: ' + ip + ' -> ' + mac);
+        if (pcName === 'PC1' && ip === STATIC_ARP_IP && mac === '5489-9800-0099') step14Done = true;
+        updateInfoPanels();
+    }
+
+    function handleArpD(pcName, ip) {
+        var pc = DEVICES[pcName];
+        if (pc.arpTable[ip]) {
+            delete pc.arpTable[ip];
+            consolePrint('已删除ARP条目: ' + ip);
+            if (pcName === 'PC1' && ip === STATIC_ARP_IP) step16Done = true;
+        } else {
+            consolePrint('未找到ARP条目: ' + ip);
+        }
+        updateInfoPanels();
+    }
+
+    function handlePing(pcName, targetIp) {
+        var pc = DEVICES[pcName];
+        var targetPc = null;
+        var pcNames = ['PC1','PC2','PC3','PC4'];
+        for (var i = 0; i < pcNames.length; i++) {
+            if (DEVICES[pcNames[i]].ip === targetIp) {
+                targetPc = DEVICES[pcNames[i]];
+                break;
+            }
+        }
+        if (!targetPc) {
+            consolePrint('Ping ' + targetIp + ': 目标主机不可达');
+            return;
+        }
+
+        var sameSubnet = isSameSubnet(pc.ip, pc.mask, targetIp);
+
+        if (sameSubnet) {
+            handleSameSubnetPing(pcName, pc, targetPc, targetIp);
+        } else {
+            handleCrossSubnetPing(pcName, pc, targetPc, targetIp);
+        }
+    }
+
+    function isSameSubnet(ip1, mask, ip2) {
+        var a1 = ip1.split('.').map(Number);
+        var a2 = ip2.split('.').map(Number);
+        var m = mask.split('.').map(Number);
+        for (var i = 0; i < 4; i++) {
+            if ((a1[i] & m[i]) !== (a2[i] & m[i])) return false;
+        }
+        return true;
+    }
+
+    function handleSameSubnetPing(pcName, pc, targetPc, targetIp) {
+        var hadArp = !!pc.arpTable[targetIp];
+
+        if (!hadArp) {
+            consolePrint('正在解析 ' + targetIp + ' 的MAC地址...');
+            consolePrint('ARP Request: 广播请求 ' + targetIp + ' 的MAC');
+            consolePrint('ARP Reply: ' + targetIp + ' 回复MAC=' + targetPc.mac);
+        }
+
+        pc.arpTable[targetIp] = { mac: targetPc.mac, type: '动态' };
+        targetPc.arpTable[pc.ip] = { mac: pc.mac, type: '动态' };
+
+        var path = findSameSubnetPath(pcName, targetPc.name);
+        updateFrameInfo(pc.mac, targetPc.mac, pc.ip, targetIp, hadArp ? 'ARP缓存命中-ICMP Echo' : 'ARP请求→ARP响应→ICMP Echo');
+
+        animatePing(path, pc, targetPc, function() {
+            consolePrint('Ping ' + targetIp + ': 应答时间=1ms TTL=128');
+            consolePrint('Ping ' + targetIp + ': 应答时间=1ms TTL=128');
+            consolePrint('Ping ' + targetIp + ': 应答时间=1ms TTL=128');
+            consolePrint('--- ' + targetIp + ' Ping统计 ---');
+            consolePrint('  数据率 已发送3, 已接收3, 丢失=0');
+
+            if (pcName === 'PC1' && targetPc.name === 'PC2') step4Done = true;
+            if (pcName === 'PC2' && targetPc.name === 'PC1') step7Done = true;
+            if (pcName === 'PC3' && targetPc.name === 'PC4') step13Done = true;
+
+            updateInfoPanels();
+            autoEvaluate();
+        });
+    }
+
+    function handleCrossSubnetPing(pcName, pc, targetPc, targetIp) {
+        var g000 = DEVICES.AR1.interfaces['G0/0/0'];
+        var g001 = DEVICES.AR1.interfaces['G0/0/1'];
+
+        var gatewayIp = pc.gateway;
+        var gatewayIf = null;
+        var gatewayMac = '';
+        if (gatewayIp === '192.168.1.254') {
+            gatewayIf = g000;
+            gatewayMac = '5489-9800-A001';
+        } else if (gatewayIp === '192.168.2.254') {
+            gatewayIf = g001;
+            gatewayMac = '5489-9800-A002';
+        }
+
+        if (!gatewayIf || !gatewayIf.ip) {
+            consolePrint('Ping ' + targetIp + ': 目标主机不可达达（路由器接口未配置IP）');
+            consolePrint('请求超时');
+            updateFrameInfo(pc.mac, 'FF-FF-FF-FF-FF-FF', pc.ip, targetIp, 'ARP请求网关失败-路由器未配置');
+            return;
+        }
+
+        var hadGwArp = !!pc.arpTable[gatewayIp];
+        if (!hadGwArp) {
+            consolePrint('目标 ' + targetIp + ' 不在同一子网，需要通过网关转发');
+            consolePrint('ARP Request: 广播请求网关 ' + gatewayIp + ' 的MAC');
+            consolePrint('ARP Reply: 网关 ' + gatewayIp + ' 回复MAC=' + gatewayMac);
+        }
+
+        pc.arpTable[gatewayIp] = { mac: gatewayMac, type: '动态' };
+
+        var targetGateway = targetPc.gateway;
+        var targetGatewayMac = '';
+        if (targetGateway === '192.168.1.254') targetGatewayMac = '5489-9800-A001';
+        else if (targetGateway === '192.168.2.254') targetGatewayMac = '5489-9800-A002';
+
+        if (!DEVICES.AR1.arpTable[pc.ip]) {
+            DEVICES.AR1.arpTable[pc.ip] = { mac: pc.mac, type: '动态', interface: gatewayIp === '192.168.1.254' ? 'G0/0/0' : 'G0/0/1' };
+        }
+        if (!DEVICES.AR1.arpTable[targetPc.ip]) {
+            DEVICES.AR1.arpTable[targetPc.ip] = { mac: targetPc.mac, type: '动态', interface: targetGateway === '192.168.1.254' ? 'G0/0/0' : 'G0/0/1' };
+        }
+
+        if (!targetPc.arpTable[targetGateway]) {
+            targetPc.arpTable[targetGateway] = { mac: targetGatewayMac, type: '动态' };
+        }
+        targetPc.arpTable[pc.ip] = { mac: targetGatewayMac, type: '动态' };
+
+        var path = findCrossSubnetPath(pcName, targetPc.name);
+        updateFrameInfo(pc.mac, gatewayMac, pc.ip, targetIp, hadGwArp ? 'ARP缓存命中-经网关转发' : 'ARP请求网关→经路由器转发');
+
+        animatePing(path, pc, targetPc, function() {
+            consolePrint('Ping ' + targetIp + ': 应答时间=2ms TTL=127');
+            consolePrint('Ping ' + targetIp + ': 应答时间=2ms TTL=127');
+            consolePrint('Ping ' + targetIp + ': 应答时间=2ms TTL=127');
+            consolePrint('--- ' + targetIp + ' Ping统计 ---');
+            consolePrint('  数据率 已发送3, 已接收3, 丢失=0');
+
+            if (pcName === 'PC1' && targetPc.name === 'PC3') step9Done = true;
+
+            updateInfoPanels();
+            autoEvaluate();
+        });
+    }
+
+    function findSameSubnetPath(srcPc, dstPc) {
+        return [
+            { type:'pc', name:srcPc },
+            { type:'switch', name:DEVICES[srcPc].switch },
+            { type:'pc', name:dstPc }
+        ];
+    }
+
+    function findCrossSubnetPath(srcPc, dstPc) {
+        return [
+            { type:'pc', name:srcPc },
+            { type:'switch', name:DEVICES[srcPc].switch },
+            { type:'router', name:'AR1' },
+            { type:'switch', name:DEVICES[dstPc].switch },
+            { type:'pc', name:dstPc }
+        ];
+    }
+
+    function handleSubnet(networkAddr, subnetMask) {
+        var netParts = networkAddr.split('.').map(Number);
+        var maskParts = subnetMask.split('.').map(Number);
+
+        if (netParts.length !== 4 || maskParts.length !== 4) {
+            consolePrint('错误: 无效的IP地址或子网掩码格');
+            return;
+        }
+
+        var maskBits = 0;
+        for (var i = 0; i < 4; i++) {
+            maskBits += countBits(maskParts[i]);
+        }
+
+        var netAddr = [];
+        for (var j = 0; j < 4; j++) {
+            netAddr.push(netParts[j] & maskParts[j]);
+        }
+        var calculatedNet = netAddr.join('.');
+
+        var origBits = 0;
+        for (var k = 0; k < 4; k++) {
+            origBits += countBits(netParts[k] | (~maskParts[k] & 255));
+        }
+
+        var borrowBits = maskBits - (32 - (32 - maskBits));
+        var hostBits = 32 - maskBits;
+        var numSubnets = Math.pow(2, maskBits - getOriginalPrefix(networkAddr));
+        var hostsPerSubnet = Math.pow(2, hostBits) - 2;
+
+        var origPrefix = getOriginalPrefix(networkAddr);
+        var borrowedBits = maskBits - origPrefix;
+
+        if (borrowedBits < 0) {
+            consolePrint('错误: 子网掩码长度不能小于原始网络前缀');
+            return;
+        }
+
+        numSubnets = Math.pow(2, borrowedBits);
+        hostsPerSubnet = Math.pow(2, 32 - maskBits) - 2;
+
+        consolePrint('========================================');
+        consolePrint('子网划分结果');
+        consolePrint('========================================');
+        consolePrint('原始网络: ' + networkAddr + '/' + origPrefix);
+        consolePrint('子网掩码: ' + subnetMask + ' (/' + maskBits + ')');
+        consolePrint('借用位数: ' + borrowedBits);
+        consolePrint('子网数量: ' + numSubnets);
+        consolePrint('每个子网可用主机 ' + hostsPerSubnet);
+        consolePrint('----------------------------------------');
+
+        var subnetInfo = [];
+        for (var s = 0; s < numSubnets; s++) {
+            var subNetAddr = [];
+            var increment = Math.pow(2, 32 - maskBits) * s;
+            var addrVal = (netAddr[0] << 24 | netAddr[1] << 16 | netAddr[2] << 8 | netAddr[3]) + increment;
+            subNetAddr.push((addrVal >>> 24) & 255);
+            subNetAddr.push((addrVal >>> 16) & 255);
+            subNetAddr.push((addrVal >>> 8) & 255);
+            subNetAddr.push(addrVal & 255);
+
+            var broadcast = [];
+            var bcVal = addrVal + Math.pow(2, 32 - maskBits) - 1;
+            broadcast.push((bcVal >>> 24) & 255);
+            broadcast.push((bcVal >>> 16) & 255);
+            broadcast.push((bcVal >>> 8) & 255);
+            broadcast.push(bcVal & 255);
+
+            var firstHost = subNetAddr.slice();
+            firstHost[3] += 1;
+            var lastHost = broadcast.slice();
+            lastHost[3] -= 1;
+
+            consolePrint('子网 ' + (s+1) + ':');
+            consolePrint('  网络地址: ' + subNetAddr.join('.'));
+            consolePrint('  广播地址: ' + broadcast.join('.'));
+            consolePrint('  可用范围: ' + firstHost.join('.') + ' - ' + lastHost.join('.'));
+
+            subnetInfo.push({
+                network: subNetAddr.join('.'),
+                broadcast: broadcast.join('.'),
+                firstHost: firstHost.join('.'),
+                lastHost: lastHost.join('.'),
+                hosts: hostsPerSubnet
+            });
+        }
+        consolePrint('========================================');
+
+        subnetResults = subnetInfo;
+        updateSubnetPanel(subnetInfo);
+
+        if (networkAddr === '192.168.1.0' && subnetMask === '255.255.255.128') step17Done = true;
+        if (networkAddr === '192.168.2.0' && subnetMask === '255.255.255.192') step18Done = true;
+    }
+
+    function getOriginalPrefix(networkAddr) {
+        var parts = networkAddr.split('.').map(Number);
+        var first = parts[0];
+        if (first >= 1 && first <= 126) return 8;
+        if (first >= 128 && first <= 191) return 16;
+        if (first >= 192 && first <= 223) return 24;
+        return 24;
+    }
+
+    function countBits(n) {
+        var count = 0;
+        while (n) { count += n & 1; n >>= 1; }
+        return count;
+    }
+
+    function handleRouterCommand(cmd) {
+        var parts = cmd.split(/\s+/);
+        var base = parts[0].toLowerCase();
+
+        if (viewMode === 'user') {
+            if (base === 'display' || base === 'show') {
+                handleRouterDisplay(parts);
+            } else if (base === 'system-view') {
+                viewMode = 'system';
+                currentInterface = '';
+                consolePrint('Enter system view, return user view with Ctrl+Z.');
+                updatePrompt();
+            } else if (base === 'route-summary') {
+                handleRouteSummary();
+            } else if (base === '?' || base === 'help') {
+                consolePrint('可用命令:');
+                consolePrint('  display ip interface brief  - 查看接口IP简要信号');
+                consolePrint('  display arp                 - 查看ARP');
+                consolePrint('  display ip routing-table    - 查看路由表');
+                consolePrint('  route-summary               - 路由聚合与最长前缀匹配');
+                consolePrint('  system-view                 - 进入系统视图');
+            } else {
+                consolePrint('错误: 无法识别的命令"' + cmd + '"');
+                LabScoringEnhance.recordError(currentStep, cmd);
+            }
+        } else if (viewMode === 'system') {
+            if (currentInterface) {
+                handleRouterInterfaceCmd(parts, base, cmd);
+            } else {
+                handleRouterSystemCmd(parts, base, cmd);
+            }
+        }
+    }
+
+    function handleRouterDisplay(parts) {
+        var sub = parts.length > 1 ? parts[1].toLowerCase() : '';
+        var sub2 = parts.length > 2 ? parts[2].toLowerCase() : '';
+        var sub3 = parts.length > 3 ? parts[3].toLowerCase() : '';
+
+        if (sub === 'ip' && sub2 === 'interface' && sub3 === 'brief') {
+            consolePrint('接口          IP地址           子网掩码           状态');
+            consolePrint('-------------------------------------------------------');
+            for (var iface in DEVICES.AR1.interfaces) {
+                var inf = DEVICES.AR1.interfaces[iface];
+                var ipStr = inf.ip || '未配置';
+                var maskStr = inf.mask || '未配置';
+                consolePrint(padRight(iface, 14) + padRight(ipStr, 17) + padRight(maskStr, 19) + inf.status);
+            }
+        } else if (sub === 'arp') {
+            var keys = Object.keys(DEVICES.AR1.arpTable);
+            if (keys.length === 0) {
+                consolePrint('ARP表为');
+            } else {
+                consolePrint('IP地址            MAC地址           接口        类型');
+                consolePrint('-------------------------------------------------------');
+                for (var ip in DEVICES.AR1.arpTable) {
+                    var entry = DEVICES.AR1.arpTable[ip];
+                    consolePrint(padRight(ip, 18) + padRight(entry.mac, 18) + padRight(entry.interface || '', 12) + (entry.type || '动态'));
+                }
+            }
+            step12Done = true;
+            viewedArpDevices[currentDevice] = true;
+            updateInfoPanels();
+        } else if (sub === 'ip' && sub2 === 'routing-table') {
+            consolePrint('路由表：');
+            consolePrint('-------------------------------------------------------');
+            consolePrint('目的地址         子网掩码             接口       优先');
+            consolePrint('-------------------------------------------------------');
+            var hasRoute = false;
+            for (var iface in DEVICES.AR1.interfaces) {
+                var inf = DEVICES.AR1.interfaces[iface];
+                if (inf.ip && inf.mask) {
+                    var netAddr = calcNetworkAddr(inf.ip, inf.mask);
+                    consolePrint(padRight(netAddr, 17) + padRight(inf.mask, 21) + padRight(iface, 11) + '0');
+                    hasRoute = true;
+                }
+            }
+            if (!hasRoute) {
+                consolePrint('(无路由条目，请先配置接口IP)');
+            } else {
+                consolePrint('');
+                consolePrint('说明: 以上为直连路由(Direct路由)，优先级0为最高优先级');
+                consolePrint('直连路由是路由器接口配置IP后自动生成的路由条目');
+                step11Done = true;
+            }
+        } else {
+            consolePrint('错误: 无法识别的显示命令');
+            LabScoringEnhance.recordError(currentStep, 'display ' + parts.slice(1).join(' '));
+        }
+    }
+
+    function handleRouterSystemCmd(parts, base, cmd) {
+        if (base === 'interface') {
+            if (parts.length < 2) { consolePrint('用法: interface <接口'); return; }
+            var iface = parts[1];
+            if (iface.match(/^G0\/0\/\d+$/) || iface.match(/^GigabitEthernet0\/0\/\d+$/)) {
+                iface = iface.replace(/^GigabitEthernet/, 'G');
+                if (!DEVICES.AR1.interfaces[iface]) {
+                    consolePrint('错误: 接口 ' + iface + ' 不存在');
+                    return;
+                }
+                currentInterface = iface;
+                consolePrint('Enter interface ' + iface + ' view');
+                updatePrompt();
+            } else {
+                consolePrint('错误: 无效的接口名');
+            }
+        } else if (base === 'display' || base === 'show') {
+            handleRouterDisplay(parts);
+        } else if (base === 'route-summary') {
+            handleRouteSummary();
+        } else if (base === 'quit' || base === 'return') {
+            viewMode = 'user';
+            currentInterface = '';
+            consolePrint('Return to user view.');
+            updatePrompt();
+        } else if (base === '?' || base === 'help') {
+            consolePrint('可用命令:');
+            consolePrint('  interface G0/0/X           - 进入接口视图');
+            consolePrint('  display ip interface brief - 查看接口IP');
+            consolePrint('  display arp                - 查看ARP');
+            consolePrint('  display ip routing-table   - 查看路由表');
+            consolePrint('  route-summary              - 路由聚合与最长前缀匹配');
+            consolePrint('  quit                       - 返回用户视图');
+        } else {
+            consolePrint('错误: 无法识别的命令"' + cmd + '"');
+            LabScoringEnhance.recordError(currentStep, cmd);
+        }
+    }
+
+    function handleRouterInterfaceCmd(parts, base, cmd) {
+        var iface = currentInterface;
+
+        if (base === 'ip' && parts[1] === 'address') {
+            if (parts.length < 4) { consolePrint('用法: ip address <IP地址> <子网掩码>'); return; }
+            var ip = parts[2];
+            var mask = parts[3];
+            if (!isValidIp(ip) || !isValidIp(mask)) {
+                consolePrint('错误: 无效的IP地址或子网掩');
+                return;
+            }
+            DEVICES.AR1.interfaces[iface].ip = ip;
+            DEVICES.AR1.interfaces[iface].mask = mask;
+            consolePrint('接口 ' + iface + ' IP地址已配置为 ' + ip + ' ' + mask);
+
+            if (iface === 'G0/0/0' && ip === '192.168.1.254' && mask === '255.255.255.0') step2Done = true;
+            if (iface === 'G0/0/1' && ip === '192.168.2.254' && mask === '255.255.255.0') step3Done = true;
+
+            drawTopology();
+            updateInfoPanels();
+        } else if (base === 'quit' || base === 'return') {
+            currentInterface = '';
+            consolePrint('Return to system view.');
+            updatePrompt();
+        } else if (base === 'display' || base === 'show') {
+            handleRouterDisplay(parts);
+        } else if (base === '?' || base === 'help') {
+            consolePrint('可用命令:');
+            consolePrint('  ip address X.X.X.X M.M.M.M - 配置IP地址');
+            consolePrint('  display ip routing-table   - 查看路由表');
+            consolePrint('  route-summary              - 路由聚合与最长前缀匹配');
+            consolePrint('  quit                        - 返回系统视图');
+        } else {
+            consolePrint('错误: 无法识别的命令');
+            LabScoringEnhance.recordError(currentStep, cmd);
+        }
+    }
+
+    function handleArpBroadcast(pcName) {
+        var pc = DEVICES[pcName];
+        consolePrint('=== ARP请求广播与响应单播过程 ===');
+        consolePrint('');
+        consolePrint('【ARP请求(Request)】');
+        consolePrint('  源MAC地址: ' + pc.mac);
+        consolePrint('  目的MAC地址: FF-FF-FF-FF-FF-FF (广播地址)');
+        consolePrint('  源IP地址: ' + pc.ip);
+        consolePrint('  目的IP地址: 目标主机IP');
+        consolePrint('  发送方式: 广播(Broadcast) — 同一网段所有主机都能收到');
+        consolePrint('  说明: 因为不知道目标主机的MAC地址，所以必须广播询问');
+        consolePrint('');
+        consolePrint('【ARP响应(Reply)】');
+        consolePrint('  源MAC地址: 目标主机MAC地址');
+        consolePrint('  目的MAC地址: ' + pc.mac + ' (请求方MAC)');
+        consolePrint('  源IP地址: 目标主机IP');
+        consolePrint('  目的IP地址: ' + pc.ip);
+        consolePrint('  发送方式: 单播(Unicast) — 只回复给请求方');
+        consolePrint('  说明: 目标主机知道请求方的MAC地址，所以直接单播回复');
+        consolePrint('');
+        consolePrint('关键区别:');
+        consolePrint('  ARP请求 → 广播方式(一对所有)，因为不知道目标MAC');
+        consolePrint('  ARP响应 → 单播方式(一对一)，因为已知请求方MAC');
+        step6Done = true;
+    }
+
+    function handleDeliverMode(pcName) {
+        var pc = DEVICES[pcName];
+        consolePrint('=== 直接交付与间接交付 ===');
+        consolePrint('');
+        consolePrint('【直接交付(Direct Delivery)】');
+        consolePrint('  适用场景: 源主机与目标主机在同一网段');
+        consolePrint('  过程: 源主机直接通过ARP获取目标主机MAC地址');
+        consolePrint('  示例: PC1(192.168.1.1) → PC2(192.168.1.2)');
+        consolePrint('  特点: 不需要经过路由器，ARP请求直接发给目标主机');
+        consolePrint('  帧的目的MAC = 目标主机的MAC');
+        consolePrint('');
+        consolePrint('【间接交付(Indirect Delivery)】');
+        consolePrint('  适用场景: 源主机与目标主机不在同一网段');
+        consolePrint('  过程: 源主机通过ARP获取网关(路由器)接口的MAC地址');
+        consolePrint('  示例: PC1(192.168.1.1) → PC3(192.168.2.1)');
+        consolePrint('  特点: 需要经过路由器转发，ARP请求发给网关而非目标主机');
+        consolePrint('  帧的目的MAC = 网关(路由器)的MAC');
+        consolePrint('');
+        consolePrint('判断方法: 比较源IP与目标IP的网络部分(通过子网掩码)');
+        consolePrint('  网络部分相同 → 直接交付');
+        consolePrint('  网络部分不同 → 间接交付');
+        consolePrint('');
+        consolePrint('当前主机 ' + pcName + ' (' + pc.ip + '/' + pc.mask + '):');
+        var pcList = ['PC1','PC2','PC3','PC4'];
+        for (var i = 0; i < pcList.length; i++) {
+            if (pcList[i] === pcName) continue;
+            var target = DEVICES[pcList[i]];
+            var same = isSameSubnet(pc.ip, pc.mask, target.ip);
+            consolePrint('  → ' + pcList[i] + '(' + target.ip + '): ' + (same ? '直接交付(同网段)' : '间接交付(跨网段，经网关' + pc.gateway + ')'));
+        }
+        step8Done = true;
+    }
+
+    function handleRouteSummary() {
+        consolePrint('=== 路由聚合与最长前缀匹配 ===');
+        consolePrint('');
+        consolePrint('【路由聚合(Route Aggregation)】');
+        consolePrint('  将多个子网路由合并为一条更概括的路由条目');
+        consolePrint('  示例:');
+        consolePrint('    192.168.1.0/25 (掩码255.255.255.128)');
+        consolePrint('    192.168.1.128/25 (掩码255.255.255.128)');
+        consolePrint('    → 聚合为 192.168.1.0/24 (掩码255.255.255.0)');
+        consolePrint('  优点: 减少路由表条目数，降低路由器内存和CPU消耗');
+        consolePrint('  条件: 被聚合的子网必须具有相同的下一跳(出口接口)');
+        consolePrint('');
+        consolePrint('【最长前缀匹配(Longest Prefix Match)】');
+        consolePrint('  路由器查找路由表时，选择掩码最长(最精确)的匹配项');
+        consolePrint('  示例: 目标地址 192.168.1.130');
+        consolePrint('    路由表条目1: 192.168.1.0/24  → 掩码24位(匹配)');
+        consolePrint('    路由表条目2: 192.168.1.128/25 → 掩码25位(匹配，更长)');
+        consolePrint('  结果: 选择 192.168.1.128/25 这条更精确的路由');
+        consolePrint('');
+        consolePrint('  原则: 更长的前缀 = 更精确的匹配 = 更高的优先级');
+        consolePrint('  应用: 路由器总是选择最具体的路由来转发数据包');
+        consolePrint('');
+        consolePrint('当前AR1路由表中的直连路由:');
+        for (var iface in DEVICES.AR1.interfaces) {
+            var inf = DEVICES.AR1.interfaces[iface];
+            if (inf.ip && inf.mask) {
+                var netAddr = calcNetworkAddr(inf.ip, inf.mask);
+                var maskBits = countMaskBits(inf.mask);
+                consolePrint('  ' + netAddr + '/' + maskBits + ' via ' + iface);
+            }
+        }
+        step19Done = true;
+    }
+
+    function handleThinkArp() {
+        consolePrint('=== ARP思考题 ===');
+        consolePrint('');
+        consolePrint('请思考以下问题，使用 think-arp-answer <题号> <答案> 作答');
+        consolePrint('需答对3题以上才能通过本步骤');
+        consolePrint('');
+        consolePrint('题1: ARP表中的动态条目和静态条目有什么区别？');
+        consolePrint('  A. 动态条目会自动更新，静态条目不会');
+        consolePrint('  B. 动态条目有生存时间，静态条目永久有效');
+        consolePrint('  C. 动态条目由ARP协议自动学习，静态条目由管理员手动配置');
+        consolePrint('  D. 以上都对');
+        consolePrint('');
+        consolePrint('题2: ARP请求为什么使用广播方式发送？');
+        consolePrint('  A. 因为不知道目标主机的MAC地址');
+        consolePrint('  B. 因为广播效率更高');
+        consolePrint('  C. 因为交换机只支持广播');
+        consolePrint('');
+        consolePrint('题3: 当主机需要与不同网段的主机通信时，ARP请求的目标是谁？');
+        consolePrint('  A. 目标主机');
+        consolePrint('  B. 网关(路由器)');
+        consolePrint('  C. 广播域内所有主机');
+        consolePrint('');
+        consolePrint('题4: ARP表项的默认生存时间一般是多少？');
+        consolePrint('  A. 120秒');
+        consolePrint('  B. 600秒');
+        consolePrint('  C. 1800秒(30分钟)');
+        consolePrint('  D. 永久有效');
+        consolePrint('');
+        consolePrint('已答: ' + Object.keys(thinkArpAnswers).length + '/4 题');
+    }
+
+    function handleThinkArpAnswer(qNum, answer) {
+        var correct = { '1': 'D', '2': 'A', '3': 'B', '4': 'C' };
+        var num = String(qNum);
+        if (!correct[num]) {
+            consolePrint('错误: 题号必须是1-4');
+            return;
+        }
+        var ans = answer.toUpperCase();
+        thinkArpAnswers[num] = ans;
+        if (correct[num] === ans) {
+            consolePrint('题' + num + ': 回答正确！答案 ' + ans);
+        } else {
+            consolePrint('题' + num + ': 回答错误，正确答案是 ' + correct[num]);
+        }
+        var correctCount = 0;
+        for (var k in thinkArpAnswers) {
+            if (thinkArpAnswers[k] === correct[k]) correctCount++;
+        }
+        consolePrint('当前成绩: ' + correctCount + '/4 题正确');
+        if (correctCount >= 3) {
+            consolePrint('已答对3题以上，本步骤通过！');
+            step21Done = true;
+        } else {
+            consolePrint('还需答对 ' + (3 - correctCount) + ' 题才能通过');
+        }
+    }
+
+    function countMaskBits(mask) {
+        var parts = mask.split('.').map(Number);
+        var bits = 0;
+        for (var i = 0; i < 4; i++) bits += countBits(parts[i]);
+        return bits;
+    }
+
+    function isValidIp(ip) {
+        var parts = ip.split('.');
+        if (parts.length !== 4) return false;
+        for (var i = 0; i < 4; i++) {
+            var n = parseInt(parts[i]);
+            if (isNaN(n) || n < 0 || n > 255) return false;
+        }
+        return true;
+    }
+
+    function calcNetworkAddr(ip, mask) {
+        var ipParts = ip.split('.').map(Number);
+        var maskParts = mask.split('.').map(Number);
+        var result = [];
+        for (var i = 0; i < 4; i++) {
+            result.push(ipParts[i] & maskParts[i]);
+        }
+        return result.join('.');
+    }
+
+    function padRight(str, len) {
+        while (str.length < len) str += ' ';
+        return str;
+    }
+
+    function animatePing(path, srcPc, dstPc, callback) {
+        if (animating) return;
+        animating = true;
+
+        if (demoMode) {
+            animating = false;
+            if (callback) callback();
+            return;
+        }
+
+        var waypoints = [];
+        for (var i = 0; i < path.length; i++) {
+            var node = path[i];
+            var dev = DEVICES[node.name];
+            if (dev) waypoints.push({ x: dev.x, y: dev.y });
+        }
+
+        var packet = { x: waypoints[0].x, y: waypoints[0].y, color: '#fbbf24', borderColor: '#f59e0b', label: 'ICMP', alpha: 1 };
+        framePackets = [packet];
+
+        var totalSegments = waypoints.length - 1;
+        var currentSegment = 0;
+        var step = 0;
+        var stepsPerSegment = 30;
+
+        function animate() {
+            step++;
+            var t = easeInOut(step / stepsPerSegment);
+            var from = waypoints[currentSegment];
+            var to = waypoints[currentSegment + 1];
+            packet.x = from.x + (to.x - from.x) * t;
+            packet.y = from.y + (to.y - from.y) * t;
+            drawTopology();
+
+            if (step >= stepsPerSegment) {
+                currentSegment++;
+                step = 0;
+                if (currentSegment >= totalSegments) {
+                    setTimeout(function() {
+                        packet.color = '#4ade80';
+                        packet.borderColor = '#22c55e';
+                        packet.label = 'REPLY';
+                        updateFrameInfo(dstPc.mac, srcPc.mac, dstPc.ip, srcPc.ip, 'ICMP Echo Reply');
+
+                        var replySegment = totalSegments - 1;
+                        var replyStep = 0;
+                        function animateReply() {
+                            replyStep++;
+                            var rt = easeInOut(replyStep / stepsPerSegment);
+                            var rFrom = waypoints[replySegment + 1];
+                            var rTo = waypoints[replySegment];
+                            packet.x = rFrom.x + (rTo.x - rFrom.x) * rt;
+                            packet.y = rFrom.y + (rTo.y - rFrom.y) * rt;
+                            drawTopology();
+                            if (replyStep >= stepsPerSegment) {
+                                replySegment--;
+                                replyStep = 0;
+                                if (replySegment < 0) {
+                                    setTimeout(function() {
+                                        framePackets = [];
+                                        drawTopology();
+                                        animating = false;
+                                        if (callback) callback();
+                                    }, 300);
+                                    return;
+                                }
+                                setTimeout(function() { animFrame = requestAnimationFrame(animateReply); }, 1000);
+                            } else {
+                                animFrame = requestAnimationFrame(animateReply);
+                            }
+                        }
+                        animFrame = requestAnimationFrame(animateReply);
+                    }, 300);
+                    return;
+                }
+                setTimeout(function() { animFrame = requestAnimationFrame(animate); }, 1000);
+            }
+            animFrame = requestAnimationFrame(animate);
+        }
+        animFrame = requestAnimationFrame(animate);
+    }
+
+    function easeInOut(t) { return t < 0.5 ? 2*t*t : -1+(4-2*t)*t; }
+
+    function updateFrameInfo(srcMac, dstMac, srcIp, dstIp, action) {
+        document.getElementById('frameInfo').innerHTML =
+            '<div class="frame-info">' +
+            '<div><span class="label">源MAC：</span><span class="value">' + srcMac + '</span></div>' +
+            '<div><span class="label">目的MAC：</span><span class="value">' + dstMac + '</span></div>' +
+            '<div><span class="label">源IP：</span><span class="value">' + srcIp + '</span></div>' +
+            '<div><span class="label">目的IP：</span><span class="value">' + dstIp + '</span></div>' +
+            '<div><span class="label">动作：</span><span class="value">' + action + '</span></div>' +
+            '</div>';
+    }
+
+    function updateInfoPanels() {
+        var dev = DEVICES[currentDevice];
+        document.getElementById('arpTableDevice').textContent = currentDevice;
+
+        var arpTbody = document.getElementById('arpTableTbody');
+        var arpKeys = Object.keys(dev.arpTable);
+        if (arpKeys.length === 0) {
+            arpTbody.innerHTML = '<tr><td colspan="3" style="color:#94a3b8;text-align:center;">(空表)</td></tr>';
+        } else {
+            var html = '';
+            for (var ip in dev.arpTable) {
+                var entry = dev.arpTable[ip];
+                var type = entry.type || '动态';
+                html += '<tr class="new-entry"><td style="font-family:Consolas,monospace;">' + ip + '</td><td style="font-family:Consolas,monospace;">' + entry.mac + '</td><td>' + type + '</td></tr>';
+            }
+            arpTbody.innerHTML = html;
+        }
+    }
+
+    function updateSubnetPanel(subnetInfo) {
+        var html = '<div class="subnet-info">';
+        for (var i = 0; i < subnetInfo.length; i++) {
+            var s = subnetInfo[i];
+            html += '<div style="margin-bottom:6px;padding:4px 6px;background:rgba(56,189,248,0.05);border-radius:4px;">';
+            html += '<div><span class="label">子网' + (i+1) + '：</span><span class="value">' + s.network + '</span></div>';
+            html += '<div><span class="label">广播地址：</span><span class="value">' + s.broadcast + '</span></div>';
+            html += '<div><span class="label">范围：</span><span class="value">' + s.firstHost + ' - ' + s.lastHost + '</span></div>';
+            html += '</div>';
+        }
+        html += '</div>';
+        document.getElementById('subnetInfo').innerHTML = html;
+    }
+
+    function renderStepList() {
+        var html = '';
+        for (var i = 0; i < STEPS.length; i++) {
+            var s = STEPS[i];
+            var cls = '';
+            if (s.id === currentStep) cls = 'active';
+            if (stepResults[s.id] === 'pass') cls += ' completed';
+            if (stepResults[s.id] === 'fail') cls += ' failed';
+            var icon = stepResults[s.id] === 'pass' ? '✅' : stepResults[s.id] === 'fail' ? '❌' : (s.id === currentStep ? '▶️' : '⏳');
+            html += '<div class="step-item ' + cls + '" onclick="selectStep(' + s.id + ')">';
+            html += '<span class="step-icon">' + icon + '</span>';
+            html += '步骤' + s.id + '. ' + s.title;
+            html += '</div>';
+        }
+        document.getElementById('stepList').innerHTML = html;
+    }
+
+    function selectStep(id) {
+        currentStep = id;
+        var step = STEPS[id - 1];
+        document.getElementById('hintBox').textContent = step.hint;
+        renderStepList();
+    }
+
+    function autoEvaluate() {
+        var changed = false;
+        for (var i = 0; i < STEPS.length; i++) {
+            var s = STEPS[i];
+            if (stepResults[s.id]) continue;
+            var result = window[s.evalFn]();
+            if (result === 'pass' || result === 'fail') {
+                stepResults[s.id] = result;
+                showEvalResult(s.id, result);
+                changed = true;
+            }
+        }
+        if (changed) {
+            var nextStep = 0;
+            for (var j = 0; j < STEPS.length; j++) {
+                if (!stepResults[STEPS[j].id]) { nextStep = STEPS[j].id; break; }
+            }
+            if (nextStep) { currentStep = nextStep; document.getElementById('hintBox').textContent = STEPS[nextStep - 1].hint; }
+        }
+        updateProgress();
+        renderStepList();
+    }
+
+    function evalStep1() { return step1Done ? 'pass' : ''; }
+    function evalStep2() { return DEVICES.AR1.interfaces['G0/0/0'].ip === AR1_G0_IP ? 'pass' : ''; }
+    function evalStep3() { return DEVICES.AR1.interfaces['G0/0/1'].ip === AR1_G1_IP ? 'pass' : ''; }
+    function evalStep4() { return step4Done ? 'pass' : ''; }
+    function evalStep5() { return step5Done ? 'pass' : ''; }
+    function evalStep6() { return step6Done ? 'pass' : ''; }
+    function evalStep7() { return step7Done ? 'pass' : ''; }
+    function evalStep8() { return step8Done ? 'pass' : ''; }
+    function evalStep9() { return step9Done ? 'pass' : ''; }
+    function evalStep10() { return step10Done ? 'pass' : ''; }
+    function evalStep11() { return step11Done ? 'pass' : ''; }
+    function evalStep12() { return step12Done ? 'pass' : ''; }
+    function evalStep13() { return step13Done ? 'pass' : ''; }
+    function evalStep14() { return DEVICES.PC1.arpTable[STATIC_ARP_IP] && DEVICES.PC1.arpTable[STATIC_ARP_IP].type === '静态' ? 'pass' : ''; }
+    function evalStep15() { return step15Done ? 'pass' : ''; }
+    function evalStep16() { return !DEVICES.PC1.arpTable[STATIC_ARP_IP] ? 'pass' : ''; }
+    function evalStep17() { return step17Done ? 'pass' : ''; }
+    function evalStep18() { return step18Done ? 'pass' : ''; }
+    function evalStep19() { return step19Done ? 'pass' : ''; }
+    function evalStep20() { return step20Done ? 'pass' : ''; }
+    function evalStep21() { return step21Done ? 'pass' : ''; }
+    function evalStep22() {
+        var passed = 0;
+        for (var id in stepResults) { if (stepResults[id] === 'pass') passed++; }
+        return passed >= STEPS.length - 1 ? 'pass' : '';
+    }
+
+    function showEvalResult(stepId, result) {
+        var body = document.getElementById('evalBody');
+        var html = '';
+        for (var id in stepResults) {
+            var s = STEPS[id - 1];
+            var cls = stepResults[id] === 'pass' ? 'eval-pass' : 'eval-fail';
+            var txt = stepResults[id] === 'pass' ? '通过 (+' + s.score + '分)' : '未通过';
+            html += '<div class="eval-result ' + cls + '">步骤' + id + '. ' + txt + '</div>';
+        }
+        body.innerHTML = html;
+    }
+
+    function updateProgress() {
+        var completed = 0;
+        totalScore = 0;
+        for (var id in stepResults) {
+            if (stepResults[id] === 'pass') {
+                completed++;
+                totalScore += STEPS[id - 1].score;
+            }
+        }
+        var pct = Math.round(completed / STEPS.length * 100);
+        document.getElementById('progressFill').style.width = pct + '%';
+        document.getElementById('progressText').textContent = pct + '%';
+        var displayScore = Math.round(totalScore * 0.8);
+        document.getElementById('scoreFill').style.width = displayScore + '%';
+        document.getElementById('scoreText').textContent = displayScore + '/80';
+
+        var nextStep = null;
+        for (var i = 0; i < STEPS.length; i++) {
+            if (!stepResults[STEPS[i].id]) { nextStep = STEPS[i].id; break; }
+        }
+        if (nextStep) {
+            currentStep = nextStep;
+            document.getElementById('hintBox').textContent = STEPS[nextStep - 1].hint;
+        }
+    }
+
+    function resetExperiment() {
+        LabScoringEnhance.init(30);
+        DEVICES.AR1.interfaces = {
+            'G0/0/0': { ip: '', mask: '', status: 'up' },
+            'G0/0/1': { ip: '', mask: '', status: 'up' }
+        };
+        DEVICES.AR1.arpTable = {};
+        DEVICES.PC1.arpTable = {};
+        DEVICES.PC2.arpTable = {};
+        DEVICES.PC3.arpTable = {};
+        DEVICES.PC4.arpTable = {};
+
+        stepResults = {};
+        demoMode = false;
+        demoUsed = false;
+        totalScore = 0;
+        currentStep = 1;
+        viewMode = 'user';
+        currentInterface = '';
+        consoleHistory = {};
+        deviceViewState = {};
+        subnetResults = [];
+
+        step1Done = false; step2Done = false; step3Done = false; step4Done = false;
+        step5Done = false; step6Done = false; step7Done = false; step8Done = false;
+        step9Done = false; step10Done = false; step11Done = false; step12Done = false;
+        step13Done = false; step14Done = false; step15Done = false; step16Done = false;
+        step17Done = false; step18Done = false; step19Done = false; step20Done = false;
+        step21Done = false;
+        viewedArpDevices = {};
+        thinkArpAnswers = {};
+
+        framePackets = [];
+        animating = false;
+        switchDevice('PC1');
+        renderStepList();
+        updateProgress();
+        updateInfoPanels();
+        document.getElementById('evalBody').innerHTML = '<div style="color:#94a3b8;font-size:12px;">完成步骤后自动评估</div>';
+        document.getElementById('frameInfo').innerHTML = '<span class="label">等待帧传输..</span>';
+        document.getElementById('subnetInfo').innerHTML = '<span class="label">尚未进行子网划分</span>';
+        document.getElementById('hintBox').textContent = STEPS[0].hint;
+        clearConsole();
+        consolePrint('实验已重传');
+        drawTopology();
+    }
+
+    function showDemo() {
+        if (demoMode) { stopDemo(); return; }
+        resetExperiment();
+        demoMode = true;
+        demoUsed = true;
+        consolePrint('[演示模式] 演示开始，自动执行所有步骤..');
+
+        var actions = [
+            function() { switchDevice('PC1'); setInput('arp -a'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('AR1'); setInput('system-view'); handleCommand({key:'Enter'}); },
+            function() { setInput('interface G0/0/0'); handleCommand({key:'Enter'}); },
+            function() { setInput('ip address ' + AR1_G0_IP + ' 255.255.255.0'); handleCommand({key:'Enter'}); },
+            function() { setInput('quit'); handleCommand({key:'Enter'}); },
+            function() { setInput('interface G0/0/1'); handleCommand({key:'Enter'}); },
+            function() { setInput('ip address ' + AR1_G1_IP + ' 255.255.255.0'); handleCommand({key:'Enter'}); },
+            function() { setInput('quit'); handleCommand({key:'Enter'}); },
+            function() { setInput('quit'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('PC1'); setInput('ping ' + PC2_IP); handleCommand({key:'Enter'}); },
+            function() { setInput('arp -a'); handleCommand({key:'Enter'}); },
+            function() { setInput('arp -broadcast'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('PC2'); setInput('ping ' + PC1_IP); handleCommand({key:'Enter'}); },
+            function() { switchDevice('PC1'); setInput('deliver-mode'); handleCommand({key:'Enter'}); },
+            function() { setInput('ping ' + PC3_IP); handleCommand({key:'Enter'}); },
+            function() { setInput('arp -a'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('AR1'); setInput('display ip routing-table'); handleCommand({key:'Enter'}); },
+            function() { setInput('display arp'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('PC3'); setInput('ping ' + PC4_IP); handleCommand({key:'Enter'}); },
+            function() { switchDevice('PC1'); setInput('arp -s ' + STATIC_ARP_IP + ' 5489-9800-0099'); handleCommand({key:'Enter'}); },
+            function() { setInput('arp -a'); handleCommand({key:'Enter'}); },
+            function() { setInput('arp -d ' + STATIC_ARP_IP); handleCommand({key:'Enter'}); },
+            function() { setInput('subnet ' + SUBNET1 + ' 255.255.255.128'); handleCommand({key:'Enter'}); },
+            function() { setInput('subnet ' + SUBNET2 + ' 255.255.255.192'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('AR1'); setInput('route-summary'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('PC1'); setInput('ipconfig'); handleCommand({key:'Enter'}); },
+            function() { setInput('think-arp'); handleCommand({key:'Enter'}); },
+            function() { setInput('think-arp-answer 1 D'); handleCommand({key:'Enter'}); },
+            function() { setInput('think-arp-answer 2 A'); handleCommand({key:'Enter'}); },
+            function() { setInput('think-arp-answer 3 B'); handleCommand({key:'Enter'}); }
+        ];
+
+        var idx = 0;
+        function nextAction() {
+            if (idx >= actions.length || !demoMode) { demoMode = false; return; }
+            if (animating) { if (demoTimer) clearTimeout(demoTimer); demoTimer = setTimeout(nextAction, 300); return; }
+            actions[idx]();
+            idx++;
+            demoTimer = setTimeout(nextAction, 800);
+        }
+        nextAction();
+    }
+
+    function setInput(cmd) {
+        document.getElementById('consoleInput').value = cmd;
+    }
+
+    function stopDemo() {
+        demoMode = false;
+        if (demoTimer) clearTimeout(demoTimer);
+        consolePrint('[演示模式] 已停');
+    }
+
+    async function submitExperiment() {
+        if (labScheduleState === 'not_started') { alert('实验未开放，不能提交报告'); return; }
+        if (labScheduleState === 'ended') { alert('实验已结束，不能再提交报告'); return; }
+        if (demoMode || demoUsed) {
+            consolePrint('[提示] 演示模式下无法提交实验报告，请手动完成实验后提交换');
+            return;
+        }
+        autoEvaluate();
+        var passed = 0;
+        var stepScore = 0;
+        var details = '';
+        for (var i = 0; i < STEPS.length; i++) {
+            var s = STEPS[i];
+            if (stepResults[s.id] === 'pass') {
+                passed++;
+                stepScore += s.score;
+                details += '步骤' + s.id + '. ' + s.title + ' ' + s.score + '<br>';
+            } else {
+                details += '步骤' + s.id + '. ' + s.title + ' 0<br>';
+            }
+        }
+
+        var scoreResult = LabScoringEnhance.getFinalScore(stepScore, 100);
+        details += '<br>--- 综合评价 ---<br>';
+        details += LabScoringEnhance.formatDetails(scoreResult);
+
+        document.getElementById('resultSummary').textContent = '共完成' + passed + '/' + STEPS.length + ' 个实验步骤';
+        document.getElementById('finalScore').textContent = scoreResult.totalScore;
+        document.getElementById('finalScore').style.color = scoreResult.totalScore >= 60 ? '#22c55e' : '#ef4444';
+        document.getElementById('resultDetails').innerHTML = details;
+
+        var currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
+        if (currentUser.username && currentUser.type === 'student') {
+            try {
+                var labTitle = document.querySelector('.top-bar h1').textContent.trim();
+                var reportEntry = {
+                    labTitle: labTitle,
+                    score: scoreResult.totalScore,
+                    maxScore: 100,
+                    submitTime: new Date().toISOString(),
+                    mode: 'manual',
+                    details: details,
+                    baseScore: scoreResult.baseScore,
+                    accuracyScore: scoreResult.accuracyScore,
+                    efficiencyScore: scoreResult.efficiencyScore,
+                    errorCount: scoreResult.errorCount,
+                    elapsedMinutes: scoreResult.elapsedMinutes
+                };
+                var token = localStorage.getItem('authToken') || '';
+                var res = await fetch(API_BASE + '/api/lab-reports', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                    body: JSON.stringify({ studentId: currentUser.username, report: reportEntry })
+                });
+                var result = await res.json();
+                if (result.error) console.error('提交报告失败:', result.error);
+            } catch (e) { console.error('提交报告失败:', e); }
+        }
+
+        document.getElementById('resultModal').classList.add('show');
+
+        stepResults[22] = passed >= STEPS.length - 1 ? 'pass' : 'fail';
+        showEvalResult(22, stepResults[22]);
+        updateProgress();
+        renderStepList();
+    }
+
+    window.addEventListener('load', init);
+    </script>
+
+
+    <script>
+    (async function() {
+    var THIS_LAB_ID = 'arp-ip-lab';
+    var user = JSON.parse(localStorage.getItem('currentUser') || '{}');
+    var schedules = {};
+    try {
+        var res = await fetch(API_BASE + '/api/lab-schedules', {headers:{'Authorization':'Bearer '+(localStorage.getItem('authToken')||'')}});
+        var data = await res.json();
+        schedules = data.schedules || {};
+    } catch(e) {}
+    var s = schedules[THIS_LAB_ID] || {};
+    var now = new Date().getTime();
+    window.labScheduleState = 'not_started';
+    if (s.alwaysOpen) window.labScheduleState = 'open';
+    else if (s.startTime && now < new Date(s.startTime).getTime()) window.labScheduleState = 'not_started';
+    else if (s.endTime && now > new Date(s.endTime).getTime()) window.labScheduleState = 'ended';
+    else if (s.startTime || s.endTime) window.labScheduleState = 'open';
+
+    if (user.type === 'student' && labScheduleState === 'not_started') {
+        var startStr = s.startTime ? new Date(s.startTime).toLocaleString('zh-CN') : '';
+        var endStr = s.endTime ? new Date(s.endTime).toLocaleString('zh-CN') : '';
+        var overlay = document.createElement('div');
+        overlay.id = 'labScheduleOverlay';
+        overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:99999;display:flex;align-items:center;justify-content:center;';
+        overlay.innerHTML = '<div style="background:white;border-radius:20px;padding:40px 50px;text-align:center;max-width:500px;box-shadow:0 20px 60px rgba(0,0,0,0.3);">' +
+            '<div style="font-size:60px;margin-bottom:20px;">⏰</div>' +
+            '<h2 style="color:#e74c3c;margin-bottom:15px;">实验未开放</h2>' +
+            '<p style="color:#666;font-size:16px;line-height:1.8;">该实验尚未到开放时间，暂时无法操作</p>' +
+            (startStr ? '<p style="color:#333;font-size:15px;margin-top:10px;">开放时间：' + startStr + ' — ' + endStr + '</p>' : '') +
+            '<button onclick="window.location.href=\'../index.html\'" style="margin-top:25px;padding:12px 40px;background:linear-gradient(135deg,#4a90e2,#357abd);color:white;border:none;border-radius:10px;font-size:16px;cursor:pointer;transition:all 0.3s;">返回首页</button>' +
+            '</div>';
+        document.body.appendChild(overlay);
+        var cmdInput = document.getElementById('commandInput');
+        if (cmdInput) cmdInput.disabled = true;
+        var demoBtn = document.querySelector('.btn-demo');
+        if (demoBtn) demoBtn.disabled = true;
+        var submitBtn = document.querySelector('.btn-submit');
+        if (submitBtn) submitBtn.disabled = true;
+    } else if (user.type === 'student' && labScheduleState === 'ended') {
+        var submitBtn2 = document.querySelector('.btn-submit');
+        if (submitBtn2) {
+            submitBtn2.disabled = true;
+            submitBtn2.title = '实验已结束，不能再提交报告';
+            submitBtn2.style.opacity = '0.5';
+            submitBtn2.style.cursor = 'not-allowed';
+        }
+        var banner = document.createElement('div');
+        banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:linear-gradient(135deg,#f39c12,#e67e22);color:white;text-align:center;padding:12px;font-size:15px;z-index:9998;box-shadow:0 -2px 10px rgba(0,0,0,0.2);';
+        banner.innerHTML = '⚠️ 实验已结束，您可以查看实验内容，但不能再提交实验报告';
+        document.body.appendChild(banner);
+        document.body.style.paddingBottom = '50px';
+    }
+
+    function toggleHintPanel() {
+        var panel = document.getElementById('floatHintPanel');
+        if (panel.classList.contains('hidden')) {
+            panel.classList.remove('hidden');
+        } else {
+            panel.classList.add('hidden');
+        }
+    }
+
+    (function() {
+        var header = document.getElementById('floatHintHeader');
+        var panel = document.getElementById('floatHintPanel');
+        if (!header || !panel) return;
+        var dragging = false, offsetX = 0, offsetY = 0;
+        header.addEventListener('mousedown', function(e) {
+            dragging = true;
+            var rect = panel.getBoundingClientRect();
+            var parentRect = panel.parentElement.getBoundingClientRect();
+            offsetX = e.clientX - rect.left;
+            offsetY = e.clientY - rect.top;
+            panel.style.left = (rect.left - parentRect.left) + 'px';
+            panel.style.top = (rect.top - parentRect.top) + 'px';
+            panel.style.right = 'auto';
+            panel.style.bottom = 'auto';
+            e.preventDefault();
+        });
+        document.addEventListener('mousemove', function(e) {
+            if (!dragging) return;
+            var parentRect = panel.parentElement.getBoundingClientRect();
+            panel.style.left = (e.clientX - parentRect.left - offsetX) + 'px';
+            panel.style.top = (e.clientY - parentRect.top - offsetY) + 'px';
+        });
+        document.addEventListener('mouseup', function() { dragging = false; });
+    })();
+    })();
+    </script>
+    
+    
+    
+    <script>
+    document.addEventListener('paste', function(e) {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+            e.preventDefault();
+        }
+    }, true);
+    </script>
+</body>
+</html>

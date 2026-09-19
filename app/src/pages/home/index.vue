@@ -52,6 +52,7 @@ const studentFeatures = [
   { label: 'AI 助教', desc: '向知识库提问', icon: '💬', color: '#8b5cf6', bg: '#f5f3ff', url: '/pages/qa/index' },
   { label: '我的作业', desc: '提交课程作业', icon: '📝', color: '#0ea5e9', bg: '#f0f9ff', url: '/pages/homework/index' },
   { label: '我的考试', desc: '参加考试答题', icon: '📄', color: '#ef4444', bg: '#fef2f2', url: '/pages/exam/index' },
+  { label: '实验成绩', desc: '查看虚拟实验分数', icon: '🧪', color: '#14b8a6', bg: '#f0fdfa', url: '/pages/lab/grades' },
   { label: '错题本', desc: '复盘错题记录', icon: '📕', color: '#f59e0b', bg: '#fff7ed', url: '/pages/wrongbook/index' },
   { label: '消息通知', desc: '作业考试动态', icon: '🔔', color: '#10b981', bg: '#ecfdf5', url: '/pages/notify/index' },
   { label: '个人中心', desc: '维护账号资料', icon: '👤', color: '#64748b', bg: '#f1f5f9', tab: '/pages/profile/index' },

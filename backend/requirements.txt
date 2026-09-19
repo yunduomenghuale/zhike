@@ -13,6 +13,8 @@ openpyxl==3.1.5  # 学生账号 Excel 批量导入
 pypdf==5.1.0
 python-docx==1.1.2
 python-pptx==1.0.2
+# 实验报告 PDF 生成（DOCX 用 python-docx；中文字体见 deploy/fonts.conf + Dockerfile fonts-noto-cjk）
+reportlab==5.0.1
 # PDF 页面渲染为图片（Chrome PDFium 引擎，纯 pip 依赖，跨平台一致，替代 pdftoppm）
 pypdfium2==4.30.1
 pywin32==312; platform_system == "Windows"

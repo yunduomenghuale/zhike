@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>网络设备对比 - 计算机网络辅助教学平台</title>
+    
+    
+    
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', Arial, sans-serif; background: #0b1120; min-height: 100vh; padding: 20px;  color: #e2e8f0; }
+        .container { max-width: 1400px; margin: 0 auto; background: #0f172a; border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); padding: 30px; }
+        h1 { text-align: center; color: #e2e8f0; margin-bottom: 10px; font-size: 28px; }
+        .subtitle { text-align: center; color: #cbd5e1; margin-bottom: 30px; font-size: 14px; }
+        .section-title { font-size: 20px; font-weight: bold; color: #e2e8f0; margin-bottom: 20px; text-align: center; }
+
+        .comparison-section { background: #0f172a; border-radius: 15px; padding: 25px; margin-bottom: 30px; }
+        .comparison-tabs { display: flex; justify-content: center; gap: 10px; margin-bottom: 20px; }
+        .tab-btn { padding: 12px 24px; border: none; border-radius: 8px; background: #334155; color: #e2e8f0; font-size: 14px; font-weight: bold; cursor: pointer; transition: all 0.3s ease; text-align: center; }
+        .tab-btn:hover { background: #475569; }
+        .tab-btn.active { background: #0ea5e9; color: white; }
+        .comparison-content { display: none; }
+        .comparison-content.active { display: block; }
+
+        .media-card { background: #0f172a; border-radius: 10px; padding: 20px; margin-bottom: 20px; border: 2px solid #334155; transition: all 0.3s ease; }
+        .media-card:hover { border-color: #4a90e2; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        .media-header { display: flex; align-items: center; gap: 15px; margin-bottom: 15px; justify-content: center; }
+        .media-icon { width: 60px; height: 60px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 30px; }
+        .media-title { font-size: 24px; font-weight: bold; color: #e2e8f0; }
+        .media-subtitle { font-size: 13px; color: #cbd5e1; }
+
+        .media-photo { margin-bottom: 20px; text-align: center; }
+        .media-photo .photo-row { display: flex; gap: 15px; justify-content: center; margin-bottom: 10px; }
+        .media-photo a { display: inline-block; border-radius: 10px; overflow: hidden; border: 2px solid #334155; transition: all 0.3s; }
+        .media-photo a:hover { border-color: #4a90e2; box-shadow: 0 4px 15px rgba(0,0,0,0.15); transform: translateY(-3px); }
+        .media-photo img { width: 280px; height: 200px; object-fit: cover; display: block; }
+        .media-photo .photo-caption { font-size: 13px; color: #94a3b8; }
+
+        .specs-table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        .specs-table th { background: #4a90e2; color: white; padding: 10px; text-align: left; font-size: 13px; }
+        .specs-table td { padding: 10px; border-bottom: 1px solid #334155; font-size: 13px; }
+        .specs-table td:first-child { font-weight: bold; color: #e2e8f0; width: 120px; }
+
+        .pros-cons { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .pros, .cons { background: #0f172a; border-radius: 8px; padding: 15px; }
+        .pros { border-left: 4px solid #2ecc71; }
+        .cons { border-left: 4px solid #e74c3c; }
+        .pros h4, .cons h4 { font-size: 16px; margin-bottom: 10px; }
+        .pros h4 { color: #2ecc71; }
+        .cons h4 { color: #e74c3c; }
+        .pros ul, .cons ul { list-style: none; padding-left: 0; }
+        .pros li, .cons li { padding: 5px 0; font-size: 14px; color: #94a3b8; position: relative; padding-left: 20px; }
+        .pros li::before { content: "✓"; position: absolute; left: 0; color: #2ecc71; font-weight: bold; }
+        .cons li::before { content: "✗"; position: absolute; left: 0; color: #e74c3c; font-weight: bold; }
+
+        .specs-table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        .specs-table th { background: #4a90e2; color: white; padding: 10px; text-align: left; font-size: 13px; }
+        .specs-table td { padding: 10px; border-bottom: 1px solid #334155; font-size: 13px; }
+        .specs-table td:first-child { font-weight: bold; color: #e2e8f0; width: 120px; }
+
+        .comparison-table { width: 100%; border-collapse: collapse; margin-top: 20px; background: #0f172a; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .comparison-table th { background: #1e293b; color: white; padding: 15px; text-align: center; font-size: 14px; }
+        .comparison-table td { padding: 12px; text-align: center; border-bottom: 1px solid #334155; font-size: 13px; }
+        .comparison-table tr:hover { background: #0f172a; }
+        .comparison-table .highlight { background: rgba(251, 191, 36, 0.1); font-weight: bold; }
+
+        .application-section { background: #0f172a; border-radius: 15px; padding: 25px; }
+        .application-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-top: 20px; }
+        .application-card { background: #0f172a; border-radius: 10px; padding: 20px; border: 2px solid #334155; transition: all 0.3s ease; }
+        .application-card:hover { border-color: #4a90e2; transform: translateY(-5px); box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        .application-card h3 { color: #4a90e2; margin-bottom: 10px; font-size: 16px; }
+        .application-card p { color: #cbd5e1; font-size: 14px; line-height: 1.8; }
+
+        .osi-diagram { background: #0f172a; border-radius: 10px; padding: 20px; margin: 20px 0; border: 2px solid #334155; }
+        .osi-layer { display: flex; align-items: center; padding: 12px 20px; margin: 4px 0; border-radius: 8px; font-size: 14px; font-weight: bold; transition: all 0.3s; }
+        .osi-layer:hover { transform: scale(1.02); }
+        .osi-layer .layer-num { width: 30px; height: 30px; border-radius: 50%; background: rgba(255,255,255,0.3); display: flex; align-items: center; justify-content: center; margin-right: 15px; font-size: 13px; }
+        .osi-layer .layer-name { margin-right: auto; }
+        .osi-layer .layer-device { font-size: 18px; font-weight: bold; margin-right: auto; }
+
+        .osi-3 { background: linear-gradient(135deg, #3498db, #2980b9); color: white; }
+        .osi-2 { background: linear-gradient(135deg, #9b59b6, #8e44ad); color: white; }
+        .osi-1 { background: linear-gradient(135deg, #636e72, #2d3436); color: white; }
+        .osi-active { box-shadow: 0 0 15px rgba(255,255,255,0.5); border: 2px solid #fff; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>网络设备对比分析</h1>
+        <p class="subtitle">集线器、交换机、路由器 工作原理、性能参数与应用场景对比</p>
+
+        <!-- OSI层次-->
+        <div class="comparison-section">
+            <div class="section-title">📊 三种设备在OSI模型中的工作层次</div>
+            <div class="osi-diagram">
+
+                <div class="osi-layer osi-3 osi-active"><span class="layer-num">3</span><span class="layer-name">网络层</span><span class="layer-device">路由器</span></div>
+                <div class="osi-layer osi-2 osi-active"><span class="layer-num">2</span><span class="layer-name">数据链路层</span><span class="layer-device">交换机</span></div>
+                <div class="osi-layer osi-1 osi-active"><span class="layer-num">1</span><span class="layer-name">物理层</span><span class="layer-device">集线器</span></div>
+            </div>
+        </div>
+
+        <!-- 详细对比 -->
+        <div class="comparison-section">
+            <div class="section-title">📋 设备详细对比</div>
+            <div class="comparison-tabs">
+                <button class="tab-btn active" onclick="showTab('hub')">集线器</button>
+                <button class="tab-btn" onclick="showTab('switch')">交换机</button>
+                <button class="tab-btn" onclick="showTab('router')">路由器</button>
+                <button class="tab-btn" onclick="showTab('table')">综合对比</button>
+            </div>
+
+            <!-- 集线器-->
+            <div class="comparison-content active" id="hub-content">
+                <div class="media-card">
+                    <div class="media-header">
+                        <div class="media-icon" style="background: linear-gradient(135deg, #636e72, #2d3436);">🔌</div>
+                        <div>
+                            <div class="media-title">集线器（Hub）</div>
+                            <div class="media-subtitle">工作在物理层，对接收到的信号进行广播转发</div>
+                        </div>
+                    </div>
+                    <table class="specs-table">
+                        <tr><th colspan="2">基本参数</th></tr>
+                        <tr><td>工作层次</td><td>物理层</td></tr>
+                        <tr><td>数据单元</td><td>比特（Bit）</td></tr>
+                        <tr><td>寻址方式</td><td>无寻址，广播转发</td></tr>
+                        <tr><td>转发方式</td><td>收到信号后向所有端口广播</td></tr>
+                        <tr><td>冲突</td><td>所有端口共享一个冲突域</td></tr>
+                        <tr><td>广播</td><td>所有端口共享一个广播域</td></tr>
+                        <tr><td>带宽共享</td><td>所有端口共享总带宽</td></tr>
+                        <tr><td>传输模式</td><td>半双工</td></tr>
+                    </table>
+                    <div class="pros-cons" style="margin-top:20px;">
+                        <div class="pros">
+                            <h4>✅ 优点</h4>
+                            <ul>
+                                <li>价格低廉，成本低</li>
+                                <li>结构简单，即插即用</li>
+                                <li>无需配置，安装方便</li>
+                                <li>适合小型网络临时组网</li>
+                            </ul>
+                        </div>
+                        <div class="cons">
+                            <h4>❌ 缺点</h4>
+                            <ul>
+                                <li>广播转发，安全性差</li>
+                                <li>所有端口共享带宽</li>
+                                <li>容易产生数据碰撞</li>
+                                <li>无法识别MAC地址</li>
+                                <li>半双工模式，效率低</li>
+                                <li>已基本被交换机淘汰</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 交换机-->
+            <div class="comparison-content" id="switch-content">
+                <div class="media-card">
+                    <div class="media-header">
+                        <div class="media-icon" style="background: linear-gradient(135deg, #9b59b6, #8e44ad);">🔀</div>
+                        <div>
+                            <div class="media-title">交换机（Switch）</div>
+                            <div class="media-subtitle">工作在数据链路层，基于MAC地址表进行点对点转发</div>
+                        </div>
+                    </div>
+                    <table class="specs-table">
+                        <tr><th colspan="2">基本参数</th></tr>
+                        <tr><td>工作层次</td><td>数据链路层（三层交换机可到网络层）</td></tr>
+                        <tr><td>数据单元</td><td>帧（Frame）</td></tr>
+                        <tr><td>寻址方式</td><td>基于MAC地址寻址</td></tr>
+                        <tr><td>转发方式</td><td>根据MAC地址表单播转发</td></tr>
+                        <tr><td>冲突</td><td>每个端口独立冲突</td></tr>
+                        <tr><td>广播</td><td>所有端口共享一个广播域（未划分VLAN时）</td></tr>
+                        <tr><td>带宽独享</td><td>每个端口独享带宽</td></tr>
+                        <tr><td>传输模式</td><td>全双工</td></tr>
+                        <tr><td>MAC地址表</td><td>自学习建立，记录端口与MAC的映射</td></tr>
+                    </table>
+                    <div class="pros-cons" style="margin-top:20px;">
+                        <div class="pros">
+                            <h4>✅ 优点</h4>
+                            <ul>
+                                <li>点对点转发，安全性高</li>
+                                <li>每个端口独享带宽</li>
+                                <li>全双工通信，效率高</li>
+                                <li>支持VLAN划分</li>
+                                <li>自学习MAC地址表</li>
+                                <li>性价比高，应用广泛</li>
+                            </ul>
+                        </div>
+                        <div class="cons">
+                            <h4>❌ 缺点</h4>
+                            <ul>
+                                <li>不能隔离广播域（需VLAN）</li>
+                                <li>不能连接不同网络</li>
+                                <li>二层交换不能路由</li>
+                                <li>MAC地址表容量有限</li>
+                                <li>广播风暴影响性能</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 路由器-->
+            <div class="comparison-content" id="router-content">
+                <div class="media-card">
+                    <div class="media-header">
+                        <div class="media-icon" style="background: linear-gradient(135deg, #3498db, #2980b9);">🌐</div>
+                        <div>
+                            <div class="media-title">路由器（Router）</div>
+                            <div class="media-subtitle">工作在网络层，基于IP地址和路由表进行跨网络转发</div>
+                        </div>
+                    </div>
+                    <table class="specs-table">
+                        <tr><th colspan="2">基本参数</th></tr>
+                        <tr><td>工作层次</td><td>网络层</td></tr>
+                        <tr><td>数据单元</td><td>数据率分组（Packet）</td></tr>
+                        <tr><td>寻址方式</td><td>基于IP地址寻址</td></tr>
+                        <tr><td>转发方式</td><td>根据路由表选择最佳路径转发</td></tr>
+                        <tr><td>冲突</td><td>每个端口独立冲突</td></tr>
+                        <tr><td>广播</td><td>每个端口独立广播</td></tr>
+                        <tr><td>路由协议</td><td>静态路由、RIP、OSPF、BGP等</td></tr>
+                        <tr><td>NAT功能</td><td>支持网络地址转换</td></tr>
+                        <tr><td>传输模式</td><td>全双工</td></tr>
+                    </table>
+                    <div class="pros-cons" style="margin-top:20px;">
+                        <div class="pros">
+                            <h4>✅ 优点</h4>
+                            <ul>
+                                <li>连接不同网络</li>
+                                <li>隔离广播域</li>
+                                <li>选择最佳传输路径</li>
+                                <li>支持NAT和防火墙功能</li>
+                                <li>安全性高，支持ACL</li>
+                                <li>支持多种路由协议</li>
+                            </ul>
+                        </div>
+                        <div class="cons">
+                            <h4>❌ 缺点</h4>
+                            <ul>
+                                <li>价格较高</li>
+                                <li>配置复杂</li>
+                                <li>转发速度低于交换机</li>
+                                <li>端口数量较少</li>
+                                <li>需要专业运维知识</li>
+                                <li>处理延迟相对较大</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 综合对比表格 -->
+            <div class="comparison-content" id="table-content">
+                <table class="comparison-table">
+                    <thead>
+                        <tr><th>对比</th><th>集线器（Hub）</th><th>交换机（Switch）</th><th>路由器（Router）</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td class="highlight">OSI层次</td><td>物理层</td><td>数据链路层</td><td>网络层</td></tr>
+                        <tr><td class="highlight">数据单元</td><td>比特（Bit）</td><td>帧（Frame）</td><td>分组（Packet）</td></tr>
+                        <tr><td>寻址依据</td><td>无</td><td>MAC地址</td><td>IP地址</td></tr>
+                        <tr><td>转发方式</td><td>广播</td><td>单播（基于MAC表）</td><td>路由选择（基于路由表）</td></tr>
+                        <tr><td>冲突域</td><td>1个（共享）</td><td>每端口</td><td>每端口</td></tr>
+                        <tr><td>广播域</td><td>1个（共享）</td><td>1个（VLAN可隔离）</td><td class="highlight">每端口</td></tr>
+                        <tr><td>带宽模式</td><td>共享</td><td class="highlight">独享</td><td class="highlight">独享</td></tr>
+                        <tr><td>传输模式</td><td>半双工</td><td class="highlight">全双工</td><td class="highlight">全双工</td></tr>
+                        <tr><td>网络互联</td><td>同网络内通信</td><td>同网络内通信</td><td class="highlight">跨网络互联</td></tr>
+                        <tr><td>安全性</td><td>低</td><td>中</td><td class="highlight">高</td></tr>
+                        <tr><td>价格</td><td class="highlight">低</td><td>中</td><td>高</td></tr>
+                        <tr><td>配置难度</td><td class="highlight">即插即用</td><td>简单</td><td>复杂</td></tr>
+                        <tr><td>当前状态</td><td>已淘汰</td><td class="highlight">广泛使用</td><td class="highlight">广泛使用</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 数据单元格式对比 -->
+        <div class="comparison-section">
+            <div class="section-title">📦 各设备处理的数据单元格式</div>
+            <div class="application-grid">
+                <div class="application-card">
+                    <h3>🔌 集线器比特处理</h3>
+                    <p>
+                        集线器工作在物理层，只识别电信号。<br><br>
+                        <strong>处理对象：</strong>比特流/0/1信号。<br>
+                        <strong>不识别：</strong>帧、MAC地址、IP地址<br>
+                        <strong>行为：</strong>将收到的电信号放大后向所有端口转发。<br>
+                        <strong>类比：</strong>像大喇叭广播，所有人都能听到
+                    </p>
+                </div>
+                <div class="application-card">
+                    <h3>🔀 交换机帧处理</h3>
+                    <p>
+                        交换机工作在数据链路层，识别帧结构<br><br>
+                        <strong>帧结构：</strong>[ 前导| 目的MAC | 源MAC | 类型 | 数据 | FCS ]<br>
+                        <strong>关键字段：</strong>目的MAC地址、源MAC地址<br>
+                        <strong>行为：</strong>读取目的MAC，查表后从对应端口转发。<br>
+                        <strong>类比：</strong>像快递分拣员，按地址精准投递
+                    </p>
+                </div>
+                <div class="application-card">
+                    <h3>🌐 路由器IP数据报处理</h3>
+                    <p>
+                        路由器工作在网络层，识别IP数据报<br><br>
+                        <strong>分组结构：</strong>[ 首部 | 数据 ]<br>
+                        <strong>关键字段：</strong>源IP地址、目的IP地址、TTL、协议<br>
+                        <strong>行为：</strong>读取目的IP，查路由表选择下一跳转发。<br>
+                        <strong>类比：</strong>像导航系统，规划最佳路由
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 应用场景 -->
+        <div class="application-section">
+            <div class="section-title">🎯 典型应用场景</div>
+            <div class="application-grid">
+                <div class="application-card">
+                    <h3>🔌 集线器应用（已淘汰）</h3>
+                    <p><strong>历史场景：</strong>早期小型局域网组网<br>
+                    <strong>临时组网：</strong>少量设备的临时连接<br>
+                    <strong>网络监测：</strong>端口镜像抓包分析<br>
+                    <strong>现状：</strong>已被交换机完全取代，市场上几乎不再销售。</p>
+                </div>
+                <div class="application-card">
+                    <h3>🔀 交换机应用</h3>
+                    <p><strong>局域网核心：</strong>企业/校园网接入层与汇聚层<br>
+                    <strong>数据中心：</strong>服务器集群互联。<br>
+                    <strong>家庭网络：</strong>多设备有线连接<br>
+                    <strong>VLAN划分：</strong>部门隔离、安全分组<br>
+                    <strong>PoE供电：</strong>IP电话、无线AP供电</p>
+                </div>
+                <div class="application-card">
+                    <h3>🌐 路由器应用</h3>
+                    <p><strong>网络互联：</strong>连接局域网与广域网<br>
+                    <strong>宽带接入：</strong>家庭/企业Internet接入<br>
+                    <strong>子网划分：</strong>大型网络分段管理<br>
+                    <strong>安全防护：</strong>NAT转换、ACL访问控制<br>
+                    <strong>VPN隧道：</strong>远程安全互联</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function showTab(tabName) {
+            document.querySelectorAll('.comparison-content').forEach(function(c) { c.classList.remove('active'); });
+            document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+            document.getElementById(tabName + '-content').classList.add('active');
+            event.target.classList.add('active');
+        }
+    </script>
+
+    
+    
+    
+</body>
+</html>

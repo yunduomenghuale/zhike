@@ -13,6 +13,7 @@ from apps.common.response import api_response
 from apps.courses.models import Catalog
 from apps.exams.models import Exam, ExamSubmission
 from apps.homework.models import Homework, HomeworkSubmission
+from apps.labs.models import Lab, LabSubmission
 from apps.questions.models import AnswerRecord, Question
 
 INACTIVE_DAYS = 7
@@ -58,6 +59,13 @@ def build_class_stats(classroom, course_id) -> dict:
     ))
     hw_total = len(hw_list)
     exam_total = len(exam_list_qs)
+    # 实验维度：本班本课程排课且已发布的实验集合
+    lab_list = list(Lab.objects.filter(
+        course_id=course_id, status=Lab.Status.PUBLISHED,
+        schedules__classroom=classroom,
+    ).distinct())
+    lab_total = len(lab_list)
+    lab_ids = {lab.id for lab in lab_list}
     now = timezone.now()
 
     rows = []
@@ -89,6 +97,15 @@ def build_class_stats(classroom, course_id) -> dict:
         exam_missing = [ex.name for ex in exam_list_qs if ex.id not in exam_taken_ids]
         avg_exam = exam_subs.aggregate(a=Avg("total_score"))["a"]
 
+        # 实验维度（循环外无法按生过滤的轻量查询；量级 = 班级人数 × 实验数）
+        lab_subs = LabSubmission.objects.filter(
+            student=stu, lab_id__in=lab_ids, status=LabSubmission.Status.SUBMITTED
+        )
+        lab_done_ids = set(lab_subs.values_list("lab_id", flat=True))
+        lab_done = len(lab_done_ids)
+        lab_missing = [lab.title for lab in lab_list if lab.id not in lab_done_ids]
+        avg_lab = lab_subs.aggregate(a=Avg("total_score"))["a"]
+
         last_ar = practice.order_by("-submitted_at").first()
         last_active = last_ar.submitted_at if last_ar else None
 
@@ -101,6 +118,8 @@ def build_class_stats(classroom, course_id) -> dict:
             warnings.append("作业缺交")
         if exam_total and exam_taken < exam_total:
             warnings.append("考试缺考")
+        if lab_total and lab_done < lab_total:
+            warnings.append("实验缺做")
 
         rows.append({
             "student_id": stu.id,
@@ -114,23 +133,32 @@ def build_class_stats(classroom, course_id) -> dict:
             "exam_taken": exam_taken,
             "exam_total": exam_total,
             "avg_exam_score": round(float(avg_exam), 1) if avg_exam is not None else None,
+            "experiment_done": lab_done,
+            "experiment_total": lab_total,
+            "avg_experiment_score": round(float(avg_lab), 1) if avg_lab is not None else None,
             "last_active": last_active,
             "warnings": warnings,
             "homework_missing": hw_missing,
             "exam_missing": exam_missing,
+            "lab_missing": lab_missing,
         })
 
     # 班级汇总
     acc_list = [r["accuracy"] for r in rows if r["accuracy"] is not None]
     exam_list = [r["avg_exam_score"] for r in rows if r["avg_exam_score"] is not None]
+    lab_scores = [r["avg_experiment_score"] for r in rows if r["avg_experiment_score"] is not None]
     student_count = len(rows)
     total_hw_slots = hw_total * student_count
     total_hw_sub = sum(r["homework_submitted"] for r in rows)
+    total_lab_slots = lab_total * student_count
+    total_lab_done = sum(r["experiment_done"] for r in rows)
     summary = {
         "student_count": student_count,
         "avg_accuracy": round(sum(acc_list) / len(acc_list)) if acc_list else None,
         "avg_exam_score": round(sum(exam_list) / len(exam_list), 1) if exam_list else None,
+        "avg_experiment_score": round(sum(lab_scores) / len(lab_scores), 1) if lab_scores else None,
         "homework_rate": round(total_hw_sub / total_hw_slots * 100) if total_hw_slots else None,
+        "experiment_rate": round(total_lab_done / total_lab_slots * 100) if total_lab_slots else None,
         "warning_count": sum(1 for r in rows if r["warnings"]),
     }
 
@@ -246,6 +274,23 @@ class ClassStudentDetailView(APIView):
                 "submitted_at": sub.submitted_at if taken else None,
             })
 
+        # 学生实验明细（仿 exams 块）
+        labs = []
+        for lab in Lab.objects.filter(
+            course_id=course.id, status=Lab.Status.PUBLISHED, schedules__classroom=classroom
+        ).distinct().order_by("order", "id"):
+            sub = LabSubmission.objects.filter(lab=lab, student=stu).first()
+            done = sub is not None and sub.status == LabSubmission.Status.SUBMITTED
+            labs.append({
+                "id": lab.id,
+                "title": lab.title,
+                "status": sub.status if sub else None,
+                "done": done,
+                "score": float(sub.total_score) if done and sub.total_score is not None else None,
+                "reviewed": sub.reviewed if sub else False,
+                "submitted_at": sub.submitted_at if done else None,
+            })
+
         recent = (
             AnswerRecord.objects.filter(
                 student=stu, scene=AnswerRecord.Scene.PRACTICE, question__course_id=course.id
@@ -345,6 +390,7 @@ class ClassStudentDetailView(APIView):
             "progress": progress,
             "homeworks": homeworks,
             "exams": exams,
+            "labs": labs,
             "recent_records": records,
         })
 

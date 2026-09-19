@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>第7章 网络安全（1学时） - 计算机网络思维导图</title>
+<style>
+* { margin: 0; padding: 0; }
+html { font-family: ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'; }
+#mindmap { display: block; width: 100vw; height: calc(100vh - 60px); margin-top: 60px; }
+.markmap-dark { background: #0b1120; color: #e2e8f0; }
+.nav-bar { position: fixed; top: 0; left: 0; right: 0; height: 60px; background: #0f172a; border-bottom: 2px solid #334155; display: flex; align-items: center; padding: 0 16px; z-index: 9999; gap: 6px; overflow-x: auto; overflow-y: hidden; white-space: nowrap; }
+.nav-bar::-webkit-scrollbar { height: 4px; }
+.nav-bar::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+.nav-bar .title { color: #e2e8f0; font-size: 14px; font-weight: bold; margin-right: 8px; white-space: nowrap; }
+.nav-bar a { color: #38bdf8; text-decoration: none; font-size: 12px; padding: 4px 8px; border-radius: 5px; transition: all 0.2s; white-space: nowrap; flex-shrink: 0; }
+.nav-bar a:hover { background: rgba(56,189,248,0.15); }
+.nav-bar a.active { background: #4a90e2; color: #fff; }
+.nav-bar .sep { color: #334155; margin: 0 2px; }
+.chapters-hidden .nav-bar { display: none !important; }
+.chapters-hidden #mindmap { margin-top: 0; height: 100vh; }
+</style>
+<link rel="stylesheet" href="../vendor/markmap/markmap-toolbar.css">
+</head>
+<body>
+<script>if(location.hash.includes("chapters-hidden"))document.documentElement.classList.add("chapters-hidden")</script>
+<div class="nav-bar">
+<span class="title">📚 计算机网络思维导图</span>
+<a href="index.html">📋 总览</a>
+<span class="sep">|</span>
+<a href="chapter1.html">第1章 概述</a>
+<a href="chapter2.html">第2章 物理层</a>
+<a href="chapter3.html">第3章 链路层</a>
+<a href="chapter4.html">第4章 网络层</a>
+<a href="chapter5.html">第5章 传输层</a>
+<a href="chapter6.html">第6章 应用层</a>
+<a href="chapter7.html" class="active">第7章 安全</a>
+<a href="chapter8.html">数据封装</a>
+</div>
+<svg id="mindmap"></svg>
+<script src="../vendor/markmap/d3.min.js"></script><script src="../vendor/markmap/markmap-view.js"></script><script src="../vendor/markmap/markmap-toolbar.js"></script><script>(()=>{setTimeout(()=>{const{markmap:S,mm:Q}=window,$=new S.Toolbar;$.attach(Q);const I=$.render();I.setAttribute("style","position:absolute;bottom:20px;right:20px"),document.body.append(I)})})()</script><script>((l,U,M,R)=>{const N=l();window.mm=N.Markmap.create("svg#mindmap",(U||N.deriveOptions)(R),M),window.matchMedia("(prefers-color-scheme: dark)").matches&&document.documentElement.classList.add("markmap-dark"),document.documentElement.classList.add("markmap-dark")})(()=>window.markmap,null,{"content":"第7章 网络安全（1学时）","children":[{"content":"网络安全概述","children":[{"content":"安全威胁","children":[],"payload":{"tag":"h4","lines":"0,0"}},{"content":"安全服务与安全机制","children":[],"payload":{"tag":"h4","lines":"0,0"}}],"payload":{"tag":"h3","lines":"0,0"}},{"content":"密码体制","children":[{"content":"对称密钥密码体制","children":[],"payload":{"tag":"h4","lines":"0,0"}},{"content":"公钥密码体制","children":[],"payload":{"tag":"h4","lines":"0,0"}}],"payload":{"tag":"h3","lines":"0,0"}},{"content":"数字签名与鉴别","children":[{"content":"数字签名原理","children":[],"payload":{"tag":"h4","lines":"0,0"}},{"content":"报文鉴别(MAC)","children":[],"payload":{"tag":"h4","lines":"0,0"}},{"content":"实体鉴别","children":[],"payload":{"tag":"h4","lines":"0,0"}}],"payload":{"tag":"h3","lines":"0,0"}},{"content":"密钥分配","children":[{"content":"对称密钥分配","children":[],"payload":{"tag":"h4","lines":"0,0"}},{"content":"公钥密钥分配","children":[],"payload":{"tag":"h4","lines":"0,0"}}],"payload":{"tag":"h3","lines":"0,0"}},{"content":"防火墙与入侵检测","children":[{"content":"防火墙技术","children":[],"payload":{"tag":"h4","lines":"0,0"}},{"content":"入侵检测系统(IDS)","children":[],"payload":{"tag":"h4","lines":"0,0"}}],"payload":{"tag":"h3","lines":"0,0"}}],"payload":{"tag":"h2","lines":"0,0"}})
+</script>
+</body>
+</html>

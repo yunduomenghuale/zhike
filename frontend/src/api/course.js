@@ -52,3 +52,27 @@ export const regenerateVideoScriptPage = (videoId, data) =>
 export const listWatchProgress = (params) => request.get('/watch-progress/', { params })
 export const reportVideoProgress = (videoId, data) =>
   request.post(`/videos/${videoId}/report-progress/`, data)
+
+// ===== 二期B：课程扩展资源（思维导图/交互演示） =====
+export const listCourseResources = (params) => request.get('/course-resources/', { params })
+export const createCourseResource = (data) => request.post('/course-resources/', data)
+export const deleteCourseResource = (id) => request.delete(`/course-resources/${id}/`)
+export const publishCourseResource = (id) => request.post(`/course-resources/${id}/publish/`)
+export const unpublishCourseResource = (id) => request.post(`/course-resources/${id}/unpublish/`)
+
+// ===== 二期C：数字人视频 =====
+export const listCourseVideos = (params) => request.get('/course-videos/', { params })
+export const uploadCourseVideo = ({ course, catalog, title, file, onProgress }) => {
+  const form = new FormData()
+  form.append('course', course)
+  form.append('catalog', catalog)
+  form.append('title', title)
+  form.append('file', file)
+  return request.post('/course-videos/', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    onUploadProgress: onProgress,
+  })
+}
+export const deleteCourseVideo = (id) => request.delete(`/course-videos/${id}/`)
+export const publishCourseVideo = (id) => request.post(`/course-videos/${id}/publish/`)
+export const unpublishCourseVideo = (id) => request.post(`/course-videos/${id}/unpublish/`)

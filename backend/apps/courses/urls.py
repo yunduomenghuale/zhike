@@ -2,6 +2,8 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     CatalogViewSet,
+    CourseResourceViewSet,
+    CourseVideoViewSet,
     CourseViewSet,
     PPTResourceViewSet,
     TeachingVideoViewSet,
@@ -14,5 +16,7 @@ router.register("catalogs", CatalogViewSet, basename="catalog")
 router.register("ppts", PPTResourceViewSet, basename="ppt")
 router.register("videos", TeachingVideoViewSet, basename="video")
 router.register("watch-progress", WatchProgressViewSet, basename="watch-progress")
+router.register("course-resources", CourseResourceViewSet, basename="course-resource")
+router.register("course-videos", CourseVideoViewSet, basename="course-video")
 
 urlpatterns = router.urls

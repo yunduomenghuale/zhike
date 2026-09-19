@@ -20,6 +20,7 @@ import {
   Notebook,
   Reading,
   TrendCharts,
+  VideoCamera,
 } from '@element-plus/icons-vue'
 import CourseWorkspaceShell from '@/components/CourseWorkspaceShell.vue'
 import { listCourses } from '@/api/course'
@@ -34,6 +35,7 @@ const tabs = [
   { name: 'course-questions', label: '题库', icon: EditPen },
   { name: 'course-homework', label: '作业', icon: Notebook },
   { name: 'course-exams', label: '考试', icon: Document },
+  { name: 'course-resources', label: '教学资源', icon: VideoCamera },
   { name: 'course-analytics', label: '学习统计', icon: TrendCharts },
 ]
 

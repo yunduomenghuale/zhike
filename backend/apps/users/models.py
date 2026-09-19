@@ -45,6 +45,7 @@ class Notification(BaseModel):
     class Type(models.TextChoices):
         HOMEWORK = "homework", "作业"
         EXAM = "exam", "考试"
+        LAB = "lab", "实验"
         SYSTEM = "system", "系统"
 
     user = models.ForeignKey(

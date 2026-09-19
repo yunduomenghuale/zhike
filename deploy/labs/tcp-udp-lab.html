@@ -1,0 +1,1781 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>实验五：传输层协议综合实验 - 计算机网络辅助教学平台</title>
+    <script src="lab-bridge.js"></script>
+    
+    
+    
+    
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', Arial, sans-serif; background: #0a0e27; color: #e0e0e0; min-height: 100vh; }
+        .main-layout { display: grid; grid-template-columns: 280px 1fr 300px; grid-template-rows: auto 1fr; height: calc(100vh - 50px); }
+        .top-bar { grid-column: 1/-1; background: linear-gradient(135deg, #1a1f3a 0%, #2d1b4e 100%); padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #4a90e2; }
+        .top-bar h1 { font-size: 18px; color: #38bdf8; }
+        .top-bar .exp-info { font-size: 13px; color: #94a3b8; }
+        .step-panel { background: #111633; border-right: 1px solid #1e2a5a; overflow-y: auto; padding: 10px; }
+        .step-panel h3 { color: #38bdf8; font-size: 14px; padding: 8px; margin-bottom: 5px; border-bottom: 1px solid #1e2a5a; }
+        .float-hint-panel { position: absolute; top: 10px; right: 10px; width: 340px; max-height: 200px; background: rgba(17,22,51,0.6); border: 1px solid rgba(245,158,11,0.4); border-radius: 10px; z-index: 9998; box-shadow: 0 4px 16px rgba(0,0,0,0.3); display: flex; flex-direction: column; overflow: hidden; }
+        .float-hint-panel.hidden { display: none; }
+        .float-hint-header { padding: 8px 12px; background: rgba(245,158,11,0.1); display: flex; justify-content: space-between; align-items: center; cursor: move; user-select: none; border-bottom: 1px solid rgba(245,158,11,0.3); }
+        .float-hint-header span { color: #fbbf24; font-size: 13px; font-weight: bold; }
+        .float-hint-close { background: none; border: none; color: #94a3b8; font-size: 16px; cursor: pointer; padding: 0 4px; line-height: 1; }
+        .float-hint-close:hover { color: #ef4444; }
+        .float-hint-body { padding: 10px 12px; font-size: 12px; color: #fbbf24; line-height: 1.7; overflow-y: auto; max-height: 150px; white-space: pre-line; }
+        .step-item { padding: 10px 12px; margin: 4px 0; border-radius: 8px; cursor: pointer; transition: all 0.3s; font-size: 13px; border-left: 3px solid transparent; line-height: 1.5; }
+        .step-item:hover { background: rgba(56,189,248,0.1); }
+        .step-item.active { background: rgba(56,189,248,0.15); border-left-color: #38bdf8; color: #fff; }
+        .step-item.completed { border-left-color: #22c55e; }
+        .step-item.completed .step-icon { color: #22c55e; }
+        .step-item.failed { border-left-color: #ef4444; }
+        .step-icon { margin-right: 6px; font-size: 14px; }
+        .sim-area { background: #0d1230; position: relative; overflow: hidden; display: flex; flex-direction: column; }
+        .sim-canvas-wrap { height: 320px; min-height: 260px; position: relative; flex-shrink: 0; }
+        #simCanvas { width: 100%; height: 100%; display: block; }
+        .console-area { flex: 1; background: #0b1025; border-top: 1px solid #1e2a5a; display: flex; flex-direction: column; min-height: 220px; }
+        .console-header { padding: 6px 12px; background: #0f1535; font-size: 12px; color: #38bdf8; display: flex; justify-content: space-between; align-items: center; }
+        .console-output { flex: 1; overflow-y: auto; padding: 8px 12px; background: #0a0f22; font-family: 'Consolas', 'Courier New', monospace; font-size: 13px; line-height: 1.6; color: #a3e635; }
+        .console-input-wrap { display: flex; border-top: 1px solid #1e2a5a; background: #0c1128; }
+        .console-prompt { padding: 8px; color: #38bdf8; font-family: 'Consolas', monospace; font-size: 13px; white-space: nowrap; }
+        .console-input { flex: 1; background: transparent; border: none; color: #a3e635; font-family: 'Consolas', monospace; font-size: 13px; padding: 8px 4px; outline: none; }
+        .info-panel { background: #111633; border-left: 1px solid #1e2a5a; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+        .panel-card { background: #0d1230; border: 1px solid #1e2a5a; border-radius: 8px; overflow: hidden; }
+        .panel-card-header { padding: 8px 12px; background: #151b3d; font-size: 13px; font-weight: bold; color: #38bdf8; display: flex; justify-content: space-between; align-items: center; }
+        .panel-card-body { padding: 10px 12px; font-size: 12px; max-height: 200px; overflow-y: auto; }
+        .info-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        .info-table th { background: #1a2150; color: #94a3b8; padding: 6px 8px; text-align: left; font-weight: normal; border-bottom: 1px solid #1e2a5a; }
+        .info-table td { padding: 6px 8px; border-bottom: 1px solid #0d1230; color: #a3e635; }
+        .info-table tr.new-entry td { animation: rowHighlight 1.5s ease; }
+        @keyframes rowHighlight { 0% { background: rgba(56,189,248,0.3); } 100% { background: transparent; } }
+        .frame-info { font-size: 12px; line-height: 1.8; }
+        .frame-info .label { color: #94a3b8; }
+        .frame-info .value { color: #fbbf24; font-family: 'Consolas', monospace; }
+        .eval-result { padding: 8px 12px; border-radius: 6px; font-size: 13px; margin-top: 6px; }
+        .eval-pass { background: rgba(34,197,94,0.15); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); }
+        .eval-fail { background: rgba(239,68,68,0.15); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
+        .btn { padding: 6px 14px; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; font-family: inherit; transition: all 0.3s; }
+        .btn-primary { background: #4a90e2; color: white; }
+        .btn-primary:hover { background: #357abd; }
+        .btn-success { background: #22c55e; color: white; }
+        .btn-success:hover { background: #16a34a; }
+        .btn-warning { background: #f59e0b; color: #1a1a1a; }
+        .btn-warning:hover { background: #d97706; }
+        .btn-sm { padding: 4px 10px; font-size: 11px; }
+        .score-bar { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+        .score-bar-track { flex: 1; height: 8px; background: #1a2150; border-radius: 4px; overflow: hidden; }
+        .score-bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s; background: linear-gradient(90deg, #4a90e2, #22c55e); }
+        .score-text { font-size: 14px; font-weight: bold; color: #38bdf8; min-width: 40px; text-align: right; }
+        .sw-tab { padding: 3px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; border: 1px solid #1e2a5a; background: #0d1230; color: #94a3b8; transition: all 0.3s; }
+        .sw-tab.active { background: #4a90e2; color: #fff; border-color: #4a90e2; }
+        .sw-tab:hover { background: #1a2150; }
+        .sw-tab.active:hover { background: #357abd; }
+        .state-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-family: 'Consolas', monospace; }
+        .state-closed { background: rgba(148,163,184,0.2); color: #94a3b8; }
+        .state-listen { background: rgba(56,189,248,0.2); color: #38bdf8; }
+        .state-syn-sent { background: rgba(245,158,11,0.2); color: #f59e0b; }
+        .state-syn-rcvd { background: rgba(245,158,11,0.2); color: #f59e0b; }
+        .state-established { background: rgba(34,197,94,0.2); color: #22c55e; }
+        .state-fin-wait1 { background: rgba(168,85,247,0.2); color: #a855f7; }
+        .state-fin-wait2 { background: rgba(168,85,247,0.2); color: #a855f7; }
+        .state-close-wait { background: rgba(239,68,68,0.2); color: #ef4444; }
+        .state-closing { background: rgba(239,68,68,0.2); color: #ef4444; }
+        .state-last-ack { background: rgba(239,68,68,0.2); color: #ef4444; }
+        .state-time-wait { background: rgba(99,102,241,0.2); color: #6366f1; }
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 10000; align-items: center; justify-content: center; }
+        .modal-overlay.show { display: flex; }
+        .modal-box { background: #151b3d; border: 2px solid #4a90e2; border-radius: 12px; padding: 30px; max-width: 600px; width: 90%; text-align: center; }
+        .modal-box h2 { color: #38bdf8; margin-bottom: 15px; }
+        .modal-box p { color: #94a3b8; margin-bottom: 20px; line-height: 1.8; }
+        .modal-box .final-score { font-size: 48px; color: #22c55e; font-weight: bold; margin: 15px 0; }
+        .state-flow { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; font-size: 11px; }
+        .state-flow .sf-state { padding: 2px 6px; border-radius: 3px; background: #1a2150; color: #94a3b8; font-family: 'Consolas', monospace; }
+        .state-flow .sf-state.current { background: rgba(56,189,248,0.3); color: #38bdf8; font-weight: bold; }
+        .state-flow .sf-arrow { color: #4a6a9a; }
+    </style>
+</head>
+<body>
+    <div class="top-bar">
+        <h1>实验五：传输层协议综合实系统</h1>
+        <div class="exp-info">计算机网络实验教| 虚拟仿真实验 | 配套教材：基于华为eNSP</div>
+    </div>
+
+    <div class="main-layout">
+    <div class="step-panel">
+        <h3>实验步骤</h3>
+        <div id="stepList"></div>
+        <div style="padding:10px; margin-top:10px;">
+            <div style="font-size:12px; color:#94a3b8; margin-bottom:6px;">实验进度</div>
+            <div class="score-bar">
+                <div class="score-bar-track"><div class="score-bar-fill" id="progressFill" style="width:0%"></div></div>
+                <span class="score-text" id="progressText">0%</span>
+            </div>
+        </div>
+        <div style="padding:10px;">
+            <div style="font-size:12px; color:#94a3b8; margin-bottom:6px;">实验评分</div>
+            <div class="score-bar">
+                <div class="score-bar-track"><div class="score-bar-fill" id="scoreFill" style="width:0%"></div></div>
+                <span class="score-text" id="scoreText">0</span>
+            </div>
+        </div>
+        <div style="padding:10px; display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn btn-primary btn-sm" onclick="resetExperiment()">重置实验</button>
+            <button class="btn btn-warning btn-sm" onclick="showDemo()">演示模式</button>
+            <button class="btn btn-success btn-sm" onclick="submitExperiment()">提交报告</button>
+        </div>
+    </div>
+
+    <div class="sim-area">
+        <div class="sim-canvas-wrap">
+            <canvas id="simCanvas"></canvas>
+        </div>
+        <div class="float-hint-panel" id="floatHintPanel">
+            <div class="float-hint-header" id="floatHintHeader">
+                <span>💡 实验提示</span>
+                <button class="float-hint-close" onclick="toggleHintPanel()">×</button>
+            </div>
+            <div class="float-hint-body" id="hintBox">请按照左侧步骤依次完成实验。点击当前步骤可查看详细提示。</div>
+        </div>
+        <div class="console-area">
+            <div class="console-header">
+                <span id="consoleTitle">设备控制台</span>
+                <div style="display:flex;gap:4px;align-items:center;">
+                    <span style="font-size:11px;color:#94a3b8;">切换设备：</span>
+                    <button class="sw-tab active" data-device="Client" onclick="switchDevice('Client')">Client</button>
+                    <button class="sw-tab" data-device="Server" onclick="switchDevice('Server')">Server</button>
+                    <button class="btn btn-sm" style="background:#1a2150;color:#94a3b8;margin-left:6px;" onclick="clearConsole()">清屏</button>
+                </div>
+            </div>
+            <div class="console-output" id="consoleOutput"></div>
+            <div class="console-input-wrap">
+                <span class="console-prompt" id="consolePrompt">Client&gt;</span>
+                <input type="text" class="console-input" id="consoleInput" placeholder="输入命令后按回车..." onkeydown="handleCommand(event)">
+            </div>
+        </div>
+    </div>
+
+    <div class="info-panel">
+        <div class="panel-card">
+            <div class="panel-card-header"><span>TCP连接状态表</span></div>
+            <div class="panel-card-body" id="tcpStatusBody">
+                <table class="info-table">
+                    <thead><tr><th>本地地址</th><th>本地端口</th><th>远端地址</th><th>远端端口</th><th>状态</th></tr></thead>
+                    <tbody id="tcpStatusTbody"><tr><td colspan="5" style="color:#94a3b8;text-align:center;">无TCP连接</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="panel-card">
+            <div class="panel-card-header"><span>当前报文详情</span></div>
+            <div class="panel-card-body" id="packetInfoBody">
+                <div class="frame-info" id="packetInfo">
+                    <span class="label">等待报文传输...</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel-card">
+            <div class="panel-card-header"><span>TCP状态变化</span></div>
+            <div class="panel-card-body" id="tcpStateBody">
+                <div id="stateFlowDiagram" style="font-size:12px; color:#94a3b8; line-height:2;">
+                    <div>Client: <span id="clientStateDisplay" class="state-badge state-closed">CLOSED</span></div>
+                    <div>Server: <span id="serverStateDisplay" class="state-badge state-listen">LISTEN</span></div>
+                    <div style="margin-top:6px;" id="stateTransitionText">等待操作...</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel-card">
+            <div class="panel-card-header"><span>UDP报文结构</span></div>
+            <div class="panel-card-body" id="udpStructBody">
+                <div style="font-size:12px; color:#94a3b8; line-height:1.8;" id="udpStructInfo">
+                    <div style="color:#94a3b8;">尚未发送UDP数据。</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel-card">
+            <div class="panel-card-header"><span>步骤评判</span></div>
+            <div class="panel-card-body" id="evalBody">
+                <div style="color:#94a3b8;font-size:12px;">完成步骤后自动评估</div>
+            </div>
+        </div>
+    </div>
+    </div>
+
+    <div class="modal-overlay" id="resultModal">
+        <div class="modal-box">
+            <h2>实验报告</h2>
+            <p id="resultSummary"></p>
+            <div class="final-score" id="finalScore">0</div>
+            <p style="font-size:14px;">总分（满00分）</p>
+            <div id="resultDetails" style="text-align:left;margin:15px 0;font-size:13px;color:#94a3b8;line-height:2;"></div>
+            <button class="btn btn-primary" onclick="document.getElementById('resultModal').classList.remove('show')">关闭</button>
+            <button class="btn btn-success" onclick="LabReportGenerator.showConclusionDialog()" style="margin-left:10px;">生成实验报告</button>
+        </div>
+    </div>
+
+    <script>
+    var RAND_SUBNET = Math.floor(Math.random() * 9) + 1;
+    var CLIENT_IP = '192.168.' + RAND_SUBNET + '.1';
+    var SERVER_IP = '192.168.' + RAND_SUBNET + '.100';
+    var CLIENT_PORT = Math.floor(Math.random() * 50000) + 10000;
+
+    var DEVICES = {
+        Client: { type: 'host', name: 'Client', ip: CLIENT_IP, mac: '5489-9800-0001', x: 0, y: 0 },
+        S1: { type: 'switch', name: 'S1', x: 0, y: 0 },
+        Server: { type: 'host', name: 'Server', ip: SERVER_IP, mac: '5489-9800-0100', x: 0, y: 0 }
+    };
+
+    var LINKS = [
+        { from: 'Client', to: 'S1' },
+        { from: 'S1', to: 'Server' }
+    ];
+
+    var STEPS = [
+        { id:1, title:'查看Client的TCP状态', hint:'第1步：切换到Client，输入display tcp status', score:3, evalFn:'evalStep1' },
+        { id:2, title:'发起TCP三次握手', hint:'第2步：在Client上，输入 tcp connect ' + SERVER_IP + ' 80', score:6, evalFn:'evalStep2' },
+        { id:3, title:'观察SYN报文', hint:'第3步：观察第一次握手SYN报文：源端口随机，目的端口80，序号随机，SYN=1', score:5, evalFn:'evalStep3' },
+        { id:4, title:'观察SYN+ACK报文', hint:'第4步：观察第二次握手SYN+ACK报文：Server回应SYN和ACK标志均置1', score:5, evalFn:'evalStep4' },
+        { id:5, title:'观察ACK报文，确认连接建立', hint:'第5步：观察第三次握手ACK报文：ACK=1，确认连接建立', score:4, evalFn:'evalStep5' },
+        { id:6, title:'查看TCP连接状态（ESTABLISHED）', hint:'第6步：在Client上，输入 display tcp status', score:3, evalFn:'evalStep6' },
+        { id:7, title:'发送HTTP请求', hint:'第7步：在Client上，输入 tcp send ' + SERVER_IP + ' 80 "GET / HTTP/1.1"', score:4, evalFn:'evalStep7' },
+        { id:8, title:'观察数据传输（PSH+ACK标志）', hint:'第8步：观察数据传输报文：PSH=1, ACK=1，表示推送数据', score:5, evalFn:'evalStep8' },
+        { id:9, title:'接收HTTP响应', hint:'第9步：观察Server返回的HTTP响应数据', score:5, evalFn:'evalStep9' },
+        { id:10, title:'发起TCP四次挥手', hint:'第10步：在Client上，输入 tcp close ' + SERVER_IP + ' 80', score:6, evalFn:'evalStep10' },
+        { id:11, title:'观察FIN报文', hint:'第11步：观察第一次挥手FIN报文：FIN=1, ACK=1，Client请求关闭', score:4, evalFn:'evalStep11' },
+        { id:12, title:'观察ACK确认', hint:'第12步：观察第二次挥手ACK报文：Server确认收到FIN', score:3, evalFn:'evalStep12' },
+        { id:13, title:'观察对端FIN报文', hint:'第13步：观察第三次挥手FIN报文：Server也请求关闭连接', score:4, evalFn:'evalStep13' },
+        { id:14, title:'观察最终ACK，确认连接释放', hint:'第14步：观察第四次挥手ACK报文：Client确认收到Server的FIN', score:4, evalFn:'evalStep14' },
+        { id:15, title:'查看TCP状态（TIME_WAIT→CLOSED）', hint:'第15步：在Client上，输入 display tcp status', score:3, evalFn:'evalStep15' },
+        { id:16, title:'TCP流量控制分析', hint:'第16步：在Client上，输入 tcp-flow-control，分析TCP滑动窗口流量控制机制', score:5, evalFn:'evalStep16' },
+        { id:17, title:'TCP拥塞控制分析', hint:'第17步：在Client上，输入 tcp-congestion-control，分析TCP拥塞控制四算法', score:5, evalFn:'evalStep17' },
+        { id:18, title:'发送UDP数据报', hint:'第18步：在Client上，输入 udp send ' + SERVER_IP + ' 53 "DNS查询"', score:6, evalFn:'evalStep18' },
+        { id:19, title:'UDP报文格式分析', hint:'第19步：在Client上，输入 udp-format，分析UDP首部8字节结构', score:5, evalFn:'evalStep19' },
+        { id:20, title:'UDP长报文与短报文对比', hint:'第20步：在Client上，输入 udp-length-compare，对比UDP长报文（4000字节）与短报文（28字节）', score:5, evalFn:'evalStep20' },
+        { id:21, title:'TCP与UDP思考题', hint:'第21步：在Client上，输入 think-tcp-udp 查看思考题，再用 think-tcp-udp-answer <题号> <答案> 作答（需答对2题以上）', score:5, evalFn:'evalStep21' },
+        { id:22, title:'完成实验总结', hint:'第22步：总结TCP与UDP的区别：TCP面向连接、可靠传输；UDP无连接、不可靠但高速', score:5, evalFn:'evalStep22' }
+    ];
+
+    var currentStep = 1;
+    var stepResults = {};
+    var totalScore = 0;
+    var animating = false;
+    var animFrame = null;
+    var framePackets = [];
+    var demoMode = false;
+    var demoUsed = false;
+    var demoTimer = null;
+
+    var currentDevice = 'Client';
+    var consoleHistory = {};
+
+    var clientTcpState = 'CLOSED';
+    var serverTcpState = 'LISTEN';
+    var tcpConnections = [];
+    var clientSeq = 1000;
+    var serverSeq = 5000;
+    var clientPort = CLIENT_PORT;
+    var serverPort = 80;
+
+    var stepFlags = {};
+    for (var si = 1; si <= 22; si++) stepFlags[si] = false;
+
+    var lastPacketInfo = null;
+    var udpSent = false;
+    var lastUdpInfo = null;
+    var thinkTcpUdpCorrect = {};
+
+    var canvas, ctx;
+
+    function init() {
+        LabScoringEnhance.init(30);
+        canvas = document.getElementById('simCanvas');
+        ctx = canvas.getContext('2d');
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+        renderStepList();
+        drawTopology();
+        switchDevice('Client');
+        updateInfoPanels();
+    }
+
+    function resizeCanvas() {
+        var wrap = canvas.parentElement;
+        canvas.width = wrap.clientWidth;
+        canvas.height = wrap.clientHeight;
+        drawTopology();
+    }
+
+    function drawTopology() {
+        if (!ctx) return;
+        var w = canvas.width, h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+
+        DEVICES.Client.x = w * 0.12;
+        DEVICES.Client.y = h * 0.5;
+        DEVICES.S1.x = w * 0.5;
+        DEVICES.S1.y = h * 0.5;
+        DEVICES.Server.x = w * 0.88;
+        DEVICES.Server.y = h * 0.5;
+
+        for (var i = 0; i < LINKS.length; i++) {
+            var lk = LINKS[i];
+            var fd = DEVICES[lk.from], td = DEVICES[lk.to];
+            drawLink(fd.x, fd.y, td.x, td.y);
+        }
+
+        drawHost(DEVICES.Client.x, DEVICES.Client.y, 'Client', '192.168.1.1');
+        drawSwitch(DEVICES.S1.x, DEVICES.S1.y, 'S1');
+        drawHost(DEVICES.Server.x, DEVICES.Server.y, 'Server', '192.168.1.100');
+
+        drawFramePackets();
+    }
+
+    function drawTextWithShadow(text, x, y, color, font) {
+        ctx.font = font;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 3;
+        ctx.lineJoin = 'round';
+        ctx.strokeText(text, x, y);
+        ctx.fillStyle = color;
+        ctx.fillText(text, x, y);
+    }
+
+    function drawHost(x, y, name, ip) {
+        var pw = 90, ph = 60;
+        ctx.fillStyle = '#1e3355';
+        ctx.strokeStyle = '#5b8dc9';
+        ctx.lineWidth = 2;
+        roundRect(ctx, x - pw/2, y - ph/2, pw, ph, 8);
+        ctx.fill(); ctx.stroke();
+
+        var monitorW = 50, monitorH = 30;
+        ctx.fillStyle = '#0d1a33';
+        ctx.strokeStyle = '#3a6a9a';
+        ctx.lineWidth = 1;
+        roundRect(ctx, x - monitorW/2, y - ph/2 + 6, monitorW, monitorH, 3);
+        ctx.fill(); ctx.stroke();
+
+        ctx.fillStyle = '#38bdf8';
+        ctx.fillRect(x - 4, y - ph/2 + 6 + monitorH, 8, 4);
+        ctx.fillStyle = '#3a6a9a';
+        ctx.fillRect(x - 12, y - ph/2 + 6 + monitorH + 4, 24, 3);
+
+        drawTextWithShadow(name, x, y + 8, '#ffffff', 'bold 13px Microsoft YaHei');
+        drawTextWithShadow(ip, x, y + 22, '#ffe066', '10px Consolas');
+    }
+
+    function drawSwitch(x, y, name) {
+        var sw = 90, sh = 50;
+        ctx.fillStyle = '#1a3a6a';
+        ctx.strokeStyle = '#4a90e2';
+        ctx.lineWidth = 2;
+        roundRect(ctx, x - sw/2, y - sh/2, sw, sh, 8);
+        ctx.fill(); ctx.stroke();
+
+        drawTextWithShadow(name, x, y - 8, '#ffffff', 'bold 14px Microsoft YaHei');
+        drawTextWithShadow('交换机', x, y + 10, '#ffe066', '11px Microsoft YaHei');
+
+        for (var i = 0; i < 4; i++) {
+            var px = x - 18 + i * 12;
+            var py = y + sh/2 + 2;
+            ctx.fillStyle = '#22c55e';
+            ctx.beginPath();
+            ctx.arc(px, py, 3, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    function drawLink(x1, y1, x2, y2) {
+        ctx.beginPath();
+        ctx.strokeStyle = '#4a6a9a';
+        ctx.lineWidth = 2;
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+    }
+
+    function roundRect(c, x, y, w, h, r) {
+        c.beginPath();
+        c.moveTo(x + r, y);
+        c.lineTo(x + w - r, y);
+        c.quadraticCurveTo(x + w, y, x + w, y + r);
+        c.lineTo(x + w, y + h - r);
+        c.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        c.lineTo(x + r, y + h);
+        c.quadraticCurveTo(x, y + h, x, y + h - r);
+        c.lineTo(x, y + r);
+        c.quadraticCurveTo(x, y, x + r, y);
+        c.closePath();
+    }
+
+    function drawFramePackets() {
+        for (var i = 0; i < framePackets.length; i++) {
+            var p = framePackets[i];
+            ctx.save();
+            ctx.globalAlpha = p.alpha || 1;
+            ctx.fillStyle = p.color || '#fbbf24';
+            ctx.strokeStyle = p.borderColor || '#f59e0b';
+            ctx.lineWidth = 2;
+            var line1 = p.line1 || p.label || 'PKT';
+            var line2 = p.line2 || '';
+            ctx.font = 'bold 13px Consolas';
+            var tw1 = ctx.measureText(line1).width;
+            var tw2 = line2 ? ctx.measureText(line2).width : 0;
+            var tw = Math.max(tw1, tw2);
+            var pw = tw + 24, ph = line2 ? 42 : 28;
+            var rx = p.x - pw/2, ry = p.y - ph/2;
+            ctx.shadowColor = 'rgba(0,0,0,0.5)';
+            ctx.shadowBlur = 8;
+            ctx.shadowOffsetX = 2;
+            ctx.shadowOffsetY = 2;
+            roundRect(ctx, rx, ry, pw, ph, 8);
+            ctx.fill(); ctx.stroke();
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+            if (line2) {
+                drawTextWithShadow(line1, p.x, p.y - 8, '#ffffff', 'bold 13px Consolas');
+                drawTextWithShadow(line2, p.x, p.y + 10, '#ffe066', '11px Consolas');
+            } else {
+                drawTextWithShadow(line1, p.x, p.y, '#ffffff', 'bold 13px Consolas');
+            }
+            ctx.restore();
+        }
+    }
+
+    var deviceViewState = {};
+
+    function switchDevice(devName) {
+        currentDevice = devName;
+        var tabs = document.querySelectorAll('.sw-tab');
+        for (var i = 0; i < tabs.length; i++) {
+            tabs[i].classList.toggle('active', tabs[i].getAttribute('data-device') === devName);
+        }
+        updatePrompt();
+        updateInfoPanels();
+
+        if (!consoleHistory[devName]) {
+            consoleHistory[devName] = [];
+        }
+        var output = document.getElementById('consoleOutput');
+        output.innerHTML = '';
+        for (var j = 0; j < consoleHistory[devName].length; j++) {
+            var line = document.createElement('div');
+            line.textContent = consoleHistory[devName][j];
+            output.appendChild(line);
+        }
+        output.scrollTop = output.scrollHeight;
+    }
+
+    function updatePrompt() {
+        var prompt = document.getElementById('consolePrompt');
+        prompt.textContent = currentDevice + '>';
+    }
+
+    function consolePrint(text) {
+        var output = document.getElementById('consoleOutput');
+        var line = document.createElement('div');
+        line.textContent = text;
+        output.appendChild(line);
+        output.scrollTop = output.scrollHeight;
+        if (!consoleHistory[currentDevice]) consoleHistory[currentDevice] = [];
+        consoleHistory[currentDevice].push(text);
+    }
+
+    function clearConsole() {
+        document.getElementById('consoleOutput').innerHTML = '';
+        consoleHistory[currentDevice] = [];
+    }
+
+    function handleCommand(event) {
+        if (event.key !== 'Enter') return;
+        var input = document.getElementById('consoleInput');
+        var cmd = input.value.trim();
+        input.value = '';
+        if (!cmd) return;
+
+        var promptText = document.getElementById('consolePrompt').textContent;
+        consolePrint(promptText + cmd);
+
+        if (currentDevice === 'Client') {
+            handleClientCommand(cmd);
+        } else {
+            handleServerCommand(cmd);
+        }
+        autoEvaluate();
+    }
+
+    function handleClientCommand(cmd) {
+        var parts = cmd.split(/\s+/);
+        var base = parts[0].toLowerCase();
+        var sub = (parts[1] || '').toLowerCase();
+        var sub2 = (parts[2] || '').toLowerCase();
+
+        if (base === 'display' && sub === 'tcp' && sub2 === 'status') {
+            displayTcpStatus('Client');
+        } else if (base === 'display' && sub === 'udp' && sub2 === 'status') {
+            displayUdpStatus('Client');
+        } else if (base === 'tcp' && sub === 'connect') {
+            handleTcpConnect(parts);
+        } else if (base === 'tcp' && sub === 'send') {
+            handleTcpSend(parts);
+        } else if (base === 'tcp' && sub === 'close') {
+            handleTcpClose(parts);
+        } else if (base === 'udp' && sub === 'send') {
+            handleUdpSend(parts);
+        } else if (base === 'tcp-flow-control') {
+            handleTcpFlowControl();
+        } else if (base === 'tcp-congestion-control') {
+            handleTcpCongestionControl();
+        } else if (base === 'udp-format') {
+            handleUdpFormat();
+        } else if (base === 'udp-length-compare') {
+            handleUdpLengthCompare();
+        } else if (base === 'think-tcp-udp') {
+            handleThinkTcpUdp();
+        } else if (base === 'think-tcp-udp-answer') {
+            if (parts.length < 3) { consolePrint('用法: think-tcp-udp-answer <题号> <答案>'); return; }
+            handleThinkTcpUdpAnswer(parts[1], parts[2]);
+        } else if (base === '?' || base === 'help') {
+            consolePrint('可用命令:');
+            consolePrint('  display tcp status           - 查看TCP连接状态');
+            consolePrint('  display udp status           - 查看UDP信息');
+            consolePrint('  tcp connect IP PORT          - 发起TCP连接');
+            consolePrint('  tcp send IP PORT DATA        - 发送TCP数据');
+            consolePrint('  tcp close IP PORT            - 关闭TCP连接');
+            consolePrint('  udp send IP PORT DATA        - 发送UDP数据报');
+            consolePrint('  tcp-flow-control             - TCP流量控制分析');
+            consolePrint('  tcp-congestion-control       - TCP拥塞控制分析');
+            consolePrint('  udp-format                   - UDP报文格式分析');
+            consolePrint('  udp-length-compare           - UDP长报文与短报文对比');
+            consolePrint('  think-tcp-udp                - TCP与UDP思考题');
+        } else {
+            consolePrint('错误: 无法识别的命令"' + cmd + '"');
+            consolePrint('输入 ? 查看可用命令');
+            LabScoringEnhance.recordError(currentStep, cmd);
+        }
+    }
+
+    function handleServerCommand(cmd) {
+        var parts = cmd.split(/\s+/);
+        var base = parts[0].toLowerCase();
+        var sub = (parts[1] || '').toLowerCase();
+        var sub2 = (parts[2] || '').toLowerCase();
+
+        if (base === 'display' && sub === 'tcp' && sub2 === 'status') {
+            displayTcpStatus('Server');
+        } else if (base === 'display' && sub === 'udp' && sub2 === 'status') {
+            displayUdpStatus('Server');
+        } else if (base === '?' || base === 'help') {
+            consolePrint('可用命令:');
+            consolePrint('  display tcp status           - 查看TCP连接状态');
+            consolePrint('  display udp status           - 查看UDP信息');
+        } else {
+            consolePrint('错误: 无法识别的命令"' + cmd + '"');
+            consolePrint('输入 ? 查看可用命令');
+            LabScoringEnhance.recordError(currentStep, cmd);
+        }
+    }
+
+    function displayTcpStatus(device) {
+        if (device === 'Client') {
+            stepFlags[1] = true;
+        }
+        if (tcpConnections.length === 0) {
+            consolePrint('TCP连接状态表为空');
+            consolePrint('  本地地址       本地端口  远端地址       远端端口  状态');
+            consolePrint('  (无连接');
+        } else {
+            consolePrint('TCP连接状态表:');
+            consolePrint('  本地地址       本地端口  远端地址       远端端口  状态');
+            for (var i = 0; i < tcpConnections.length; i++) {
+                var c = tcpConnections[i];
+                var state = (device === 'Client') ? c.clientState : c.serverState;
+                consolePrint('  ' + padRight(c.localIp, 15) + padRight(String(c.localPort), 9) + padRight(c.remoteIp, 15) + padRight(String(c.remotePort), 9) + state);
+            }
+        }
+        if (device === 'Client' && clientTcpState === 'ESTABLISHED') stepFlags[6] = true;
+        if (device === 'Client' && (clientTcpState === 'TIME_WAIT' || clientTcpState === 'CLOSED') && stepFlags[14]) stepFlags[15] = true;
+        updateInfoPanels();
+    }
+
+    function displayUdpStatus(device) {
+        consolePrint('UDP状态信号');
+        consolePrint('  本地地址: ' + DEVICES[device].ip);
+        consolePrint('  UDP端口: (动态分用');
+        if (udpSent) {
+            consolePrint('  已发送UDP数据率 1');
+            consolePrint('  UDP无连接状态，无需维护连接信息');
+        } else {
+            consolePrint('  尚未发送UDP数据率');
+        }
+    }
+
+    function handleTcpConnect(parts) {
+        if (parts.length < 4) { consolePrint('用法: tcp connect <IP> <PORT>'); return; }
+        var ip = parts[2];
+        var port = parseInt(parts[3]);
+
+        if (ip !== '192.168.1.100') { consolePrint('错误: 无法连接到' + ip); return; }
+        if (isNaN(port)) { consolePrint('错误: 无效端口'); return; }
+
+        if (clientTcpState !== 'CLOSED') { consolePrint('错误: 当前已有TCP连接，请先关闭'); return; }
+
+
+        stepFlags[2] = true;
+        clientPort = 10000 + Math.floor(Math.random() * 50000);
+        serverPort = port;
+        clientSeq = Math.floor(Math.random() * 10000);
+        serverSeq = Math.floor(Math.random() * 10000);
+
+        animateThreeWayHandshake();
+    }
+
+    function animateThreeWayHandshake() {
+        if (animating) return;
+        animating = true;
+
+        if (demoMode) {
+            clientTcpState = 'SYN_SENT';
+            consolePrint('');
+            consolePrint('=== TCP三次握手 ===');
+            consolePrint('[1] Client Server: SYN报文');
+            consolePrint('    源端口' + clientPort + ' 目的端口=' + serverPort + ' 序号=' + clientSeq + ' SYN=1');
+            framePackets = [{ x: DEVICES.Client.x, y: DEVICES.Client.y, color: '#fbbf24', borderColor: '#f59e0b', line1: 'SYN', line2: 'seq=' + clientSeq, alpha: 1 }];
+            drawTopology();
+            setTimeout(function() {
+                framePackets = [{ x: DEVICES.S1.x, y: DEVICES.S1.y, color: '#fbbf24', borderColor: '#f59e0b', line1: 'SYN', line2: 'seq=' + clientSeq, alpha: 1 }];
+                drawTopology();
+                stepFlags[3] = true;
+                setTimeout(function() {
+                    serverTcpState = 'SYN_RCVD';
+                    consolePrint('[2] Server Client: SYN+ACK报文');
+                    consolePrint('    源端口' + serverPort + ' 目的端口=' + clientPort + ' 序号=' + serverSeq + ' 确认' + (clientSeq + 1) + ' SYN=1 ACK=1');
+                    framePackets = [{ x: DEVICES.Server.x, y: DEVICES.Server.y, color: '#4ade80', borderColor: '#22c55e', line1: 'SYN+ACK', line2: 'seq=' + serverSeq + ' ack=' + (clientSeq + 1), alpha: 1 }];
+                    drawTopology();
+                    setTimeout(function() {
+                        framePackets = [{ x: DEVICES.S1.x, y: DEVICES.S1.y, color: '#4ade80', borderColor: '#22c55e', line1: 'SYN+ACK', line2: 'seq=' + serverSeq + ' ack=' + (clientSeq + 1), alpha: 1 }];
+                        drawTopology();
+                        stepFlags[4] = true;
+                        setTimeout(function() {
+                            consolePrint('[3] Client Server: ACK报文');
+                            consolePrint('    源端口' + clientPort + ' 目的端口=' + serverPort + ' 序号=' + (clientSeq + 1) + ' 确认' + (serverSeq + 1) + ' ACK=1');
+                            consolePrint('=== 三次握手完成，连接建===');
+                            framePackets = [{ x: DEVICES.Client.x, y: DEVICES.Client.y, color: '#38bdf8', borderColor: '#1d4ed8', line1: 'ACK', line2: 'seq=' + (clientSeq + 1) + ' ack=' + (serverSeq + 1), alpha: 1 }];
+                            drawTopology();
+                            setTimeout(function() {
+                                framePackets = [{ x: DEVICES.S1.x, y: DEVICES.S1.y, color: '#38bdf8', borderColor: '#1d4ed8', line1: 'ACK', line2: 'seq=' + (clientSeq + 1) + ' ack=' + (serverSeq + 1), alpha: 1 }];
+                                drawTopology();
+                                stepFlags[5] = true;
+                                clientTcpState = 'ESTABLISHED';
+                                serverTcpState = 'ESTABLISHED';
+                                tcpConnections = [{
+                                    localIp: '192.168.1.1', localPort: clientPort,
+                                    remoteIp: '192.168.1.100', remotePort: serverPort,
+                                    clientState: 'ESTABLISHED', serverState: 'ESTABLISHED'
+                                }];
+                                setTimeout(function() {
+                                    framePackets = [];
+                                    drawTopology();
+                                    animating = false;
+                                    updateInfoPanels();
+                                    autoEvaluate();
+                                }, 600);
+                            }, 1000);
+                        }, 600);
+                    }, 1000);
+                }, 600);
+            }, 1000);
+            return;
+        }
+
+        var cx = DEVICES.Client.x, cy = DEVICES.Client.y;
+        var sx = DEVICES.Server.x, sy = DEVICES.Server.y;
+        var swx = DEVICES.S1.x, swy = DEVICES.S1.y;
+
+        clientTcpState = 'SYN_SENT';
+        updateInfoPanels();
+
+        var synInfo = {
+            type: 'TCP', srcIp: '192.168.1.1', dstIp: '192.168.1.100',
+            srcPort: clientPort, dstPort: serverPort,
+            seq: clientSeq, ack: 0, ackNum: 0,
+            flags: { SYN: 1, ACK: 0, FIN: 0, PSH: 0, RST: 0 },
+            window: 65535, desc: 'SYN'
+        };
+
+        consolePrint('');
+        consolePrint('=== TCP三次握手 ===');
+        consolePrint('[1] Client Server: SYN报文');
+        consolePrint('    源端口' + clientPort + ' 目的端口=' + serverPort + ' 序号=' + clientSeq + ' SYN=1');
+
+        updatePacketInfo(synInfo);
+
+        var packet = { x: cx, y: cy, color: '#fbbf24', borderColor: '#f59e0b', line1: 'SYN', line2: 'seq=' + clientSeq, alpha: 1 };
+        framePackets = [packet];
+
+        animateAlongPath(packet, [{x:cx,y:cy},{x:swx,y:swy},{x:sx,y:sy}], 1000, 40, function() {
+            stepFlags[3] = true;
+            serverTcpState = 'SYN_RCVD';
+            updateInfoPanels();
+
+            setTimeout(function() {
+                var synAckInfo = {
+                    type: 'TCP', srcIp: '192.168.1.100', dstIp: '192.168.1.1',
+                    srcPort: serverPort, dstPort: clientPort,
+                    seq: serverSeq, ack: 1, ackNum: clientSeq + 1,
+                    flags: { SYN: 1, ACK: 1, FIN: 0, PSH: 0, RST: 0 },
+                    window: 65535, desc: 'SYN+ACK'
+                };
+
+                consolePrint('[2] Server Client: SYN+ACK报文');
+                consolePrint('    源端口' + serverPort + ' 目的端口=' + clientPort + ' 序号=' + serverSeq + ' 确认' + (clientSeq + 1) + ' SYN=1 ACK=1');
+
+                updatePacketInfo(synAckInfo);
+
+                packet.x = sx; packet.y = sy;
+                packet.color = '#4ade80'; packet.borderColor = '#22c55e';
+                packet.line1 = 'SYN+ACK'; packet.line2 = 'seq=' + serverSeq + ' ack=' + (clientSeq + 1);
+
+                animateAlongPath(packet, [{x:sx,y:sy},{x:swx,y:swy},{x:cx,y:cy}], 1000, 40, function() {
+                    stepFlags[4] = true;
+
+                    setTimeout(function() {
+                        var ackInfo = {
+                            type: 'TCP', srcIp: '192.168.1.1', dstIp: '192.168.1.100',
+                            srcPort: clientPort, dstPort: serverPort,
+                            seq: clientSeq + 1, ack: 1, ackNum: serverSeq + 1,
+                            flags: { SYN: 0, ACK: 1, FIN: 0, PSH: 0, RST: 0 },
+                            window: 65535, desc: 'ACK'
+                        };
+
+                        consolePrint('[3] Client Server: ACK报文');
+                        consolePrint('    源端口' + clientPort + ' 目的端口=' + serverPort + ' 序号=' + (clientSeq + 1) + ' 确认' + (serverSeq + 1) + ' ACK=1');
+                        consolePrint('=== 三次握手完成，连接建===');
+
+                        updatePacketInfo(ackInfo);
+
+                        packet.x = cx; packet.y = cy;
+                        packet.color = '#38bdf8'; packet.borderColor = '#1d4ed8';
+                        packet.line1 = 'ACK'; packet.line2 = 'seq=' + (clientSeq + 1) + ' ack=' + (serverSeq + 1);
+
+                        animateAlongPath(packet, [{x:cx,y:cy},{x:swx,y:swy},{x:sx,y:sy}], 1000, 40, function() {
+                            stepFlags[5] = true;
+                            clientTcpState = 'ESTABLISHED';
+                            serverTcpState = 'ESTABLISHED';
+                            tcpConnections = [{
+                                localIp: '192.168.1.1', localPort: clientPort,
+                                remoteIp: '192.168.1.100', remotePort: serverPort,
+                                clientState: 'ESTABLISHED', serverState: 'ESTABLISHED'
+                            }];
+
+                            setTimeout(function() {
+                                framePackets = [];
+                                drawTopology();
+                                animating = false;
+                                updateInfoPanels();
+                                autoEvaluate();
+                            }, 800);
+                        });
+                    }, 800);
+                });
+            }, 800);
+        });
+    }
+
+    function handleTcpSend(parts) {
+        if (parts.length < 5) { consolePrint('用法: tcp send <IP> <PORT> <DATA>'); return; }
+        var ip = parts[2];
+        var port = parseInt(parts[3]);
+        var data = parts.slice(4).join(' ');
+
+        if (clientTcpState !== 'ESTABLISHED') { consolePrint('错误: TCP连接未建立，请先执行 tcp connect'); return; }
+
+        stepFlags[7] = true;
+
+        var cx = DEVICES.Client.x, cy = DEVICES.Client.y;
+        var sx = DEVICES.Server.x, sy = DEVICES.Server.y;
+
+        var sendInfo = {
+            type: 'TCP', srcIp: '192.168.1.1', dstIp: '192.168.1.100',
+            srcPort: clientPort, dstPort: serverPort,
+            seq: clientSeq + 1, ack: 1, ackNum: serverSeq + 1,
+            flags: { SYN: 0, ACK: 1, FIN: 0, PSH: 1, RST: 0 },
+            window: 65535, desc: 'PSH+ACK', data: data
+        };
+
+        consolePrint('');
+        consolePrint('发送TCP数据: "' + data + '"');
+        consolePrint('  源端口' + clientPort + ' 目的端口=' + serverPort + ' PSH=1 ACK=1');
+
+        updatePacketInfo(sendInfo);
+
+        animating = true;
+
+        if (demoMode) {
+            stepFlags[8] = true;
+            framePackets = [{ x: DEVICES.Client.x, y: DEVICES.Client.y, color: '#fbbf24', borderColor: '#f59e0b', line1: 'PSH+ACK', line2: 'seq=' + (clientSeq + 1), alpha: 1 }];
+            drawTopology();
+            setTimeout(function() {
+                framePackets = [{ x: DEVICES.S1.x, y: DEVICES.S1.y, color: '#fbbf24', borderColor: '#f59e0b', line1: 'PSH+ACK', line2: 'seq=' + (clientSeq + 1), alpha: 1 }];
+                drawTopology();
+                setTimeout(function() {
+                    stepFlags[9] = true;
+                    consolePrint('收到Server响应: "HTTP/1.1 200 OK"');
+                    framePackets = [{ x: DEVICES.Server.x, y: DEVICES.Server.y, color: '#4ade80', borderColor: '#22c55e', line1: 'PSH+ACK', line2: 'seq=' + (serverSeq + 1), alpha: 1 }];
+                    drawTopology();
+                    setTimeout(function() {
+                        framePackets = [{ x: DEVICES.S1.x, y: DEVICES.S1.y, color: '#4ade80', borderColor: '#22c55e', line1: 'PSH+ACK', line2: 'seq=' + (serverSeq + 1), alpha: 1 }];
+                        drawTopology();
+                        setTimeout(function() {
+                            framePackets = [];
+                            drawTopology();
+                            animating = false;
+                            updateInfoPanels();
+                            autoEvaluate();
+                        }, 600);
+                    }, 1000);
+                }, 600);
+            }, 1000);
+            return;
+        }
+
+        var cx = DEVICES.Client.x, cy = DEVICES.Client.y;
+        var sx = DEVICES.Server.x, sy = DEVICES.Server.y;
+        var swx = DEVICES.S1.x, swy = DEVICES.S1.y;
+
+        var packet = { x: cx, y: cy, color: '#fbbf24', borderColor: '#f59e0b', line1: 'PSH+ACK', line2: 'seq=' + (clientSeq + 1), alpha: 1 };
+        framePackets = [packet];
+
+        animateAlongPath(packet, [{x:cx,y:cy},{x:swx,y:swy},{x:sx,y:sy}], 1000, 40, function() {
+            stepFlags[8] = true;
+
+            setTimeout(function() {
+                var respData = 'HTTP/1.1 200 OK';
+                var respInfo = {
+                    type: 'TCP', srcIp: '192.168.1.100', dstIp: '192.168.1.1',
+                    srcPort: serverPort, dstPort: clientPort,
+                    seq: serverSeq + 1, ack: 1, ackNum: clientSeq + 1 + data.length,
+                    flags: { SYN: 0, ACK: 1, FIN: 0, PSH: 1, RST: 0 },
+                    window: 65535, desc: 'PSH+ACK', data: respData
+                };
+
+                consolePrint('收到Server响应: "' + respData + '"');
+                updatePacketInfo(respInfo);
+
+                stepFlags[9] = true;
+
+                packet.x = sx; packet.y = sy;
+                packet.color = '#4ade80'; packet.borderColor = '#22c55e';
+                packet.line1 = 'PSH+ACK'; packet.line2 = 'seq=' + (serverSeq + 1);
+
+                animateAlongPath(packet, [{x:sx,y:sy},{x:swx,y:swy},{x:cx,y:cy}], 1000, 40, function() {
+                    setTimeout(function() {
+                        framePackets = [];
+                        drawTopology();
+                        animating = false;
+                        updateInfoPanels();
+                        autoEvaluate();
+                    }, 800);
+                });
+            }, 800);
+        });
+    }
+
+    function handleTcpClose(parts) {
+        if (parts.length < 4) { consolePrint('用法: tcp close <IP> <PORT>'); return; }
+        if (clientTcpState !== 'ESTABLISHED') { consolePrint('错误: 没有可关闭的TCP连接'); return; }
+
+        stepFlags[10] = true;
+
+        var cx = DEVICES.Client.x, cy = DEVICES.Client.y;
+        var sx = DEVICES.Server.x, sy = DEVICES.Server.y;
+
+        consolePrint('');
+        consolePrint('=== TCP四次挥手 ===');
+
+        clientTcpState = 'FIN_WAIT_1';
+        updateInfoPanels();
+
+        var finInfo1 = {
+            type: 'TCP', srcIp: '192.168.1.1', dstIp: '192.168.1.100',
+            srcPort: clientPort, dstPort: serverPort,
+            seq: clientSeq + 2, ack: 1, ackNum: serverSeq + 2,
+            flags: { SYN: 0, ACK: 1, FIN: 1, PSH: 0, RST: 0 },
+            window: 65535, desc: 'FIN+ACK'
+        };
+
+        consolePrint('[1] Client Server: FIN报文');
+        consolePrint('    FIN=1 ACK=1 序号=' + (clientSeq + 2) + ' 确认' + (serverSeq + 2));
+
+        updatePacketInfo(finInfo1);
+
+        animating = true;
+
+        if (demoMode) {
+            stepFlags[11] = true;
+            serverTcpState = 'CLOSE_WAIT';
+            clientTcpState = 'FIN_WAIT_2';
+            framePackets = [{ x: DEVICES.Client.x, y: DEVICES.Client.y, color: '#a855f7', borderColor: '#7c3aed', line1: 'FIN', line2: 'seq=' + (clientSeq + 2), alpha: 1 }];
+            drawTopology();
+            setTimeout(function() {
+                framePackets = [{ x: DEVICES.S1.x, y: DEVICES.S1.y, color: '#a855f7', borderColor: '#7c3aed', line1: 'FIN', line2: 'seq=' + (clientSeq + 2), alpha: 1 }];
+                drawTopology();
+                setTimeout(function() {
+                    consolePrint('[2] Server Client: ACK报文');
+                    consolePrint('    ACK=1 确认' + (clientSeq + 3));
+                    stepFlags[12] = true;
+                    serverTcpState = 'LAST_ACK';
+                    framePackets = [{ x: DEVICES.Server.x, y: DEVICES.Server.y, color: '#38bdf8', borderColor: '#1d4ed8', line1: 'ACK', line2: 'ack=' + (clientSeq + 3), alpha: 1 }];
+                    drawTopology();
+                    setTimeout(function() {
+                        framePackets = [{ x: DEVICES.S1.x, y: DEVICES.S1.y, color: '#38bdf8', borderColor: '#1d4ed8', line1: 'ACK', line2: 'ack=' + (clientSeq + 3), alpha: 1 }];
+                        drawTopology();
+                        setTimeout(function() {
+                            consolePrint('[3] Server Client: FIN报文');
+                            consolePrint('    FIN=1 ACK=1 序号=' + (serverSeq + 2) + ' 确认' + (clientSeq + 3));
+                            stepFlags[13] = true;
+                            clientTcpState = 'TIME_WAIT';
+                            framePackets = [{ x: DEVICES.Server.x, y: DEVICES.Server.y, color: '#ef4444', borderColor: '#dc2626', line1: 'FIN+ACK', line2: 'seq=' + (serverSeq + 2) + ' ack=' + (clientSeq + 3), alpha: 1 }];
+                            drawTopology();
+                            setTimeout(function() {
+                                framePackets = [{ x: DEVICES.S1.x, y: DEVICES.S1.y, color: '#ef4444', borderColor: '#dc2626', line1: 'FIN+ACK', line2: 'seq=' + (serverSeq + 2) + ' ack=' + (clientSeq + 3), alpha: 1 }];
+                                drawTopology();
+                                setTimeout(function() {
+                                    consolePrint('[4] Client Server: ACK报文');
+                                    consolePrint('    ACK=1 确认' + (serverSeq + 3));
+                                    consolePrint('=== 四次挥手完成，连接释===');
+                                    stepFlags[14] = true;
+                                    serverTcpState = 'CLOSED';
+                                    clientTcpState = 'CLOSED';
+                                    tcpConnections = [];
+                                    framePackets = [];
+                                    drawTopology();
+                                    animating = false;
+                                    updateInfoPanels();
+                                    autoEvaluate();
+                                }, 600);
+                            }, 1000);
+                        }, 600);
+                    }, 1000);
+                }, 1000);
+            }, 1000);
+            return;
+        }
+
+        var cx = DEVICES.Client.x, cy = DEVICES.Client.y;
+        var sx = DEVICES.Server.x, sy = DEVICES.Server.y;
+        var swx = DEVICES.S1.x, swy = DEVICES.S1.y;
+
+        var packet = { x: cx, y: cy, color: '#a855f7', borderColor: '#7c3aed', line1: 'FIN', line2: 'seq=' + (clientSeq + 2), alpha: 1 };
+        framePackets = [packet];
+
+        animateAlongPath(packet, [{x:cx,y:cy},{x:swx,y:swy},{x:sx,y:sy}], 1000, 40, function() {
+            stepFlags[11] = true;
+            serverTcpState = 'CLOSE_WAIT';
+            clientTcpState = 'FIN_WAIT_2';
+            updateInfoPanels();
+
+            setTimeout(function() {
+                var ackInfo2 = {
+                    type: 'TCP', srcIp: '192.168.1.100', dstIp: '192.168.1.1',
+                    srcPort: serverPort, dstPort: clientPort,
+                    seq: serverSeq + 2, ack: 1, ackNum: clientSeq + 3,
+                    flags: { SYN: 0, ACK: 1, FIN: 0, PSH: 0, RST: 0 },
+                    window: 65535, desc: 'ACK'
+                };
+
+                consolePrint('[2] Server Client: ACK报文');
+                consolePrint('    ACK=1 确认' + (clientSeq + 3));
+
+                updatePacketInfo(ackInfo2);
+
+                packet.x = sx; packet.y = sy;
+                packet.color = '#38bdf8'; packet.borderColor = '#1d4ed8';
+                packet.line1 = 'ACK'; packet.line2 = 'ack=' + (clientSeq + 3);
+
+                animateAlongPath(packet, [{x:sx,y:sy},{x:swx,y:swy},{x:cx,y:cy}], 1000, 40, function() {
+                    stepFlags[12] = true;
+                    serverTcpState = 'LAST_ACK';
+
+                    setTimeout(function() {
+                        var finInfo2 = {
+                            type: 'TCP', srcIp: '192.168.1.100', dstIp: '192.168.1.1',
+                            srcPort: serverPort, dstPort: clientPort,
+                            seq: serverSeq + 2, ack: 1, ackNum: clientSeq + 3,
+                            flags: { SYN: 0, ACK: 1, FIN: 1, PSH: 0, RST: 0 },
+                            window: 65535, desc: 'FIN+ACK'
+                        };
+
+                        consolePrint('[3] Server Client: FIN报文');
+                        consolePrint('    FIN=1 ACK=1 序号=' + (serverSeq + 2) + ' 确认' + (clientSeq + 3));
+
+                        updatePacketInfo(finInfo2);
+
+                        packet.x = sx; packet.y = sy;
+                        packet.color = '#ef4444'; packet.borderColor = '#dc2626';
+                        packet.line1 = 'FIN+ACK'; packet.line2 = 'seq=' + (serverSeq + 2) + ' ack=' + (clientSeq + 3);
+
+                        animateAlongPath(packet, [{x:sx,y:sy},{x:swx,y:swy},{x:cx,y:cy}], 1000, 40, function() {
+                            stepFlags[13] = true;
+                            clientTcpState = 'TIME_WAIT';
+
+                            setTimeout(function() {
+                                var ackInfo4 = {
+                                    type: 'TCP', srcIp: '192.168.1.1', dstIp: '192.168.1.100',
+                                    srcPort: clientPort, dstPort: serverPort,
+                                    seq: clientSeq + 3, ack: 1, ackNum: serverSeq + 3,
+                                    flags: { SYN: 0, ACK: 1, FIN: 0, PSH: 0, RST: 0 },
+                                    window: 65535, desc: 'ACK'
+                                };
+
+                                consolePrint('[4] Client Server: ACK报文');
+                                consolePrint('    ACK=1 确认' + (serverSeq + 3));
+                                consolePrint('=== 四次挥手完成，连接释===');
+
+                                updatePacketInfo(ackInfo4);
+
+                                packet.x = cx; packet.y = cy;
+                                packet.color = '#38bdf8'; packet.borderColor = '#1d4ed8';
+                                packet.line1 = 'ACK'; packet.line2 = 'ack=' + (serverSeq + 3);
+
+                                animateAlongPath(packet, [{x:cx,y:cy},{x:swx,y:swy},{x:sx,y:sy}], 1000, 40, function() {
+                                    stepFlags[14] = true;
+                                    serverTcpState = 'CLOSED';
+
+                                    setTimeout(function() {
+                                        clientTcpState = 'CLOSED';
+                                        tcpConnections = [];
+                                        framePackets = [];
+                                        drawTopology();
+                                        animating = false;
+                                        updateInfoPanels();
+                                        autoEvaluate();
+                                    }, 500);
+                                });
+                            }, 800);
+                        });
+                    }, 800);
+                });
+            }, 800);
+        });
+    }
+
+    function handleUdpSend(parts) {
+        if (parts.length < 5) { consolePrint('用法: udp send <IP> <PORT> <DATA>'); return; }
+        var ip = parts[2];
+        var port = parseInt(parts[3]);
+        var data = parts.slice(4).join(' ');
+
+        if (ip !== '192.168.1.100') { consolePrint('错误: 无法发送到 ' + ip); return; }
+
+        stepFlags[18] = true;
+
+        var cx = DEVICES.Client.x, cy = DEVICES.Client.y;
+        var sx = DEVICES.Server.x, sy = DEVICES.Server.y;
+
+        var udpSrcPort = 50000 + Math.floor(Math.random() * 10000);
+        var udpLen = 8 + data.length * 2;
+
+        var udpInfo = {
+            type: 'UDP', srcIp: '192.168.1.1', dstIp: '192.168.1.100',
+            srcPort: udpSrcPort, dstPort: port,
+            length: udpLen, checksum: '0xAAAA',
+            data: data,
+            noSeq: true, noAck: true, noFlags: true
+        };
+
+        lastUdpInfo = udpInfo;
+
+        consolePrint('');
+        consolePrint('发送UDP数据报 "' + data + '"');
+        consolePrint('  源端口=' + udpSrcPort + ' 目的端口=' + port + ' 长度=' + udpLen);
+        consolePrint('  注意: UDP无连接、无序号、无确认号、无标志');
+
+        updatePacketInfo(udpInfo);
+
+        animating = true;
+
+        if (demoMode) {
+            udpSent = true;
+            framePackets = [{ x: DEVICES.Client.x, y: DEVICES.Client.y, color: '#f97316', borderColor: '#ea580c', line1: 'UDP', line2: 'port ' + udpSrcPort + '→' + port, alpha: 1 }];
+            drawTopology();
+            setTimeout(function() {
+                framePackets = [{ x: DEVICES.S1.x, y: DEVICES.S1.y, color: '#f97316', borderColor: '#ea580c', line1: 'UDP', line2: 'port ' + udpSrcPort + '→' + port, alpha: 1 }];
+                drawTopology();
+                setTimeout(function() {
+                    framePackets = [];
+                    drawTopology();
+                    animating = false;
+                    updateInfoPanels();
+                    autoEvaluate();
+                }, 600);
+            }, 1000);
+            return;
+        }
+
+        var cx = DEVICES.Client.x, cy = DEVICES.Client.y;
+        var sx = DEVICES.Server.x, sy = DEVICES.Server.y;
+        var swx = DEVICES.S1.x, swy = DEVICES.S1.y;
+
+        var packet = { x: cx, y: cy, color: '#f97316', borderColor: '#ea580c', line1: 'UDP', line2: 'port ' + udpSrcPort + '→' + port, alpha: 1 };
+        framePackets = [packet];
+
+        animateAlongPath(packet, [{x:cx,y:cy},{x:swx,y:swy},{x:sx,y:sy}], 1000, 40, function() {
+            udpSent = true;
+
+            setTimeout(function() {
+                framePackets = [];
+                drawTopology();
+                animating = false;
+                updateInfoPanels();
+                autoEvaluate();
+            }, 800);
+        });
+    }
+
+    function handleTcpFlowControl() {
+        stepFlags[16] = true;
+        consolePrint('');
+        consolePrint('=== TCP流量控制分析 ===');
+        consolePrint('');
+        consolePrint('TCP流量控制通过滑动窗口机制实现：');
+        consolePrint('');
+        consolePrint('1. 接收窗口（rwnd）：接收方在ACK报文中通过窗口字段告知发送方');
+        consolePrint('   自己的接收缓冲区剩余空间（本实验中窗口大小=65535字节）');
+        consolePrint('');
+        consolePrint('2. 发送窗口：发送方根据接收窗口限制已发送但未确认的数据量');
+        consolePrint('   发送窗口 = min(rwnd, cwnd)，确保不会淹没接收方');
+        consolePrint('');
+        consolePrint('3. 窗口滑动：收到ACK后窗口向前滑动，释放已确认数据的缓冲区');
+        consolePrint('   序号=' + clientSeq + '的数据被确认后，窗口向前滑动');
+        consolePrint('');
+        consolePrint('4. 零窗口探测：当接收窗口为0时，发送方定期发送零窗口探测报文');
+        consolePrint('   防止双方死锁等待');
+        consolePrint('');
+        consolePrint('对比UDP：UDP无流量控制机制，发送方不考虑接收方状态');
+        consolePrint('=== 流量控制分析完成 ===');
+        autoEvaluate();
+    }
+
+    function handleTcpCongestionControl() {
+        stepFlags[17] = true;
+        consolePrint('');
+        consolePrint('=== TCP拥塞控制分析 ===');
+        consolePrint('');
+        consolePrint('TCP拥塞控制包含四个核心算法：');
+        consolePrint('');
+        consolePrint('1. 慢启动（Slow Start）：');
+        consolePrint('   连接初始cwnd=1，每收到一个ACK，cwnd加倍增长');
+        consolePrint('   指数增长直到ssthresh（慢启动阈值，默认16）');
+        consolePrint('');
+        consolePrint('2. 拥塞避免（Congestion Avoidance）：');
+        consolePrint('   cwnd达到ssthresh后，改为线性增长（每RTT增加1）');
+        consolePrint('   逐步探测网络承载能力，避免突发涌入');
+        consolePrint('');
+        consolePrint('3. 快重传（Fast Retransmit）：');
+        consolePrint('   收到3个重复ACK时，立即重传丢失的报文段');
+        consolePrint('   不必等待超时，减少等待时间');
+        consolePrint('');
+        consolePrint('4. 快恢复（Fast Recovery）：');
+        consolePrint('   快重传后ssthresh=cwnd/2，cwnd=ssthresh+3');
+        consolePrint('   不回到慢启动，直接进入拥塞避免阶段');
+        consolePrint('');
+        consolePrint('对比UDP：UDP无拥塞控制，可能加剧网络拥塞');
+        consolePrint('=== 拥塞控制分析完成 ===');
+        autoEvaluate();
+    }
+
+    function handleUdpFormat() {
+        stepFlags[19] = true;
+        consolePrint('');
+        consolePrint('=== UDP报文格式分析 ===');
+        consolePrint('');
+        consolePrint('UDP首部仅8字节，由4个字段组成（每个2字节）：');
+        consolePrint('');
+        consolePrint('  +--------+--------+--------+--------+');
+        consolePrint('  | 源端口  | 目的端口 |  长度   | 校验和  |');
+        consolePrint('  +--------+--------+--------+--------+');
+        consolePrint('  |  2字节  |  2字节  |  2字节  |  2字节  |');
+        consolePrint('  +--------+--------+--------+--------+');
+        consolePrint('');
+        consolePrint('1. 源端口（2字节）：发送方端口，可选（全0表示无源端口）');
+        consolePrint('2. 目的端口（2字节）：接收方端口，必须填写');
+        consolePrint('3. 长度（2字节）：UDP报文总长度（首部+数据），最小值8');
+        consolePrint('4. 校验和（2字节）：对首部和数据进行校验，可选（全0表示不校验）');
+        consolePrint('');
+        consolePrint('UDP面向报文：不拆分也不合并，保留报文边界');
+        consolePrint('对比TCP首部20字节：UDP首部仅8字节，开销更小');
+        consolePrint('=== UDP报文格式分析完成 ===');
+        autoEvaluate();
+    }
+
+    function handleUdpLengthCompare() {
+        stepFlags[20] = true;
+        consolePrint('');
+        consolePrint('=== UDP长报文与短报文对比 ===');
+        consolePrint('');
+        consolePrint('【UDP长报文】数据长度=4000字节：');
+        consolePrint('  UDP报文总长度 = 8(首部) + 4000(数据) = 4008字节');
+        consolePrint('  超过MTU(1500字节)，IP层需要分片：');
+        consolePrint('    分片1: IP头20 + UDP头8 + 数据1472 = 1500字节');
+        consolePrint('    分片2: IP头20 + 数据1480 = 1500字节');
+        consolePrint('    分片3: IP头20 + 数据1048 = 1068字节');
+        consolePrint('  分片在目的端重组，若任一分片丢失则整个报文丢弃');
+        consolePrint('');
+        consolePrint('【UDP短报文】数据长度=28字节（最小长度）：');
+        consolePrint('  UDP报文总长度 = 8(首部) + 28(数据) = 36字节');
+        consolePrint('  远小于MTU，无需分片，单个IP数据报即可传输');
+        consolePrint('  传输效率高，但应用层需自行保证可靠性');
+        consolePrint('');
+        consolePrint('思考：若IP数据报没有总长度字段，接收方无法知道报文边界');
+        consolePrint('      将无法正确重组分片，导致数据丢失或错乱');
+        consolePrint('=== UDP长报文与短报文对比完成 ===');
+        autoEvaluate();
+    }
+
+    function handleThinkTcpUdp() {
+        consolePrint('');
+        consolePrint('=== TCP与UDP思考题 ===');
+        consolePrint('');
+        consolePrint('请思考以下问题，使用 think-tcp-udp-answer <题号> <答案> 作答');
+        consolePrint('');
+        consolePrint('题1：若IP数据报中没有设计总长度这个字段，会导致什么错误情况？');
+        consolePrint('  A. 无法区分IP数据报和数据帧');
+        consolePrint('  B. 无法知道IP数据报的边界，导致分片无法正确重组');
+        consolePrint('  C. 无法计算校验和');
+        consolePrint('  D. 无法确定协议类型');
+        consolePrint('');
+        consolePrint('题2：在TCP建立连接的过程中，SYN报文段不包含数据，但为什么要占用1个字节的序号？');
+        consolePrint('  A. 因为SYN报文段需要确认');
+        consolePrint('  B. 因为SYN报文段消耗了一个序号，后续数据序号从SYN序号+1开始');
+        consolePrint('  C. 因为TCP规定所有报文段都必须占用序号');
+        consolePrint('  D. 因为SYN报文段需要携带控制信息');
+        consolePrint('');
+    }
+
+    function handleThinkTcpUdpAnswer(qNum, answer) {
+        var answers = { '1': 'B', '2': 'B' };
+        if (!answers[qNum]) { consolePrint('错误: 无效题号'); return; }
+        if (answer.toUpperCase() === answers[qNum]) {
+            consolePrint('题' + qNum + ' 回答正确！');
+            if (!thinkTcpUdpCorrect) thinkTcpUdpCorrect = {};
+            thinkTcpUdpCorrect[qNum] = true;
+            var correctCount = 0;
+            for (var k in thinkTcpUdpCorrect) correctCount++;
+            if (correctCount >= 2) {
+                stepFlags[21] = true;
+                consolePrint('思考题全部完成！');
+                autoEvaluate();
+            }
+        } else {
+            consolePrint('题' + qNum + ' 回答错误，正确答案是 ' + answers[qNum]);
+        }
+    }
+
+    function easeInOut(t) { return t < 0.5 ? 2*t*t : -1+(4-2*t)*t; }
+
+    function animateAlongPath(packet, waypoints, pauseMs, stepsPerSeg, onDone) {
+        var segIdx = 0;
+        function nextSeg() {
+            if (segIdx >= waypoints.length - 1) { onDone(); return; }
+            var from = waypoints[segIdx], to = waypoints[segIdx + 1];
+            var step = 0;
+            function anim() {
+                step++;
+                var t = easeInOut(step / stepsPerSeg);
+                packet.x = from.x + (to.x - from.x) * t;
+                packet.y = from.y + (to.y - from.y) * t;
+                drawTopology();
+                if (step >= stepsPerSeg) {
+                    segIdx++;
+                    if (segIdx < waypoints.length - 1) {
+                        setTimeout(nextSeg, pauseMs);
+                    } else {
+                        onDone();
+                    }
+                    return;
+                }
+                animFrame = requestAnimationFrame(anim);
+            }
+            animFrame = requestAnimationFrame(anim);
+        }
+        nextSeg();
+    }
+
+    function updatePacketInfo(info) {
+        lastPacketInfo = info;
+        var html = '<div class="frame-info">';
+        if (info.type === 'TCP') {
+            html += '<div><span class="label">协议：</span><span class="value">TCP</span></div>';
+            html += '<div><span class="label">源IP：</span><span class="value">' + info.srcIp + '</span></div>';
+            html += '<div><span class="label">目的IP：</span><span class="value">' + info.dstIp + '</span></div>';
+            html += '<div><span class="label">源端口：</span><span class="value">' + info.srcPort + '</span></div>';
+            html += '<div><span class="label">目的端口：</span><span class="value">' + info.dstPort + '</span></div>';
+            html += '<div><span class="label">序号：</span><span class="value">' + info.seq + '</span></div>';
+            html += '<div><span class="label">确认号：</span><span class="value">' + info.ackNum + '</span></div>';
+            var flagStr = '';
+            if (info.flags.SYN) flagStr += 'SYN ';
+            if (info.flags.ACK) flagStr += 'ACK ';
+            if (info.flags.FIN) flagStr += 'FIN ';
+            if (info.flags.PSH) flagStr += 'PSH ';
+            if (info.flags.RST) flagStr += 'RST ';
+            html += '<div><span class="label">标志位：</span><span class="value">' + flagStr.trim() + '</span></div>';
+            html += '<div><span class="label">窗口大小窗口</span><span class="value">' + info.window + '</span></div>';
+            if (info.data) html += '<div><span class="label">数据：</span><span class="value">"' + info.data + '"</span></div>';
+        } else if (info.type === 'UDP') {
+            html += '<div><span class="label">协议：</span><span class="value">UDP</span></div>';
+            html += '<div><span class="label">源IP：</span><span class="value">' + info.srcIp + '</span></div>';
+            html += '<div><span class="label">目的IP：</span><span class="value">' + info.dstIp + '</span></div>';
+            html += '<div><span class="label">源端口：</span><span class="value">' + info.srcPort + '</span></div>';
+            html += '<div><span class="label">目的端口：</span><span class="value">' + info.dstPort + '</span></div>';
+            html += '<div><span class="label">长度：</span><span class="value">' + info.length + ' 字节</span></div>';
+            html += '<div><span class="label">校验和：</span><span class="value">' + info.checksum + '</span></div>';
+            html += '<div><span class="label">序号：</span><span class="value" style="color:#ef4444;">无（UDP无序号）</span></div>';
+            html += '<div><span class="label">确认号：</span><span class="value" style="color:#ef4444;">无（UDP无确认）</span></div>';
+            html += '<div><span class="label">标志位：</span><span class="value" style="color:#ef4444;">无（UDP无标志位、无窗口）</span></div>';
+            html += '<div><span class="label">数据：</span><span class="value">"' + info.data + '"</span></div>';
+        }
+        html += '</div>';
+        document.getElementById('packetInfo').innerHTML = html;
+    }
+
+    function updateInfoPanels() {
+        var tcpTbody = document.getElementById('tcpStatusTbody');
+        if (tcpConnections.length === 0 && clientTcpState === 'CLOSED' && serverTcpState === 'LISTEN') {
+            tcpTbody.innerHTML = '<tr><td colspan="5" style="color:#94a3b8;text-align:center;">无TCP连接</td></tr>';
+        } else if (tcpConnections.length > 0) {
+            var html = '';
+            for (var i = 0; i < tcpConnections.length; i++) {
+                var c = tcpConnections[i];
+                html += '<tr class="new-entry"><td>' + c.localIp + '</td><td>' + c.localPort + '</td><td>' + c.remoteIp + '</td><td>' + c.remotePort + '</td><td><span class="state-badge state-established">' + c.clientState + '</span></td></tr>';
+            }
+            tcpTbody.innerHTML = html;
+        } else {
+            var stateHtml = '<tr><td colspan="5" style="color:#94a3b8;text-align:center;">Client: ' + clientTcpState + ' | Server: ' + serverTcpState + '</td></tr>';
+            tcpTbody.innerHTML = stateHtml;
+        }
+
+        var clientStateEl = document.getElementById('clientStateDisplay');
+        var serverStateEl = document.getElementById('serverStateDisplay');
+        clientStateEl.textContent = clientTcpState;
+        serverStateEl.textContent = serverTcpState;
+        clientStateEl.className = 'state-badge state-' + clientTcpState.toLowerCase().replace(/_/g, '-');
+        serverStateEl.className = 'state-badge state-' + serverTcpState.toLowerCase().replace(/_/g, '-');
+
+        var transText = document.getElementById('stateTransitionText');
+        if (clientTcpState === 'CLOSED' && serverTcpState === 'LISTEN') {
+            transText.textContent = '等待Client发起连接...';
+        } else if (clientTcpState === 'SYN_SENT') {
+            transText.textContent = 'Client发送SYN，等待Server回应...';
+        } else if (clientTcpState === 'ESTABLISHED') {
+            transText.textContent = 'TCP连接已建立，可传输数据';
+        } else if (clientTcpState === 'FIN_WAIT_1') {
+            transText.textContent = 'Client请求关闭连接...';
+        } else if (clientTcpState === 'FIN_WAIT_2') {
+            transText.textContent = '等待Server关闭连接...';
+        } else if (clientTcpState === 'TIME_WAIT') {
+            transText.textContent = '等待2MSL超时后关..';
+        } else if (clientTcpState === 'CLOSED' && stepFlags[14]) {
+            transText.textContent = 'TCP连接已完全释放';
+        }
+
+        var udpStructEl = document.getElementById('udpStructInfo');
+        if (udpSent && lastUdpInfo) {
+            udpStructEl.innerHTML =
+                '<div style="color:#38bdf8; font-weight:bold; margin-bottom:4px;">UDP报文首部字节数</div>' +
+                '<div style="font-family:Consolas,monospace; font-size:11px; line-height:1.6;">' +
+                '<div style="border:1px solid #4a6a9a; padding:2px 6px; display:flex; justify-content:space-between;">' +
+                '<span style="color:#fbbf24;">源端口 ' + lastUdpInfo.srcPort + '</span>' +
+                '<span style="color:#4ade80;">目的端口: ' + lastUdpInfo.dstPort + '</span></div>' +
+                '<div style="border:1px solid #4a6a9a; padding:2px 6px; display:flex; justify-content:space-between;">' +
+                '<span style="color:#fbbf24;">长度: ' + lastUdpInfo.length + '</span>' +
+                '<span style="color:#4ade80;">校验证 ' + lastUdpInfo.checksum + '</span></div>' +
+                '<div style="border:1px solid #4a6a9a; padding:2px 6px; color:#a3e635;">数据: "' + lastUdpInfo.data + '"</div>' +
+                '</div>' +
+                '<div style="margin-top:6px; color:#ef4444; font-size:11px;">对比TCP：无序号、无确认号、无标志位、无窗口</div>';
+        } else {
+            udpStructEl.innerHTML = '<div style="color:#94a3b8;">尚未发送UDP数据。</div>';
+        }
+    }
+
+    function renderStepList() {
+        var html = '';
+        for (var i = 0; i < STEPS.length; i++) {
+            var s = STEPS[i];
+            var cls = '';
+            if (s.id === currentStep) cls = 'active';
+            if (stepResults[s.id] === 'pass') cls += ' completed';
+            if (stepResults[s.id] === 'fail') cls += ' failed';
+            var icon = stepResults[s.id] === 'pass' ? '✅' : stepResults[s.id] === 'fail' ? '❌' : (s.id === currentStep ? '▶️' : '⏳');
+            html += '<div class="step-item ' + cls + '" onclick="selectStep(' + s.id + ')">';
+            html += '<span class="step-icon">' + icon + '</span>';
+            html += '步骤' + s.id + '. ' + s.title;
+            html += '</div>';
+        }
+        document.getElementById('stepList').innerHTML = html;
+    }
+
+    function selectStep(id) {
+        currentStep = id;
+        var step = STEPS[id - 1];
+        document.getElementById('hintBox').textContent = step.hint;
+        renderStepList();
+    }
+
+    function autoEvaluate() {
+        var changed = false;
+        for (var i = 0; i < STEPS.length; i++) {
+            var s = STEPS[i];
+            if (stepResults[s.id]) continue;
+            var result = window[s.evalFn]();
+            if (result === 'pass' || result === 'fail') {
+                stepResults[s.id] = result;
+                showEvalResult(s.id, result);
+                changed = true;
+            }
+        }
+        if (changed) {
+            var nextStep = 0;
+            for (var j = 0; j < STEPS.length; j++) {
+                if (!stepResults[STEPS[j].id]) { nextStep = STEPS[j].id; break; }
+            }
+            if (nextStep) { currentStep = nextStep; document.getElementById('hintBox').textContent = STEPS[nextStep - 1].hint; }
+        }
+        updateProgress();
+        renderStepList();
+    }
+
+    function evalStep1() { return stepFlags[1] ? 'pass' : ''; }
+    function evalStep2() { return stepFlags[2] ? 'pass' : ''; }
+    function evalStep3() { return stepFlags[3] ? 'pass' : ''; }
+    function evalStep4() { return stepFlags[4] ? 'pass' : ''; }
+    function evalStep5() { return stepFlags[5] ? 'pass' : ''; }
+    function evalStep6() { return stepFlags[6] ? 'pass' : ''; }
+    function evalStep7() { return stepFlags[7] ? 'pass' : ''; }
+    function evalStep8() { return stepFlags[8] ? 'pass' : ''; }
+    function evalStep9() { return stepFlags[9] ? 'pass' : ''; }
+    function evalStep10() { return stepFlags[10] ? 'pass' : ''; }
+    function evalStep11() { return stepFlags[11] ? 'pass' : ''; }
+    function evalStep12() { return stepFlags[12] ? 'pass' : ''; }
+    function evalStep13() { return stepFlags[13] ? 'pass' : ''; }
+    function evalStep14() { return stepFlags[14] ? 'pass' : ''; }
+    function evalStep15() { return stepFlags[15] ? 'pass' : ''; }
+    function evalStep16() { return stepFlags[16] ? 'pass' : ''; }
+    function evalStep17() { return stepFlags[17] ? 'pass' : ''; }
+    function evalStep18() { return stepFlags[18] ? 'pass' : ''; }
+    function evalStep19() { return stepFlags[19] ? 'pass' : ''; }
+    function evalStep20() { return stepFlags[20] ? 'pass' : ''; }
+    function evalStep21() { return stepFlags[21] ? 'pass' : ''; }
+    function evalStep22() {
+        var passed = 0;
+        for (var id in stepResults) { if (stepResults[id] === 'pass') passed++; }
+        return passed >= STEPS.length - 1 ? 'pass' : '';
+    }
+
+    function showEvalResult(stepId, result) {
+        var body = document.getElementById('evalBody');
+        var html = '';
+        for (var id in stepResults) {
+            var s = STEPS[id - 1];
+            var cls = stepResults[id] === 'pass' ? 'eval-pass' : 'eval-fail';
+            var txt = stepResults[id] === 'pass' ? '通过 (+' + s.score + '分)' : '未通过';
+            html += '<div class="eval-result ' + cls + '">步骤' + id + '. ' + txt + '</div>';
+        }
+        body.innerHTML = html;
+    }
+
+    function updateProgress() {
+        var completed = 0;
+        totalScore = 0;
+        for (var id in stepResults) {
+            if (stepResults[id] === 'pass') {
+                completed++;
+                totalScore += STEPS[id - 1].score;
+            }
+        }
+        var pct = Math.round(completed / STEPS.length * 100);
+        document.getElementById('progressFill').style.width = pct + '%';
+        document.getElementById('progressText').textContent = pct + '%';
+        document.getElementById('scoreFill').style.width = Math.round(totalScore * 0.8) + '%';
+        document.getElementById('scoreText').textContent = Math.round(totalScore * 0.8) + '/80';
+
+        var nextStep = null;
+        for (var i = 0; i < STEPS.length; i++) {
+            if (!stepResults[STEPS[i].id]) { nextStep = STEPS[i].id; break; }
+        }
+        if (nextStep) {
+            currentStep = nextStep;
+            document.getElementById('hintBox').textContent = STEPS[nextStep - 1].hint;
+        }
+    }
+
+    function resetExperiment() {
+        LabScoringEnhance.init(30);
+        clientTcpState = 'CLOSED';
+        serverTcpState = 'LISTEN';
+        tcpConnections = [];
+        clientSeq = 1000;
+        serverSeq = 5000;
+        clientPort = 12345;
+        serverPort = 80;
+        udpSent = false;
+        lastUdpInfo = null;
+        lastPacketInfo = null;
+
+        for (var si = 1; si <= 22; si++) stepFlags[si] = false;
+        thinkTcpUdpCorrect = {};
+
+        stepResults = {};
+        demoMode = false;
+        demoUsed = false;
+        totalScore = 0;
+        currentStep = 1;
+        consoleHistory = {};
+        deviceViewState = {};
+
+        framePackets = [];
+        if (animFrame) cancelAnimationFrame(animFrame);
+        animating = false;
+
+        switchDevice('Client');
+        renderStepList();
+        updateProgress();
+        updateInfoPanels();
+        document.getElementById('evalBody').innerHTML = '<div style="color:#94a3b8;font-size:12px;">完成步骤后自动评估</div>';
+        document.getElementById('packetInfo').innerHTML = '<span class="label">等待报文传输...</span>';
+        document.getElementById('hintBox').textContent = STEPS[0].hint;
+        clearConsole();
+        consolePrint('实验已重传');
+        drawTopology();
+    }
+
+    function showDemo() {
+        if (demoMode) { stopDemo(); return; }
+        resetExperiment();
+        demoMode = true;
+        demoUsed = true;
+        consolePrint('[演示模式] 演示开始，自动执行所有步骤..');
+
+        var actions = [
+            function() { switchDevice('Client'); setInput('display tcp status'); handleCommand({key:'Enter'}); },
+            function() { setInput('tcp connect ' + SERVER_IP + ' 80'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('Client'); setInput('display tcp status'); handleCommand({key:'Enter'}); },
+            function() { setInput('tcp send ' + SERVER_IP + ' 80 "GET / HTTP/1.1"'); handleCommand({key:'Enter'}); },
+            function() { setInput('tcp close ' + SERVER_IP + ' 80'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('Client'); setInput('display tcp status'); handleCommand({key:'Enter'}); },
+            function() { setInput('tcp-flow-control'); handleCommand({key:'Enter'}); },
+            function() { setInput('tcp-congestion-control'); handleCommand({key:'Enter'}); },
+            function() { setInput('udp send ' + SERVER_IP + ' 53 "DNS查询"'); handleCommand({key:'Enter'}); },
+            function() { setInput('udp-format'); handleCommand({key:'Enter'}); },
+            function() { setInput('udp-length-compare'); handleCommand({key:'Enter'}); },
+            function() { setInput('think-tcp-udp'); handleCommand({key:'Enter'}); },
+            function() { setInput('think-tcp-udp-answer 1 B'); handleCommand({key:'Enter'}); },
+            function() { setInput('think-tcp-udp-answer 2 B'); handleCommand({key:'Enter'}); }
+        ];
+
+        var idx = 0;
+        function nextAction() {
+            if (idx >= actions.length || !demoMode) { demoMode = false; return; }
+            if (animating) { if (demoTimer) clearTimeout(demoTimer); demoTimer = setTimeout(nextAction, 300); return; }
+            actions[idx]();
+            idx++;
+            demoTimer = setTimeout(nextAction, 800);
+        }
+        nextAction();
+    }
+
+    function setInput(cmd) {
+        document.getElementById('consoleInput').value = cmd;
+    }
+
+    function stopDemo() {
+        demoMode = false;
+
+        if (demoTimer) clearTimeout(demoTimer);
+        consolePrint('[演示模式] 已停');
+    }
+
+    function padRight(str, len) {
+        while (str.length < len) str += ' ';
+        return str;
+    }
+
+    async function submitExperiment() {
+        if (labScheduleState === 'not_started') { alert('实验未开放，不能提交报告'); return; }
+        if (labScheduleState === 'ended') { alert('实验已结束，不能再提交报告'); return; }
+        if (demoMode || demoUsed) {
+            consolePrint('[提示] 演示模式下无法提交实验报告，请手动完成实验后提交换');
+            return;
+        }
+        autoEvaluate();
+        var passed = 0;
+        var stepScore = 0;
+        var details = '';
+        for (var i = 0; i < STEPS.length; i++) {
+            var s = STEPS[i];
+            if (stepResults[s.id] === 'pass') {
+                passed++;
+                stepScore += s.score;
+                details += '步骤' + s.id + '. ' + s.title + ' ' + s.score + '<br>';
+            } else {
+                details += '步骤' + s.id + '. ' + s.title + ' 0<br>';
+            }
+        }
+
+        var scoreResult = LabScoringEnhance.getFinalScore(stepScore, 100);
+        details += '<br>--- 综合评价 ---<br>';
+        details += LabScoringEnhance.formatDetails(scoreResult);
+
+        document.getElementById('resultSummary').textContent = '共完成' + passed + '/' + STEPS.length + ' 个实验步骤';
+        document.getElementById('finalScore').textContent = scoreResult.totalScore;
+        document.getElementById('finalScore').style.color = scoreResult.totalScore >= 60 ? '#22c55e' : '#ef4444';
+        document.getElementById('resultDetails').innerHTML = details;
+
+        var currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
+        if (currentUser.username && currentUser.type === 'student') {
+            try {
+                var labTitle = document.querySelector('.top-bar h1').textContent.trim();
+                var reportEntry = {
+                    labTitle: labTitle,
+                    score: scoreResult.totalScore,
+                    maxScore: 100,
+                    submitTime: new Date().toISOString(),
+                    mode: 'manual',
+                    details: details,
+                    baseScore: scoreResult.baseScore,
+                    accuracyScore: scoreResult.accuracyScore,
+                    efficiencyScore: scoreResult.efficiencyScore,
+                    errorCount: scoreResult.errorCount,
+                    elapsedMinutes: scoreResult.elapsedMinutes
+                };
+                var token = localStorage.getItem('authToken') || '';
+                var res = await fetch(API_BASE + '/api/lab-reports', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                    body: JSON.stringify({ studentId: currentUser.username, report: reportEntry })
+                });
+                var result = await res.json();
+                if (result.error) console.error('提交报告失败:', result.error);
+            } catch (e) { console.error('提交报告失败:', e); }
+        }
+        document.getElementById('resultModal').classList.add('show');
+
+        stepResults[22] = passed >= STEPS.length - 1 ? 'pass' : 'fail';
+        showEvalResult(22, stepResults[22]);
+        updateProgress();
+        renderStepList();
+    }
+
+    window.addEventListener('load', init);
+    </script>
+
+
+    <script>
+    (async function() {
+    var THIS_LAB_ID = 'tcp-udp-lab';
+    var user = JSON.parse(localStorage.getItem('currentUser') || '{}');
+    var schedules = {};
+    try {
+        var res = await fetch(API_BASE + '/api/lab-schedules', {headers:{'Authorization':'Bearer '+(localStorage.getItem('authToken')||'')}});
+        var data = await res.json();
+        schedules = data.schedules || {};
+    } catch(e) {}
+    var s = schedules[THIS_LAB_ID] || {};
+    var now = new Date().getTime();
+    window.labScheduleState = 'not_started';
+    if (s.alwaysOpen) window.labScheduleState = 'open';
+    else if (s.startTime && now < new Date(s.startTime).getTime()) window.labScheduleState = 'not_started';
+    else if (s.endTime && now > new Date(s.endTime).getTime()) window.labScheduleState = 'ended';
+    else if (s.startTime || s.endTime) window.labScheduleState = 'open';
+
+    if (user.type === 'student' && labScheduleState === 'not_started') {
+        var startStr = s.startTime ? new Date(s.startTime).toLocaleString('zh-CN') : '';
+        var endStr = s.endTime ? new Date(s.endTime).toLocaleString('zh-CN') : '';
+        var overlay = document.createElement('div');
+        overlay.id = 'labScheduleOverlay';
+        overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:99999;display:flex;align-items:center;justify-content:center;';
+        overlay.innerHTML = '<div style="background:white;border-radius:20px;padding:40px 50px;text-align:center;max-width:500px;box-shadow:0 20px 60px rgba(0,0,0,0.3);">' +
+            '<div style="font-size:60px;margin-bottom:20px;">⏰</div>' +
+            '<h2 style="color:#e74c3c;margin-bottom:15px;">实验未开放</h2>' +
+            '<p style="color:#666;font-size:16px;line-height:1.8;">该实验尚未到开放时间，暂时无法操作</p>' +
+            (startStr ? '<p style="color:#333;font-size:15px;margin-top:10px;">开放时间：' + startStr + ' — ' + endStr + '</p>' : '') +
+            '<button onclick="window.location.href=\'../index.html\'" style="margin-top:25px;padding:12px 40px;background:linear-gradient(135deg,#4a90e2,#357abd);color:white;border:none;border-radius:10px;font-size:16px;cursor:pointer;transition:all 0.3s;">返回首页</button>' +
+            '</div>';
+        document.body.appendChild(overlay);
+        var cmdInput = document.getElementById('commandInput');
+        if (cmdInput) cmdInput.disabled = true;
+        var demoBtn = document.querySelector('.btn-demo');
+        if (demoBtn) demoBtn.disabled = true;
+        var submitBtn = document.querySelector('.btn-submit');
+        if (submitBtn) submitBtn.disabled = true;
+    } else if (user.type === 'student' && labScheduleState === 'ended') {
+        var submitBtn2 = document.querySelector('.btn-submit');
+        if (submitBtn2) {
+            submitBtn2.disabled = true;
+            submitBtn2.title = '实验已结束，不能再提交报告';
+            submitBtn2.style.opacity = '0.5';
+            submitBtn2.style.cursor = 'not-allowed';
+        }
+        var banner = document.createElement('div');
+        banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:linear-gradient(135deg,#f39c12,#e67e22);color:white;text-align:center;padding:12px;font-size:15px;z-index:9998;box-shadow:0 -2px 10px rgba(0,0,0,0.2);';
+        banner.innerHTML = '⚠️ 实验已结束，您可以查看实验内容，但不能再提交实验报告';
+        document.body.appendChild(banner);
+        document.body.style.paddingBottom = '50px';
+    }
+
+    function toggleHintPanel() {
+        var panel = document.getElementById('floatHintPanel');
+        if (panel.classList.contains('hidden')) {
+            panel.classList.remove('hidden');
+        } else {
+            panel.classList.add('hidden');
+        }
+    }
+
+    (function() {
+        var header = document.getElementById('floatHintHeader');
+        var panel = document.getElementById('floatHintPanel');
+        if (!header || !panel) return;
+        var dragging = false, offsetX = 0, offsetY = 0;
+        header.addEventListener('mousedown', function(e) {
+            dragging = true;
+            var rect = panel.getBoundingClientRect();
+            var parentRect = panel.parentElement.getBoundingClientRect();
+            offsetX = e.clientX - rect.left;
+            offsetY = e.clientY - rect.top;
+            panel.style.left = (rect.left - parentRect.left) + 'px';
+            panel.style.top = (rect.top - parentRect.top) + 'px';
+            panel.style.right = 'auto';
+            panel.style.bottom = 'auto';
+            e.preventDefault();
+        });
+        document.addEventListener('mousemove', function(e) {
+            if (!dragging) return;
+            var parentRect = panel.parentElement.getBoundingClientRect();
+            panel.style.left = (e.clientX - parentRect.left - offsetX) + 'px';
+            panel.style.top = (e.clientY - parentRect.top - offsetY) + 'px';
+        });
+        document.addEventListener('mouseup', function() { dragging = false; });
+    })();
+    })();
+    </script>
+    
+    
+    
+    <script>
+    document.addEventListener('paste', function(e) {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+            e.preventDefault();
+        }
+    }, true);
+    </script>
+</body>
+</html>

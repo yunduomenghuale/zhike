@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>网络时延分析 - 计算机网络辅助教学平台</title>
+    
+    
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+            background: #0b1120;
+            min-height: 100vh;
+            padding: 20px;
+         color: #e2e8f0; }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: #0f172a;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 30px;
+        }
+
+        h1 {
+            text-align: center;
+            color: #e2e8f0;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #cbd5e1;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .visualization-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+
+        .diagram-section {
+            background: #0f172a;
+            border-radius: 15px;
+            padding: 25px;
+        }
+
+        .diagram-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #e2e8f0;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .network-diagram {
+            position: relative;
+            height: 500px;
+            background: #0f172a;
+            border-radius: 10px;
+            border: 2px solid #334155;
+        }
+
+        .node {
+            position: absolute;
+            width: 90px;
+            height: 50px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 13px;
+            color: white;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+        }
+
+        .node-source {
+            left: 20px;
+            top: 220px;
+            background: #4a90e2;
+        }
+
+        .node-router {
+            left: 200px;
+            top: 220px;
+            background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);
+        }
+
+        .node-destination {
+            left: 380px;
+            top: 220px;
+            background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
+        }
+
+        .link {
+            position: absolute;
+            height: 6px;
+            background: #95a5a6;
+        }
+
+        .link-1 {
+            left: 110px;
+            top: 243px;
+            width: 90px;
+        }
+
+        .link-2 {
+            left: 290px;
+            top: 243px;
+            width: 90px;
+        }
+
+        .delay-indicator {
+            position: absolute;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: bold;
+            color: white;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            white-space: nowrap;
+        }
+
+        .delay-send {
+            left: 20px;
+            top: 130px;
+            background: #e74c3c;
+        }
+
+        .delay-prop1 {
+            left: 120px;
+            top: 175px;
+            background: #3498db;
+        }
+
+        .delay-process {
+            left: 200px;
+            top: 130px;
+            background: #9b59b6;
+        }
+
+        .delay-queue {
+            left: 200px;
+            top: 310px;
+            background: #f39c12;
+        }
+
+        .delay-prop2 {
+            left: 300px;
+            top: 175px;
+            background: #3498db;
+        }
+
+        .arrow {
+            position: absolute;
+            font-size: 24px;
+            color: #e74c3c;
+        }
+
+        /* 动画效果 */
+        @keyframes sendPulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.1); opacity: 0.8; }
+        }
+
+        @keyframes propMove {
+            0% { transform: translateX(0); }
+            50% { transform: translateX(10px); }
+            100% { transform: translateX(0); }
+        }
+
+        @keyframes processRotate {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        @keyframes queueBounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-5px); }
+        }
+
+        .delay-send {
+            animation: sendPulse 2s ease-in-out infinite;
+        }
+
+        .delay-prop1, .delay-prop2 {
+            animation: propMove 1.5s ease-in-out infinite;
+        }
+
+        .delay-process {
+            animation: sendPulse 1.8s ease-in-out infinite;
+        }
+
+        .delay-queue {
+            animation: queueBounce 1s ease-in-out infinite;
+        }
+
+        /* 数据包动*/
+        .data-packet {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background: #e74c3c;
+            border-radius: 50%;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            animation: packetMove 4s linear infinite;
+        }
+
+        @keyframes packetMove {
+            0% { left: 110px; top: 237px; opacity: 1; }
+            25% { left: 200px; top: 237px; opacity: 1; }
+            50% { left: 290px; top: 237px; opacity: 1; }
+            75% { left: 380px; top: 237px; opacity: 1; }
+            100% { left: 470px; top: 237px; opacity: 0; }
+        }
+
+        /* 排队动画 - 多个数据率*/
+        .queue-packet {
+            position: absolute;
+            width: 15px;
+            height: 15px;
+            background: #f39c12;
+            border-radius: 3px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+        }
+
+        .queue-packet-1 {
+            left: 210px;
+            top: 290px;
+            animation: queueMove1 2s ease-in-out infinite;
+        }
+
+        .queue-packet-2 {
+            left: 230px;
+            top: 290px;
+            animation: queueMove2 2s ease-in-out infinite 0.3s;
+        }
+
+        .queue-packet-3 {
+            left: 250px;
+            top: 290px;
+            animation: queueMove3 2s ease-in-out infinite 0.6s;
+        }
+
+        @keyframes queueMove1 {
+            0%, 100% { transform: translateY(0); opacity: 1; }
+            50% { transform: translateY(-10px); opacity: 0.7; }
+        }
+
+        @keyframes queueMove2 {
+            0%, 100% { transform: translateY(0); opacity: 1; }
+            50% { transform: translateY(-8px); opacity: 0.7; }
+        }
+
+        @keyframes queueMove3 {
+            0%, 100% { transform: translateY(0); opacity: 1; }
+            50% { transform: translateY(-6px); opacity: 0.7; }
+        }
+
+        /* 处理动画 - 旋转齿轮 */
+        .process-gear {
+            position: absolute;
+            left: 235px;
+            top: 185px;
+            width: 30px;
+            height: 30px;
+            border: 3px solid #9b59b6;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: processRotate 1s linear infinite;
+        }
+
+        .arrow {
+            left: 145px;
+            top: 240px;
+        }
+
+        .arrow-2 {
+            left: 325px;
+            top: 240px;
+        }
+
+        .control-section {
+            background: #0f172a;
+            border-radius: 15px;
+            padding: 25px;
+        }
+
+        .control-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #e2e8f0;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .parameter-group {
+            margin-bottom: 20px;
+        }
+
+        .parameter-label {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .parameter-name {
+            font-weight: bold;
+            color: #e2e8f0;
+            font-size: 14px;
+        }
+
+        .parameter-value {
+            color: #4a90e2;
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        .parameter-slider {
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background: #334155;
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        .parameter-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #4a90e2;
+            cursor: pointer;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+        }
+
+        .parameter-unit {
+            color: #cbd5e1;
+            font-size: 12px;
+            margin-top: 4px;
+        }
+
+        .result-section {
+            background: #0f172a;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 20px;
+            border: 2px solid #4a90e2;
+        }
+
+        .result-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #4a90e2;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+
+        .delay-bar {
+            display: flex;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .delay-label {
+            width: 100px;
+            font-size: 13px;
+            font-weight: bold;
+        }
+
+        .delay-bar-container {
+            flex: 1;
+            height: 30px;
+            background: #1e293b;
+            border-radius: 15px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .delay-bar-fill {
+            height: 100%;
+            border-radius: 15px;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 12px;
+        }
+
+        .delay-value {
+            width: 80px;
+            text-align: right;
+            font-size: 13px;
+            font-weight: bold;
+            color: #e2e8f0;
+            margin-left: 10px;
+        }
+
+        .total-delay {
+            background: #1e293b;
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            font-size: 18px;
+            font-weight: bold;
+            margin-top: 15px;
+        }
+
+        .info-panel {
+            background: #0f172a;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 30px;
+        }
+
+        .info-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #e2e8f0;
+            margin-bottom: 15px;
+        }
+
+        .info-content {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+        }
+
+        .info-item {
+            background: #0f172a;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #4a90e2;
+        }
+
+        .info-item h3 {
+            color: #4a90e2;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .info-item p {
+            color: #cbd5e1;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .formula {
+            background: rgba(251, 191, 36, 0.1);
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            text-align: center;
+            font-size: 16px;
+            font-weight: bold;
+            color: #e2e8f0;
+            border: 2px dashed #f39c12;
+        }
+
+        .legend {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+        }
+    </style>
+
+</head>
+<body>
+    <div class="container">
+        <h1>计算机网络 - 四种时延演示</h1>
+        <p class="subtitle">基于《计算机网络教程（第7版）》图1-12 | 发送时延、传播时延、处理时延、排队时延</p>
+
+        <div class="legend">
+            <div class="legend-item">
+                <div class="legend-color" style="background: #e74c3c;"></div>
+                <span>发送时延</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #3498db;"></div>
+                <span>传播时延</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #9b59b6;"></div>
+                <span>处理时延</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #f39c12;"></div>
+                <span>排队时延</span>
+            </div>
+        </div>
+
+        <div class="visualization-section">
+            <div class="diagram-section">
+                <div class="diagram-title">📊 时延产生位置示意图</div>
+                <div class="network-diagram">
+                    <!-- 网络节点 -->
+                    <div class="node node-source">源主机</div>
+                    <div class="node node-router">路由器</div>
+                    <div class="node node-destination">目的主机</div>
+                    
+                    <!-- 链路 -->
+                    <div class="link link-1"></div>
+                    <div class="link link-2"></div>
+                    
+                    <!-- 时延指示-->
+                    <div class="delay-indicator delay-send" id="sendDelayIndicator">发送时延</div>
+                    <div class="delay-indicator delay-prop1" id="prop1DelayIndicator">传播时延</div>
+                    <div class="delay-indicator delay-process" id="processDelayIndicator">处理时延</div>
+                    <div class="delay-indicator delay-queue" id="queueDelayIndicator">排队时延</div>
+                    <div class="delay-indicator delay-prop2" id="prop2DelayIndicator">传播时延</div>
+                    
+                    <!-- 箭头 -->
+                    <div class="arrow arrow-1">➡</div>
+                    <div class="arrow arrow-2">➡</div>
+                    
+                    <!-- 动画元素 -->
+                    <div class="data-packet"></div>
+                    <div class="queue-packet queue-packet-1"></div>
+                    <div class="queue-packet queue-packet-2"></div>
+                    <div class="queue-packet queue-packet-3"></div>
+                    <div class="process-gear"></div>
+                </div>
+            </div>
+
+            <div class="control-section">
+                <div class="control-title">⚙️ 参数调节</div>
+                
+                <div class="parameter-group">
+                    <div class="parameter-label">
+                        <span class="parameter-name">数据长度 (L)</span>
+                        <span class="parameter-value" id="dataLengthValue">1000 bit</span>
+                    </div>
+                    <input type="range" class="parameter-slider" id="dataLength" min="100" max="10000" value="1000" step="100">
+                    <div class="parameter-unit">范围: 100 - 10000 bit</div>
+                </div>
+
+                <div class="parameter-group">
+                    <div class="parameter-label">
+                        <span class="parameter-name">发送速率 (R)</span>
+                        <span class="parameter-value" id="sendRateValue">1 Mbps</span>
+                    </div>
+                    <input type="range" class="parameter-slider" id="sendRate" min="0.1" max="100" value="1" step="0.1">
+                    <div class="parameter-unit">范围: 0.1 - 100 Mbps</div>
+                </div>
+
+                <div class="parameter-group">
+                    <div class="parameter-label">
+                        <span class="parameter-name">链路长度 (D)</span>
+                        <span class="parameter-value" id="linkLengthValue">100 km</span>
+                    </div>
+                    <input type="range" class="parameter-slider" id="linkLength" min="1" max="1000" value="100" step="1">
+                    <div class="parameter-unit">范围: 1 - 1000 km</div>
+                </div>
+
+                <div class="parameter-group">
+                    <div class="parameter-label">
+                        <span class="parameter-name">传播速率 (v)</span>
+                        <span class="parameter-value" id="propSpeedValue">2×10⁵km/s</span>
+                    </div>
+                    <input type="range" class="parameter-slider" id="propSpeed" min="1" max="3" value="2" step="0.1">
+                    <div class="parameter-unit">范围: 1×10⁵ - 3×10⁵km/s (光速的倍数)</div>
+                </div>
+
+                <div class="parameter-group">
+                    <div class="parameter-label">
+                        <span class="parameter-name">处理时延</span>
+                        <span class="parameter-value" id="processDelayValue">1 ms</span>
+                    </div>
+                    <input type="range" class="parameter-slider" id="processDelay" min="0.1" max="10" value="1" step="0.1">
+                    <div class="parameter-unit">范围: 0.1 - 10 ms</div>
+                </div>
+
+                <div class="parameter-group">
+                    <div class="parameter-label">
+                        <span class="parameter-name">排队时延</span>
+                        <span class="parameter-value" id="queueDelayValue">2 ms</span>
+                    </div>
+                    <input type="range" class="parameter-slider" id="queueDelay" min="0.1" max="20" value="2" step="0.1">
+                    <div class="parameter-unit">范围: 0.1 - 20 ms</div>
+                </div>
+
+                <div class="result-section">
+                    <div class="result-title">📈 时延分析结果</div>
+                    
+                    <div class="delay-bar">
+                        <div class="delay-label" style="color: #e74c3c;">发送时延</div>
+                        <div class="delay-bar-container">
+                            <div class="delay-bar-fill" id="sendBar" style="background: #e74c3c;"></div>
+                        </div>
+                        <div class="delay-value" id="sendDelayResult">1.00 ms</div>
+                    </div>
+
+                    <div class="delay-bar">
+                        <div class="delay-label" style="color: #3498db;">传播时延</div>
+                        <div class="delay-bar-container">
+                            <div class="delay-bar-fill" id="propBar" style="background: #3498db;"></div>
+                        </div>
+                        <div class="delay-value" id="propDelayResult">0.50 ms</div>
+                    </div>
+
+                    <div class="delay-bar">
+                        <div class="delay-label" style="color: #9b59b6;">处理时延</div>
+                        <div class="delay-bar-container">
+                            <div class="delay-bar-fill" id="processBar" style="background: #9b59b6;"></div>
+                        </div>
+                        <div class="delay-value" id="processDelayResult">1.00 ms</div>
+                    </div>
+
+                    <div class="delay-bar">
+                        <div class="delay-label" style="color: #f39c12;">排队时延</div>
+                        <div class="delay-bar-container">
+                            <div class="delay-bar-fill" id="queueBar" style="background: #f39c12;"></div>
+                        </div>
+                        <div class="delay-value" id="queueDelayResult">2.00 ms</div>
+                    </div>
+
+                    <div class="total-delay" id="totalDelay">
+                        总时延 = 4.50 ms
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="formula">
+            总时延 = 发送时延 + 传播时延 + 处理时延 + 排队时延<br>
+            <span style="font-size: 14px; font-weight: normal;">
+                发送时延 = L/R &nbsp;&nbsp;|&nbsp;&nbsp; 传播时延 = D/v
+            </span>
+        </div>
+
+        <div class="info-panel">
+            <div class="info-title">📚 四种时延详细说明</div>
+            <div class="info-content">
+                <div class="info-item">
+                    <h3>🔹 发送时延（传输时延）</h3>
+                    <p><strong>定义：</strong>主机或路由器发送数据帧所需要的时间。<br>
+                    <strong>公式：</strong>发送时延 = 数据帧长度(bit) / 发送速率(bit/s)<br>
+                    <strong>位置：</strong>在发送方产生，数据从发送方进入链路的过程。</p>
+                </div>
+                <div class="info-item">
+                    <h3>🔹 传播时延</h3>
+                    <p><strong>定义：</strong>电磁波或光信号在信道中传播一定的距离所花费的时间。<br>
+                    <strong>公式：</strong>传播时延 = 信道长度(m) / 电磁波在信道上的传播速率(m/s)<br>
+                    <strong>位置：</strong>在链路上产生，信号从一端传到另一端的过程。</p>
+                </div>
+                <div class="info-item">
+                    <h3>🔹 处理时延</h3>
+                    <p><strong>定义：</strong>主机或路由器在收到分组时进行处理所花费的时间。<br>
+                    <strong>内容：</strong>分析分组首部、提取数据、差错检验、查找路由表等。<br>
+                    <strong>位置：</strong>在路由器或主机内部产生。</p>
+                </div>
+                <div class="info-item">
+                    <h3>🔹 排队时延</h3>
+                    <p><strong>定义：</strong>分组在输入队列中等待处理，或在输出队列中等待转发的时间。<br>
+                    <strong>特点：</strong>取决于网络拥塞程度，是最难确定的时延。<br>
+                    <strong>位置：</strong>在路由器的队列中产生。</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 获取参数
+        function getParameters() {
+            return {
+                dataLength: parseFloat(document.getElementById('dataLength').value), // bit
+                sendRate: parseFloat(document.getElementById('sendRate').value), // Mbps
+                linkLength: parseFloat(document.getElementById('linkLength').value), // km
+                propSpeed: parseFloat(document.getElementById('propSpeed').value), // ×10km/s
+                processDelay: parseFloat(document.getElementById('processDelay').value), // ms
+                queueDelay: parseFloat(document.getElementById('queueDelay').value) // ms
+            };
+        }
+
+        // 计算时延
+        function calculateDelays(params) {
+            // 发送时延 = L/R (bit / Mbps = bit / (10^6 bit/s) = 10^-6 s = 10^-3 ms)
+            const sendDelay = (params.dataLength / (params.sendRate * 1000000)) * 1000; // ms
+            
+            // 传播时延 = D/v (km / (×10km/s) = 10^-5 s = 10^-2 ms)
+            const propDelay = (params.linkLength / (params.propSpeed * 100000)) * 1000; // ms
+            
+            // 处理时延和排队时延直接使用输入
+            const processDelay = params.processDelay;
+            const queueDelay = params.queueDelay;
+            
+            // 总时
+            const totalDelay = sendDelay + propDelay + processDelay + queueDelay;
+            
+            return {
+                sendDelay,
+                propDelay,
+                processDelay,
+                queueDelay,
+                totalDelay
+            };
+        }
+
+        // 更新显示
+        function updateDisplay() {
+            const params = getParameters();
+            const delays = calculateDelays(params);
+            
+            // 更新参数显示
+            document.getElementById('dataLengthValue').textContent = params.dataLength + ' bit';
+            document.getElementById('sendRateValue').textContent = params.sendRate + ' Mbps';
+            document.getElementById('linkLengthValue').textContent = params.linkLength + ' km';
+            document.getElementById('propSpeedValue').textContent = params.propSpeed + '×10⁵km/s';
+            document.getElementById('processDelayValue').textContent = params.processDelay + ' ms';
+            document.getElementById('queueDelayValue').textContent = params.queueDelay + ' ms';
+            
+            // 更新时延结果显示
+            document.getElementById('sendDelayResult').textContent = delays.sendDelay.toFixed(2) + ' ms';
+            document.getElementById('propDelayResult').textContent = delays.propDelay.toFixed(2) + ' ms';
+            document.getElementById('processDelayResult').textContent = delays.processDelay.toFixed(2) + ' ms';
+            document.getElementById('queueDelayResult').textContent = delays.queueDelay.toFixed(2) + ' ms';
+            document.getElementById('totalDelay').textContent = '总时延 = ' + delays.totalDelay.toFixed(2) + ' ms';
+            
+            // 更新条形
+            const maxDelay = Math.max(delays.sendDelay, delays.propDelay, delays.processDelay, delays.queueDelay);
+            const totalWidth = 100;
+            
+            const sendPercent = (delays.sendDelay / maxDelay) * totalWidth;
+            const propPercent = (delays.propDelay / maxDelay) * totalWidth;
+            const processPercent = (delays.processDelay / maxDelay) * totalWidth;
+            const queuePercent = (delays.queueDelay / maxDelay) * totalWidth;
+            
+            document.getElementById('sendBar').style.width = sendPercent + '%';
+            document.getElementById('propBar').style.width = propPercent + '%';
+            document.getElementById('processBar').style.width = processPercent + '%';
+            document.getElementById('queueBar').style.width = queuePercent + '%';
+            
+            // 更新条形图内的文
+            document.getElementById('sendBar').textContent = sendPercent > 20 ? delays.sendDelay.toFixed(2) + ' ms' : '';
+            document.getElementById('propBar').textContent = propPercent > 20 ? delays.propDelay.toFixed(2) + ' ms' : '';
+            document.getElementById('processBar').textContent = processPercent > 20 ? delays.processDelay.toFixed(2) + ' ms' : '';
+            document.getElementById('queueBar').textContent = queuePercent > 20 ? delays.queueDelay.toFixed(2) + ' ms' : '';
+            
+            // 更新时延指示
+            document.getElementById('sendDelayIndicator').textContent = '发送时延: ' + delays.sendDelay.toFixed(2) + ' ms';
+            document.getElementById('prop1DelayIndicator').textContent = '传播时延: ' + delays.propDelay.toFixed(2) + ' ms';
+            document.getElementById('prop2DelayIndicator').textContent = '传播时延: ' + delays.propDelay.toFixed(2) + ' ms';
+            document.getElementById('processDelayIndicator').textContent = '处理时延: ' + delays.processDelay.toFixed(2) + ' ms';
+            document.getElementById('queueDelayIndicator').textContent = '排队时延: ' + delays.queueDelay.toFixed(2) + ' ms';
+        }
+
+        // 绑定事件
+        document.getElementById('dataLength').addEventListener('input', updateDisplay);
+        document.getElementById('sendRate').addEventListener('input', updateDisplay);
+        document.getElementById('linkLength').addEventListener('input', updateDisplay);
+        document.getElementById('propSpeed').addEventListener('input', updateDisplay);
+        document.getElementById('processDelay').addEventListener('input', updateDisplay);
+        document.getElementById('queueDelay').addEventListener('input', updateDisplay);
+
+        // 初始化显示
+        updateDisplay();
+    </script>
+
+
+    
+    
+    
+</body>
+</html>

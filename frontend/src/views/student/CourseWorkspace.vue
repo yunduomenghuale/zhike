@@ -19,6 +19,7 @@ import {
   Files,
   Notebook,
   Reading,
+  VideoPlay,
 } from '@element-plus/icons-vue'
 import CourseWorkspaceShell from '@/components/CourseWorkspaceShell.vue'
 import { listClasses } from '@/api/classroom'
@@ -30,6 +31,7 @@ const tabs = [
   { name: 'student-course-learning', label: '章节目录', icon: Reading },
   { name: 'student-course-qa', label: 'AI 助教', icon: ChatDotRound },
   { name: 'student-course-materials', label: '课程资料', icon: Files },
+  { name: 'student-course-resources', label: '课程资源', icon: VideoPlay },
   { name: 'student-course-homework', label: '我的作业', icon: Notebook },
   { name: 'student-course-exams', label: '我的考试', icon: Document },
   { name: 'student-course-wrong', label: '错题本', icon: Collection },

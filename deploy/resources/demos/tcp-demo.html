@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TCP协议详解 - 计算机网络辅助教学平台</title>
+    
+    
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: "Microsoft Yahei", "微软雅黑", sans-serif;
+        }
+
+        body {
+            background-color: #0b1120;
+            color: #e2e8f0;
+            padding: 20px;
+            line-height: 1.7;
+        }
+
+        .container {
+            max-width: 1280px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            margin: 10px 0 25px;
+            color: #38bdf8;
+            font-size: 32px;
+            text-shadow: 0 0 12px rgba(56, 189, 248, 0.4);
+        }
+
+        .tab-box {
+            display: flex;
+            justify-content: center;
+            gap: 25px;
+            margin-bottom: 25px;
+        }
+
+        .tab {
+            padding: 12px 32px;
+            border-radius: 10px;
+            background: #1e293b;
+            border: 2px solid #475569;
+            cursor: pointer;
+            font-size: 18px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+
+        .tab.active {
+            background: #0ea5e9;
+            border-color: #0ea5e9;
+            color: #fff;
+            box-shadow: 0 0 18px rgba(14, 165, 233, 0.5);
+            transform: scale(1.05);
+        }
+
+        .btn-group {
+            text-align: center;
+            margin-bottom: 25px;
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        #autoPlay { background-color: #10b981; color: white; }
+        #stepPlay { background-color: #0ea5e9; color: white; }
+        #reset { background-color: #ef4444; color: white; }
+
+        button:hover {
+            opacity: 0.95;
+            transform: scale(1.06);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+
+        .main-box {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            height: 480px;
+            position: relative;
+            border: 2px solid #334155;
+            border-radius: 16px;
+            padding: 25px;
+            background: #0f172a;
+            margin-bottom: 30px;
+            overflow: hidden;
+        }
+
+        .host {
+            width: 240px;
+            height: 280px;
+            border-radius: 14px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            font-weight: bold;
+            box-shadow: 0 0 30px rgba(0, 0, 0, 0.6);
+            padding: 15px;
+            position: relative;
+        }
+
+        .client {
+            background: linear-gradient(135deg, #1d4ed8, #3b82f6);
+            color: white;
+        }
+
+        .server {
+            background: linear-gradient(135deg, #a21caf, #c084fc);
+            color: white;
+        }
+
+        .host-name {
+            font-size: 24px;
+            margin-bottom: 15px;
+        }
+
+        .state-box {
+            background: rgba(0, 0, 0, 0.35);
+            padding: 10px 16px;
+            border-radius: 8px;
+            margin: 10px 0;
+            font-size: 15px;
+            width: 95%;
+            text-align: center;
+            transition: all 0.4s ease;
+            border: 1px solid transparent;
+        }
+
+        .state-highlight {
+            background: rgba(251, 191, 36, 0.2);
+            border: 1px solid #fbbf24;
+            color: #fcd34d;
+            box-shadow: 0 0 10px rgba(251, 191, 36, 0.3);
+        }
+
+        .seq-info {
+            background: rgba(0, 0, 0, 0.25);
+            padding: 10px 14px;
+            border-radius: 8px;
+            width: 95%;
+            text-align: center;
+            font-size: 14px;
+            margin-top: 12px;
+        }
+
+        .line {
+            position: absolute;
+            top: 50%;
+            left: 260px;
+            right: 260px;
+            height: 2px;
+            background-color: #64748b;
+            transform: translateY(-50%);
+        }
+
+        /* 基础数据包样*/
+        .packet {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            padding: 10px 14px;
+            border-radius: 10px;
+            font-size: 17px;
+            font-weight: 700;
+            white-space: nowrap;
+            opacity: 0;
+            transition: all 2.2s ease-in-out !important;
+            z-index: 10;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.7);
+            line-height: 1.4;
+            text-align: center;
+            border: 2px solid #000;
+            min-height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* 客户端发出的包（向右）去服务器*/
+        .to-right {
+          min-width: 80px !important;
+          width: fit-content !important; 
+          padding: 8px 12px !important;
+        }
+
+        /* 服务器发出的包（向左）去客户端*/
+        .to-left {
+            min-width: unset !important;
+            width: fit-content !important;
+            padding: 8px 12px !important;
+        }
+
+        .packet::after {
+            content: "";
+            position: absolute;
+            top: 50%;
+            width: 0;
+            height: 0;
+            border-top: 8px solid transparent;
+            border-bottom: 8px solid transparent;
+            transform: translateY(-50%);
+        }
+        .to-right::after {
+            right: -15px;
+            border-left: 15px solid #60a5fa;
+        }
+        .to-left::after {
+            left: -15px;
+            border-right: 15px solid #c084fc;
+        }
+
+        .p1 { background: #60a5fa; color: #000; left: 260px; }
+        .p2 { background: #c084fc; color: #000; right: 260px; }
+        .p3 { background: #34d399; color: #000; left:260px; }
+        .w1 { background: #fb923c; color: #000; left: 260px; display: none; }
+        .w2 { background: #f87171; color: #000; right: 260px; display: none; }
+        .w3 { background: #a78bfa; color: #000; right: 260px; display: none; }
+        .w4 { background: #2dd4bf; color: #000; left: 260px; display: none; }
+
+        .tip-box {
+            position: absolute;
+            background: rgba(15, 23, 42, 0.95);
+            border: 1px solid #38bdf8;
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-size: 13px;
+            color: #e2e8f0;
+            white-space: pre-line;
+            z-index: 99;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+            width: 280px;
+        }
+
+        .step-text {
+            position: absolute;
+            top: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(14, 165, 233, 0.15);
+            border: 1px solid #0ea5e9;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 16px;
+            color: #93c5fd;
+            opacity: 0;
+            transition: all 0.6s ease;
+        }
+
+        .explain-box {
+            background: #0f172a;
+            border-radius: 14px;
+            padding: 28px;
+            border: 2px solid #334155;
+        }
+
+        .title {
+            font-size: 22px;
+            color: #38bdf8;
+            margin-bottom: 18px;
+            font-weight: bold;
+        }
+
+        .step {
+            margin-bottom: 14px;
+            line-height: 1.7;
+            font-size: 15.5px;
+        }
+
+        .highlight {
+            color: #fbbf24;
+            font-weight: bold;
+        }
+
+        .knowledge-point {
+            margin-top: 22px;
+            padding: 15px;
+            background: rgba(14, 165, 233, 0.1);
+            border-radius: 10px;
+            border-left: 4px solid #0ea5e9;
+        }
+
+        .summary {
+            margin-top: 20px;
+            padding-top: 15px;
+            border-top: 1px solid #475569;
+            color: #94a3b8;
+        }
+
+        .hand-content { display: block; }
+        .wave-content { display: none; }
+    </style>
+
+</head>
+<body>
+    <div class="container">
+        <h1>TCP 三次握手与四次挥手</h1>
+
+        <div class="tab-box">
+            <div class="tab active" id="tabHand">三次握手</div>
+            <div class="tab" id="tabWave">四次挥手</div>
+        </div>
+
+        <div class="btn-group">
+            <button id="autoPlay">自动完整播放动画</button>
+            <button id="stepPlay">手动分步播放（讲课专用）</button>
+            <button id="reset">一键重置所有动画</button>
+        </div>
+
+        <div class="main-box">
+            <div class="step-text" id="stepTip"></div>
+
+            <div class="host client">
+                <div class="host-name">客户端</div>
+                <div class="state-box" id="clientState">状态：CLOSED</div>
+                <div class="seq-info">初始序列号 seq = x</div>
+            </div>
+
+            <div class="line"></div>
+
+            <div class="packet p1 to-right" data-tip="第一次握手：SYN报文\nseq=x，不携带数据\n客户端进入SYN_SENT">SYN<br>seq=x</div>
+            <div class="packet p2 to-left" data-tip="第二次握手：SYN+ACK报文\nseq=y，ack=x+1\n服务器进入SYN_RCVD">SYN+ACK<br>seq=y ack=x+1</div>
+            <div class="packet p3 to-right" data-tip="第三次握手：ACK报文\nseq=x+1，ack=y+1\n双方进入ESTABLISHED">ACK<br>seq=x+1 ack=y+1</div>
+
+            <div class="packet w1 to-right" data-tip="第一次挥手：FIN报文\nseq=u，客户端进入FIN_WAIT1">FIN<br>seq=u</div>
+            <div class="packet w2 to-left" data-tip="第二次挥手：ACK报文\nack=u+1，服务器进入CLOSE_WAIT">ACK<br>seq=u+1</div>
+            <div class="packet w3 to-left" data-tip="第三次挥手：FIN报文\nseq=v，服务器进入LAST_ACK">FIN<br>seq=v</div>
+            <div class="packet w4 to-right" data-tip="第四次挥手：ACK报文\nack=v+1，客户端TIME_WAIT后关闭">ACK<br>ack=v+1</div>
+
+            <div class="tip-box" id="packetTip"></div>
+
+            <div class="host server">
+                <div class="host-name">服务器</div>
+                <div class="state-box" id="serverState">状态：CLOSED</div>
+                <div class="seq-info">初始序列seq = y</div>
+            </div>
+        </div>
+
+        <div class="explain-box hand-content" id="handExplain">
+            <div class="title">📖 TCP三次握手原理详解</div>
+            <div class="step">
+                <span class="highlight">第一次握手（客户端→服务器）</span><br>
+                客户端发送<strong>SYN同步报文</strong>，序列号 seq=x，客户端进入 <strong>SYN_SENT</strong> 状态，发起连接请求
+            </div>
+            <div class="step">
+                <span class="highlight">第二次握手（服务器→客户端）</span><br>
+                服务器接收后，回<strong>SYN+ACK报文</strong>：自身序列号 seq=y，确认号 ack=x+1，服务器进入 <strong>SYN_RCVD</strong> 状态
+            </div>
+            <div class="step">
+                <span class="highlight">第三次握手（客户端→服务器）</span><br>
+                客户端回<strong>ACK确认报文</strong>：序列号 seq=x+1，确认号 ack=y+1。双方全部进<strong>ESTABLISHED</strong> 状态，连接建立完成，开始全双工数据传输中
+            </div>
+            <div class="knowledge-point">
+                <strong>🎯 考试核心考点：为什么需要三次握手，不能2次握手？</strong><br>
+                1. 防止**过期的旧连接请求报文**到达服务器，导致服务器无效建立连接、浪费资源<br>
+                2. 可靠同步**双方的发送序列号**，保证双向通道都正常<br>
+                3. 两次握手服务器无法确认客户端能否接收自己的数据，三次握手实现双向可靠确认
+            </div>
+            <div class="summary">
+               核心作用：可靠建立全双工TCP连接，同步双方序列号与确认号，解决网络延迟报文干扰问题
+            </div>
+        </div>
+
+        <div class="explain-box wave-content" id="waveExplain">
+            <div class="title">📖 TCP四次挥手原理详解</div>
+            <div class="step">
+                <span class="highlight">第一次挥手（客户端→服务器）</span><br>
+                客户端发送<strong>FIN结束报文</strong>，seq=u，进<strong>FIN_WAIT1</strong>，请求关闭自身写通道
+            </div>
+            <div class="step">
+                <span class="highlight">第二次挥手（服务器→客户端）</span><br>
+               服务器回<strong>ACK确认报文</strong>，ack=u+1，进<strong>CLOSE_WAIT</strong>；客户端进入 <strong>FIN_WAIT2</strong>
+            </div>
+            <div class="step">
+                <span class="highlight">第三次挥手（服务器→客户端）</span><br>
+               服务器剩余数据全部发送完毕后，发送<strong>FIN结束报文</strong>，seq=v，进<strong>LAST_ACK</strong>
+            </div>
+            <div class="step">
+                <span class="highlight">第四次挥手（客户端→服务器）</span><br>
+                客户端回<strong>ACK确认报文</strong>，ack=v+1，客户端进入 <strong>TIME_WAIT</strong>；等MSL后完全关闭，服务器直接关闭
+            </div>
+            <div class="knowledge-point">
+                <strong>🎯 考试核心考点1：为什么断开连接需要四次，不能3次？</strong><br>
+                TCP<strong>全双工通信</strong>，客户端、服务器双方读写通道相互独立，需要各自单独关闭、单独确认，因此无法合并报文<br><br>
+                <strong>🎯 考试核心考点2：TIME_WAIT 2MSL详解</strong><br>
+                1. MSL：报文最大生存时间，网络中数据包最长存活时间<br>
+                2. 等待2MSL：确保服务器收到最后一个ACK报文，同时网络中所有旧报文全部过期消失<br>
+                3. 避免旧报文干扰后续新的TCP连接
+            </div>
+            <div class="summary">
+                总结：三次握手建立连接，四次挥手断开连接；全双工通道导致关闭需要独立确认
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const tabHand = document.getElementById('tabHand');
+        const tabWave = document.getElementById('tabWave');
+        const handExplain = document.getElementById('handExplain');
+        const waveExplain = document.getElementById('waveExplain');
+        const clientState = document.getElementById('clientState');
+        const serverState = document.getElementById('serverState');
+        const stepTip = document.getElementById('stepTip');
+        const packetTip = document.getElementById('packetTip');
+
+        const p1 = document.querySelector('.p1');
+        const p2 = document.querySelector('.p2');
+        const p3 = document.querySelector('.p3');
+        const w1 = document.querySelector('.w1');
+        const w2 = document.querySelector('.w2');
+        const w3 = document.querySelector('.w3');
+        const w4 = document.querySelector('.w4');
+
+        const autoPlayBtn = document.getElementById('autoPlay');
+        const stepPlayBtn = document.getElementById('stepPlay');
+        const resetBtn = document.getElementById('reset');
+
+        let currentStep = 0;
+        let isHand = true;
+        const allPackets = [p1,p2,p3,w1,w2,w3,w4];
+
+        // ======================
+        // 绝对零遮+ 完美对齐停靠坐标
+        // ======================
+        // 三次握手停止位置
+        const RIGHT_STOP = "920px";  // 客户端→服务器?
+        const LEFT_STOP = "850px";   // 服务器→客户端（SYN+ACK较大，需要更远）
+        const P3_STOP = "850px";     // 第三次握手ACK
+
+        // 四次挥手停止位置
+        const W_RIGHT_STOP = "920px";  // 客户端→服务器?
+        const W_LEFT_STOP = "900px";   // 服务器→客户端（ACK较小，可以更近）
+
+        allPackets.forEach(packet => {
+            if(!packet) return;
+            packet.addEventListener('mousemove', (e) => {
+                packetTip.style.opacity = 1;
+                packetTip.innerText = packet.dataset.tip;
+                packetTip.style.left = (e.pageX + 15) + 'px';
+                packetTip.style.top = (e.pageY + 15) + 'px';
+            });
+            packet.addEventListener('mouseleave', () => {
+                packetTip.style.opacity = 0;
+            });
+        });
+
+        tabHand.onclick = () => {
+            isHand = true;
+            tabHand.classList.add('active');
+            tabWave.classList.remove('active');
+            handExplain.style.display = 'block';
+            waveExplain.style.display = 'none';
+            resetAll();
+        }
+        tabWave.onclick = () => {
+            isHand = false;
+            tabWave.classList.add('active');
+            tabHand.classList.remove('active');
+            waveExplain.style.display = 'block';
+            handExplain.style.display = 'none';
+            resetAll();
+        }
+
+        function resetAll() {
+            currentStep = 0;
+            stepTip.style.opacity = 0;
+            allPackets.forEach(p => {
+                if(!p) return;
+                p.style.opacity = 0;
+                p.style.left = '';
+                p.style.right = '';
+                p.style.display = 'block';
+            });
+            [w1,w2,w3,w4].forEach(p=>{if(p)p.style.display='none'});
+            clientState.className = 'state-box';
+            serverState.className = 'state-box';
+            clientState.innerText = '状态：CLOSED';
+            serverState.innerText = '状态：CLOSED';
+        }
+
+        // 三次握手
+        function playHandAuto() {
+            resetAll();
+            setTimeout(() => {
+                p1.style.opacity = 1;
+                p1.style.left = RIGHT_STOP;
+                clientState.className = 'state-box state-highlight';
+                clientState.innerText = '状态：SYN_SENT';
+                stepTip.innerText = "第一步：客户端发送SYN报文，请求建立连接";
+                stepTip.style.opacity = 1;
+            }, 300);
+            setTimeout(() => {
+                p1.style.opacity = 0;
+                p2.style.opacity = 1;
+                p2.style.right = LEFT_STOP;
+                serverState.className = 'state-box state-highlight';
+                serverState.innerText = '状态：SYN_RCVD';
+                stepTip.innerText = "第二步：服务器回复SYN+ACK，同意连接";
+            }, 3300);
+            setTimeout(() => {
+                p2.style.opacity = 0;
+                p3.style.opacity = 1;
+                p3.style.left = P3_STOP;
+                clientState.className = 'state-box state-highlight';
+                clientState.innerText = '状态：ESTABLISHED';
+                serverState.className = 'state-box state-highlight';
+                serverState.innerText = '状态：ESTABLISHED';
+                stepTip.innerText = "第三步：客户端发送ACK确认，连接正式建立完成";
+            }, 6300);
+        }
+
+        // 四次挥手
+        function playWaveAuto() {
+            resetAll();
+            [w1,w2,w3,w4].forEach(p=>{if(p)p.style.display='block'});
+            setTimeout(() => {
+                w1.style.opacity = 1;
+                w1.style.left = W_RIGHT_STOP;
+                clientState.className = 'state-box state-highlight';
+                clientState.innerText = '状态：FIN_WAIT1';
+                stepTip.innerText = "第一步：客户端发送FIN，主动关闭连接";
+                stepTip.style.opacity = 1;
+            }, 300);
+            setTimeout(() => {
+                w1.style.opacity = 0;
+                w2.style.opacity = 1;
+                w2.style.right = W_LEFT_STOP;
+                clientState.className = 'state-box state-highlight';
+                clientState.innerText = '状态：FIN_WAIT2';
+                serverState.className = 'state-box state-highlight';
+                serverState.innerText = '状态：CLOSE_WAIT';
+                stepTip.innerText = "第二步：服务器ACK确认，半关闭状态";
+            }, 3300);
+            setTimeout(() => {
+                w2.style.opacity = 0;
+                w3.style.opacity = 1;
+                w3.style.right = W_LEFT_STOP;
+                serverState.className = 'state-box state-highlight';
+                serverState.innerText = '状态：LAST_ACK';
+                stepTip.innerText = "第三步：服务器数据发完，发送FIN关闭自身通道";
+            }, 6300);
+            setTimeout(() => {
+                w3.style.opacity = 0;
+                w4.style.opacity = 1;
+                w4.style.left = W_RIGHT_STOP;
+                clientState.className = 'state-box state-highlight';
+                clientState.innerText = '状态：TIME_WAIT';
+                serverState.className = 'state-box state-highlight';
+                serverState.innerText = '状态：CLOSED';
+                stepTip.innerText = "第四步：客户端ACK确认，等MSL后完全关闭";
+            }, 9300);
+        }
+
+        autoPlayBtn.onclick = () => {
+            if(isHand) playHandAuto();
+            else playWaveAuto();
+        };
+
+        // 手动播放
+        stepPlayBtn.onclick = () => {
+            if(isHand){
+                currentStep++;
+                if(currentStep === 1){
+                    p1.style.opacity = 1;
+                    p1.style.left = '260px';  // 先设置初始位
+                    setTimeout(() => {
+                        p1.style.left = RIGHT_STOP;  // 然后移动到目标位
+                    }, 50);
+                    clientState.className = 'state-box state-highlight';
+                    clientState.innerText = '状态：SYN_SENT';
+                    stepTip.innerText = "第一步：客户端发送SYN报文，请求建立连接";
+                    stepTip.style.opacity = 1;
+                }else if(currentStep === 2){
+                    p1.style.opacity = 0;
+                    p2.style.opacity = 1;
+                    p2.style.right = LEFT_STOP;
+                    serverState.className = 'state-box state-highlight';
+                    serverState.innerText = '状态：SYN_RCVD';
+                    stepTip.innerText = "第二步：服务器回复SYN+ACK，同意连接";
+                }else if(currentStep === 3){
+                    p2.style.opacity = 0;
+                    p3.style.opacity = 1;
+                    p3.style.left = P3_STOP;
+                    clientState.className = 'state-box state-highlight';
+                    clientState.innerText = '状态：ESTABLISHED';
+                    serverState.className = 'state-box state-highlight';
+                    serverState.innerText = '状态：ESTABLISHED';
+                    stepTip.innerText = "第三步：客户端发送ACK确认，连接正式建立完成";
+                }
+            }else{
+                [w1,w2,w3,w4].forEach(p=>{if(p)p.style.display='block'});
+                currentStep++;
+                if(currentStep === 1){
+                    w1.style.opacity = 1;
+                    w1.style.left = '260px';  // 先设置初始位
+                    setTimeout(() => {
+                        w1.style.left = W_RIGHT_STOP;  // 然后移动到目标位
+                    }, 50);
+                    clientState.className = 'state-box state-highlight';
+                    clientState.innerText = '状态：FIN_WAIT1';
+                    stepTip.innerText = "第一步：客户端发送FIN，主动关闭连接";
+                    stepTip.style.opacity = 1;
+                }else if(currentStep === 2){
+                    w1.style.opacity = 0;
+                    w2.style.opacity = 1;
+                    w2.style.right = W_LEFT_STOP;
+                    clientState.className = 'state-box state-highlight';
+                    clientState.innerText = '状态：FIN_WAIT2';
+                    serverState.className = 'state-box state-highlight';
+                    serverState.innerText = '状态：CLOSE_WAIT';
+                    stepTip.innerText = "第二步：服务器ACK确认，半关闭状态";
+                }else if(currentStep === 3){
+                    w2.style.opacity = 0;
+                    w3.style.opacity = 1;
+                    w3.style.right = W_LEFT_STOP;
+                    serverState.className = 'state-box state-highlight';
+                    serverState.innerText = '状态：LAST_ACK';
+                    stepTip.innerText = "第三步：服务器数据发完，发送FIN关闭自身通道";
+                }else if(currentStep === 4){
+                    w3.style.opacity = 0;
+                    w4.style.opacity = 1;
+                    w4.style.left = W_RIGHT_STOP;
+                    clientState.className = 'state-box state-highlight';
+                    clientState.innerText = '状态：TIME_WAIT';
+                    serverState.className = 'state-box state-highlight';
+                    serverState.innerText = '状态：CLOSED';
+                    stepTip.innerText = "第四步：客户端ACK确认，等MSL后完全关闭";
+                }
+            }
+        }
+
+        resetBtn.onclick = resetAll;
+    </script>
+
+
+    
+    
+    
+</body>
+</html>

@@ -13,10 +13,12 @@ from apps.common.permissions import IsStudent, IsTeacher, IsTeacherOrReadOnly
 from apps.common.response import api_response
 from apps.common.viewsets import BaseModelViewSet
 
-from .models import Catalog, Course, PPTResource, TeachingVideo, VideoWatchProgress
+from .models import Catalog, Course, CourseResource, CourseVideo, PPTResource, TeachingVideo, VideoWatchProgress
 from .serializers import (
     CatalogSerializer,
+    CourseResourceSerializer,
     CourseSerializer,
+    CourseVideoSerializer,
     PPTResourceSerializer,
     TeachingVideoSerializer,
     VideoWatchProgressSerializer,
@@ -503,3 +505,110 @@ class WatchProgressViewSet(BaseModelViewSet):
         if course_id:
             qs = qs.filter(video__course_id=course_id)
         return qs.order_by("id")
+
+
+class CourseResourceViewSet(BaseModelViewSet):
+    """课程扩展资源（思维导图/交互演示）：教师引用挂课程，学生看已发布的。"""
+
+    serializer_class = CourseResourceSerializer
+    permission_classes = [IsTeacherOrReadOnly]
+    filterset_fields = ["course", "catalog", "kind", "is_published"]
+
+    def get_queryset(self):
+        qs = CourseResource.objects.select_related("course", "catalog")
+        user = self.request.user
+        if user.is_authenticated and user.is_student:
+            qs = qs.filter(is_published=True, course__classes__students__student=user,
+                           course__classes__students__learn_status="active")
+        elif user.is_authenticated and user.is_teacher:
+            qs = qs.filter(course__teacher=user)
+        elif not user.is_authenticated or not user.is_staff:
+            qs = qs.none()
+        return qs.distinct()
+
+    def perform_create(self, serializer):
+        serializer.save()
+
+    @action(detail=True, methods=["post"], url_path="publish", permission_classes=[IsTeacher])
+    def publish(self, request, pk=None):
+        resource = self.get_object()
+        resource.is_published = True
+        resource.save(update_fields=["is_published", "updated_at"])
+        return api_response(
+            CourseResourceSerializer(resource, context={"request": request}).data, message="资源已发布"
+        )
+
+    @action(detail=True, methods=["post"], url_path="unpublish", permission_classes=[IsTeacher])
+    def unpublish(self, request, pk=None):
+        resource = self.get_object()
+        resource.is_published = False
+        resource.save(update_fields=["is_published", "updated_at"])
+        return api_response(
+            CourseResourceSerializer(resource, context={"request": request}).data, message="资源已下架"
+        )
+
+
+MAX_COURSE_VIDEO_SIZE = 500 * 1024 * 1024  # 500MB
+
+
+class CourseVideoViewSet(BaseModelViewSet):
+    """数字人视频：教师上传（≤500MB）、发布；学生看自己课程已发布的。"""
+
+    serializer_class = CourseVideoSerializer
+    permission_classes = [IsTeacherOrReadOnly]
+    http_method_names = ["get", "post", "delete", "head", "options"]
+    filterset_fields = ["course", "catalog", "is_published"]
+
+    def get_queryset(self):
+        qs = CourseVideo.objects.select_related("course", "course__teacher", "catalog")
+        user = self.request.user
+        if user.is_authenticated and user.is_student:
+            qs = qs.filter(
+                is_published=True,
+                course__classes__students__student=user,
+                course__classes__students__learn_status="active",
+            )
+        elif user.is_authenticated and user.is_teacher:
+            qs = qs.filter(course__teacher=user)
+        elif not user.is_authenticated or not user.is_staff:
+            qs = qs.none()
+        return qs.distinct()
+
+    def create(self, request, *args, **kwargs):
+        file = request.FILES.get("file")
+        if not file:
+            return api_response(message="请上传视频文件", code=400, status=400)
+        if file.size > MAX_COURSE_VIDEO_SIZE:
+            return api_response(message="视频大小不能超过 500MB", code=400, status=400)
+        if file.size == 0:
+            return api_response(message="视频文件为空", code=400, status=400)
+        request_data = request.data.copy()
+        request_data["file"] = file
+        serializer = self.get_serializer(data=request_data)
+        serializer.is_valid(raise_exception=True)
+        video = serializer.save(
+            file_name=file.name,
+            file_size=file.size,  # 以落库时的真实 size 为准
+        )
+        return api_response(
+            CourseVideoSerializer(video, context={"request": request}).data,
+            message="视频已上传", status=201,
+        )
+
+    @action(detail=True, methods=["post"], url_path="publish", permission_classes=[IsTeacher])
+    def publish(self, request, pk=None):
+        video = self.get_object()
+        video.is_published = True
+        video.save(update_fields=["is_published", "updated_at"])
+        return api_response(
+            CourseVideoSerializer(video, context={"request": request}).data, message="视频已发布"
+        )
+
+    @action(detail=True, methods=["post"], url_path="unpublish", permission_classes=[IsTeacher])
+    def unpublish(self, request, pk=None):
+        video = self.get_object()
+        video.is_published = False
+        video.save(update_fields=["is_published", "updated_at"])
+        return api_response(
+            CourseVideoSerializer(video, context={"request": request}).data, message="视频已下架"
+        )
