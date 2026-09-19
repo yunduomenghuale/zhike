@@ -7,12 +7,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# 国内 apt 源；安装 LibreOffice（PPT 转 PDF）与全套中文开源字体
+# 国内 apt 源；安装 LibreOffice（PPT/Word 转 PDF/docx）与全套中文开源字体
 # （PDF 出图已改为 pypdfium2 纯 pip 依赖，不再需要 poppler-utils）
+# writer：知识库旧版 .doc 转 docx 解析用；impress：PPT 渲染用
 RUN sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
-       libreoffice-impress \
+       libreoffice-impress libreoffice-writer \
        fonts-noto-cjk fonts-wqy-microhei fonts-wqy-zenhei \
        fonts-arphic-uming fonts-arphic-ukai \
     && rm -rf /var/lib/apt/lists/*
