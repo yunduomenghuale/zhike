@@ -188,6 +188,8 @@ watch([activeTab, () => props.courseName], updatePageTitle, { immediate: true })
 
 .course-rail {
   height: 100%;
+  display: flex;
+  flex-direction: column;
   border: 1px solid rgba(37, 99, 235, 0.1);
   border-radius: 30px;
   background: rgba(255, 255, 255, 0.86);
@@ -204,6 +206,31 @@ watch([activeTab, () => props.courseName], updatePageTitle, { immediate: true })
   justify-items: center;
   gap: 11px;
   cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* 视口较矮（缩放 ≥100%）时收缩封面卡，把空间让给导航 */
+@media (max-height: 860px) {
+  .course-cover {
+    padding: 16px 18px;
+    gap: 6px;
+    grid-template-columns: auto 1fr;
+    justify-items: start;
+    align-items: center;
+    text-align: left;
+  }
+
+  .cover-visual {
+    width: 52px;
+    height: 52px;
+    border-radius: 16px;
+    font-size: 22px;
+    grid-row: span 2;
+  }
+
+  .cover-name {
+    font-size: 15px;
+  }
 }
 
 .cover-visual {
@@ -247,6 +274,30 @@ watch([activeTab, () => props.courseName], updatePageTitle, { immediate: true })
   padding: 0 18px 24px;
   display: grid;
   gap: 8px;
+  /* 项多时滚动：flex 子项可收缩 + 细滚动条 */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  align-content: start;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(37, 99, 235, 0.25) transparent;
+}
+
+.course-menu::-webkit-scrollbar {
+  width: 5px;
+}
+
+.course-menu::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: rgba(37, 99, 235, 0.22);
+}
+
+.course-menu::-webkit-scrollbar-thumb:hover {
+  background: rgba(37, 99, 235, 0.4);
+}
+
+.course-menu::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .course-menu-item {

@@ -941,6 +941,31 @@ function onCommand(cmd) {
   background: transparent;
   color: inherit;
   cursor: pointer;
+  /* 视口较矮（缩放 ≥100%）时收缩此卡，把空间让给导航菜单 */
+  flex-shrink: 0;
+}
+
+@media (max-height: 860px) {
+  .space-cover {
+    padding: 16px 18px;
+    gap: 6px;
+    grid-template-columns: auto 1fr;
+    justify-items: start;
+    align-items: center;
+    text-align: left;
+  }
+
+  .space-visual {
+    width: 52px;
+    height: 52px;
+    border-radius: 16px;
+    font-size: 22px;
+    grid-row: span 2;
+  }
+
+  .space-title {
+    font-size: 15px;
+  }
 }
 
 .space-visual {
@@ -976,6 +1001,28 @@ function onCommand(cmd) {
 
 .app-rail .menu-wrap {
   padding: 0 18px 20px;
+  /* 导航项多时滚动；flex 子项允许收缩，保证 overflow 生效 */
+  min-height: 0;
+  /* 隐藏原生粗滚动条改细样式 */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(37, 99, 235, 0.25) transparent;
+}
+
+.app-rail .menu-wrap::-webkit-scrollbar {
+  width: 5px;
+}
+
+.app-rail .menu-wrap::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: rgba(37, 99, 235, 0.22);
+}
+
+.app-rail .menu-wrap::-webkit-scrollbar-thumb:hover {
+  background: rgba(37, 99, 235, 0.4);
+}
+
+.app-rail .menu-wrap::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .app-rail .menu :deep(.el-menu-item) {
