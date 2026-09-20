@@ -437,6 +437,14 @@ async function load() {
     templates.value = t.results ?? t
     labs.value = (l.results ?? l)
     courses.value = (c.results ?? c)
+    // 已排课的实验后台预取统计（列表"学生完成/班级均分"列刷新后即有数据）
+    labs.value
+      .filter((lab) => (lab.schedules || []).length)
+      .forEach((lab) => {
+        fetchLabStats(lab).then((st) => {
+          labStatsCache.value = { ...labStatsCache.value, [lab.id]: st }
+        }).catch(() => {})
+      })
   } finally {
     loading.value = false
   }

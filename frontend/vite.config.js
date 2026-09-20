@@ -87,6 +87,30 @@ export default defineConfig({
           res.setHeader('Content-Type', 'text/html; charset=utf-8')
           fs.createReadStream(fsPath).pipe(res)
         })
+        // 虚拟实验静态页（含 lab-bridge.js）：生产由 nginx 挂载 deploy/labs，
+        // 开发环境同样直读该目录，避免 SPA fallback 把实验页变成 404。
+        server.middlewares.use('/labs', (req, res, next) => {
+          const root = path.resolve(__dirname, '../deploy/labs')
+          const rel = decodeURIComponent(req.url.split('?')[0]).replace(/^\/+/, '')
+          const fsPath = path.resolve(root, rel)
+          if (!fsPath.startsWith(root)) {
+            res.statusCode = 403
+            return res.end('Forbidden')
+          }
+          if (!fs.existsSync(fsPath) || !fs.statSync(fsPath).isFile()) {
+            res.statusCode = 404
+            return res.end('Not Found: ' + rel)
+          }
+          const ext = path.extname(fsPath).toLowerCase()
+          const type = ext === '.js' ? 'text/javascript; charset=utf-8'
+            : ext === '.css' ? 'text/css; charset=utf-8'
+            : ext === '.svg' ? 'image/svg+xml'
+            : ext === '.png' ? 'image/png'
+            : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
+            : 'text/html; charset=utf-8'
+          res.setHeader('Content-Type', type)
+          fs.createReadStream(fsPath).pipe(res)
+        })
       },
     },
   ],
