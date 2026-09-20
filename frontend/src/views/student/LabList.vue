@@ -32,6 +32,16 @@
           <span>满分 {{ row.total_score }} 分</span>
           <span v-if="submissionOf(row)?.reviewed">教师已复核</span>
         </div>
+        <div v-if="mySchedules(row).length" class="lab-window">
+          <span
+            v-for="s in mySchedules(row)"
+            :key="s.id"
+            class="window-chip"
+            :class="windowState(s).cls"
+          >
+            {{ s.classroom_name }} · {{ windowState(s).text }}
+          </span>
+        </div>
 
         <!-- 成绩明细（已提交的实验：即时展示评分构成） -->
         <div v-if="isSubmitted(row) && breakdownOf(row)" class="lab-score">
@@ -103,6 +113,28 @@ const guideDialog = ref(null)
 
 function submissionOf(row) {
   return submissions.value.find((s) => s.lab === row.id)
+}
+
+/** 我所在班级的排课窗口（学生接口只返回自己班级的）。 */
+function mySchedules(row) {
+  return row.schedules || []
+}
+
+/** 窗口状态：未开始 / 进行中 / 已结束 / 长期开放。 */
+function windowState(s) {
+  if (!s.open_at && !s.close_at) return { text: '长期开放', cls: 'open' }
+  const now = Date.now()
+  const open = s.open_at ? new Date(s.open_at).getTime() : null
+  const close = s.close_at ? new Date(s.close_at).getTime() : null
+  const fmt = (t) => {
+    const d = new Date(t)
+    const p = (n) => String(n).padStart(2, '0')
+    return `${d.getMonth() + 1}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+  }
+  if (open && now < open) return { text: `${fmt(open)} 开放`, cls: 'future' }
+  if (close && now > close) return { text: `已于 ${fmt(close)} 结束`, cls: 'closed' }
+  const left = close ? `，${fmt(close)} 截止` : ''
+  return { text: `开放中${left}`, cls: 'open' }
 }
 
 function isSubmitted(row) {
@@ -218,6 +250,17 @@ onMounted(load)
 .lab-title { font-size: 16px; font-weight: 600; flex: 1; }
 .lab-desc { color: #6b7280; font-size: 13px; margin: 8px 0; }
 .lab-meta { display: flex; gap: 16px; color: #94a3b8; font-size: 12px; margin-bottom: 10px; }
+.lab-window { display: flex; gap: 8px; flex-wrap: wrap; margin: -2px 0 10px; }
+.window-chip {
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  background: #f1f5f9;
+  color: #64748b;
+}
+.window-chip.open { background: #ecfdf5; color: #059669; }
+.window-chip.future { background: #fff7ed; color: #d97706; }
+.window-chip.closed { background: #f8fafc; color: #94a3b8; }
 
 /* 成绩明细 */
 .lab-score {

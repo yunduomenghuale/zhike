@@ -50,6 +50,19 @@
           </template>
         </el-table-column>
         <el-table-column prop="standard_minutes_display" label="标准时长(分)" width="100" />
+        <el-table-column label="排课窗口" min-width="230">
+          <template #default="{ row }">
+            <template v-if="row.schedules?.length">
+              <div v-for="s in row.schedules" :key="s.id" class="schedule-line">
+                <span class="schedule-class">{{ s.classroom_name }}</span>
+                <span class="schedule-time">
+                  {{ s.open_at ? fmtDT(s.open_at) : '未设时间' }} ~ {{ s.close_at ? fmtDT(s.close_at) : '未设时间' }}
+                </span>
+              </div>
+            </template>
+            <span v-else class="schedule-none">未排课</span>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="330" fixed="right">
           <template #default="{ row }">
             <el-button size="small" @click="openSchedule(row)">排课</el-button>
@@ -184,6 +197,13 @@ const guideDialog = ref(null)
 const statusText = (s) => ({ draft: '草稿', published: '已发布', closed: '已下线' }[s] || s)
 const statusType = (s) => ({ draft: 'info', published: 'success', closed: 'warning' }[s] || 'info')
 
+function fmtDT(t) {
+  if (!t) return '—'
+  const d = new Date(t)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getMonth() + 1}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
 async function load() {
   loading.value = true
   try {
@@ -311,4 +331,15 @@ onMounted(load)
 <style scoped>
 .mb12 { margin-bottom: 12px; }
 .form-tip { color: #94a3b8; font-size: 12px; margin-left: 10px; }
+.schedule-line { display: flex; align-items: center; gap: 8px; line-height: 1.9; }
+.schedule-class {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  border-radius: 4px;
+  background: #ecf5ff;
+  color: #409eff;
+  font-size: 12px;
+}
+.schedule-time { color: #64748b; font-size: 12px; white-space: nowrap; }
+.schedule-none { color: #cbd5e1; font-size: 12px; }
 </style>

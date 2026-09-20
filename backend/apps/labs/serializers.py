@@ -26,12 +26,38 @@ class LabTemplateSerializer(serializers.ModelSerializer):
         ]
 
 
+class LabScheduleSerializer(serializers.ModelSerializer):
+    lab_title = serializers.CharField(source="lab.title", read_only=True)
+    classroom_name = serializers.CharField(source="classroom.name", read_only=True)
+
+    class Meta:
+        model = LabSchedule
+        fields = ["id", "lab", "lab_title", "classroom", "classroom_name", "open_at", "close_at"]
+        # 唯一性交给视图层 upsert（同班重排=更新窗口），这里不生成 UniqueTogetherValidator
+        validators = []
+
+    def validate(self, attrs):
+        lab, classroom = attrs.get("lab"), attrs.get("classroom")
+        if lab and classroom:
+            user = self.context["request"].user
+            if lab.course.teacher_id != user.id or classroom.teacher_id != user.id:
+                raise serializers.ValidationError("只能给自己课程的实验、自己的班级排课")
+            if not classroom.courses.filter(id=lab.course_id).exists():
+                raise serializers.ValidationError("该班级未关联此课程，无法排课")
+        open_at, close_at = attrs.get("open_at"), attrs.get("close_at")
+        if open_at and close_at and open_at >= close_at:
+            raise serializers.ValidationError("开放时间必须早于截止时间")
+        return attrs
+
+
 class LabSerializer(serializers.ModelSerializer):
     template_code = serializers.CharField(source="template.code", read_only=True)
     template_title = serializers.CharField(source="template.title", read_only=True)
     page_url = serializers.CharField(source="template.page_url", read_only=True)
     course_name = serializers.CharField(source="course.name", read_only=True)
     standard_minutes_display = serializers.IntegerField(source="effective_standard_minutes", read_only=True)
+    # 排课窗口（教师排课管理 / 学生判断是否在开放时间内）
+    schedules = LabScheduleSerializer(many=True, read_only=True)
     # 缺省继承模板（见 validate），创建时可不传
     title = serializers.CharField(required=False, allow_blank=True, max_length=128)
     description = serializers.CharField(required=False, allow_blank=True)
@@ -45,7 +71,7 @@ class LabSerializer(serializers.ModelSerializer):
             "standard_minutes", "standard_minutes_display",
             "total_score", "pass_score", "question_weight", "random_config",
             "time_limit_seconds", "allow_resubmit", "status", "order",
-            "created_at", "updated_at",
+            "schedules", "created_at", "updated_at",
         ]
         read_only_fields = ["status"]
 
@@ -70,30 +96,6 @@ class LabSerializer(serializers.ModelSerializer):
                 attrs["description"] = template.description
             if attrs.get("random_config") in (None, {}):
                 attrs["random_config"] = template.random_config
-        return attrs
-
-
-class LabScheduleSerializer(serializers.ModelSerializer):
-    lab_title = serializers.CharField(source="lab.title", read_only=True)
-    classroom_name = serializers.CharField(source="classroom.name", read_only=True)
-
-    class Meta:
-        model = LabSchedule
-        fields = ["id", "lab", "lab_title", "classroom", "classroom_name", "open_at", "close_at"]
-        # 唯一性交给视图层 upsert（同班重排=更新窗口），这里不生成 UniqueTogetherValidator
-        validators = []
-
-    def validate(self, attrs):
-        lab, classroom = attrs.get("lab"), attrs.get("classroom")
-        if lab and classroom:
-            user = self.context["request"].user
-            if lab.course.teacher_id != user.id or classroom.teacher_id != user.id:
-                raise serializers.ValidationError("只能给自己课程的实验、自己的班级排课")
-            if not classroom.courses.filter(id=lab.course_id).exists():
-                raise serializers.ValidationError("该班级未关联此课程，无法排课")
-        open_at, close_at = attrs.get("open_at"), attrs.get("close_at")
-        if open_at and close_at and open_at >= close_at:
-            raise serializers.ValidationError("开放时间必须早于截止时间")
         return attrs
 
 
