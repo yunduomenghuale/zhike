@@ -83,7 +83,7 @@
             type="warning"
             size="small"
             :loading="entering === row.id"
-            @click="enter(row, true)"
+            @click="enter(row)"
           >
             重做实验
           </el-button>
@@ -108,7 +108,7 @@
 
 <script setup>
 import { onMounted, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import LabGuideDialog from '@/components/LabGuideDialog.vue'
 import { listLabs, listLabSubmissions, startLab } from '@/api/labs'
 
@@ -223,14 +223,7 @@ async function load() {
   }
 }
 
-async function enter(row, isRedo = false) {
-  if (isRedo) {
-    try {
-      await ElMessageBox.confirm('重做将开始新一轮实验，确认继续？', '重做实验', { type: 'warning' })
-    } catch {
-      return
-    }
-  }
+async function enter(row) {
   entering.value = row.id
   try {
     const data = await startLab(row.id)
