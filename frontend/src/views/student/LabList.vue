@@ -128,7 +128,7 @@ function breakdownItems(row) {
   if (!bk) return []
   const sub = submissionOf(row)
   const items = [
-    { key: 'base', label: '步骤得分', value: num(bk.base), max: num(bk.max_base), color: '#3b82f6' },
+    { key: 'base', label: '基础分', value: num(bk.base), max: num(bk.max_base), color: '#3b82f6' },
     { key: 'accuracy', label: '操作准确性', value: num(bk.accuracy), max: 5, color: '#10b981' },
     { key: 'efficiency', label: '完成效率', value: num(bk.efficiency), max: 5, color: '#f59e0b' },
     { key: 'completion', label: '完成度', value: num(bk.completion), max: 10, color: '#8b5cf6' },
