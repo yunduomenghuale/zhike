@@ -159,4 +159,49 @@
   window.addEventListener('error', function (e) {
     if (bridge.validated && e.message) bridge.recordError('page', '', e.message);
   });
+
+  // ---- 步骤数据胶水（训练型实验核心链路）----
+  // 旧实验页把步骤结果记在自己的 stepResults（含思考题步骤），但从不回传 bridge；
+  // 这里在页面就绪后：①把页面步骤同步进 bridge.steps（后续 recordStep 增量更新）；
+  // ②包裹页面自己的 submitExperiment，提交前同步一次最新步骤并统一走 bridge.submit，
+  // 让「提交报告」「生成实验报告」两个按钮殊途同归，服务端拿到真实步骤数据。
+  function syncPageSteps() {
+    var page = window.stepResults;
+    if (!page || typeof page !== 'object') return 0;
+    var n = 0;
+    for (var k in page) {
+      if (Object.prototype.hasOwnProperty.call(page, k)) {
+        bridge.steps[k] = page[k] === 'pass' ? 'pass' : 'fail';
+        n++;
+      }
+    }
+    return n;
+  }
+
+  window.addEventListener('load', function () {
+    syncPageSteps();
+    // 兼容实验页的"重置实验"：清空页面记分时同步清空 bridge
+    var origResults = window.stepResults;
+    if (origResults) {
+      try {
+        Object.defineProperty(window, 'stepResults', {
+          configurable: true,
+          get: function () { return origResults; },
+          set: function (v) { origResults = v || {}; bridge.steps = {}; syncPageSteps(); },
+        });
+      } catch (e) { /* 老浏览器降级：不同步重置 */ }
+    }
+    // 包裹页面提交函数：无论哪个入口提交，步骤都先抄进 bridge 再统一上传
+    if (typeof window.submitExperiment === 'function') {
+      var origSubmit = window.submitExperiment;
+      window.submitExperiment = function () {
+        try { syncPageSteps(); } catch (e) { /* 不阻塞原提交 */ }
+        var p = bridge.submit().catch(function () { /* 上传失败不挡页面反馈 */ });
+        var r = origSubmit.apply(this, arguments);
+        return r && typeof r.then === 'function' ? r : Promise.race([r, p]).then(function () { return r; });
+      };
+    }
+    // 页面定时补抄（兜底：defineProperty 不支持或步骤在别处更新）
+    setInterval(function () { if (bridge.validated) syncPageSteps(); }, 5000);
+  });
 })();
