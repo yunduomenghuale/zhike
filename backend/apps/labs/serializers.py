@@ -102,10 +102,11 @@ class LabSerializer(serializers.ModelSerializer):
 class LabQuestionSerializer(serializers.ModelSerializer):
     stem = serializers.CharField(source="snapshot.stem", read_only=True)
     qtype = serializers.CharField(source="snapshot.qtype", read_only=True)
+    qtype_display = serializers.CharField(source="snapshot.qtype_display", read_only=True)
 
     class Meta:
         model = LabQuestion
-        fields = ["id", "lab", "question", "score", "order", "snapshot", "stem", "qtype"]
+        fields = ["id", "lab", "question", "score", "order", "snapshot", "stem", "qtype", "qtype_display"]
         read_only_fields = ["snapshot"]
 
 

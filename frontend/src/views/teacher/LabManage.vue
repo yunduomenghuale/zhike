@@ -239,9 +239,24 @@
     <el-drawer v-model="reviewVisible" :title="`批阅 - ${currentSub?.name || ''}`" size="62%">
       <div v-loading="reviewLoading" class="detail-body">
         <template v-if="currentSub">
-          <!-- 步骤分概况（只读，服务端计算） -->
+          <!-- 步骤分概况（只读，服务端计算；含各字段口径说明） -->
           <div class="d-section">
-            <div class="d-title">步骤评分（系统按过程数据计算）</div>
+            <div class="d-title">
+              步骤评分（系统按过程数据计算）
+              <el-tooltip placement="top" effect="light">
+                <template #content>
+                  <div class="weight-tip">
+                    <p><b>基础分</b>（满分 = 实验满分×0.8）：通过步骤数 ÷ 总步骤数 × 满分</p>
+                    <p><b>准确性</b>（满分 5）：5 − 错误操作次数（每次扣 1，扣完为止）</p>
+                    <p><b>效率</b>（满分 5）：5 − ⌊超时分钟 ÷ 3⌋（超出标准时长每 3 分钟扣 1）</p>
+                    <p><b>完成度</b>（满分 10）：通过步骤数 ÷ 总步骤数 × 10</p>
+                    <p><b>错误次数 / 用时</b>：实验过程采集的实际值</p>
+                    <p><b>总分</b>：无附题 = 基础分+准确性+效率+完成度；有附题按题目权重加权合成</p>
+                  </div>
+                </template>
+                <el-icon class="tip-ico"><QuestionFilled /></el-icon>
+              </el-tooltip>
+            </div>
             <div class="d-grid">
               <div class="d-item"><span class="d-k">总分</span><span class="score-num">{{ currentSub.total_score ?? '—' }}</span></div>
               <div class="d-item"><span class="d-k">基础分</span><span>{{ bkOf(currentSub).base ?? '—' }} / {{ bkOf(currentSub).max_base ?? '—' }}</span></div>
@@ -253,17 +268,22 @@
             </div>
           </div>
 
-          <!-- 附加题逐题批阅 -->
+          <!-- 附加题逐题批阅：待批阅（主观题）排最前，其余按题目序号 -->
           <div class="d-section">
-            <div class="d-title">附加题作答（{{ qAnswers.length }} 题）</div>
+            <div class="d-title">附加题作答（{{ qAnswers.length }} 题，待批阅 {{ pendingCount }} 题）</div>
             <el-alert
               v-if="!qAnswers.length"
               type="info" :closable="false" show-icon
-              title="该实验未附加题目或学生尚未作答，直接提交总分即可"
+              title="该实验未附加题目或学生尚未作答，无需批阅"
             />
-            <div v-for="qa in qAnswers" :key="qa.id" class="qa-card">
+            <el-alert
+              v-else-if="!pendingCount"
+              type="success" :closable="false" show-icon
+              title="客观题系统已自动判分，无待批阅的主观题，可直接提交"
+            />
+            <div v-for="qa in sortedQAnswers" :key="qa.id" class="qa-card" :class="{ pending: qa.pending_review }">
               <div class="qa-head">
-                <el-tag size="small" effect="plain">{{ qa.lab_question?.qtype_display || qa.lab_question?.qtype || '题' }}</el-tag>
+                <el-tag size="small" effect="plain">{{ qtypeText(qa) }}</el-tag>
                 <span class="qa-stem">{{ qa.lab_question?.stem || '(无题干)' }}</span>
                 <span class="qa-score-tag">{{ qa.lab_question?.score }} 分</span>
               </div>
@@ -277,15 +297,19 @@
                   <span class="qa-text qa-ref">{{ refAnswerText(qa) || '—' }}</span>
                 </div>
                 <div class="qa-row">
-                  <span class="d-k">系统预评</span>
+                  <span class="d-k">{{ qa.pending_review ? '系统预评' : '系统判分' }}</span>
                   <span>
                     {{ qa.auto_score ?? '—' }} 分
                     <span v-if="qa.similarity != null" class="sub-text">相似度 {{ (Number(qa.similarity) * 100).toFixed(0) }}%</span>
                     <span class="sub-text">{{ qa.auto_comment }}</span>
                     <el-tag v-if="qa.pending_review" size="small" type="warning" effect="light" style="margin-left: 6px">待批阅</el-tag>
+                    <el-tag v-else size="small" :type="qa.is_correct ? 'success' : 'danger'" effect="light" style="margin-left: 6px">
+                      {{ qa.is_correct ? '自动判分正确' : '自动判分错误' }}
+                    </el-tag>
                   </span>
                 </div>
-                <div class="qa-row qa-grade">
+                <!-- 只有主观题（待批阅）需要教师打分；客观题已自动判分 -->
+                <div v-if="qa.pending_review" class="qa-row qa-grade">
                   <span class="d-k">教师评分</span>
                   <el-input-number
                     v-model="reviewScores[qa.lab_question?.id]"
@@ -586,9 +610,10 @@ async function openReview(row) {
       qAnswers.value = (Array.isArray(list) ? list : []).slice().sort(
         (a, b) => (a.lab_question?.order ?? 0) - (b.lab_question?.order ?? 0),
       )
-      // 预填：已批过的用批改分，否则用系统预评分
+      // 预填：只对待批阅的主观题预填（客观题已自动判分，不参与批阅）
       const init = {}
       for (const qa of qAnswers.value) {
+        if (!qa.pending_review) continue
         const qid = qa.lab_question?.id
         if (qid != null) init[qid] = Number(qa.score ?? qa.auto_score ?? 0)
       }
@@ -602,6 +627,26 @@ async function openReview(row) {
 function bkOf(sub) {
   return sub?.score_breakdown || {}
 }
+
+/** 题型中文标签（后端 qtype_display 优先，兜底本地映射）。 */
+function qtypeText(qa) {
+  const lq = qa.lab_question || {}
+  if (lq.qtype_display) return lq.qtype_display
+  const map = { single: '单选题', multi: '多选题', judge: '判断题', blank: '填空题', short: '简答题' }
+  return map[lq.qtype] || '题目'
+}
+
+/** 待批阅（主观题）排最前，其余按题目序号。 */
+const sortedQAnswers = computed(() =>
+  qAnswers.value.slice().sort((a, b) => {
+    const pa = a.pending_review ? 0 : 1
+    const pb = b.pending_review ? 0 : 1
+    if (pa !== pb) return pa - pb
+    return (a.lab_question?.order ?? 0) - (b.lab_question?.order ?? 0)
+  }),
+)
+
+const pendingCount = computed(() => qAnswers.value.filter((qa) => qa.pending_review).length)
 
 /** 学生作答文本：客观题映射选项，主观题取文本。 */
 function answerText(qa) {
@@ -746,6 +791,10 @@ onMounted(load)
   padding: 12px 14px;
   margin-bottom: 12px;
   background: #fff;
+}
+.qa-card.pending {
+  border-color: #fbbf24;
+  background: #fffbeb;
 }
 .qa-head { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
 .qa-stem { flex: 1; font-size: 13px; color: #1e293b; line-height: 1.6; }
