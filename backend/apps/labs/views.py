@@ -332,7 +332,8 @@ class LabSubmissionViewSet(BaseModelViewSet):
         return None
 
     def _reset_fields(self, sub, lab, operator):
-        """就地清分（保留记录与审计），重新生成随机参数。"""
+        """重做开始一轮：过程数据清零、状态回进行中；**成绩保留**——上一轮
+        分数/明细/提交时间不动，学生仍可见，新提交后覆盖为最新成绩。"""
         sub.attempt += 1
         sub.random_seed = seedgen.generate_seed(lab, sub.student_id, sub.attempt)
         sub.status = LabSubmission.Status.IN_PROGRESS
@@ -342,15 +343,6 @@ class LabSubmissionViewSet(BaseModelViewSet):
         sub.error_count = 0
         sub.passed_steps = 0
         sub.total_steps = 0
-        sub.base_score = sub.accuracy_score = sub.efficiency_score = None
-        sub.completion_score = sub.question_score = sub.total_score = None
-        sub.score_breakdown = {}
-        sub.subjective_scores = {}
-        sub.reviewed = False
-        sub.reviewed_by = None
-        sub.reviewed_at = None
-        sub.abnormal = False
-        sub.submitted_at = None
         sub.started_at = timezone.now()
         sub.reset_by = operator
         sub.reset_at = timezone.now()

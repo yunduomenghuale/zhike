@@ -44,7 +44,7 @@
         </div>
 
         <!-- 成绩明细（已提交的实验：即时展示评分构成） -->
-        <div v-if="isSubmitted(row) && breakdownOf(row)" class="lab-score">
+        <div v-if="breakdownOf(row)" class="lab-score">
           <div class="lab-score-head">
             <span class="lab-score-total">
               {{ submissionOf(row).total_score }}
@@ -79,7 +79,7 @@
         <div class="lab-actions">
           <!-- 已提交：成绩明细直接展示在卡片上；仅允许重做的实验提供重做入口 -->
           <el-button
-            v-if="isSubmitted(row) && hasOpenWindow(row)"
+            v-if="submissionOf(row) && hasOpenWindow(row)"
             type="warning"
             size="small"
             :loading="entering === row.id"
@@ -88,7 +88,7 @@
             重做实验
           </el-button>
           <el-button
-            v-if="!isSubmitted(row) && hasOpenWindow(row)"
+            v-if="!submissionOf(row) && hasOpenWindow(row)"
             type="primary"
             size="small"
             :loading="entering === row.id"
@@ -149,11 +149,6 @@ function windowState(s) {
   if (close && now > close) return { text: `已于 ${fmt(close)} 结束`, cls: 'closed' }
   const left = close ? `，${fmt(close)} 截止` : ''
   return { text: `开放中${left}`, cls: 'open' }
-}
-
-function isSubmitted(row) {
-  const sub = submissionOf(row)
-  return !!sub && sub.status === 'submitted'
 }
 
 function breakdownOf(row) {
