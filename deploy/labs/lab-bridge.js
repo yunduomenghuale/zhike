@@ -86,7 +86,7 @@
       if (answers) payload.answers = answers;
       return fetch(API_ROOT + '/lab-submissions/' + this.submissionId + '/submit/', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Lab-Token': this.token },
         body: JSON.stringify(payload),
       }).then(function (res) { return res.json(); });
     },
@@ -141,13 +141,14 @@
     showConclusionDialog: function () {
       var text = window.prompt('请填写实验结论（提交后可在课程实验页查看报告）：');
       if (!text) return;
-      var conclusion = bridge.submit().then(function () {
-        return fetch(API_ROOT + '/lab-submissions/' + bridge.submissionId + '/conclusion/', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ conclusion: text }),
-        });
-      }).then(function () { alert('实验结论已提交'); })
+      // 先落结论（票据还未消费），再提交实验（消费票据）
+      fetch(API_ROOT + '/lab-submissions/' + bridge.submissionId + '/conclusion/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Lab-Token': bridge.token },
+        body: JSON.stringify({ conclusion: text }),
+      }).catch(function () { /* 结论失败不挡提交 */ })
+        .then(function () { return bridge.submit(); })
+        .then(function () { alert('实验已提交'); })
         .catch(function () { alert('提交失败，请重试'); });
     },
     submitConclusion: function () { this.showConclusionDialog(); },

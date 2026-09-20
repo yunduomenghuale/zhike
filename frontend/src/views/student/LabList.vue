@@ -79,7 +79,7 @@
         <div class="lab-actions">
           <!-- 已提交：成绩明细直接展示在卡片上；仅允许重做的实验提供重做入口 -->
           <el-button
-            v-if="isSubmitted(row)"
+            v-if="isSubmitted(row) && hasOpenWindow(row)"
             type="warning"
             size="small"
             :loading="entering === row.id"
@@ -88,7 +88,7 @@
             重做实验
           </el-button>
           <el-button
-            v-if="!isSubmitted(row)"
+            v-if="!isSubmitted(row) && hasOpenWindow(row)"
             type="primary"
             size="small"
             :loading="entering === row.id"
@@ -127,6 +127,13 @@ function mySchedules(row) {
   return row.schedules || []
 }
 
+/** 是否存在可进入的窗口（未排课=长期开放可进；排课了须有任一窗口开放中）。 */
+function hasOpenWindow(row) {
+  const list = mySchedules(row)
+  if (!list.length) return true
+  return list.some((s) => windowState(s).cls !== 'closed')
+}
+
 /** 窗口状态：未开始 / 进行中 / 已结束 / 长期开放。 */
 function windowState(s) {
   if (!s.open_at && !s.close_at) return { text: '长期开放', cls: 'open' }
@@ -139,7 +146,7 @@ function windowState(s) {
     return `${d.getMonth() + 1}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
   }
   if (open && now < open) return { text: `${fmt(open)} 开放`, cls: 'future' }
-  if (close && now > close) return { text: `窗口已结束，可自主练习`, cls: 'closed' }
+  if (close && now > close) return { text: `已于 ${fmt(close)} 结束`, cls: 'closed' }
   const left = close ? `，${fmt(close)} 截止` : ''
   return { text: `开放中${left}`, cls: 'open' }
 }

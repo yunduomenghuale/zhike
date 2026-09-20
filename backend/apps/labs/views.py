@@ -10,6 +10,8 @@ from rest_framework.permissions import IsAuthenticated
 from apps.common.access import is_platform_admin
 from apps.common.permissions import IsStudent, IsTeacher, IsTeacherOrReadOnly
 from apps.common.response import api_response
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from .auth import LabTokenAuthentication
 from apps.common.viewsets import BaseModelViewSet
 from apps.homework.models import question_snapshot
 from apps.questions.grading import grade_objective
@@ -279,8 +281,9 @@ class LabSubmissionViewSet(BaseModelViewSet):
             raise ValidationError("实验不存在")
         if lab.status != Lab.Status.PUBLISHED:
             raise ValidationError("实验未发布或已下线")
-        # 训练型：窗口内正常进入；窗口外若已被排过课，降级为"自主练习"（新种子可提交，统计可区分）
-        schedule, is_practice = self._resolve_schedule(lab, request.user)
+        # 训练型但保留排课硬控制：窗口内才可进入（票据一次性 + 2h 有效，
+        # 窗口外旧链接/旧票据均无法进入）
+        schedule = self._resolve_schedule(lab, request.user)
         if not schedule:
             raise ValidationError("你没有该实验的排课权限")
 
@@ -315,23 +318,18 @@ class LabSubmissionViewSet(BaseModelViewSet):
                 "random_seed": sub.random_seed,
                 "page_url": lab.template.page_url,
                 "questions": self._build_for_taking(lab),
-                "is_practice": is_practice,
             },
-            message="自主练习模式" if is_practice else "实验已开始",
+            message="实验已开始",
         )
 
     def _resolve_schedule(self, lab, user):
-        """返回 (schedule, is_practice)：窗口内 (s, False)；窗口外取最近一次排课 (s, True)。"""
-        schedules = list(
-            lab.schedules.filter(
-                classroom__students__student=user, classroom__students__learn_status="active"
-            ).order_by("open_at")
-        )
-        for s in schedules:
+        """排课硬控制：仅窗口内的排课可进入。"""
+        for s in lab.schedules.filter(
+            classroom__students__student=user, classroom__students__learn_status="active"
+        ).order_by("open_at"):
             if s.is_open():
-                return s, False
-        # 训练型：排过课的学生窗口外也可自主练习（取最近排课作上下文）
-        return (schedules[-1], True) if schedules else (None, False)
+                return s
+        return None
 
     def _reset_fields(self, sub, lab, operator):
         """就地清分（保留记录与审计），重新生成随机参数。"""
@@ -375,7 +373,9 @@ class LabSubmissionViewSet(BaseModelViewSet):
         return result
 
     # ---- 桥接：静态页换取随机参数 ----
-    @action(detail=False, methods=["get"], url_path="bridge-validate", permission_classes=[IsAuthenticated])
+    @action(detail=False, methods=["get"], url_path="bridge-validate",
+            permission_classes=[IsAuthenticated],
+            authentication_classes=[LabTokenAuthentication, JWTAuthentication])
     def bridge_validate(self, request):
         raw_token = request.query_params.get("token", "")
         try:
@@ -400,7 +400,8 @@ class LabSubmissionViewSet(BaseModelViewSet):
         )
 
     # ---- 学生：提交（服务端重算评分） ----
-    @action(detail=True, methods=["post"], url_path="submit", permission_classes=[IsStudent])
+    @action(detail=True, methods=["post"], url_path="submit", permission_classes=[IsStudent],
+            authentication_classes=[LabTokenAuthentication, JWTAuthentication])
     def submit(self, request, pk=None):
         sub = self.get_object()
         if sub.student_id != request.user.id:
@@ -414,7 +415,8 @@ class LabSubmissionViewSet(BaseModelViewSet):
         if ticket.submission_id != sub.id:
             raise ValidationError("票据与作答不匹配")
         schedule = sub.schedule
-        # 训练型：窗口外不拦截提交（自主练习成绩也入库）
+        if schedule and not schedule.is_open():
+            raise ValidationError("实验已截止，无法提交")
 
         steps = request.data.get("steps_result") or {}
         error_log = request.data.get("error_log", []) or []
@@ -484,7 +486,8 @@ class LabSubmissionViewSet(BaseModelViewSet):
         )
 
     # ---- 学生：提交实验结论（二期报告的前置数据） ----
-    @action(detail=True, methods=["post"], url_path="conclusion", permission_classes=[IsStudent])
+    @action(detail=True, methods=["post"], url_path="conclusion", permission_classes=[IsStudent],
+            authentication_classes=[LabTokenAuthentication, JWTAuthentication])
     def conclusion(self, request, pk=None):
         sub = self.get_object()
         if sub.student_id != request.user.id:
