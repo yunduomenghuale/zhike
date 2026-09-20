@@ -44,7 +44,7 @@
         </div>
 
         <!-- 成绩明细（已提交的实验：即时展示评分构成） -->
-        <div v-if="isSubmitted(row) && breakdownOf(row)" class="lab-score">
+        <div v-if="isSubmitted(row) && breakdownOf(row)" :id="`lab-score-${row.id}`" class="lab-score">
           <div class="lab-score-head">
             <span class="lab-score-total">
               {{ submissionOf(row).total_score }}
@@ -77,8 +77,33 @@
         </div>
 
         <div class="lab-actions">
-          <el-button type="primary" size="small" :loading="entering === row.id" @click="enter(row)">
-            {{ isSubmitted(row) ? '查看成绩' : '进入实验' }}
+          <!-- 已提交：成绩明细就展在卡片上，无需再进实验页；仅允许重做的实验提供重做入口 -->
+          <el-button
+            v-if="isSubmitted(row)"
+            size="small"
+            type="primary"
+            plain
+            @click="scrollToScore(row)"
+          >
+            查看成绩
+          </el-button>
+          <el-button
+            v-if="isSubmitted(row) && row.allow_resubmit"
+            type="warning"
+            size="small"
+            :loading="entering === row.id"
+            @click="enter(row, true)"
+          >
+            重做实验
+          </el-button>
+          <el-button
+            v-if="!isSubmitted(row)"
+            type="primary"
+            size="small"
+            :loading="entering === row.id"
+            @click="enter(row)"
+          >
+            进入实验
           </el-button>
           <el-button
             v-if="isSubmitted(row)"
@@ -100,7 +125,7 @@
 
 <script setup>
 import { onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import LabGuideDialog from '@/components/LabGuideDialog.vue'
 import { listLabs, listLabSubmissions, startLab, generateLabReport, downloadLabReportUrl } from '@/api/labs'
 
@@ -209,7 +234,24 @@ async function load() {
   }
 }
 
-async function enter(row) {
+/** 已提交实验点"查看成绩"：定位高亮卡片上的成绩明细区。 */
+function scrollToScore(row) {
+  const el = document.getElementById(`lab-score-${row.id}`)
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    el.classList.add('flash')
+    setTimeout(() => el.classList.remove('flash'), 1600)
+  }
+}
+
+async function enter(row, isRedo = false) {
+  if (isRedo) {
+    try {
+      await ElMessageBox.confirm('重做将开始新一轮实验，确认继续？', '重做实验', { type: 'warning' })
+    } catch {
+      return
+    }
+  }
   entering.value = row.id
   try {
     const data = await startLab(row.id)
@@ -269,6 +311,11 @@ onMounted(load)
   border-radius: 10px;
   background: #f8fafc;
   border: 1px solid #eef2f7;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+.lab-score.flash {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
 }
 .lab-score-head {
   display: flex;
