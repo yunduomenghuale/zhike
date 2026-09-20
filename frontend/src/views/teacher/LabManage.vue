@@ -28,11 +28,23 @@
         <el-form-item label="标准时长">
           <el-input-number v-model="form.standard_minutes" :min="5" :max="180" placeholder="分钟" />
         </el-form-item>
-        <el-form-item label="题目权重">
+        <el-form-item>
+          <template #label>
+            <span class="weight-label">题目权重</span>
+            <el-tooltip placement="top" effect="light">
+              <template #content>
+                <div class="weight-tip">
+                  <p><b>0</b> = 纯实验步骤评分（基础分+准确性+效率+完成度）</p>
+                  <p><b>0.3</b> = 实验步骤分 × 0.7 + 附加题得分 × 0.3</p>
+                  <p>取值 0~1，附加题越多建议权重越大</p>
+                </div>
+              </template>
+              <el-icon class="tip-ico"><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </template>
           <div class="weight-row">
             <el-input-number v-model="form.question_weight" :min="0" :max="1" :step="0.1" />
             <el-button class="create-btn" type="primary" :loading="creating" @click="create">创建实验</el-button>
-            <span class="form-tip">0 = 纯实验步骤评分；0.3 = 实验分×0.7 + 附题分×0.3</span>
           </div>
         </el-form-item>
       </el-form>
@@ -203,16 +215,16 @@
               <el-table-column label="提交时间" width="120">
                 <template #default="{ row }">{{ row.submitted_at ? fmtDT(row.submitted_at) : '—' }}</template>
               </el-table-column>
-              <el-table-column label="复核" width="84">
+              <el-table-column label="批阅" width="84">
                 <template #default="{ row }">
-                  <el-tag v-if="row.reviewed" type="success" size="small" effect="plain">已复核</el-tag>
+                  <el-tag v-if="row.reviewed" type="success" size="small" effect="plain">已批阅</el-tag>
                   <span v-else class="sub-text">—</span>
                 </template>
               </el-table-column>
               <el-table-column label="操作" width="150" fixed="right">
                 <template #default="{ row }">
                   <template v-if="row.state === 'submitted'">
-                    <el-button size="small" link type="primary" @click="openReview(row)">复核改分</el-button>
+                    <el-button size="small" link type="primary" @click="openReview(row)">批阅打分</el-button>
                     <el-button size="small" link type="warning" @click="reset(row)">重置</el-button>
                   </template>
                 </template>
@@ -223,8 +235,8 @@
       </div>
     </el-drawer>
 
-    <!-- 复核抽屉：步骤分 + 附加题逐题作答与评分 -->
-    <el-drawer v-model="reviewVisible" :title="`复核 - ${currentSub?.name || ''}`" size="62%">
+    <!-- 批阅抽屉：步骤分 + 附加题逐题作答与评分 -->
+    <el-drawer v-model="reviewVisible" :title="`批阅 - ${currentSub?.name || ''}`" size="62%">
       <div v-loading="reviewLoading" class="detail-body">
         <template v-if="currentSub">
           <!-- 步骤分概况（只读，服务端计算） -->
@@ -241,7 +253,7 @@
             </div>
           </div>
 
-          <!-- 附加题逐题复核 -->
+          <!-- 附加题逐题批阅 -->
           <div class="d-section">
             <div class="d-title">附加题作答（{{ qAnswers.length }} 题）</div>
             <el-alert
@@ -270,7 +282,7 @@
                     {{ qa.auto_score ?? '—' }} 分
                     <span v-if="qa.similarity != null" class="sub-text">相似度 {{ (Number(qa.similarity) * 100).toFixed(0) }}%</span>
                     <span class="sub-text">{{ qa.auto_comment }}</span>
-                    <el-tag v-if="qa.pending_review" size="small" type="warning" effect="light" style="margin-left: 6px">待复核</el-tag>
+                    <el-tag v-if="qa.pending_review" size="small" type="warning" effect="light" style="margin-left: 6px">待批阅</el-tag>
                   </span>
                 </div>
                 <div class="qa-row qa-grade">
@@ -287,29 +299,24 @@
             </div>
           </div>
 
-          <!-- 总分与评语 -->
+          <!-- 评语 -->
           <div class="d-section">
-            <div class="d-title">总评</div>
-            <el-form label-width="90px" style="max-width: 480px">
-              <el-form-item label="最终总分">
-                <el-input-number v-model="reviewForm.total_score" :min="0" :max="Number(currentSub?.lab_total_score || 100)" />
-                <span class="sub-text">满分 {{ currentSub?.lab_total_score ?? '—' }}</span>
-              </el-form-item>
+            <div class="d-title">评语</div>
+            <el-form label-width="90px" style="max-width: 520px">
               <el-form-item label="评语">
                 <el-input v-model="reviewForm.comment" type="textarea" :rows="3" placeholder="写给学生的评语（可选）" />
               </el-form-item>
             </el-form>
             <el-alert
               type="info" :closable="false" show-icon
-              title="填了教师评分的题目会按题目分重算附题得分并合成总分；最终总分手动调整优先"
-              style="margin-bottom: 12px"
+              title="提交后系统按题目评分自动重算附题得分并合成总分，教师无需手动改总分"
             />
           </div>
         </template>
       </div>
       <template #footer>
         <el-button @click="reviewVisible = false">取消</el-button>
-        <el-button :loading="reviewSaving" type="primary" @click="saveReview">提交复核（将通知学生）</el-button>
+        <el-button :loading="reviewSaving" type="primary" @click="saveReview">提交批阅（将通知学生）</el-button>
       </template>
     </el-drawer>
 
@@ -322,6 +329,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { QuestionFilled } from '@element-plus/icons-vue'
 import request from '@/api/request'
 import LabGuideDialog from '@/components/LabGuideDialog.vue'
 import {
@@ -457,13 +465,23 @@ async function openDetail(row) {
 
 /** 详情表格行：名单为基线，合并提交状态；没排课时退化为纯提交列表。 */
 const detailRows = computed(() => {
+  const mapSub = (s, name, username) => ({
+    id: s.id,
+    name: name || s.student_name,
+    username: username || s.student_username,
+    state: s.status === 'submitted' ? 'submitted' : 'ongoing',
+    total_score: s.total_score,
+    passed_steps: s.passed_steps,
+    total_steps: s.total_steps,
+    error_count: s.error_count,
+    elapsed_seconds: s.elapsed_seconds,
+    score_breakdown: s.score_breakdown,
+    reviewed: s.reviewed,
+    submitted_at: s.submitted_at,
+    student: s.student,
+  })
   if (!detailRoster.value.length) {
-    return detailSubs.value.map((s) => ({
-      id: s.id, name: s.student_name, username: s.student_username, state: s.status === 'submitted' ? 'submitted' : 'ongoing',
-      total_score: s.total_score, passed_steps: s.passed_steps, total_steps: s.total_steps,
-      error_count: s.error_count, elapsed_seconds: s.elapsed_seconds,
-      reviewed: s.reviewed, submitted_at: s.submitted_at, student: s.student,
-    }))
+    return detailSubs.value.map((s) => mapSub(s))
   }
   const byStudent = new Map(detailSubs.value.map((s) => [s.student, s]))
   return detailRoster.value.map((r) => {
@@ -471,13 +489,7 @@ const detailRows = computed(() => {
     if (!s) {
       return { id: null, name: r.student_name, username: r.username, state: 'not_started' }
     }
-    return {
-      id: s.id, name: r.student_name, username: r.username,
-      state: s.status === 'submitted' ? 'submitted' : 'ongoing',
-      total_score: s.total_score, passed_steps: s.passed_steps, total_steps: s.total_steps,
-      error_count: s.error_count, elapsed_seconds: s.elapsed_seconds,
-      reviewed: s.reviewed, submitted_at: s.submitted_at, student: s.student,
-    }
+    return mapSub(s, r.student_name, r.username)
   })
 })
 
@@ -562,7 +574,7 @@ async function remove(row) {
 
 async function openReview(row) {
   currentSub.value = { ...row, lab_total_score: currentLab.value?.total_score }
-  reviewForm.value = { total_score: Number(row.total_score || 0), comment: '' }
+  reviewForm.value = { comment: '' }
   qAnswers.value = []
   reviewScores.value = {}
   reviewVisible.value = true
@@ -631,23 +643,22 @@ async function saveReview() {
   if (!currentSub.value?.id) return
   reviewSaving.value = true
   try {
-    // 有逐题评分则先按题目分批改（后端重算附题得分与总分）
+    // 逐题评分：后端按题目分重算附题得分并自动合成总分（无需教师改总分）
     const scores = Object.fromEntries(
       Object.entries(reviewScores.value).filter(([, v]) => v != null),
     )
     if (Object.keys(scores).length && qAnswers.value.length) {
       await gradeLabSubmission(currentSub.value.id, { scores })
     }
-    // 总分或评语有手动调整再走复核接口
-    const sub = qAnswers.value.length ? null : currentSub.value
-    if (sub || reviewForm.value.comment || reviewForm.value.total_score !== Number(currentSub.value.total_score || 0)) {
-      await reviewLabSubmission(currentSub.value.id, reviewForm.value)
+    // 评语非空时再走 review 接口落评语并通知学生
+    if (reviewForm.value.comment) {
+      await reviewLabSubmission(currentSub.value.id, { comment: reviewForm.value.comment })
     }
-    ElMessage.success('复核完成，已通知学生')
+    ElMessage.success('批阅完成，成绩已通知学生')
     reviewVisible.value = false
     if (detailVisible.value && currentLab.value) await openDetail(currentLab.value)
   } catch (e) {
-    ElMessage.error(e?.message || '复核失败')
+    ElMessage.error(e?.message || '批阅失败')
   } finally {
     reviewSaving.value = false
   }
@@ -666,9 +677,14 @@ onMounted(load)
 
 <style scoped>
 .mb12 { margin-bottom: 12px; }
-.form-tip { color: #94a3b8; font-size: 12px; margin-left: 10px; }
-.weight-row { display: flex; align-items: center; }
-.create-btn { margin-left: 14px; }
+.weight-label { margin-right: 2px; }
+.tip-ico { color: #94a3b8; cursor: help; font-size: 14px; vertical-align: -2px; }
+.weight-tip p { margin: 0 0 4px; font-size: 12px; line-height: 1.6; }
+.weight-tip p:last-child { margin-bottom: 0; }
+.weight-tip b { color: #2563eb; }
+.weight-row { display: flex; align-items: center; width: 100%; }
+.weight-row .el-input-number { margin-right: auto; }
+.create-btn { margin-left: auto; }
 .schedule-line { display: flex; align-items: center; gap: 8px; line-height: 1.9; }
 .schedule-class {
   flex-shrink: 0;

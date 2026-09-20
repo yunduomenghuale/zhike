@@ -414,8 +414,11 @@ class LabSubmissionViewSet(BaseModelViewSet):
 
         steps = request.data.get("steps_result") or {}
         error_log = request.data.get("error_log", []) or []
+        answers = request.data.get("answers") or {}
         if not isinstance(steps, (dict, list)) or not isinstance(error_log, list):
             raise ValidationError("步骤结果或错误日志格式不正确")
+        if not isinstance(answers, dict):
+            raise ValidationError({"answers": "附题作答格式不正确（应为 {lab_question_id: answer}）"})
         try:
             elapsed = max(0, int(request.data.get("elapsed_seconds", 0)))
         except (TypeError, ValueError) as exc:
@@ -439,6 +442,23 @@ class LabSubmissionViewSet(BaseModelViewSet):
             sub.status = LabSubmission.Status.SUBMITTED
             sub.submitted_at = now
             sub.save()
+
+            # 附题作答落库：{lab_question_id: {key/keys/text/blanks,...}}，评分以题目快照为准
+            if answers:
+                valid_ids = set(
+                    sub.lab.questions.values_list("id", flat=True)
+                )
+                LabAnswer.objects.filter(submission=sub).delete()
+                for raw_id, stu_answer in answers.items():
+                    try:
+                        lq_id = int(raw_id)
+                    except (TypeError, ValueError):
+                        raise ValidationError({"answers": f"无效的附题编号：{raw_id}"})
+                    if lq_id not in valid_ids:
+                        continue  # 非本实验的题目直接忽略
+                    if not isinstance(stu_answer, dict):
+                        stu_answer = {"text": str(stu_answer)}
+                    LabAnswer.objects.create(submission=sub, lab_question_id=lq_id, student_answer=stu_answer)
 
             lab = sub.lab
             step_scores = scoring.calc_step_scores(sub, lab.effective_standard_minutes, lab.total_score)
