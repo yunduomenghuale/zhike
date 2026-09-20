@@ -105,9 +105,10 @@ class LabFlowTest(TestCase):
         self.assertEqual(Decimal(sub["accuracy_score"]), Decimal("3"))
         self.assertGreater(Decimal(sub["total_score"]), Decimal("0"))
 
-        # 重复提交被拒
+        # 训练型：提交后可直接重开新一轮（allow_resubmit 默认 True）
         res = self.sc.post("/api/lab-submissions/start/", {"lab": lab_id}, format="json")
-        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data["data"]["submission"]["status"], "in_progress")
 
         # 教师复核改分 + 学生收到通知
         res = self.tc.post(f"/api/lab-submissions/{sub_id}/review/", {"total_score": "88", "comment": "不错"}, format="json")
@@ -115,12 +116,13 @@ class LabFlowTest(TestCase):
         self.assertEqual(Decimal(res.data["data"]["total_score"]), Decimal("88.0"))
         self.assertTrue(self.student.notifications.filter(ntype="lab").exists())
 
-        # 教师重置 → 学生可重做
+        # 教师重置接口仍可用（后端保留）
         res = self.tc.post(f"/api/lab-submissions/{sub_id}/reset/", format="json")
         self.assertIn(res.status_code, (200, 201), res.data)
         res = self.sc.post("/api/lab-submissions/start/", {"lab": lab_id}, format="json")
         self.assertIn(res.status_code, (200, 201), res.data)
-        self.assertEqual(res.data["data"]["submission"]["attempt"], 2)
+        # 训练型：学生可自主重做（attempt+1），教师 reset 再 +1
+        self.assertEqual(res.data["data"]["submission"]["attempt"], 3)
 
         # 学情统计含实验维度
         res = self.tc.get(f"/api/analytics/class/{self.classroom.id}/?course={self.course.id}")

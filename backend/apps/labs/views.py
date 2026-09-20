@@ -279,11 +279,10 @@ class LabSubmissionViewSet(BaseModelViewSet):
             raise ValidationError("实验不存在")
         if lab.status != Lab.Status.PUBLISHED:
             raise ValidationError("实验未发布或已下线")
-        schedule = self._resolve_schedule(lab, request.user)
+        # 训练型：窗口内正常进入；窗口外若已被排过课，降级为"自主练习"（新种子可提交，统计可区分）
+        schedule, is_practice = self._resolve_schedule(lab, request.user)
         if not schedule:
             raise ValidationError("你没有该实验的排课权限")
-        if not schedule.is_open():
-            raise ValidationError("当前不在实验开放时间内")
 
         now = timezone.now()
         with transaction.atomic():
@@ -316,17 +315,23 @@ class LabSubmissionViewSet(BaseModelViewSet):
                 "random_seed": sub.random_seed,
                 "page_url": lab.template.page_url,
                 "questions": self._build_for_taking(lab),
+                "is_practice": is_practice,
             },
-            message="实验已开始",
+            message="自主练习模式" if is_practice else "实验已开始",
         )
 
     def _resolve_schedule(self, lab, user):
-        for s in lab.schedules.filter(
-            classroom__students__student=user, classroom__students__learn_status="active"
-        ).order_by("open_at"):
+        """返回 (schedule, is_practice)：窗口内 (s, False)；窗口外取最近一次排课 (s, True)。"""
+        schedules = list(
+            lab.schedules.filter(
+                classroom__students__student=user, classroom__students__learn_status="active"
+            ).order_by("open_at")
+        )
+        for s in schedules:
             if s.is_open():
-                return s
-        return None
+                return s, False
+        # 训练型：排过课的学生窗口外也可自主练习（取最近排课作上下文）
+        return (schedules[-1], True) if schedules else (None, False)
 
     def _reset_fields(self, sub, lab, operator):
         """就地清分（保留记录与审计），重新生成随机参数。"""
@@ -409,8 +414,7 @@ class LabSubmissionViewSet(BaseModelViewSet):
         if ticket.submission_id != sub.id:
             raise ValidationError("票据与作答不匹配")
         schedule = sub.schedule
-        if schedule and not schedule.is_open():
-            raise ValidationError("实验已截止，无法提交")
+        # 训练型：窗口外不拦截提交（自主练习成绩也入库）
 
         steps = request.data.get("steps_result") or {}
         error_log = request.data.get("error_log", []) or []

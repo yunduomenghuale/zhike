@@ -79,7 +79,7 @@
         <div class="lab-actions">
           <!-- 已提交：成绩明细直接展示在卡片上；仅允许重做的实验提供重做入口 -->
           <el-button
-            v-if="isSubmitted(row) && row.allow_resubmit"
+            v-if="isSubmitted(row)"
             type="warning"
             size="small"
             :loading="entering === row.id"
@@ -139,7 +139,7 @@ function windowState(s) {
     return `${d.getMonth() + 1}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
   }
   if (open && now < open) return { text: `${fmt(open)} 开放`, cls: 'future' }
-  if (close && now > close) return { text: `已于 ${fmt(close)} 结束`, cls: 'closed' }
+  if (close && now > close) return { text: `窗口已结束，可自主练习`, cls: 'closed' }
   const left = close ? `，${fmt(close)} 截止` : ''
   return { text: `开放中${left}`, cls: 'open' }
 }

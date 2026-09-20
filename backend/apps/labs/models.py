@@ -74,7 +74,7 @@ class Lab(BaseModel):
     # 缺省继承模板，允许覆盖随机参数范围
     random_config = models.JSONField("随机参数配置", default=dict, blank=True)
     time_limit_seconds = models.IntegerField("限时(秒)", null=True, blank=True)
-    allow_resubmit = models.BooleanField("允许学生重复提交", default=False)  # 重做主要走教师 reset
+    allow_resubmit = models.BooleanField("允许学生重复提交", default=True)  # 训练型：学生可自主重做
     status = models.CharField("状态", max_length=16, choices=Status.choices, default=Status.DRAFT)
     order = models.PositiveIntegerField("排序号", default=0)
 

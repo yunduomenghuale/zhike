@@ -220,11 +220,6 @@
               <el-table-column label="提交时间" width="128">
                 <template #default="{ row }">{{ row.submitted_at ? fmtDT(row.submitted_at) : '—' }}</template>
               </el-table-column>
-              <el-table-column label="操作" width="80">
-                <template #default="{ row }">
-                  <el-button v-if="row.state === 'submitted'" size="small" link type="warning" @click="reset(row)">重置</el-button>
-                </template>
-              </el-table-column>
             </el-table>
           </div>
         </template>
@@ -246,7 +241,7 @@ import LabGuideDialog from '@/components/LabGuideDialog.vue'
 import {
   listLabs, createLab, deleteLab, publishLab, closeLab,
   listLabTemplates, listLabSchedules, createLabSchedule,
-  listLabSubmissions, resetLabSubmission,
+  listLabSubmissions,
 } from '@/api/labs'
 
 const route = useRoute()
@@ -480,14 +475,6 @@ async function remove(row) {
   await ElMessageBox.confirm(`确认删除实验「${row.title}」？`, '提示', { type: 'warning' })
   await deleteLab(row.id)
   await load()
-}
-
-async function reset(row) {
-  if (!row.id) return
-  await ElMessageBox.confirm(`重置后 ${row.name} 可重新做实验（旧成绩清空），确认？`, '提示', { type: 'warning' })
-  await resetLabSubmission(row.id)
-  ElMessage.success('已重置')
-  if (currentLab.value) await openDetail(currentLab.value)
 }
 
 onMounted(load)
