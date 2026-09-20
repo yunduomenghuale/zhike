@@ -8,7 +8,7 @@
       <el-button type="warning" plain size="small" @click="guideDialog.open()">实验必读</el-button>
     </div>
 
-    <!-- 新建实验：选模板 → 绑课程 → 覆盖配置 -->
+    <!-- 新建实验：选模板 → 绑课程 → 覆盖配置（按钮内联在最后一行右侧，不单独占行） -->
     <el-card shadow="never" class="mb12">
       <template #header><span>新建实验</span></template>
       <el-form :model="form" label-width="100px" style="max-width: 720px">
@@ -29,28 +29,39 @@
           <el-input-number v-model="form.standard_minutes" :min="5" :max="180" placeholder="分钟" />
         </el-form-item>
         <el-form-item label="题目权重">
-          <el-input-number v-model="form.question_weight" :min="0" :max="1" :step="0.1" />
-          <span class="form-tip">0 = 纯实验步骤评分；0.3 = 实验分×0.7 + 附题分×0.3</span>
+          <div class="weight-row">
+            <el-input-number v-model="form.question_weight" :min="0" :max="1" :step="0.1" />
+            <span class="form-tip">0 = 纯实验步骤评分；0.3 = 实验分×0.7 + 附题分×0.3</span>
+          </div>
         </el-form-item>
-        <el-form-item>
+        <el-form-item label=" " class="create-row">
           <el-button type="primary" :loading="creating" @click="create">创建实验</el-button>
         </el-form-item>
       </el-form>
     </el-card>
 
-    <!-- 已建实验列表：附题/排课/发布/成绩/复核/重置 -->
+    <!-- 我的实验列表 -->
     <el-card shadow="never">
       <template #header><span>我的实验</span></template>
       <el-table :data="labs" v-loading="loading">
         <el-table-column prop="title" label="实验" min-width="200" />
-        <el-table-column prop="course_name" label="课程" width="140" />
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
             <el-tag :type="statusType(row.status)" size="small">{{ statusText(row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="standard_minutes_display" label="标准时长(分)" width="100" />
-        <el-table-column label="排课窗口" min-width="230">
+        <el-table-column label="学生完成" width="100" align="center">
+          <template #default="{ row }">
+            <span class="stu-done">{{ labDone(row) }}/{{ labTotalStudents(row) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="班级均分" width="90" align="center">
+          <template #default="{ row }">
+            <span v-if="labAvg(row) !== null">{{ labAvg(row) }}</span>
+            <span v-else class="stu-done">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="排课窗口" min-width="220">
           <template #default="{ row }">
             <template v-if="row.schedules?.length">
               <div v-for="s in row.schedules" :key="s.id" class="schedule-line">
@@ -63,12 +74,12 @@
             <span v-else class="schedule-none">未排课</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="330" fixed="right">
+        <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
+            <el-button size="small" type="primary" plain @click="openDetail(row)">详情</el-button>
             <el-button size="small" @click="openSchedule(row)">排课</el-button>
             <el-button v-if="row.status === 'draft'" size="small" type="success" @click="publish(row)">发布</el-button>
             <el-button v-if="row.status === 'published'" size="small" type="warning" @click="close(row)">下线</el-button>
-            <el-button size="small" @click="openSubmissions(row)">成绩</el-button>
             <el-button size="small" type="danger" plain @click="remove(row)">删除</el-button>
           </template>
         </el-table-column>
@@ -104,42 +115,131 @@
       </template>
     </el-dialog>
 
-    <!-- 成绩弹窗 -->
-    <el-dialog v-model="scoreVisible" :title="`实验成绩 - ${currentLab?.title || ''}`" width="860">
-      <el-table :data="submissions" v-loading="scoreLoading">
-        <el-table-column prop="student_name" label="学生" width="110" />
-        <el-table-column prop="student_username" label="学号" width="110" />
-        <el-table-column label="状态" width="90">
-          <template #default="{ row }">{{ row.status === 'submitted' ? '已提交' : '进行中' }}</template>
-        </el-table-column>
-        <el-table-column prop="passed_steps" label="步骤" width="80">
-          <template #default="{ row }">{{ row.passed_steps }}/{{ row.total_steps }}</template>
-        </el-table-column>
-        <el-table-column prop="error_count" label="错误" width="70" />
-        <el-table-column label="用时" width="90">
-          <template #default="{ row }">{{ Math.round(row.elapsed_seconds / 60) }} 分</template>
-        </el-table-column>
-        <el-table-column prop="total_score" label="总分" width="80" />
-        <el-table-column label="复核" width="70">
-          <template #default="{ row }"><el-tag v-if="row.reviewed" size="small">已复核</el-tag></template>
-        </el-table-column>
-        <el-table-column label="操作" width="160" fixed="right">
-          <template #default="{ row }">
-            <el-button v-if="row.status === 'submitted'" size="small" @click="openReview(row)">改分</el-button>
-            <el-button size="small" type="warning" plain @click="reset(row)">重置</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-dialog>
+    <!-- 实验详情抽屉：概况 + 学生完成统计 + 逐学生成绩 -->
+    <el-drawer v-model="detailVisible" :title="currentLab?.title || '实验详情'" size="72%">
+      <div v-loading="detailLoading" class="detail-body">
+        <template v-if="currentLab">
+          <!-- 实验概况 -->
+          <div class="d-section">
+            <div class="d-title">实验概况</div>
+            <div class="d-grid">
+              <div class="d-item"><span class="d-k">状态</span><el-tag :type="statusType(currentLab.status)" size="small">{{ statusText(currentLab.status) }}</el-tag></div>
+              <div class="d-item"><span class="d-k">实验模板</span><span>{{ currentLab.template_title }}</span></div>
+              <div class="d-item"><span class="d-k">满分</span><span>{{ currentLab.total_score }} 分（及格 {{ currentLab.pass_score }}）</span></div>
+              <div class="d-item"><span class="d-k">标准时长</span><span>{{ currentLab.standard_minutes_display }} 分钟</span></div>
+              <div class="d-item"><span class="d-k">题目权重</span><span>{{ currentLab.question_weight > 0 ? currentLab.question_weight : '纯步骤评分' }}</span></div>
+              <div class="d-item"><span class="d-k">允许重做</span><span>{{ currentLab.allow_resubmit ? '是' : '否' }}</span></div>
+            </div>
+          </div>
 
-    <!-- 复核改分弹窗 -->
-    <el-dialog v-model="reviewVisible" title="复核改分" width="420">
+          <!-- 学生完成统计 -->
+          <div class="d-section">
+            <div class="d-title">学生完成统计</div>
+            <div class="stat-cards">
+              <div class="stat-box">
+                <div class="stat-num">{{ detailStats.expected }}</div>
+                <div class="stat-label">应做人数</div>
+              </div>
+              <div class="stat-box ok">
+                <div class="stat-num">{{ detailStats.submitted }}</div>
+                <div class="stat-label">已提交</div>
+              </div>
+              <div class="stat-box ing">
+                <div class="stat-num">{{ detailStats.ongoing }}</div>
+                <div class="stat-label">进行中</div>
+              </div>
+              <div class="stat-box miss">
+                <div class="stat-num">{{ detailStats.notStarted }}</div>
+                <div class="stat-label">未开始</div>
+              </div>
+              <div class="stat-box avg">
+                <div class="stat-num">{{ detailStats.avgScore ?? '—' }}</div>
+                <div class="stat-label">提交均分</div>
+              </div>
+              <div class="stat-box avg">
+                <div class="stat-num">{{ detailStats.avgSteps ?? '—' }}</div>
+                <div class="stat-label">平均步骤通过</div>
+              </div>
+            </div>
+            <el-progress
+              v-if="detailStats.expected"
+              :percentage="detailStats.submitRate"
+              :stroke-width="10"
+              :color="'#10b981'"
+              :format="(p) => `提交率 ${p}%`"
+              style="margin-top: 10px"
+            />
+          </div>
+
+          <!-- 逐学生成绩 -->
+          <div class="d-section">
+            <div class="d-title">学生成绩</div>
+            <el-table :data="detailRows" size="small">
+              <el-table-column label="学生" min-width="100">
+                <template #default="{ row }">{{ row.name }}<span class="sub-text">{{ row.username }}</span></template>
+              </el-table-column>
+              <el-table-column label="状态" width="84">
+                <template #default="{ row }">
+                  <el-tag v-if="row.state === 'submitted'" type="success" size="small">已提交</el-tag>
+                  <el-tag v-else-if="row.state === 'ongoing'" type="warning" size="small">进行中</el-tag>
+                  <el-tag v-else type="info" size="small" effect="plain">未开始</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="总分" width="70" align="center">
+                <template #default="{ row }">
+                  <span v-if="row.state === 'submitted'" class="score-num">{{ row.total_score }}</span>
+                  <span v-else class="sub-text">—</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="步骤" width="70" align="center">
+                <template #default="{ row }">{{ row.state === 'not_started' ? '—' : `${row.passed_steps ?? 0}/${row.total_steps ?? '—'}` }}</template>
+              </el-table-column>
+              <el-table-column prop="error_count" label="错误" width="56" align="center">
+                <template #default="{ row }">{{ row.state === 'not_started' ? '—' : (row.error_count ?? 0) }}</template>
+              </el-table-column>
+              <el-table-column label="用时" width="66" align="center">
+                <template #default="{ row }">
+                  {{ row.state === 'not_started' ? '—' : `${Math.round((row.elapsed_seconds ?? 0) / 60)}分` }}
+                </template>
+              </el-table-column>
+              <el-table-column label="提交时间" width="120">
+                <template #default="{ row }">{{ row.submitted_at ? fmtDT(row.submitted_at) : '—' }}</template>
+              </el-table-column>
+              <el-table-column label="复核" width="84">
+                <template #default="{ row }">
+                  <el-tag v-if="row.reviewed" type="success" size="small" effect="plain">已复核</el-tag>
+                  <span v-else class="sub-text">—</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="150" fixed="right">
+                <template #default="{ row }">
+                  <template v-if="row.state === 'submitted'">
+                    <el-button size="small" link type="primary" @click="openReview(row)">复核改分</el-button>
+                    <el-button size="small" link type="warning" @click="reset(row)">重置</el-button>
+                  </template>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </template>
+      </div>
+    </el-drawer>
+
+    <!-- 复核改分弹窗：主观题相似度预评分仅系统参考，教师可终审调整 -->
+    <el-dialog v-model="reviewVisible" title="复核改分" width="440">
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        title="主观题系统按相似度预评分，仅作参考；教师复核为最终成绩，提交后将通知学生"
+        style="margin-bottom: 12px"
+      />
       <el-form label-width="90px">
         <el-form-item label="新总分">
           <el-input-number v-model="reviewForm.total_score" :min="0" :max="Number(currentSub?.lab_total_score || 100)" />
         </el-form-item>
         <el-form-item label="评语">
-          <el-input v-model="reviewForm.comment" type="textarea" :rows="3" />
+          <el-input v-model="reviewForm.comment" type="textarea" :rows="3" placeholder="写给学生的评语（可选）" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -160,7 +260,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/api/request'
 import LabGuideDialog from '@/components/LabGuideDialog.vue'
 import {
-  listLabs, createLab, updateLab, deleteLab, publishLab, closeLab,
+  listLabs, createLab, deleteLab, publishLab, closeLab,
   listLabTemplates, listLabSchedules, createLabSchedule,
   listLabSubmissions, reviewLabSubmission, resetLabSubmission,
 } from '@/api/labs'
@@ -185,9 +285,11 @@ const scheduleVisible = ref(false)
 const scheduleForm = ref({ lab: null, classroom: null, open_at: '', close_at: '' })
 const currentLab = ref(null)
 
-const scoreVisible = ref(false)
-const scoreLoading = ref(false)
-const submissions = ref([])
+// 详情抽屉
+const detailVisible = ref(false)
+const detailLoading = ref(false)
+const detailRoster = ref([])   // 应做学生名单（排课班级的 active 学生）
+const detailSubs = ref([])     // 该实验全部提交（含进行中）
 
 const reviewVisible = ref(false)
 const reviewForm = ref({ total_score: 0, comment: '' })
@@ -201,7 +303,22 @@ function fmtDT(t) {
   if (!t) return '—'
   const d = new Date(t)
   const p = (n) => String(n).padStart(2, '0')
-  return `${d.getMonth() + 1}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+/** 列表页快捷统计：某实验已完成/应做人数、均分（拉取过详情后才有缓存数据）。 */
+const labStatsCache = ref({})
+function labDone(row) {
+  const st = labStatsCache.value[row.id]
+  return st ? st.submitted : '—'
+}
+function labTotalStudents(row) {
+  const st = labStatsCache.value[row.id]
+  return st ? st.expected : '—'
+}
+function labAvg(row) {
+  const st = labStatsCache.value[row.id]
+  return st ? st.avgScore : null
 }
 
 async function load() {
@@ -217,6 +334,86 @@ async function load() {
     loading.value = false
   }
 }
+
+/** 拉取一个实验的统计（应做名单 + 提交记录），列表与详情共用。 */
+async function fetchLabStats(lab) {
+  const classroomIds = (lab.schedules || []).map((s) => s.classroom)
+  if (!classroomIds.length) {
+    return { expected: 0, submitted: 0, ongoing: 0, notStarted: 0, avgScore: null, avgSteps: null, submitRate: 0, roster: [], subs: [] }
+  }
+  const rosterReq = request.get('/class-students/', {
+    params: { classroom: classroomIds, learn_status: 'active', page_size: 500 },
+  })
+  const subReq = listLabSubmissions({ lab: lab.id, page_size: 500 })
+  const [rosterRes, subRes] = await Promise.all([rosterReq, subReq])
+  let roster = rosterRes.results ?? rosterRes
+  if (!Array.isArray(roster)) roster = []
+  const subs = subRes.results ?? subRes
+  const submitted = subs.filter((s) => s.status === 'submitted')
+  const ongoing = subs.filter((s) => s.status !== 'submitted')
+  const doneIds = new Set(submitted.map((s) => s.student))
+  const scores = submitted.map((s) => Number(s.total_score || 0)).filter((n) => Number.isFinite(n))
+  const avgScore = scores.length ? Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10 : null
+  const stepPairs = submitted.filter((s) => s.total_steps > 0)
+  const avgSteps = stepPairs.length
+    ? Math.round((stepPairs.reduce((a, s) => a + s.passed_steps / s.total_steps, 0) / stepPairs.length) * 100)
+    : null
+  return {
+    expected: roster.length,
+    submitted: submitted.length,
+    ongoing: ongoing.length,
+    notStarted: Math.max(0, roster.length - doneIds.size - ongoing.length),
+    avgScore,
+    avgSteps,
+    submitRate: roster.length ? Math.round((submitted.length / roster.length) * 100) : 0,
+    roster,
+    subs,
+  }
+}
+
+async function openDetail(row) {
+  currentLab.value = row
+  detailVisible.value = true
+  detailLoading.value = true
+  try {
+    const st = await fetchLabStats(row)
+    labStatsCache.value = { ...labStatsCache.value, [row.id]: st }
+    detailRoster.value = st.roster
+    detailSubs.value = st.subs
+  } finally {
+    detailLoading.value = false
+  }
+}
+
+/** 详情表格行：名单为基线，合并提交状态；没排课时退化为纯提交列表。 */
+const detailRows = computed(() => {
+  if (!detailRoster.value.length) {
+    return detailSubs.value.map((s) => ({
+      id: s.id, name: s.student_name, username: s.student_username, state: s.status === 'submitted' ? 'submitted' : 'ongoing',
+      total_score: s.total_score, passed_steps: s.passed_steps, total_steps: s.total_steps,
+      error_count: s.error_count, elapsed_seconds: s.elapsed_seconds,
+      reviewed: s.reviewed, submitted_at: s.submitted_at, student: s.student,
+    }))
+  }
+  const byStudent = new Map(detailSubs.value.map((s) => [s.student, s]))
+  return detailRoster.value.map((r) => {
+    const s = byStudent.get(r.student)
+    if (!s) {
+      return { id: null, name: r.student_name, username: r.username, state: 'not_started' }
+    }
+    return {
+      id: s.id, name: r.student_name, username: r.username,
+      state: s.status === 'submitted' ? 'submitted' : 'ongoing',
+      total_score: s.total_score, passed_steps: s.passed_steps, total_steps: s.total_steps,
+      error_count: s.error_count, elapsed_seconds: s.elapsed_seconds,
+      reviewed: s.reviewed, submitted_at: s.submitted_at, student: s.student,
+    }
+  })
+})
+
+const detailStats = computed(() => labStatsCache.value[currentLab.value?.id] || {
+  expected: 0, submitted: 0, ongoing: 0, notStarted: 0, avgScore: null, avgSteps: null, submitRate: 0,
+})
 
 async function create() {
   if (!form.value.template) {
@@ -293,18 +490,6 @@ async function remove(row) {
   await load()
 }
 
-async function openSubmissions(row) {
-  currentLab.value = row
-  scoreVisible.value = true
-  scoreLoading.value = true
-  try {
-    const res = await listLabSubmissions({ lab: row.id })
-    submissions.value = res.results ?? res
-  } finally {
-    scoreLoading.value = false
-  }
-}
-
 function openReview(row) {
   currentSub.value = { ...row, lab_total_score: currentLab.value?.total_score }
   reviewForm.value = { total_score: Number(row.total_score || 0), comment: '' }
@@ -315,14 +500,15 @@ async function saveReview() {
   await reviewLabSubmission(currentSub.value.id, reviewForm.value)
   ElMessage.success('复核完成，已通知学生')
   reviewVisible.value = false
-  await openSubmissions(currentLab.value)
+  if (detailVisible.value && currentLab.value) await openDetail(currentLab.value)
 }
 
 async function reset(row) {
-  await ElMessageBox.confirm('重置后该学生可重新做实验（旧成绩清空），确认？', '提示', { type: 'warning' })
+  if (!row.id) return
+  await ElMessageBox.confirm(`重置后 ${row.name} 可重新做实验（旧成绩清空），确认？`, '提示', { type: 'warning' })
   await resetLabSubmission(row.id)
   ElMessage.success('已重置')
-  await openSubmissions(currentLab.value)
+  if (currentLab.value) await openDetail(currentLab.value)
 }
 
 onMounted(load)
@@ -331,6 +517,8 @@ onMounted(load)
 <style scoped>
 .mb12 { margin-bottom: 12px; }
 .form-tip { color: #94a3b8; font-size: 12px; margin-left: 10px; }
+.weight-row { display: flex; align-items: center; }
+.create-row :deep(.el-form-item__content) { justify-content: flex-start; }
 .schedule-line { display: flex; align-items: center; gap: 8px; line-height: 1.9; }
 .schedule-class {
   flex-shrink: 0;
@@ -342,4 +530,47 @@ onMounted(load)
 }
 .schedule-time { color: #64748b; font-size: 12px; white-space: nowrap; }
 .schedule-none { color: #cbd5e1; font-size: 12px; }
+.stu-done { color: #475569; font-size: 13px; }
+
+.detail-body { padding: 0 4px; }
+.d-section { margin-bottom: 26px; }
+.d-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1e293b;
+  margin-bottom: 12px;
+  padding-left: 8px;
+  border-left: 3px solid #409eff;
+}
+.d-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px 24px;
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+.d-item { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #334155; }
+.d-k { color: #94a3b8; flex-shrink: 0; }
+
+.stat-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 12px; }
+.stat-box {
+  border-radius: 10px;
+  padding: 14px 10px;
+  text-align: center;
+  background: #f8fafc;
+}
+.stat-box .stat-num { font-size: 24px; font-weight: 700; color: #1e293b; }
+.stat-box .stat-label { margin-top: 4px; font-size: 12px; color: #94a3b8; }
+.stat-box.ok { background: #ecfdf5; }
+.stat-box.ok .stat-num { color: #059669; }
+.stat-box.ing { background: #fff7ed; }
+.stat-box.ing .stat-num { color: #d97706; }
+.stat-box.miss { background: #fef2f2; }
+.stat-box.miss .stat-num { color: #dc2626; }
+.stat-box.avg { background: #eff6ff; }
+.stat-box.avg .stat-num { color: #2563eb; }
+
+.sub-text { color: #94a3b8; font-size: 12px; margin-left: 6px; }
+.score-num { font-weight: 700; color: #2563eb; }
 </style>
