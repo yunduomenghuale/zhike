@@ -185,43 +185,48 @@
           <div class="d-section">
             <div class="d-title">学生成绩</div>
             <el-table :data="detailRows" size="small">
-              <el-table-column label="学生" min-width="100">
-                <template #default="{ row }">{{ row.name }}<span class="sub-text">{{ row.username }}</span></template>
+              <el-table-column label="学生" min-width="130">
+                <template #default="{ row }">
+                  <div class="stu-cell">
+                    <span class="stu-name">{{ row.name }}</span>
+                    <span class="stu-no">{{ row.username }}</span>
+                  </div>
+                </template>
               </el-table-column>
-              <el-table-column label="状态" width="84">
+              <el-table-column label="状态" width="78">
                 <template #default="{ row }">
                   <el-tag v-if="row.state === 'submitted'" type="success" size="small">已提交</el-tag>
                   <el-tag v-else-if="row.state === 'ongoing'" type="warning" size="small">进行中</el-tag>
                   <el-tag v-else type="info" size="small" effect="plain">未开始</el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="总分" width="70" align="center">
+              <el-table-column label="总分" width="66" align="center">
                 <template #default="{ row }">
                   <span v-if="row.state === 'submitted'" class="score-num">{{ row.total_score }}</span>
                   <span v-else class="sub-text">—</span>
                 </template>
               </el-table-column>
-              <el-table-column label="步骤" width="70" align="center">
+              <el-table-column label="步骤" width="66" align="center">
                 <template #default="{ row }">{{ row.state === 'not_started' ? '—' : `${row.passed_steps ?? 0}/${row.total_steps ?? '—'}` }}</template>
               </el-table-column>
               <el-table-column prop="error_count" label="错误" width="56" align="center">
                 <template #default="{ row }">{{ row.state === 'not_started' ? '—' : (row.error_count ?? 0) }}</template>
               </el-table-column>
-              <el-table-column label="用时" width="66" align="center">
+              <el-table-column label="用时" width="62" align="center">
                 <template #default="{ row }">
                   {{ row.state === 'not_started' ? '—' : `${Math.round((row.elapsed_seconds ?? 0) / 60)}分` }}
                 </template>
               </el-table-column>
-              <el-table-column label="提交时间" width="120">
+              <el-table-column label="提交时间" width="128">
                 <template #default="{ row }">{{ row.submitted_at ? fmtDT(row.submitted_at) : '—' }}</template>
               </el-table-column>
-              <el-table-column label="批阅" width="84">
+              <el-table-column label="批阅" width="78">
                 <template #default="{ row }">
                   <el-tag v-if="row.reviewed" type="success" size="small" effect="plain">已批阅</el-tag>
                   <span v-else class="sub-text">—</span>
                 </template>
               </el-table-column>
-              <el-table-column label="操作" width="150" fixed="right">
+              <el-table-column label="操作" width="140" fixed="right">
                 <template #default="{ row }">
                   <template v-if="row.state === 'submitted'">
                     <el-button size="small" link type="primary" @click="openReview(row)">批阅打分</el-button>
@@ -784,6 +789,11 @@ onMounted(load)
 
 .sub-text { color: #94a3b8; font-size: 12px; margin-left: 6px; }
 .score-num { font-weight: 700; color: #2563eb; }
+
+/* 学生列：姓名+学号两行堆叠，整齐不挤压 */
+.stu-cell { display: flex; flex-direction: column; gap: 2px; line-height: 1.35; padding: 3px 0; }
+.stu-cell .stu-name { color: #1e293b; font-size: 13px; font-weight: 600; }
+.stu-cell .stu-no { color: #94a3b8; font-size: 12px; font-family: 'JetBrains Mono', Consolas, monospace; }
 
 .qa-card {
   border: 1px solid #e2e8f0;
