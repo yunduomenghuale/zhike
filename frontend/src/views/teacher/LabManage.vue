@@ -84,7 +84,7 @@
             <span v-else class="schedule-none">未排课</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="300" fixed="right">
+        <el-table-column label="操作" width="300">
           <template #default="{ row }">
             <el-button size="small" type="primary" plain @click="openDetail(row)">详情</el-button>
             <el-button size="small" @click="openSchedule(row)">排课</el-button>
@@ -226,7 +226,7 @@
                   <span v-else class="sub-text">—</span>
                 </template>
               </el-table-column>
-              <el-table-column label="操作" width="140" fixed="right">
+              <el-table-column label="操作" min-width="132">
                 <template #default="{ row }">
                   <template v-if="row.state === 'submitted'">
                     <el-button size="small" link type="primary" @click="openReview(row)">批阅打分</el-button>
