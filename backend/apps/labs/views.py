@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from django.db import transaction
 from django.utils import timezone
+from rest_framework import mixins, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
@@ -14,10 +15,11 @@ from apps.homework.models import question_snapshot
 from apps.questions.grading import grade_objective
 from apps.questions.models import Question
 
-from . import bridge, scoring, seedgen
+from . import bridge, guide_preset, scoring, seedgen
 from .models import (
     Lab,
     LabAnswer,
+    LabGuide,
     LabQuestion,
     LabSchedule,
     LabSubmission,
@@ -25,6 +27,7 @@ from .models import (
 )
 from .serializers import (
     LabAnswerSerializer,
+    LabGuideSerializer,
     LabQuestionSerializer,
     LabScheduleSerializer,
     LabSerializer,
@@ -41,6 +44,57 @@ class LabTemplateViewSet(BaseModelViewSet):
 
     def get_queryset(self):
         return LabTemplate.objects.filter(is_active=True)
+
+
+class LabGuideViewSet(
+    mixins.RetrieveModelMixin, mixins.UpdateModelMixin, viewsets.GenericViewSet
+):
+    """实验必读（平台级单例，路由走 detail）：登录用户可读；教师可编辑/恢复预设。
+
+    GET    /lab-guide/1/        读取（content 为空自动回退平台预设内容）
+    PATCH  /lab-guide/1/        教师更新标题/内容
+    POST   /lab-guide/1/reset/  教师清空 content（恢复平台预设）
+    """
+
+    serializer_class = LabGuideSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self):
+        guide, _ = LabGuide.objects.get_or_create(
+            pk=1, defaults={"title": guide_preset.PRESET_TITLE}
+        )
+        return guide
+
+    def retrieve(self, request, *args, **kwargs):
+        guide = self.get_object()
+        data = LabGuideSerializer(guide, context={"request": request}).data
+        if data["is_preset"]:
+            data["title"] = data["title"] or guide_preset.PRESET_TITLE
+            data["content"] = guide_preset.PRESET_CONTENT
+        return api_response(data)
+
+    def partial_update(self, request, *args, **kwargs):
+        if not getattr(request.user, "is_teacher", False):
+            raise PermissionDenied("只有教师可以编辑实验必读")
+        guide = self.get_object()
+        serializer = LabGuideSerializer(
+            guide, data=request.data, partial=True, context={"request": request}
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save(updated_by=request.user)
+        return api_response(serializer.data, message="实验必读已更新")
+
+    @action(detail=True, methods=["post"], url_path="reset", permission_classes=[IsTeacher])
+    def reset(self, request, pk=None):
+        guide = self.get_object()
+        guide.content = ""
+        guide.title = guide_preset.PRESET_TITLE
+        guide.updated_by = request.user
+        guide.save(update_fields=["content", "title", "updated_by", "updated_at"])
+        data = LabGuideSerializer(guide, context={"request": request}).data
+        data["title"] = guide_preset.PRESET_TITLE
+        data["content"] = guide_preset.PRESET_CONTENT
+        return api_response(data, message="已恢复平台预设内容")
 
 
 class LabViewSet(BaseModelViewSet):

@@ -273,6 +273,31 @@ class LabAttemptToken(BaseModel):
         return f"{self.submission} ticket"
 
 
+class LabGuide(BaseModel):
+    """实验必读（平台级单例文档，教师可编辑；content 为空时回退平台预设内容）。
+
+    老实验平台的"实验操作教程"静态页（/labs/lab-guide.html）已转为平台预设，
+    教师可在前端直接编辑覆盖，也可一键恢复预设。
+    """
+
+    title = models.CharField("标题", max_length=128, default="实验必读")
+    content = models.TextField(
+        "内容HTML", blank=True,
+        help_text="富文本 HTML（含受控内联 style）；留空则展示平台预设内容",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="lab_guides", verbose_name="更新人",
+    )
+
+    class Meta:
+        verbose_name = "实验必读"
+        verbose_name_plural = verbose_name
+
+    def __str__(self):
+        return self.title
+
+
 class LabReport(BaseModel):
     """实验报告（二期生成 DOCX/PDF，一期先承载学生结论）。"""
 

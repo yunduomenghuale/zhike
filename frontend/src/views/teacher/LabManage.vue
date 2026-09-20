@@ -5,7 +5,7 @@
         <div class="page-title">虚拟实验</div>
         <div class="page-subtitle">引用平台实验模板创建实验，排课后学生按窗口进入</div>
       </div>
-      <el-button type="warning" plain size="small" @click="openGuide">实验必读</el-button>
+      <el-button type="warning" plain size="small" @click="guideDialog.open()">实验必读</el-button>
     </div>
 
     <!-- 新建实验：选模板 → 绑课程 → 覆盖配置 -->
@@ -17,10 +17,10 @@
             <el-option v-for="t in templates" :key="t.id" :value="t.id" :label="t.title" />
           </el-select>
         </el-form-item>
-        <el-form-item label="所属课程" required>
-          <el-select v-model="form.course" placeholder="选择自己的课程" style="width: 100%">
-            <el-option v-for="c in courses" :key="c.id" :value="c.id" :label="c.name" />
-          </el-select>
+        <el-form-item label="所属课程">
+          <el-input :model-value="currentCourseName" disabled>
+            <template #append>当前课程</template>
+          </el-input>
         </el-form-item>
         <el-form-item label="实验名称">
           <el-input v-model="form.title" placeholder="留空默认使用模板名称" />
@@ -126,6 +126,9 @@
         <el-button type="primary" @click="saveReview">提交（将通知学生）</el-button>
       </template>
     </el-dialog>
+
+    <!-- 实验必读管理弹窗（教师：可编辑/恢复预设） -->
+    <LabGuideDialog ref="guideDialog" is-teacher-view />
   </div>
 </template>
 
@@ -134,6 +137,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/api/request'
+import LabGuideDialog from '@/components/LabGuideDialog.vue'
 import {
   listLabs, createLab, updateLab, deleteLab, publishLab, closeLab,
   listLabTemplates, listLabSchedules, createLabSchedule,
@@ -142,6 +146,10 @@ import {
 
 const route = useRoute()
 const fixedCourseId = computed(() => Number(route.params.id) || null)
+// 课程空间内新建实验：课程固定为当前路由课程，无需选择
+const currentCourseName = computed(
+  () => courses.value.find((c) => c.id === fixedCourseId.value)?.name || `课程 #${fixedCourseId.value}`,
+)
 
 const templates = ref([])
 const courses = ref([])
@@ -150,7 +158,7 @@ const labs = ref([])
 const loading = ref(false)
 const creating = ref(false)
 
-const form = ref({ template: null, course: fixedCourseId.value, title: '', standard_minutes: 30, question_weight: 0 })
+const form = ref({ template: null, title: '', standard_minutes: 30, question_weight: 0 })
 
 const scheduleVisible = ref(false)
 const scheduleForm = ref({ lab: null, classroom: null, open_at: '', close_at: '' })
@@ -163,6 +171,7 @@ const submissions = ref([])
 const reviewVisible = ref(false)
 const reviewForm = ref({ total_score: 0, comment: '' })
 const currentSub = ref(null)
+const guideDialog = ref(null)
 
 const statusText = (s) => ({ draft: '草稿', published: '已发布', closed: '已下线' }[s] || s)
 const statusType = (s) => ({ draft: 'info', published: 'success', closed: 'warning' }[s] || 'info')
@@ -171,28 +180,27 @@ async function load() {
   loading.value = true
   try {
     const params = fixedCourseId.value ? { course: fixedCourseId.value } : undefined
+    // 课程固定为当前课程：只需拉模板、实验列表、课程名（用于只读展示）
     const [t, l, c] = await Promise.all([listLabTemplates(), listLabs(params), request.get('/courses/', { params })])
     templates.value = t.results ?? t
     labs.value = (l.results ?? l)
-    courses.value = c.results ?? c
+    courses.value = (c.results ?? c)
   } finally {
     loading.value = false
   }
 }
 
-function openGuide() {
-  window.open('/labs/lab-guide.html', '_blank')
-}
-
 async function create() {
-  if (!form.value.template || !form.value.course) {
-    ElMessage.warning('请选择实验模板与课程')
+  if (!form.value.template) {
+    ElMessage.warning('请选择实验模板')
     return
   }
   creating.value = true
   try {
-    await createLab({ ...form.value, title: form.value.title || undefined })
+    // course 由路由注入：本页面仅存在于课程空间内
+    await createLab({ ...form.value, course: fixedCourseId.value, title: form.value.title || undefined })
     ElMessage.success('实验已创建，排课并发布后学生可见')
+    form.value = { template: null, title: '', standard_minutes: 30, question_weight: 0 }
     await load()
   } finally {
     creating.value = false

@@ -6,6 +6,7 @@ from .models import (
     Lab,
     LabAnswer,
     LabAttemptToken,
+    LabGuide,
     LabQuestion,
     LabReport,
     LabSchedule,
@@ -143,6 +144,28 @@ class LabAttemptTokenSerializer(serializers.ModelSerializer):
     class Meta:
         model = LabAttemptToken
         fields = ["id", "token", "submission", "expires_at", "consumed"]
+
+
+class LabGuideSerializer(serializers.ModelSerializer):
+    """实验必读：content 为空时由后端返回平台预设内容（前端不需要感知兜底逻辑）。"""
+
+    is_preset = serializers.SerializerMethodField()
+    updated_by_name = serializers.CharField(source="updated_by.real_name", read_only=True)
+
+    class Meta:
+        model = LabGuide
+        fields = ["id", "title", "content", "is_preset", "updated_by_name", "updated_at"]
+
+    def get_is_preset(self, obj) -> bool:
+        return not (obj.content or "").strip()
+
+    def validate_content(self, value: str) -> str:
+        # 基础防护：封死脚本执行面；富文本样式经 .lab-guide-doc 作用域，不污染全局
+        lowered = value.lower()
+        for tag in ("<script", "onerror=", "onload=", "javascript:"):
+            if tag in lowered:
+                raise serializers.ValidationError("内容包含不允许的标签或属性")
+        return value
 
 
 class LabReportSerializer(serializers.ModelSerializer):

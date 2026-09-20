@@ -9,7 +9,7 @@
         type="warning"
         plain
         size="small"
-        @click="openGuide"
+        @click="guideDialog.open()"
       >
         实验必读
       </el-button>
@@ -48,12 +48,16 @@
       </article>
     </div>
     <el-empty v-else description="暂无可参加的虚拟实验" />
+
+    <!-- 实验必读（学生只读浏览） -->
+    <LabGuideDialog ref="guideDialog" />
   </div>
 </template>
 
 <script setup>
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import LabGuideDialog from '@/components/LabGuideDialog.vue'
 import { listLabs, listLabSubmissions, startLab, generateLabReport, downloadLabReportUrl } from '@/api/labs'
 
 const labs = ref([])
@@ -61,6 +65,7 @@ const submissions = ref([])
 const loading = ref(false)
 const entering = ref(null)
 const reporting = ref(null)
+const guideDialog = ref(null)
 
 function submissionOf(row) {
   return submissions.value.find((s) => s.lab === row.id)
@@ -77,9 +82,6 @@ async function load() {
   }
 }
 
-function openGuide() {
-  window.open('/labs/lab-guide.html', '_blank')
-}
 
 async function enter(row) {
   entering.value = row.id
