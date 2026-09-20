@@ -64,6 +64,14 @@
 
     <!-- 排课弹窗 -->
     <el-dialog v-model="scheduleVisible" title="排课（班级开放窗口）" width="560">
+      <el-alert
+        v-if="scheduleForm.id"
+        type="info"
+        :closable="false"
+        show-icon
+        title="该实验已有排课记录，保存后将更新所选班级的开放窗口"
+        style="margin-bottom: 12px"
+      />
       <el-form :model="scheduleForm" label-width="90px">
         <el-form-item label="班级" required>
           <el-select v-model="scheduleForm.classroom" style="width: 100%">
@@ -213,15 +221,35 @@ async function openSchedule(row) {
   classes.value = (res.results ?? res).filter(
     (c) => !c.courses || c.courses.some?.((cid) => cid === row.course) || true,
   )
-  scheduleForm.value = { lab: row.id, classroom: null, open_at: '', close_at: '' }
+  // 预填已有排课窗口（同班重排 = 更新窗口）
+  let scheduleId = null
+  let openAt = ''
+  let closeAt = ''
+  try {
+    const sres = await listLabSchedules({ lab: row.id })
+    const mine = (sres.results ?? sres)[0]
+    if (mine) {
+      scheduleId = mine.id
+      openAt = mine.open_at || ''
+      closeAt = mine.close_at || ''
+    }
+  } catch {
+    // 拉取失败不阻塞排课
+  }
+  scheduleForm.value = { id: scheduleId, lab: row.id, classroom: null, open_at: openAt, close_at: closeAt }
   scheduleVisible.value = true
 }
 
 async function saveSchedule() {
+  if (!scheduleForm.value.classroom) {
+    ElMessage.warning('请选择班级')
+    return
+  }
   try {
     await createLabSchedule(scheduleForm.value)
     ElMessage.success('排课已保存')
     scheduleVisible.value = false
+    await load()
   } catch (e) {
     ElMessage.error(e?.message || '排课失败')
   }

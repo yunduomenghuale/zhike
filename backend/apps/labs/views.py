@@ -229,6 +229,30 @@ class LabScheduleViewSet(BaseModelViewSet):
             qs = qs.none()
         return qs.distinct()
 
+    def create(self, request, *args, **kwargs):
+        """同班重排 = 更新已有窗口（模型约束 lab+classroom 唯一，重开复用改时间）。"""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        attrs = serializer.validated_data
+        existing = LabSchedule.objects.filter(
+            lab=attrs["lab"], classroom=attrs["classroom"]
+        ).first()
+        if existing:
+            for field in ("open_at", "close_at"):
+                if field in attrs:
+                    setattr(existing, field, attrs[field])
+            # 复用 validate 的窗口时间校验
+            check = LabScheduleSerializer(
+                existing, data={"open_at": existing.open_at, "close_at": existing.close_at}, partial=True
+            )
+            check.is_valid(raise_exception=True)
+            existing.save()
+            return api_response(
+                LabScheduleSerializer(existing).data, message="已更新该班级的开放窗口"
+            )
+        self.perform_create(serializer)
+        return api_response(serializer.data, message="排课成功", status=201)
+
 
 class LabSubmissionViewSet(BaseModelViewSet):
     serializer_class = LabSubmissionSerializer

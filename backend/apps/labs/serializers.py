@@ -80,6 +80,8 @@ class LabScheduleSerializer(serializers.ModelSerializer):
     class Meta:
         model = LabSchedule
         fields = ["id", "lab", "lab_title", "classroom", "classroom_name", "open_at", "close_at"]
+        # 唯一性交给视图层 upsert（同班重排=更新窗口），这里不生成 UniqueTogetherValidator
+        validators = []
 
     def validate(self, attrs):
         lab, classroom = attrs.get("lab"), attrs.get("classroom")
