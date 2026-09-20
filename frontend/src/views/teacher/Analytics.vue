@@ -94,6 +94,16 @@
                   <span v-if="row.avg_exam_score !== null" class="metric-score">· 均分 {{ row.avg_exam_score }}</span>
                 </strong>
               </div>
+              <div v-if="row.experiment_total" class="metric">
+                <span class="metric-label">
+                  <span class="metric-ico teal"><el-icon :size="13"><Cpu /></el-icon></span>
+                  实验
+                </span>
+                <strong class="metric-value" :class="{ warn: row.experiment_done < row.experiment_total }">
+                  {{ row.experiment_done }}/{{ row.experiment_total }}
+                  <span v-if="row.avg_experiment_score !== null" class="metric-score">· 均分 {{ row.avg_experiment_score }}</span>
+                </strong>
+              </div>
             </div>
 
             <div class="stu-warnings">
@@ -116,7 +126,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { MagicStick, Loading, Notebook, Files, Medal } from '@element-plus/icons-vue'
+import { MagicStick, Loading, Notebook, Files, Medal, Cpu } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import MarkdownIt from 'markdown-it'
 import { listClasses } from '@/api/classroom'
@@ -487,6 +497,10 @@ onMounted(loadClasses)
 .metric-ico.orange {
   color: var(--warning);
   background: #fff7ed;
+}
+.metric-ico.teal {
+  color: #0d9488;
+  background: #f0fdfa;
 }
 .metric-value {
   color: var(--gray-800);

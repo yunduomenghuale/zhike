@@ -228,6 +228,11 @@ body,
   color: var(--danger);
 }
 
+.stat-icon.cyan {
+  background: #f0fdfa;
+  color: #0d9488;
+}
+
 .stat-title {
   font-size: 14px;
   color: var(--gray-500);

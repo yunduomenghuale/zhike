@@ -129,6 +129,32 @@
           </el-col>
         </el-row>
 
+        <!-- 实验情况 -->
+        <div class="data-card section-card">
+          <div class="section-title">
+            实验情况
+            <span v-if="detail.labs?.length" class="section-sub">
+              已完成 {{ detail.labs.filter((l) => l.done).length }}/{{ detail.labs.length }}
+            </span>
+          </div>
+          <div v-if="detail.labs?.length" class="item-list">
+            <div v-for="lab in detail.labs" :key="lab.id" class="detail-item">
+              <span class="item-main">{{ lab.title }}</span>
+              <template v-if="lab.done">
+                <el-tag size="small" type="success" effect="light">已提交</el-tag>
+                <span v-if="lab.score != null" class="item-score">{{ lab.score }} 分</span>
+                <el-tag v-if="lab.reviewed" size="small" type="info" effect="plain">已复核</el-tag>
+                <span class="item-time">{{ fmtDateTime(lab.submitted_at) }}</span>
+              </template>
+              <template v-else-if="lab.status">
+                <el-tag size="small" type="warning" effect="light">进行中</el-tag>
+              </template>
+              <el-tag v-else size="small" type="danger" effect="light">未开始</el-tag>
+            </div>
+          </div>
+          <div v-else class="section-empty">该课程暂无已发布的虚拟实验</div>
+        </div>
+
         <!-- 最近练习 -->
         <div class="data-card section-card">
           <div class="section-title">
@@ -157,7 +183,7 @@
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  ArrowLeft, TrendCharts, Notebook, Files, Medal, Trophy, Flag,
+  ArrowLeft, TrendCharts, Notebook, Files, Medal, Trophy, Flag, Cpu,
   CircleCheckFilled, CircleCloseFilled,
 } from '@element-plus/icons-vue'
 import { listClasses } from '@/api/classroom'
@@ -183,6 +209,8 @@ const cards = computed(() => {
     { label: '作业提交', value: `${s.homework_submitted ?? 0}/${s.homework_total ?? 0}`, icon: Files, color: 'orange' },
     { label: '考试参加', value: `${s.exam_taken ?? 0}/${s.exam_total ?? 0}`, icon: Medal, color: 'orange' },
     { label: '考试均分', num: s.avg_exam_score, suffix: '', icon: Trophy, color: 'red' },
+    { label: '实验完成', value: `${s.experiment_done ?? 0}/${s.experiment_total ?? 0}`, icon: Cpu, color: 'cyan' },
+    { label: '实验均分', num: s.avg_experiment_score, suffix: '', icon: Trophy, color: 'cyan' },
   ]
 })
 
@@ -430,6 +458,7 @@ onMounted(async () => {
 .stat-icon.orange { background: #fff7ed; color: var(--warning); }
 .stat-icon.purple { background: #f5f3ff; color: #8b5cf6; }
 .stat-icon.red { background: #fef2f2; color: var(--danger); }
+.stat-icon.cyan { background: #f0fdfa; color: #0d9488; }
 .stat-title { font-size: 13px; color: var(--gray-500); font-weight: 650; }
 .stat-value { margin-top: 3px; font-size: 21px; font-weight: 800; color: var(--gray-900); }
 
@@ -481,6 +510,11 @@ onMounted(async () => {
   color: var(--primary-600);
   font-size: 13px;
   font-weight: 700;
+}
+.item-time {
+  flex-shrink: 0;
+  color: var(--gray-400);
+  font-size: 12px;
 }
 .record-icon {
   flex-shrink: 0;
