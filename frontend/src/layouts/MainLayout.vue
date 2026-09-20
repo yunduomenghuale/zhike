@@ -941,18 +941,15 @@ function onCommand(cmd) {
   background: transparent;
   color: inherit;
   cursor: pointer;
-  /* 视口较矮（缩放 ≥100%）时收缩此卡，把空间让给导航菜单 */
+  /* 视口较矮（缩放 ≥100%）时收缩此卡（保持居中竖排，只缩小尺寸），把空间让给导航菜单 */
   flex-shrink: 0;
+  min-height: 0;
 }
 
 @media (max-height: 860px) {
   .space-cover {
-    padding: 16px 18px;
+    padding: 16px 18px 14px;
     gap: 6px;
-    grid-template-columns: auto 1fr;
-    justify-items: start;
-    align-items: center;
-    text-align: left;
   }
 
   .space-visual {
@@ -960,11 +957,14 @@ function onCommand(cmd) {
     height: 52px;
     border-radius: 16px;
     font-size: 22px;
-    grid-row: span 2;
   }
 
   .space-title {
     font-size: 15px;
+  }
+
+  .space-user {
+    font-size: 12px;
   }
 }
 

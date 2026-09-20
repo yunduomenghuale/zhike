@@ -207,17 +207,14 @@ watch([activeTab, () => props.courseName], updatePageTitle, { immediate: true })
   gap: 11px;
   cursor: pointer;
   flex-shrink: 0;
+  min-height: 0;
 }
 
-/* 视口较矮（缩放 ≥100%）时收缩封面卡，把空间让给导航 */
+/* 视口较矮（缩放 ≥100%）时整体收缩封面卡（保持居中竖排，只缩小尺寸），把空间让给导航 */
 @media (max-height: 860px) {
   .course-cover {
-    padding: 16px 18px;
+    padding: 16px 18px 14px;
     gap: 6px;
-    grid-template-columns: auto 1fr;
-    justify-items: start;
-    align-items: center;
-    text-align: left;
   }
 
   .cover-visual {
@@ -225,11 +222,18 @@ watch([activeTab, () => props.courseName], updatePageTitle, { immediate: true })
     height: 52px;
     border-radius: 16px;
     font-size: 22px;
-    grid-row: span 2;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.72),
+      0 10px 22px rgba(37, 99, 235, 0.1);
   }
 
   .cover-name {
     font-size: 15px;
+    -webkit-line-clamp: 1;
+  }
+
+  .cover-term {
+    font-size: 12px;
   }
 }
 
