@@ -44,7 +44,7 @@
         </div>
 
         <!-- 成绩明细（已提交的实验：即时展示评分构成） -->
-        <div v-if="isSubmitted(row) && breakdownOf(row)" :id="`lab-score-${row.id}`" class="lab-score">
+        <div v-if="isSubmitted(row) && breakdownOf(row)" class="lab-score">
           <div class="lab-score-head">
             <span class="lab-score-total">
               {{ submissionOf(row).total_score }}
@@ -77,16 +77,7 @@
         </div>
 
         <div class="lab-actions">
-          <!-- 已提交：成绩明细就展在卡片上，无需再进实验页；仅允许重做的实验提供重做入口 -->
-          <el-button
-            v-if="isSubmitted(row)"
-            size="small"
-            type="primary"
-            plain
-            @click="scrollToScore(row)"
-          >
-            查看成绩
-          </el-button>
+          <!-- 已提交：成绩明细直接展示在卡片上；仅允许重做的实验提供重做入口 -->
           <el-button
             v-if="isSubmitted(row) && row.allow_resubmit"
             type="warning"
@@ -105,14 +96,6 @@
           >
             进入实验
           </el-button>
-          <el-button
-            v-if="isSubmitted(row)"
-            size="small"
-            :loading="reporting === row.id"
-            @click="downloadReport(row)"
-          >
-            下载实验报告
-          </el-button>
         </div>
       </article>
     </div>
@@ -127,13 +110,12 @@
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import LabGuideDialog from '@/components/LabGuideDialog.vue'
-import { listLabs, listLabSubmissions, startLab, generateLabReport, downloadLabReportUrl } from '@/api/labs'
+import { listLabs, listLabSubmissions, startLab } from '@/api/labs'
 
 const labs = ref([])
 const submissions = ref([])
 const loading = ref(false)
 const entering = ref(null)
-const reporting = ref(null)
 const guideDialog = ref(null)
 
 function submissionOf(row) {
@@ -234,16 +216,6 @@ async function load() {
   }
 }
 
-/** 已提交实验点"查看成绩"：定位高亮卡片上的成绩明细区。 */
-function scrollToScore(row) {
-  const el = document.getElementById(`lab-score-${row.id}`)
-  if (el) {
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    el.classList.add('flash')
-    setTimeout(() => el.classList.remove('flash'), 1600)
-  }
-}
-
 async function enter(row, isRedo = false) {
   if (isRedo) {
     try {
@@ -266,19 +238,6 @@ async function enter(row, isRedo = false) {
   } finally {
     entering.value = null
   }
-}
-
-async function downloadReport(row) {
-  const sub = submissionOf(row)
-  if (!sub) return
-  reporting.value = row.id
-  try {
-    await generateLabReport(sub.id)
-  } catch {
-    // 无结论等场景后端会返回错误消息；仍尝试直接下载已生成报告
-  }
-  window.open(downloadLabReportUrl(sub.id, 'pdf'), '_blank')
-  reporting.value = null
 }
 
 onMounted(load)
@@ -311,11 +270,6 @@ onMounted(load)
   border-radius: 10px;
   background: #f8fafc;
   border: 1px solid #eef2f7;
-  transition: border-color 0.3s ease, box-shadow 0.3s ease;
-}
-.lab-score.flash {
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
 }
 .lab-score-head {
   display: flex;
