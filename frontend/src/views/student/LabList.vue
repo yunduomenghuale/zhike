@@ -5,6 +5,14 @@
         <div class="page-title">虚拟实验</div>
         <div class="page-subtitle">在开放时间内完成实验步骤并提交，提交后即时出分</div>
       </div>
+      <el-button
+        type="warning"
+        plain
+        size="small"
+        @click="openGuide"
+      >
+        实验必读
+      </el-button>
     </div>
 
     <TableSkeleton v-if="loading" :cols="5" />
@@ -67,6 +75,10 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+function openGuide() {
+  window.open('/labs/lab-guide.html', '_blank')
 }
 
 async function enter(row) {

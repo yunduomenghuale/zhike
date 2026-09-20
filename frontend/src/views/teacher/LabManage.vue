@@ -5,6 +5,7 @@
         <div class="page-title">虚拟实验</div>
         <div class="page-subtitle">引用平台实验模板创建实验，排课后学生按窗口进入</div>
       </div>
+      <el-button type="warning" plain size="small" @click="openGuide">实验必读</el-button>
     </div>
 
     <!-- 新建实验：选模板 → 绑课程 → 覆盖配置 -->
@@ -177,6 +178,10 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+function openGuide() {
+  window.open('/labs/lab-guide.html', '_blank')
 }
 
 async function create() {
