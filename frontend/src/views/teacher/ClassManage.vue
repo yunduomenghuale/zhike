@@ -125,8 +125,54 @@
         </div>
 
         <div class="add-bar">
-          <el-input v-model="addName" placeholder="输入学生用户名手动添加" :prefix-icon="User" @keyup.enter="doAddStudent" />
-          <el-button type="primary" :loading="adding" @click="doAddStudent">添加</el-button>
+          <el-input
+            v-model="addName"
+            placeholder="搜索学号或姓名（支持前缀，如 2024 圈全班）"
+            :prefix-icon="User"
+            clearable
+            @input="onSearchInput"
+            @clear="clearSearch"
+          />
+        </div>
+
+        <!-- 搜索候选：勾选后批量添加 -->
+        <div v-if="searchKeyword" class="cand-panel">
+          <div class="cand-head">
+            <el-checkbox
+              :model-value="isAllChecked"
+              :indeterminate="isIndeterminate"
+              :disabled="!checkableCandidates.length"
+              @change="toggleAll"
+            >全选（{{ checkableCandidates.length }} 人可选）</el-checkbox>
+            <span class="cand-hint">已选 {{ selectedIds.size }} 人</span>
+            <el-button
+              type="primary"
+              size="small"
+              :loading="adding"
+              :disabled="!selectedIds.size"
+              @click="doBatchAdd"
+            >批量添加（{{ selectedIds.size }}）</el-button>
+          </div>
+          <div v-loading="searching" class="cand-list">
+            <el-empty v-if="!searching && !candidates.length" description="未找到匹配的学生" :image-size="60" />
+            <div
+              v-for="c in candidates"
+              :key="c.id"
+              class="cand-row"
+              :class="{ 'in-class': c.already_in, 'no-profile': !c.profile_complete }"
+            >
+              <el-checkbox
+                :model-value="selectedIds.has(c.username)"
+                :disabled="c.already_in || !c.profile_complete"
+                @change="toggleOne(c.username)"
+              />
+              <span class="cand-no">{{ c.username }}</span>
+              <span class="cand-name">{{ c.real_name || '未填写姓名' }}</span>
+              <span class="cand-cls" :class="{ empty: !c.current_class }">{{ c.current_class || '未分班' }}</span>
+              <el-tag v-if="c.already_in" size="small" type="info" effect="plain">已在班</el-tag>
+              <el-tag v-else-if="!c.profile_complete" size="small" type="warning" effect="plain">资料不全</el-tag>
+            </div>
+          </div>
         </div>
 
         <div v-loading="studentsLoading" class="stu-list animate-list">
@@ -175,7 +221,7 @@ import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
 import { listCourses } from '@/api/course'
 import {
   listClasses, createClass, updateClass, deleteClass, regenerateCode,
-  addStudent, listClassStudents, removeClassStudent,
+  listClassStudents, removeClassStudent, searchClassStudents, addStudentsBatch,
 } from '@/api/classroom'
 
 const courses = ref([])
@@ -270,6 +316,11 @@ const students = ref([])
 const currentClass = ref(null)
 const addName = ref('')
 const adding = ref(false)
+const searchKeyword = ref('')
+const searching = ref(false)
+const candidates = ref([])
+const selectedIds = ref(new Set())
+let searchTimer = null
 
 const AVATAR_COLORS = ['#2563eb', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4', '#f97316']
 function avatarBg(name) {
@@ -299,13 +350,66 @@ async function loadStudents() {
     studentsLoading.value = false
   }
 }
-async function doAddStudent() {
-  const name = addName.value.trim()
-  if (!name) return
+/** 学号/姓名搜索候选（防抖 300ms）。 */
+function onSearchInput(val) {
+  searchKeyword.value = (val || '').trim()
+  clearTimeout(searchTimer)
+  if (!searchKeyword.value) { candidates.value = []; selectedIds.value = new Set(); return }
+  searchTimer = setTimeout(doSearch, 300)
+}
+
+function clearSearch() {
+  searchKeyword.value = ''
+  candidates.value = []
+  selectedIds.value = new Set()
+  clearTimeout(searchTimer)
+}
+
+async function doSearch() {
+  if (!searchKeyword.value || !currentClass.value) return
+  searching.value = true
+  try {
+    const data = await searchClassStudents(currentClass.value.id, searchKeyword.value)
+    candidates.value = data.results ?? data ?? []
+    // 保留已有勾选（候选刷新后勾选项过滤到仍存在的）
+    const still = new Set(candidates.value.filter((c) => !c.already_in && c.profile_complete).map((c) => c.username))
+    selectedIds.value = new Set([...selectedIds.value].filter((u) => still.has(u)))
+  } finally {
+    searching.value = false
+  }
+}
+
+const checkableCandidates = computed(() =>
+  candidates.value.filter((c) => !c.already_in && c.profile_complete),
+)
+const isAllChecked = computed(() =>
+  checkableCandidates.value.length > 0 && checkableCandidates.value.every((c) => selectedIds.value.has(c.username)),
+)
+const isIndeterminate = computed(() =>
+  selectedIds.value.size > 0 && !isAllChecked.value,
+)
+
+function toggleOne(username) {
+  const next = new Set(selectedIds.value)
+  if (next.has(username)) next.delete(username)
+  else next.add(username)
+  selectedIds.value = next
+}
+
+function toggleAll(checked) {
+  const next = new Set(selectedIds.value)
+  checkableCandidates.value.forEach((c) => (checked ? next.add(c.username) : next.delete(c.username)))
+  selectedIds.value = next
+}
+
+async function doBatchAdd() {
+  if (!selectedIds.value.size || !currentClass.value) return
   adding.value = true
   try {
-    await addStudent(currentClass.value.id, name)
-    ElMessage.success('已添加')
+    const usernames = [...selectedIds.value]
+    const data = await addStudentsBatch(currentClass.value.id, usernames)
+    ElMessage.success(data?.message || `已添加 ${data?.data?.added ?? usernames.length} 人`)
+    clearSearch()
     addName.value = ''
     loadStudents()
     load()
@@ -789,6 +893,43 @@ onMounted(() => { loadCourses(); load() })
   box-shadow: inset 0 0 0 1px #dbe5f2;
   transition: box-shadow 0.2s ease;
 }
+
+/* 搜索候选面板 */
+.cand-panel {
+  margin-bottom: 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+  overflow: hidden;
+}
+.cand-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #eef2f7;
+  background: #fff;
+}
+.cand-hint { flex: 1; font-size: 12px; color: #94a3b8; }
+.cand-list { max-height: 280px; overflow-y: auto; }
+.cand-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid #f1f5f9;
+  transition: background 0.15s ease;
+}
+.cand-row:last-child { border-bottom: none; }
+.cand-row:hover { background: #fff; }
+.cand-row.in-class { background: #f1f5f9; opacity: 0.7; }
+.cand-row.no-profile .cand-name { color: #b45309; }
+.cand-no { font-family: 'JetBrains Mono', Consolas, monospace; font-size: 13px; color: #475569; min-width: 88px; }
+.cand-name { font-size: 13px; font-weight: 600; color: #1e293b; flex: 1; }
+.cand-cls { font-size: 12px; color: #64748b; }
+.cand-cls.empty { color: #cbd5e1; }
+.cand-list::-webkit-scrollbar { width: 5px; }
+.cand-list::-webkit-scrollbar-thumb { border-radius: 3px; background: rgba(37, 99, 235, 0.22); }
 
 .add-bar :deep(.el-input__wrapper:hover) {
   box-shadow: inset 0 0 0 1px #bfdbfe;

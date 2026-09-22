@@ -11,3 +11,5 @@ export const addStudent = (id, username) => request.post(`/classes/${id}/add-stu
 // 班级学生
 export const listClassStudents = (params) => request.get('/class-students/', { params })
 export const removeClassStudent = (id) => request.delete(`/class-students/${id}/`)
+export const searchClassStudents = (id, keyword) => request.get(`/classes/${id}/search-students/`, { params: { keyword } })
+export const addStudentsBatch = (id, usernames) => request.post(`/classes/${id}/add-students-batch/`, { usernames })
