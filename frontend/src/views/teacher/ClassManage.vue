@@ -175,14 +175,14 @@
             >
               <el-checkbox
                 :model-value="selectedIds.has(c.username)"
-                :disabled="c.already_in || !c.profile_complete"
+                :disabled="c.already_in"
                 @change="toggleOne(c.username)"
               />
               <span class="cand-no">{{ c.username }}</span>
               <span class="cand-name">{{ c.real_name || '未填写姓名' }}</span>
               <span class="cand-cls" :class="{ empty: !c.current_class }">{{ c.current_class || '未分班' }}</span>
               <el-tag v-if="c.already_in" size="small" type="info" effect="plain">已在班</el-tag>
-              <el-tag v-else-if="!c.profile_complete" size="small" type="warning" effect="plain">资料不全</el-tag>
+              <el-tag v-else-if="!c.profile_complete" size="small" type="warning">资料不全</el-tag>
             </div>
           </div>
         </div>
@@ -403,7 +403,7 @@ async function doSearch() {
     const data = await searchClassStudents(currentClass.value.id, searchKeyword.value)
     candidates.value = data.results ?? data ?? []
     // 保留已有勾选（候选刷新后勾选项过滤到仍存在的）
-    const still = new Set(candidates.value.filter((c) => !c.already_in && c.profile_complete).map((c) => c.username))
+    const still = new Set(candidates.value.filter((c) => !c.already_in).map((c) => c.username))
     selectedIds.value = new Set([...selectedIds.value].filter((u) => still.has(u)))
   } finally {
     searching.value = false
@@ -411,7 +411,7 @@ async function doSearch() {
 }
 
 const checkableCandidates = computed(() =>
-  candidates.value.filter((c) => !c.already_in && c.profile_complete),
+  candidates.value.filter((c) => !c.already_in),
 )
 const isAllChecked = computed(() =>
   checkableCandidates.value.length > 0 && checkableCandidates.value.every((c) => selectedIds.value.has(c.username)),
@@ -439,7 +439,12 @@ async function doBatchAdd() {
   try {
     const usernames = [...selectedIds.value]
     const data = await addStudentsBatch(currentClass.value.id, usernames)
-    ElMessage.success(data?.message || `已添加 ${data?.data?.added ?? usernames.length} 人`)
+    const incomplete = (data?.data?.incomplete) || []
+    if (incomplete.length) {
+      ElMessage.warning(data?.message || `已添加，但 ${incomplete.length} 人资料不全`)
+    } else {
+      ElMessage.success(data?.message || `已添加 ${data?.data?.added ?? usernames.length} 人`)
+    }
     clearSearch()
     addName.value = ''
     loadStudents()
@@ -983,6 +988,8 @@ onMounted(() => { loadCourses(); load() })
 .cand-row:last-child { border-bottom: none; }
 .cand-row:hover { background: #fff; }
 .cand-row.in-class { background: #f1f5f9; opacity: 0.7; }
+.cand-row.no-profile { background: #fffbeb; }
+.cand-row.no-profile:hover { background: #fef3c7; }
 .cand-row.no-profile .cand-name { color: #b45309; }
 .cand-no { font-family: 'JetBrains Mono', Consolas, monospace; font-size: 13px; color: #475569; min-width: 88px; }
 .cand-name { font-size: 13px; font-weight: 600; color: #1e293b; flex: 1; }

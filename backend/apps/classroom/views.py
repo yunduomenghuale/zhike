@@ -88,13 +88,11 @@ class ClassRoomViewSet(BaseModelViewSet):
         User = get_user_model()
         students = {u.username: u for u in User.objects.filter(username__in=usernames, role=User.Role.STUDENT)}
         added, skipped, not_found = 0, 0, []
+        incomplete_names = []  # 资料不全（缺姓名/手机号）：照加但标黄提示
         for name in usernames:
             stu = students.get(name)
             if not stu:
                 not_found.append(name)
-                continue
-            if not has_complete_profile(stu):
-                skipped += 1
                 continue
             obj, created = ClassStudent.objects.get_or_create(classroom=classroom, student=stu)
             if created:
@@ -105,13 +103,18 @@ class ClassRoomViewSet(BaseModelViewSet):
                 added += 1
             else:
                 skipped += 1
+                continue
+            if not has_complete_profile(stu):
+                incomplete_names.append(f"{stu.username}({stu.real_name or '未填姓名'})")
         parts = [f"成功 {added} 人"]
         if skipped:
-            parts.append(f"跳过 {skipped} 人（资料不全或已在班）")
+            parts.append(f"跳过 {skipped} 人（已在班）")
         if not_found:
             parts.append(f"未找到 {len(not_found)} 个学号")
+        if incomplete_names:
+            parts.append(f"提醒：{len(incomplete_names)} 人资料不全——{'、'.join(incomplete_names[:3])}{'等' if len(incomplete_names) > 3 else ''}")
         return api_response(
-            {"added": added, "skipped": skipped, "not_found": not_found},
+            {"added": added, "skipped": skipped, "not_found": not_found, "incomplete": incomplete_names},
             message="、".join(parts),
         )
 
