@@ -19,10 +19,16 @@
         </div>
 
         <div class="class-meta">
-          <span class="invite-chip">
+          <button
+            type="button"
+            class="invite-chip copyable"
+            :title="'点击复制：' + (row.invite_code || '')"
+            @click.stop="copyInvite(row.invite_code)"
+          >
             <span class="invite-chip-label">邀请码</span>
             <code>{{ row.invite_code }}</code>
-          </span>
+            <el-icon class="copy-ico"><DocumentCopy /></el-icon>
+          </button>
           <span class="meta-item">
             <span class="meta-label">学生</span>
             <strong>{{ row.student_count || 0 }} 人</strong>
@@ -118,10 +124,16 @@
             <div class="invite-banner-label">班级邀请码</div>
             <div class="invite-banner-tip">学生可在「我的班级」输入邀请码自助加入</div>
           </div>
-          <span class="invite-chip">
+          <button
+            type="button"
+            class="invite-chip copyable"
+            :title="'点击复制：' + (currentClass?.invite_code || '')"
+            @click="copyInvite(currentClass?.invite_code)"
+          >
             <span class="invite-chip-label">邀请码</span>
             <code>{{ currentClass?.invite_code }}</code>
-          </span>
+            <el-icon class="copy-ico"><DocumentCopy /></el-icon>
+          </button>
         </div>
 
         <div class="add-bar">
@@ -217,6 +229,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Plus, Delete, EditPen, User, Refresh, School, Close } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { DocumentCopy } from '@element-plus/icons-vue'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
 import { listCourses } from '@/api/course'
 import {
@@ -350,6 +363,24 @@ async function loadStudents() {
     studentsLoading.value = false
   }
 }
+/** 点击复制邀请码到剪贴板。 */
+async function copyInvite(code) {
+  if (!code) return
+  try {
+    await navigator.clipboard.writeText(code)
+    ElMessage.success('邀请码已复制：' + code)
+  } catch {
+    // 老浏览器降级：选中文本提示手动复制
+    const ta = document.createElement('textarea')
+    ta.value = code
+    document.body.appendChild(ta)
+    ta.select()
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+    ElMessage.success('邀请码已复制：' + code)
+  }
+}
+
 /** 学号/姓名搜索候选（防抖 300ms）。 */
 function onSearchInput(val) {
   searchKeyword.value = (val || '').trim()
@@ -560,6 +591,35 @@ onMounted(() => { loadCourses(); load() })
   border-radius: 999px;
   background: #eff6ff;
   box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.1);
+}
+
+.invite-chip.copyable {
+  border: 0;
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+  transition: box-shadow 0.15s ease, transform 0.1s ease;
+}
+
+.invite-chip.copyable:hover {
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.35);
+  background: #dbeafe;
+}
+
+.invite-chip.copyable:active {
+  transform: scale(0.97);
+}
+
+.invite-chip .copy-ico {
+  margin-right: 10px;
+  font-size: 13px;
+  color: #2563eb;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.invite-chip.copyable:hover .copy-ico {
+  opacity: 1;
 }
 
 .invite-chip-label {
