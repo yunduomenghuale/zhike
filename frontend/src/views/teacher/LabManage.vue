@@ -138,7 +138,6 @@
               <div class="d-item"><span class="d-k">满分</span><span>{{ currentLab.total_score }} 分（及格 {{ currentLab.pass_score }}）</span></div>
               <div class="d-item"><span class="d-k">标准时长</span><span>{{ currentLab.standard_minutes_display }} 分钟</span></div>
               <div class="d-item"><span class="d-k">题目权重</span><span>{{ currentLab.question_weight > 0 ? currentLab.question_weight : '纯步骤评分' }}</span></div>
-              <div class="d-item"><span class="d-k">允许重做</span><span>{{ currentLab.allow_resubmit ? '是' : '否' }}</span></div>
             </div>
           </div>
 
