@@ -77,7 +77,6 @@
           <div class="message answer">
             <div class="message-content">
               <div class="answer-plain">
-                <div v-if="m.history_dropped" class="history-note">本次对话过长，AI 已按新问题单独作答（未携带此前对话上下文）</div>
                 <div v-if="m.answer" class="answer-md" v-html="renderMd(m.answer + (m.streaming ? ' ▍' : ''))"></div>
                 <div v-else class="answer-thinking">
                   <el-icon class="is-loading" :size="15"><Loading /></el-icon> 正在检索课程资料…
@@ -344,8 +343,6 @@ async function ask(preset) {
         } else if (evt.type === 'delta') {
           msg.answer += evt.text || ''
           scrollToBottom()
-        } else if (evt.type === 'history_dropped') {
-          msg.history_dropped = true
         } else if (evt.type === 'error') {
           msg.answer += `\n[出错] ${evt.message || '生成失败'}`
         }
@@ -744,16 +741,6 @@ onMounted(loadHistory)
   color: var(--gray-800);
   line-height: 1.85;
   font-size: 14.5px;
-}
-
-.history-note {
-  margin-bottom: 8px;
-  padding: 6px 10px;
-  border-radius: 6px;
-  background: #fdf6ec;
-  border: 1px solid #f3d19e;
-  color: #b88230;
-  font-size: 12px;
 }
 
 .answer-md :deep(p) { margin: 0 0 8px; }
