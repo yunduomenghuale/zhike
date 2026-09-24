@@ -29,7 +29,7 @@ def _sse(payload: dict) -> str:
 _MAX_IMAGE_B64_LEN = 5_600_000
 
 # 多轮对话：最多携带的历史轮数（一问一答为一轮）
-QA_MAX_HISTORY_TURNS = 6
+QA_MAX_HISTORY_TURNS = 10
 
 
 def _validate_image(value):

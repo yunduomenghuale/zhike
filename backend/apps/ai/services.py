@@ -645,22 +645,42 @@ def _gather_course_context(
     return context, cited
 
 
+_HISTORY_ELLIPSIS = "……（中间省略）……"
+
+
+def _clip_history_text(text: str, limit: int) -> str:
+    """超长文本保留首尾：开头含结论与结构，结尾含列举的最后条目。
+
+    追问（如"第五点详细讲讲"）常指向列举的末尾，故尾部权重略高（4:6）。
+    """
+    if len(text) <= limit:
+        return text
+    marker = _HISTORY_ELLIPSIS
+    if limit <= len(marker) * 2 + 40:
+        return text[:limit]
+    usable = limit - len(marker)
+    tail_len = int(usable * 0.6)
+    head_len = usable - tail_len
+    return text[:head_len] + marker + text[-tail_len:]
+
+
 def build_qa_history(
     course_id: int,
     student_id,
     session: str,
     *,
     exclude_id=None,
-    max_turns: int = 6,
-    max_chars_per_msg: int = 800,
-    total_char_budget: int = 4000,
+    max_turns: int = 10,
+    max_chars_per_msg: int = 4000,
+    total_char_budget: int = 24000,
 ) -> list[dict]:
     """取同会话最近 N 轮问答，拼成多轮 messages（需求：AI 问答多轮对话）。
 
     - 只认「student + course + session」三元组，天然会话隔离；
-    - 每条截断 max_chars_per_msg、总预算 total_char_budget 从新往旧收（超出丢最旧）；
-    - 长回答/图片提问自动跳过：长文本截断会破坏语义，图片无法复原；
-    - 返回按时间正序的 [{"role": "user"|"assistant", "content": ...}]。
+    - 超长回答以「首尾保留」方式裁剪（绝不整轮丢弃）——课程问答的总结/
+      详解类回答天然很长，整轮跳过会让多轮上下文在最常见场景下失效；
+    - 总预算 total_char_budget 从新往旧收，超出丢最旧轮次；
+    - 生成失败/空回答不入历史；返回按时间正序的 messages。
     """
     if not session:
         return []
@@ -674,17 +694,15 @@ def build_qa_history(
     )
     if exclude_id:
         qs = qs.exclude(pk=exclude_id)
-    # 一轮 = 一条 QARecord（问与答同记录）；倒序取最近 N 轮
-    rows = list(qs[:max_turns])
+    rows = list(qs[:max_turns])  # 一轮 = 一条 QARecord；倒序取最近 N 轮
 
-    # rows 是倒序（新→旧）：从新往旧收，保证预算超限时丢的是最旧的轮次
     turns: list[tuple[str, str]] = []
     used = 0
-    for rec in rows:
-        q = rec.question.strip()[:max_chars_per_msg]
-        a = (rec.answer or "").strip()
-        # 追问指代依赖完整回答，截断易误导模型；长回答与带图提问不入历史
-        if not q or not a or len(a) > max_chars_per_msg or a.startswith("[图片提问]"):
+    for rec in rows:  # 从新往旧收，超预算时丢最旧轮次
+        q = _clip_history_text(rec.question.strip(), 300)
+        a = _clip_history_text((rec.answer or "").strip(), max_chars_per_msg)
+        # 失败/兜底回答不入历史
+        if not q or not a or a.startswith("[出错]") or "AI 助教暂时没有响应" in a[:60]:
             continue
         pair_chars = len(q) + len(a)
         if used + pair_chars > total_char_budget:
@@ -692,11 +710,27 @@ def build_qa_history(
         used += pair_chars
         turns.append((q, a))
     turns.reverse()  # 恢复时间正序
+
     history: list[dict] = []
     for q, a in turns:
         history.append({"role": "user", "content": q})
         history.append({"role": "assistant", "content": a})
     return history
+
+
+def _qa_user_text(context: str, question: str, history) -> str:
+    """构造问答 user 文本；带历史时附加「结合上文理解指代」提示。"""
+    base = (
+        f"课程资料：\n{context}\n\n学生问题：{question}"
+        if context
+        else f"（本课程暂无可引用的课程资料）\n\n学生问题：{question}"
+    )
+    if history:
+        base = (
+            "（注意：下文附有本次对话的历史记录，学生的问题可能是在追问上文，"
+            "请结合历史理解指代，如「它」「第五个」等。）\n\n" + base
+        )
+    return base
 
 
 def _build_qa_messages(question, user_content, image_b64, history):
@@ -742,11 +776,7 @@ def knowledge_qa(
         student_access=student_access,
         classroom_id=classroom_id,
     )
-    user_content = (
-        f"课程资料：\n{context}\n\n学生问题：{question}"
-        if context
-        else f"（本课程暂无可引用的课程资料）\n\n学生问题：{question}"
-    )
+    user_content = _qa_user_text(context, question, history)
     messages = _build_qa_messages(question, user_content, image_b64, history)
     answer, _ = _chat_with_history_fallback(provider, messages, history)
     return answer, cited
@@ -790,11 +820,7 @@ def knowledge_qa_stream(
     )
     yield {"type": "meta", "cited": cited}
 
-    user_content = (
-        f"课程资料：\n{context}\n\n学生问题：{question}"
-        if context
-        else f"（本课程暂无可引用的课程资料）\n\n学生问题：{question}"
-    )
+    user_content = _qa_user_text(context, question, history)
     messages = _build_qa_messages(question, user_content, image_b64, history)
 
     from apps.ai.providers.base import token_limit_error_hint
