@@ -645,6 +645,85 @@ def _gather_course_context(
     return context, cited
 
 
+def build_qa_history(
+    course_id: int,
+    student_id,
+    session: str,
+    *,
+    exclude_id=None,
+    max_turns: int = 6,
+    max_chars_per_msg: int = 800,
+    total_char_budget: int = 4000,
+) -> list[dict]:
+    """取同会话最近 N 轮问答，拼成多轮 messages（需求：AI 问答多轮对话）。
+
+    - 只认「student + course + session」三元组，天然会话隔离；
+    - 每条截断 max_chars_per_msg、总预算 total_char_budget 从新往旧收（超出丢最旧）；
+    - 长回答/图片提问自动跳过：长文本截断会破坏语义，图片无法复原；
+    - 返回按时间正序的 [{"role": "user"|"assistant", "content": ...}]。
+    """
+    if not session:
+        return []
+    from apps.knowledge.models import QARecord
+
+    qs = (
+        QARecord.objects.filter(course_id=course_id, student_id=student_id, session=session)
+        .exclude(answer="")
+        .exclude(question="")
+        .order_by("-id")
+    )
+    if exclude_id:
+        qs = qs.exclude(pk=exclude_id)
+    # 一轮 = 一条 QARecord（问与答同记录）；倒序取最近 N 轮
+    rows = list(qs[:max_turns])
+
+    # rows 是倒序（新→旧）：从新往旧收，保证预算超限时丢的是最旧的轮次
+    turns: list[tuple[str, str]] = []
+    used = 0
+    for rec in rows:
+        q = rec.question.strip()[:max_chars_per_msg]
+        a = (rec.answer or "").strip()
+        # 追问指代依赖完整回答，截断易误导模型；长回答与带图提问不入历史
+        if not q or not a or len(a) > max_chars_per_msg or a.startswith("[图片提问]"):
+            continue
+        pair_chars = len(q) + len(a)
+        if used + pair_chars > total_char_budget:
+            break
+        used += pair_chars
+        turns.append((q, a))
+    turns.reverse()  # 恢复时间正序
+    history: list[dict] = []
+    for q, a in turns:
+        history.append({"role": "user", "content": q})
+        history.append({"role": "assistant", "content": a})
+    return history
+
+
+def _build_qa_messages(question, user_content, image_b64, history):
+    """拼 QA messages：system + 多轮历史 + 当前问题（带图走多模态 content）。"""
+    messages = [{"role": "system", "content": QA_SYSTEM_PROMPT}]
+    messages += history or []
+    messages.append({"role": "user", "content": _qa_user_content(user_content, image_b64)})
+    return messages
+
+
+def _chat_with_history_fallback(provider, messages, history):
+    """chat 并处理上下文超限：预算裁剪失手时（罕见），丢历史降级重试一次。
+
+    返回 (answer, degraded)。degraded=True 表示本次丢弃了多轮历史。
+    """
+    from apps.ai.providers.base import token_limit_error_hint
+
+    try:
+        return provider.chat(messages), False
+    except Exception as exc:
+        if history and token_limit_error_hint(str(exc)):
+            # 降级：只保留 system + 当前问题（完整丢弃多轮历史）
+            retry = [messages[0], messages[-1]]
+            return provider.chat(retry), True
+        raise
+
+
 def knowledge_qa(
     course_id: int,
     question: str,
@@ -653,6 +732,7 @@ def knowledge_qa(
     *,
     student_access: bool = False,
     classroom_id=None,
+    history: list[dict] | None = None,
 ) -> tuple[str, list[dict]]:
     provider = get_provider()
     context, cited = _gather_course_context(
@@ -667,11 +747,9 @@ def knowledge_qa(
         if context
         else f"（本课程暂无可引用的课程资料）\n\n学生问题：{question}"
     )
-    messages = [
-        {"role": "system", "content": QA_SYSTEM_PROMPT},
-        {"role": "user", "content": _qa_user_content(user_content, image_b64)},
-    ]
-    return provider.chat(messages), cited
+    messages = _build_qa_messages(question, user_content, image_b64, history)
+    answer, _ = _chat_with_history_fallback(provider, messages, history)
+    return answer, cited
 
 
 def _qa_user_content(text: str, image_b64: str | None):
@@ -692,12 +770,15 @@ def knowledge_qa_stream(
     *,
     student_access: bool = False,
     classroom_id=None,
+    history: list[dict] | None = None,
 ):
     """知识库问答的流式版本（需求 S-K-01/02/04）。
 
     先产出一条 {"type":"meta","cited":[...]} 事件（引用片段），
     再逐段产出 {"type":"delta","text":"..."} 事件（回答文本）。
     资料来源除知识库片段外，也纳入课件 PPT 与讲解稿，避免生硬拒答。
+    上下文超限时（预算裁剪失手的罕见场景）自动丢弃多轮历史重试一次，
+    并追加一条 {"type":"history_dropped"} 事件告知前端。
     """
     provider = get_provider()
     context, cited = _gather_course_context(
@@ -714,13 +795,26 @@ def knowledge_qa_stream(
         if context
         else f"（本课程暂无可引用的课程资料）\n\n学生问题：{question}"
     )
-    messages = [
-        {"role": "system", "content": QA_SYSTEM_PROMPT},
-        {"role": "user", "content": _qa_user_content(user_content, image_b64)},
-    ]
-    for piece in provider.chat_stream(messages):
-        if piece:
-            yield {"type": "delta", "text": piece}
+    messages = _build_qa_messages(question, user_content, image_b64, history)
+
+    from apps.ai.providers.base import token_limit_error_hint
+
+    produced = False
+    try:
+        for piece in provider.chat_stream(messages):
+            if piece:
+                produced = True
+                yield {"type": "delta", "text": piece}
+    except Exception as exc:
+        if history and not produced and token_limit_error_hint(str(exc)):
+            # 降级：完整丢弃历史，仅 system + 当前问题重试
+            retry = [messages[0], messages[-1]]
+            yield {"type": "history_dropped"}
+            for piece in provider.chat_stream(retry):
+                if piece:
+                    yield {"type": "delta", "text": piece}
+            return
+        raise
 
 
 # ---------------------------------------------------------------------------

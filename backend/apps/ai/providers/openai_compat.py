@@ -15,6 +15,10 @@ from .base import BaseAIProvider
 from .mock import MockProvider
 
 
+class _Http4xxError(RuntimeError):
+    """4xx 客户端错误（含上下文超限）：不重试，直接上抛给上层识别降级。"""
+
+
 class OpenAICompatProvider(BaseAIProvider):
     def __init__(self, config: dict, name: str = "openai-compat"):
         self.name = name
@@ -52,8 +56,19 @@ class OpenAICompatProvider(BaseAIProvider):
                     json=payload,
                     timeout=kwargs.get("timeout", 180),
                 )
+                if 400 <= resp.status_code < 500:
+                    # 4xx（含上下文超限）重试无意义：带错误体上抛给上层识别降级，
+                    # 不能当成普通失败吞掉后静默回退 Mock。
+                    hint = ""
+                    try:
+                        hint = str(resp.json().get("error", {}).get("message", ""))
+                    except Exception:
+                        hint = resp.text[:500]
+                    raise _Http4xxError(f"HTTP {resp.status_code}: {hint}")
                 resp.raise_for_status()
                 return resp.json()["choices"][0]["message"]["content"]
+            except _Http4xxError:
+                raise
             except Exception as exc:
                 last_error = exc
         self.last_chat_error = str(last_error) if last_error else ""
@@ -85,6 +100,14 @@ class OpenAICompatProvider(BaseAIProvider):
                 stream=True,
                 timeout=kwargs.get("timeout", 120),
             ) as resp:
+                if 400 <= resp.status_code < 500:
+                    # 4xx（含上下文超限）不能静默回退 Mock——上抛给上层识别降级
+                    hint = ""
+                    try:
+                        hint = str(resp.json().get("error", {}).get("message", ""))
+                    except Exception:
+                        hint = resp.text[:500]
+                    raise _Http4xxError(f"HTTP {resp.status_code}: {hint}")
                 resp.raise_for_status()
                 for raw in resp.iter_lines(decode_unicode=True):
                     if not raw:
@@ -102,6 +125,8 @@ class OpenAICompatProvider(BaseAIProvider):
                     piece = (choices[0].get("delta") or {}).get("content")
                     if piece:
                         yield piece
+        except _Http4xxError:
+            raise
         except Exception:
             # 回退：分片产出 Mock 结果，前端仍表现为流式
             yield from self._mock.chat_stream(messages, **kwargs)

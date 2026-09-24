@@ -128,7 +128,10 @@
                   <div v-for="(m, i) in chatMessages" :key="i" class="chat-row" :class="m.role">
                     <div class="chat-bubble" :class="{ bare: m.imageOnly }">
                       <span v-if="m.streaming && !m.content" class="chat-typing"><i></i><i></i><i></i></span>
-                      <div v-else-if="m.role === 'assistant'" class="chat-text chat-md" v-html="renderMd(m.content + (m.streaming ? ' ▍' : ''))"></div>
+                      <template v-else-if="m.role === 'assistant'">
+                        <div v-if="m.history_dropped" class="chat-history-note">本次对话过长，AI 已按新问题单独作答</div>
+                        <div class="chat-text chat-md" v-html="renderMd(m.content + (m.streaming ? ' ▍' : ''))"></div>
+                      </template>
                       <div v-else class="chat-text">
                         <img v-if="m.image" :src="m.image" class="q-image" alt="提问图片" />
                         <template v-if="!m.imageOnly">{{ m.content }}</template>
@@ -935,6 +938,8 @@ async function askChat(preset) {
         if (evt.type === 'delta') {
           chatMessages.value[idx].content += evt.text || ''
           scrollChatToBottom()
+        } else if (evt.type === 'history_dropped') {
+          chatMessages.value[idx].history_dropped = true
         } else if (evt.type === 'error') {
           chatMessages.value[idx].content += `\n[出错] ${evt.message || '生成失败'}`
         }
@@ -1923,6 +1928,16 @@ onUnmounted(() => {
 .chat-row.user .chat-bubble.bare {
   padding: 0;
   background: transparent;
+}
+
+.chat-history-note {
+  margin-bottom: 6px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  background: #fdf6ec;
+  border: 1px solid #f3d19e;
+  color: #b88230;
+  font-size: 12px;
 }
 
 .chat-typing i {

@@ -12,6 +12,34 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 
+def token_limit_error_hint(text: str) -> bool:
+    """判断错误文本是否像「输入上下文超限」。
+
+    上层（知识库多轮问答）据此丢弃对话历史后降级重试。
+    匹配面适当放宽：误判的代价只是少一轮历史重试，漏判则用户直接看到报错。
+    """
+    t = str(text or "").lower()
+    return any(
+        h in t
+        for h in (
+            "context length",
+            "context_length",
+            "context window",
+            "prompt is too long",
+            "input is too long",
+            "input length",
+            "token limit",
+            "maximum input",
+            "输入过长",
+            "输入超长",
+            "上下文长度",
+            "超出输入",
+            "内容过长",
+        )
+    )
+
+
+
 class BaseAIProvider(ABC):
     name = "base"
 

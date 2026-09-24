@@ -36,7 +36,15 @@ class ZhipuProvider(BaseAIProvider):
             },
             timeout=kwargs.get("timeout", 60),
         )
-        resp.raise_for_status()
+        if resp.status_code >= 400:
+            # 带上服务端错误体（含上下文超限提示），供上层识别降级
+            hint = ""
+            try:
+                err = resp.json().get("error", {})
+                hint = str(err.get("message") or err)
+            except Exception:
+                hint = resp.text[:500]
+            raise RuntimeError(f"HTTP {resp.status_code}: {hint}")
         return resp.json()["choices"][0]["message"]["content"]
 
     def embed(self, texts: list[str]) -> list[list[float]]:

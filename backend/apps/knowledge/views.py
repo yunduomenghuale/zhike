@@ -6,7 +6,12 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import MethodNotAllowed, NotFound, ValidationError
 from rest_framework.permissions import IsAuthenticated
 
-from apps.ai.services import ingest_material, knowledge_qa, knowledge_qa_stream
+from apps.ai.services import (
+    build_qa_history,
+    ingest_material,
+    knowledge_qa,
+    knowledge_qa_stream,
+)
 from apps.common.permissions import IsTeacherOrReadOnly
 from apps.common.response import api_response
 from apps.common.viewsets import BaseModelViewSet
@@ -22,6 +27,9 @@ def _sse(payload: dict) -> str:
 
 # 图片问题允许的最大 base64 长度（约 4MB 原图）
 _MAX_IMAGE_B64_LEN = 5_600_000
+
+# 多轮对话：最多携带的历史轮数（一问一答为一轮）
+QA_MAX_HISTORY_TURNS = 6
 
 
 def _validate_image(value):
@@ -133,6 +141,13 @@ class QARecordViewSet(BaseModelViewSet):
         if error:
             return api_response(message=error, code=400, status=400)
 
+        session = str(request.data.get("session") or "")[:64]
+        history = build_qa_history(
+            course.id,
+            request.user.id,
+            session,
+            max_turns=QA_MAX_HISTORY_TURNS,
+        )
         answer, cited = knowledge_qa(
             course_id=course.id,
             question=question,
@@ -140,6 +155,7 @@ class QARecordViewSet(BaseModelViewSet):
             image_b64=image_b64,
             student_access=getattr(request.user, "is_student", False),
             classroom_id=classroom.id if classroom else None,
+            history=history,
         )
         record = QARecord.objects.create(
             course=course,
@@ -170,6 +186,14 @@ class QARecordViewSet(BaseModelViewSet):
             return api_response(message=error, code=400, status=400)
         user = request.user
 
+        # 多轮对话：取同会话最近几轮历史拼进模型上下文
+        history = build_qa_history(
+            course.id,
+            user.id,
+            session,
+            max_turns=QA_MAX_HISTORY_TURNS,
+        )
+
         def event_stream():
             full, cited = [], []
             try:
@@ -180,10 +204,14 @@ class QARecordViewSet(BaseModelViewSet):
                     image_b64=image_b64,
                     student_access=getattr(user, "is_student", False),
                     classroom_id=classroom.id if classroom else None,
+                    history=history,
                 ):
                     if evt["type"] == "meta":
                         cited = evt["cited"]
                         yield _sse({"type": "meta", "cited": cited})
+                    elif evt["type"] == "history_dropped":
+                        # 上下文超限已降级（丢弃多轮历史重试成功）
+                        yield _sse({"type": "history_dropped"})
                     elif evt["type"] == "delta":
                         full.append(evt["text"])
                         yield _sse({"type": "delta", "text": evt["text"]})
