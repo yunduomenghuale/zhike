@@ -467,7 +467,11 @@ class TeachingVideoViewSet(BaseModelViewSet):
         try:
             # 发音人优先级：管理端配置 > AI_TTS_VOICE 环境变量 > Cherry（DashScope 音色名/本地说话人ID）
             voice = getattr(provider, "voice", "") or getattr(settings, "AI_TTS_VOICE", "Cherry")
-            audio_url = provider.tts(target["script"].strip(), voice=voice)
+            from apps.ai.calllog import ai_scene
+            from apps.ai.models import AICallLog
+
+            with ai_scene(AICallLog.Scene.TTS, course_id=video.course_id):
+                audio_url = provider.tts(target["script"].strip(), voice=voice)
         except Exception as exc:
             target["audio_error"] = str(exc)[:300]
             video.scripts = scripts

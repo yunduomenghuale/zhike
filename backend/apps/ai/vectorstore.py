@@ -26,12 +26,18 @@ def search_chunks(
     *,
     student_access: bool = False,
     classroom_id=None,
+    catalog_id=None,
 ):
     """返回按相似度降序的 (chunk, score) 列表。
 
     片段来源有二：教辅资料（material）与课件 PPT（ppt，每页一片段）。
     旧版本课件（is_active=False）的片段不参与检索——上传新版本时已随之删除，
     这里再兜底一道，防止历史数据残留。
+
+    传入 catalog_id 时只检索该章节名下的片段（资料挂该章节 / 课件挂该章节）：
+    「这一章的重点是什么」类章节语义问题，候选池不应混入其他章节与未挂章节的
+    资料（如遗留的测试上传）——重排只能压分，挡不住语义沾边的跨章节内容。
+    未挂章节的片段不参与章节检索；调用方在章节无片段时可自行退回全课程。
     """
     from django.db.models import Q
 
@@ -46,6 +52,11 @@ def search_chunks(
         # ppt.file_name / ppt.catalog.title，一次带出避免 N+1
         .select_related("material", "material__catalog", "ppt", "ppt__catalog")
     )
+    if catalog_id:
+        # 章节语义问题：资料/课件任一来源挂在该章节下即入选（二者互斥，不会重复）
+        chunks = chunks.filter(
+            Q(material__catalog_id=catalog_id) | Q(ppt__catalog_id=catalog_id)
+        )
     if student_access:
         # 资料片段：qa_open 开启且班级可见；课件片段：已发布章节的当前版本
         material_q = Q(material__isnull=False, material__qa_open=True)

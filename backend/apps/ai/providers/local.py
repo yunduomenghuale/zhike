@@ -13,6 +13,7 @@ chat / tts 本地无内置实现，走白名单限制不可选。
 """
 from __future__ import annotations
 
+from ..calllog import record_ai_call
 from .base import BaseAIProvider
 
 
@@ -38,21 +39,30 @@ class LocalModelsProvider(BaseAIProvider):
         # 杜绝假向量污染向量空间），形参仅为与调用方契约一致
         if not texts:
             return []
-        from apps.ai.local_models import embed_texts
+        with record_ai_call(
+            "embed", self.name, self.model, input_text=texts, item_count=len(texts)
+        ) as rec:
+            from apps.ai.local_models import embed_texts
 
-        return embed_texts(self.model, texts)
+            vectors = embed_texts(self.model, texts)
+            rec.set_output(vectors)
+            return vectors
 
     def rerank(self, query: str, documents: list[str], top_n: int | None = None) -> list[dict]:
         if not documents:
             return []
-        from apps.ai.local_models import rerank_scores
+        with record_ai_call(
+            "rerank", self.name, self.model, input_text=query, item_count=len(documents)
+        ) as rec:
+            from apps.ai.local_models import rerank_scores
 
-        scores = rerank_scores(self.model, query, documents)
-        ranked = [
-            {"index": i, "score": float(score)} for i, score in enumerate(scores)
-        ]
-        ranked.sort(key=lambda item: item["score"], reverse=True)
-        return ranked[:top_n] if top_n else ranked
+            scores = rerank_scores(self.model, query, documents)
+            ranked = [
+                {"index": i, "score": float(score)} for i, score in enumerate(scores)
+            ]
+            ranked.sort(key=lambda item: item["score"], reverse=True)
+            rec.set_output(ranked)
+            return ranked[:top_n] if top_n else ranked
 
     def tts(self, text: str, voice: str = "default", speed: float = 1.0) -> str:
         raise NotImplementedError("系统内置本地模型暂不支持语音合成，请选择线上服务商")

@@ -11,6 +11,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 from django.conf import settings
 
+from .calllog import copy_call_context, run_in_context, scene_decorator
+from .models import AICallLog
 from .providers.factory import get_provider
 from .vectorstore import search_chunks
 
@@ -37,6 +39,7 @@ def _safe_json(text: str, default):
 # ---------------------------------------------------------------------------
 # 授课计划 -> 课程目录（需求 T-D-02）
 # ---------------------------------------------------------------------------
+@scene_decorator(AICallLog.Scene.CATALOG_GEN)
 def generate_catalog_from_plan(plan_text: str) -> list[dict]:
     provider = get_provider("chat")
     messages = [
@@ -56,6 +59,7 @@ def generate_catalog_from_plan(plan_text: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 # PPT 逐页讲解稿（需求 T-V-01）
 # ---------------------------------------------------------------------------
+@scene_decorator(AICallLog.Scene.SCRIPT_GEN)
 def generate_scripts_for_video(pages: list[dict]) -> list[dict]:
     provider = get_provider("chat")
     pages = pages or []
@@ -89,6 +93,10 @@ def generate_scripts_for_video(pages: list[dict]) -> list[dict]:
     return scripts
 
 
+@scene_decorator(
+    AICallLog.Scene.SCRIPT_GEN,
+    course_getter=lambda args, kwargs: getattr(args[0], "course_id", None),
+)
 def generate_script_pages_batched(video, pages: list[dict], batch_size: int = 6) -> dict:
     """分批为教学视频生成讲解稿（避免一次生成几十页超过网关 180s 超时）。
 
@@ -130,9 +138,20 @@ def generate_script_pages_batched(video, pages: list[dict], batch_size: int = 6)
         chunks = [chunk for chunk in (compact_pages[:mid], compact_pages[mid:]) if chunk]
         if len(chunks) > 1:
             with ThreadPoolExecutor(max_workers=2) as pool:
-                chunk_results = list(
-                    pool.map(lambda chunk: _request_script_batch(provider, chunk, timeout=timeout), chunks)
-                )
+                # 线程池不继承 contextvars：提交时复制调用上下文（场景/trace_id/触发人）
+                # 带进 worker，否则并发批次的调用流水丢场景归属
+                futures = [
+                    pool.submit(
+                        run_in_context,
+                        copy_call_context(),
+                        _request_script_batch,
+                        provider,
+                        chunk,
+                        timeout,
+                    )
+                    for chunk in chunks
+                ]
+                chunk_results = [future.result() for future in futures]
         else:
             chunk_results = [_request_script_batch(provider, compact_pages, timeout=timeout)]
         by_page = {}
@@ -485,6 +504,10 @@ def _dedupe_script_clauses(text: str) -> str:
 # ---------------------------------------------------------------------------
 # 逐页 AI 配音（需求 T-V-03）：对讲解稿合成语音，落地音频地址
 # ---------------------------------------------------------------------------
+@scene_decorator(
+    AICallLog.Scene.TTS,
+    course_getter=lambda args, kwargs: getattr(args[0], "course_id", None),
+)
 def synthesize_audio_for_video(video, voice: str | None = None, limit: int | None = None) -> int:
     """为教学视频的逐页讲解稿补齐配音，音频地址写回 scripts 每页。返回本批新增成功页数。
 
@@ -524,7 +547,12 @@ def synthesize_audio_for_video(video, voice: str | None = None, limit: int | Non
             return True
 
         with ThreadPoolExecutor(max_workers=min(3, len(todo))) as pool:
-            results = list(pool.map(_synthesize, todo))
+            # 与讲稿分批同理：复制调用上下文带进 worker，保留场景/trace_id/触发人
+            futures = [
+                pool.submit(run_in_context, copy_call_context(), _synthesize, item)
+                for item in todo
+            ]
+            results = [future.result() for future in futures]
         ok = sum(1 for flag in results if flag)
 
     audio_count = sum(1 for item in scripts if item.get("audio_url"))
@@ -543,6 +571,10 @@ def synthesize_audio_for_video(video, voice: str | None = None, limit: int | Non
 # ---------------------------------------------------------------------------
 # 教辅资料入库：切分 -> 向量化 -> 写入片段（需求 T-K-02 / 7.2）
 # ---------------------------------------------------------------------------
+@scene_decorator(
+    AICallLog.Scene.MATERIAL_EMBED,
+    course_getter=lambda args, kwargs: getattr(args[0], "course_id", None),
+)
 def ingest_material(material, chunk_size: int = 500) -> int:
     """把资料文本抽取→切分→向量化→写入知识库片段。返回片段数。
 
@@ -580,6 +612,10 @@ def ingest_material(material, chunk_size: int = 500) -> int:
     return len(objs)
 
 
+@scene_decorator(
+    AICallLog.Scene.PPT_EMBED,
+    course_getter=lambda args, kwargs: getattr(args[0], "course_id", None),
+)
 def ingest_ppt_pages(ppt) -> int:
     """把课件 PPT 逐页文本向量化写入知识库片段（每页一个片段）。
 
@@ -687,6 +723,7 @@ def _search_relevant_chunks(
     *,
     student_access: bool = False,
     classroom_id=None,
+    catalog_id=None,
     top_k: int = 5,
 ) -> list[tuple]:
     """检索并精排课程知识库片段，返回 [(chunk, score)]（按相关性降序）。
@@ -697,13 +734,20 @@ def _search_relevant_chunks(
     会把 4 页噪声当「参考来源」展示，用户感知为「乱引用」。
 
     编排（配了重排能力时）：
-    1. 向量召回 AI_RERANK_RECALL 条候选（比 top_k 多，给重排留筛选余地）；
+    1. 向量召回 AI_RERANK_RECALL 条候选（比 top_k 多，给重排留筛选余地）。
+       传入 catalog_id 时候选池收敛到该章节名下的片段（资料/课件挂靠该章节），
+       「这一章的重点是什么」不再把其他章节与未挂章节资料（如遗留测试上传）
+       送进候选——重排压分挡不住语义沾边的跨章节内容（2026-10-15 实测：
+       未挂章节的测试 PDF 重排分 0.1661 反超目标页）；
     2. 重排模型按 query 语义相关性精排，阈值按模型解析（见 _resolve_rerank_threshold）：
        - 最高分都低于阈值 → 判定本课资料确实没有与问题直接相关的内容，返回空，
          上层据此走「资料无相关内容」的话术；
        - 否则保留分数 >= max(阈值, 最高分 * AI_RERANK_KEEP_RATIO) 的片段——
          与最高分存在 2 倍以上落差的多为同课程弱相关噪声，相对截断避免乱引用；
     3. 取前 top_k 条返回，score 为重排相关性分。
+
+    章节兜底：章节内没有任何已挂靠片段（资料未挂章节/章节无课件）时退回全课程
+    检索——避免这类课程在章节内一问就「资料不足」；章节有素材时严格按章节过滤。
 
     回退（重排是增强项，不能拖垮问答主链路）：未配置重排能力（Mock）/
     非 DashScope 端点 / 网络或接口异常 / 响应结构异常（无有效条目）时，
@@ -722,9 +766,23 @@ def _search_relevant_chunks(
             top_k=recall,
             student_access=student_access,
             classroom_id=classroom_id,
+            catalog_id=catalog_id,
         )
         if score > 0
     ]
+    if not candidates and catalog_id:
+        # 章节无挂靠片段：退回全课程检索（见 docstring「章节兜底」）
+        candidates = [
+            (chunk, score)
+            for chunk, score in search_chunks(
+                course_id,
+                query_vec,
+                top_k=recall,
+                student_access=student_access,
+                classroom_id=classroom_id,
+            )
+            if score > 0
+        ]
     if not candidates:
         return []
 
@@ -790,7 +848,7 @@ def _gather_course_context(
 
     资料来源（按优先级）：知识库检索片段 → 课件 PPT 讲义 → 逐页讲解稿。
     把 PPT / 讲解稿也当作「资料」，避免知识库为空时一律拒答。
-    传入 catalog_id 时优先取该章节的课件与讲稿。返回 (context, cited)。
+    传入 catalog_id 时向量检索收敛到该章节名下的片段，课件与讲稿也优先取该章节。返回 (context, cited)。
 
     知识库检索走 _search_relevant_chunks 编排：向量召回多路候选后按问题
     语义重排并过滤低相关片段（未配重排则回退纯向量 top_k）。
@@ -803,7 +861,9 @@ def _gather_course_context(
     # 1) 知识库向量检索（若有片段）。课程没有任何片段时跳过 embed 调用，
     #    省一次 embedding API 往返（首字延迟的主要来源之一）。
     #    检索走 _search_relevant_chunks 编排（向量召回 + 重排 + 阈值过滤）：
-    #    关键词命中但语义不相关的噪声片段不会进上下文与引用来源。
+    #    关键词命中但语义不相关的噪声片段不会进上下文与引用来源；
+    #    章节内提问（catalog_id）时候选池收敛到该章节，跨章节与未挂章节资料
+    #    不会被「这一章的重点是什么」这类问题带进引用。
     from apps.knowledge.models import KnowledgeChunk
 
     if KnowledgeChunk.objects.filter(course_id=course_id).exists():
@@ -813,6 +873,7 @@ def _gather_course_context(
                 question,
                 student_access=student_access,
                 classroom_id=classroom_id,
+                catalog_id=catalog_id,
             ):
                 parts.append(chunk.content)
                 material = chunk.material
@@ -1009,6 +1070,10 @@ def _chat_with_history_fallback(provider, messages, history, **kwargs):
         raise
 
 
+@scene_decorator(
+    AICallLog.Scene.QA,
+    course_getter=lambda args, kwargs: args[0] if args else kwargs.get("course_id"),
+)
 def knowledge_qa(
     course_id: int,
     question: str,
@@ -1050,6 +1115,10 @@ def _qa_user_content(text: str, image_b64: str | None):
 _QA_NO_THINKING = {"enable_thinking": False}
 
 
+@scene_decorator(
+    AICallLog.Scene.QA,
+    course_getter=lambda args, kwargs: args[0] if args else kwargs.get("course_id"),
+)
 def knowledge_qa_stream(
     course_id: int,
     question: str,
@@ -1104,6 +1173,10 @@ def knowledge_qa_stream(
 # ---------------------------------------------------------------------------
 # 章节题目生成（需求 T-Q-01）
 # ---------------------------------------------------------------------------
+@scene_decorator(
+    AICallLog.Scene.QUESTION_GEN,
+    course_getter=lambda args, kwargs: args[0] if args else kwargs.get("course_id"),
+)
 def generate_questions(course_id: int, catalog_id, count: int, qtype: str, objective: str = "") -> list[dict]:
     """基于章节 PPT + 知识库资料 + 教学目标生成题目（需求 T-Q-01 / 7.1）。"""
     provider = get_provider("chat")
@@ -1159,6 +1232,7 @@ def generate_questions(course_id: int, catalog_id, count: int, qtype: str, objec
 # ---------------------------------------------------------------------------
 # 作业自动批改（二期，需求 T-H-04）—— 预留接口
 # ---------------------------------------------------------------------------
+@scene_decorator(AICallLog.Scene.GRADING)
 def auto_grade_homework(content: str, reference: str, rubric: str) -> dict:
     provider = get_provider("chat")
     messages = [
@@ -1171,6 +1245,7 @@ def auto_grade_homework(content: str, reference: str, rubric: str) -> dict:
 # ---------------------------------------------------------------------------
 # 班级学情分析（需求 T-L-04 延伸）：整体报告 + 逐学生简评
 # ---------------------------------------------------------------------------
+@scene_decorator(AICallLog.Scene.ANALYTICS)
 def analyze_class_stats(stats: dict) -> dict:
     """基于班级学习统计数据生成 AI 学情分析。
 

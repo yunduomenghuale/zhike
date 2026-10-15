@@ -315,6 +315,100 @@ class RetrievalOrchestrationTests(TestCase):
         self.assertEqual([c.page for c, _ in result], [1, 2, 3, 4, 5])
 
 
+class CatalogScopedRetrievalTests(TestCase):
+    """章节语义问题的检索范围治理（2026-10-15 实测回归）。
+
+    背景：学生在「第4章 网络层」内提问「这一章的重点是什么？」，参考来源却
+    出现未挂章节的「在线预览测试.pdf」（重排分 0.1661 反超目标页）——全课程
+    检索把章节外资料送进候选池，重排压分挡不住语义沾边的内容。修复：传入
+    catalog_id 时候选池收敛到该章节名下的片段（资料/课件挂靠该章节）。
+    """
+
+    def setUp(self):
+        from apps.courses.models import Catalog, Course, PPTResource
+        from apps.knowledge.models import Material
+
+        self.teacher = User.objects.create_user(
+            username="catalog-teacher", password="StrongPass!123", role=User.Role.TEACHER
+        )
+        self.course = Course.objects.create(name="计算机网络", teacher=self.teacher)
+        self.cat_a = Catalog.objects.create(course=self.course, title="第4章 网络层")
+        self.cat_b = Catalog.objects.create(course=self.course, title="第5章 传输层")
+        # 章节A：课件片段（每页一片段，模拟已入向量库的 PPT）
+        self.ppt = PPTResource.objects.create(
+            course=self.course, catalog=self.cat_a, file_name="网络层课件.pdf", is_active=True
+        )
+        for page in (2, 5):
+            KnowledgeChunk.objects.create(
+                course_id=self.course.id,
+                ppt=self.ppt,
+                content=f"第4章课件第{page}页",
+                page=page,
+                embedding=[1.0, 3.0],
+            )
+        # 章节B：资料片段（挂在另一章节）
+        material_b = Material.objects.create(
+            course=self.course, catalog=self.cat_b, file_name="传输层习题.pdf"
+        )
+        KnowledgeChunk.objects.create(
+            course_id=self.course.id,
+            material=material_b,
+            content="第5章资料",
+            embedding=[1.0, 3.0],
+        )
+        # 未挂章节的资料（模拟遗留的测试上传）：全课程检索会命中它
+        material_none = Material.objects.create(
+            course=self.course, catalog=None, file_name="在线预览测试.pdf"
+        )
+        KnowledgeChunk.objects.create(
+            course_id=self.course.id,
+            material=material_none,
+            content="测试上传内容",
+            embedding=[1.0, 2.0],
+        )
+
+    def _run(self, **overrides):
+        embed = _FakeEmbed([1.0, 0.0])
+        rerank = _FakeRerank(scores=[0.9, 0.8], model="gte-rerank-v2")
+        with _patch_providers(embed, rerank), override_settings(**overrides):
+            result = _search_relevant_chunks(
+                self.course.id, "这一章的重点是什么？", catalog_id=self.cat_a.id
+            )
+        return result, rerank
+
+    def test_chapter_scope_excludes_other_chapter_and_uncategorized(self):
+        """章节内提问：候选池只有该章节课件片段，跨章节资料与未挂章节资料不进候选。"""
+        result, rerank = self._run()
+        # 交给重排的候选仅章节A的 2 页课件（未挂章节的测试 PDF 被挡在候选池外）
+        self.assertEqual(rerank.calls[0]["documents"], ["第4章课件第2页", "第4章课件第5页"])
+        self.assertEqual([c.page for c, _ in result], [2, 5])
+
+    def test_chapter_scope_falls_back_to_course_when_chapter_has_no_chunks(self):
+        """章节没有任何挂靠片段（资料未挂章节/无课件）：退回全课程检索，不拒答。"""
+        from apps.courses.models import Catalog
+
+        empty_cat = Catalog.objects.create(course=self.course, title="第6章 新建")
+        embed = _FakeEmbed([1.0, 0.0])
+        rerank = _FakeRerank(scores=[0.9, 0.8, 0.7, 0.6], model="gte-rerank-v2")
+        with _patch_providers(embed, rerank):
+            result = _search_relevant_chunks(
+                self.course.id, "这一章的重点是什么？", catalog_id=empty_cat.id
+            )
+        # 兜底走全课程：4 个片段（章节A课件×2 + 章节B资料 + 未挂章节资料）都进候选
+        self.assertEqual(len(rerank.calls[0]["documents"]), 4)
+        self.assertEqual(len(result), 4)
+
+    def test_chapter_scope_still_applies_rerank_threshold(self):
+        """章节收敛不跳过阈值治理：全部低于阈值仍返回空（不走全课程兜底放大噪声）。"""
+        embed = _FakeEmbed([1.0, 0.0])
+        rerank = _FakeRerank(scores=[0.01, 0.008], model="gte-rerank-v2")
+        with _patch_providers(embed, rerank):
+            result = _search_relevant_chunks(
+                self.course.id, "这一章的重点是什么？", catalog_id=self.cat_a.id
+            )
+        self.assertEqual(result, [])
+
+
 class RerankThresholdResolutionTests(SimpleTestCase):
     """_resolve_rerank_threshold：显式环境变量 > 按模型名匹配 > 默认值。"""
 

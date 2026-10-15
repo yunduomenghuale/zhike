@@ -155,7 +155,7 @@
                   </div>
                 </div>
                 <div class="chat-input">
-                  <div v-if="chatImage" class="chat-image-preview">
+                  <div v-if="chatImage && visionSupported" class="chat-image-preview">
                     <img :src="chatImage" alt="待发送图片" />
                     <button class="preview-remove" title="移除图片" @click="chatImage = ''">
                       <el-icon :size="11"><Close /></el-icon>
@@ -171,11 +171,13 @@
                     @keydown.enter.exact.prevent="askChat()"
                   ></textarea>
                   <div class="chat-input-bar">
-                    <input ref="chatFileRef" type="file" accept="image/*" hidden @change="onPickChatImage" />
-                    <button class="chat-tool" title="提交图片提问" @click="chatFileRef?.click()">
-                      <el-icon :size="15"><Picture /></el-icon>
-                      图片
-                    </button>
+                    <template v-if="visionSupported">
+                      <input ref="chatFileRef" type="file" accept="image/*" hidden @change="onPickChatImage" />
+                      <button class="chat-tool" title="提交图片提问" @click="chatFileRef?.click()">
+                        <el-icon :size="15"><Picture /></el-icon>
+                        图片
+                      </button>
+                    </template>
                     <button class="chat-send" title="发送" :disabled="chatLoading || (!chatInput.trim() && !chatImage)" @click="askChat()">
                       <el-icon><Promotion /></el-icon>
                     </button>
@@ -408,7 +410,7 @@ import { listClasses } from '@/api/classroom'
 import { listCatalogs, listPpts, listVideos, listWatchProgress, reportVideoProgress } from '@/api/course'
 import { chapterProgress } from '@/utils/learningProgress'
 import { listQuestions, practiceSubmit } from '@/api/question'
-import { listMaterials } from '@/api/knowledge'
+import { listMaterials, getQaVisionCapability } from '@/api/knowledge'
 import { renderAiMarkdown } from '@/utils/markdown'
 import { groupCitedSources, citedSourceLabel } from '@/utils/cited-sources'
 import { genUid } from '@/utils/uid'
@@ -698,6 +700,10 @@ const chatScrollRef = ref(null)
 const chatTextareaRef = ref(null)
 const scriptDockListRef = ref(null)
 const chatSuggests = ['这一章的重点是什么？', '用简单的话解释当前知识点', '帮我生成 3 道复习题']
+// 问答图片上传入口：按对话模型的视觉能力显示（平台级配置，挂载时查一次）；
+// 拉取失败默认 false——没有入口优于用户发送图片后被接口拒绝
+const visionSupported = ref(false)
+watch(visionSupported, (on) => { if (!on) chatImage.value = '' })
 const materials = ref([])
 const materialsLoading = ref(false)
 let materialsLoaded = false
@@ -1118,7 +1124,13 @@ watch(fixedCourseId, (id) => {
   loadTree()
 })
 
-onMounted(loadCourses)
+onMounted(async () => {
+  await loadCourses()
+  try {
+    const res = await getQaVisionCapability()
+    visionSupported.value = Boolean(res?.supports_vision)
+  } catch { /* 拉取失败：保持隐藏 */ }
+})
 onUnmounted(() => {
   stopProgressTimer()
 })

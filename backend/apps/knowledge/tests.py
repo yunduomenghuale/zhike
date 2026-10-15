@@ -16,6 +16,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
 
+from apps.ai.models import AICapabilityConfig
 from apps.ai.providers.mock import MockProvider
 from apps.knowledge.models import KnowledgeChunk, Material
 from apps.knowledge.services import rebuild_vectors
@@ -488,3 +489,47 @@ class RebuildVectorsAPITests(TestCase):
             "/api/materials/rebuild-vectors/", {"course": self.course.id}, format="json"
         )
         self.assertEqual(resp.status_code, 403)
+
+
+class QaVisionCapabilityTests(TestCase):
+    """GET /api/qa-records/vision-capability/：按对话配置返回图片支持标志。
+
+    学生/教师端问答据此决定是否显示图片上传入口；接口只暴露布尔值，不泄露配置与密钥。
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+
+    def _chat_row(self, supports_vision):
+        AICapabilityConfig.objects.create(
+            capability="chat",
+            provider="tongyi",
+            enabled=True,
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            model_name="qwen3.7-plus",
+            supports_vision=supports_vision,
+        )
+
+    def test_flag_off_returns_false(self):
+        self._chat_row(supports_vision=False)
+        student = User.objects.create_user(
+            username="s_vision_off", password="pw123456!", role=User.Role.STUDENT
+        )
+        self.client.force_authenticate(user=student)
+        resp = self.client.get("/api/qa-records/vision-capability/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.data["data"]["supports_vision"])
+
+    def test_flag_on_returns_true(self):
+        self._chat_row(supports_vision=True)
+        teacher = User.objects.create_user(
+            username="t_vision_on", password="pw123456!", role=User.Role.TEACHER
+        )
+        self.client.force_authenticate(user=teacher)
+        resp = self.client.get("/api/qa-records/vision-capability/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.data["data"]["supports_vision"])
+
+    def test_anonymous_unauthorized(self):
+        resp = self.client.get("/api/qa-records/vision-capability/")
+        self.assertEqual(resp.status_code, 401)

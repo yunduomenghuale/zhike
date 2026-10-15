@@ -4,6 +4,8 @@ from rest_framework.views import APIView
 
 from apps.common.response import api_response
 
+from .calllog import ai_scene
+from .models import AICallLog
 from .providers.factory import get_provider
 
 
@@ -42,7 +44,8 @@ class TTSPreviewView(APIView):
         voice = request.data.get("voice", "default")
         speed = float(request.data.get("speed", 1.0))
         try:
-            url = get_provider("tts").tts(text, voice=voice, speed=speed)
+            with ai_scene(AICallLog.Scene.TTS_PREVIEW):
+                url = get_provider("tts").tts(text, voice=voice, speed=speed)
         except NotImplementedError as exc:
             return api_response(message=str(exc), code=501, status=501)
         return api_response({"audio_url": url})

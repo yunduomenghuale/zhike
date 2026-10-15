@@ -38,3 +38,7 @@ export const downloadMaterial = (id) =>
 // ===== 问答记录 =====
 export const listQaRecords = (params) => request.get('/qa-records/', { params })
 export const askQuestion = (data) => request.post('/qa-records/ask/', data)
+
+// 当前对话模型是否支持图片（多模态）：不支持时前端隐藏图片上传入口，
+// 避免用户发送图片后被接口拒绝；拉取失败按不支持处理（fail-closed）
+export const getQaVisionCapability = () => request.get('/qa-records/vision-capability/')

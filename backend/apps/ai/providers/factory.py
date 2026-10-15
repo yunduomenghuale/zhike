@@ -70,6 +70,8 @@ def _env_capability_config(capability: str) -> tuple[str, dict]:
         # 超时/发音人：env 派生不提供，交由 provider 回退 settings 默认值
         "timeout": None,
         "voice": "",
+        # 视觉能力：env 无开关位（DB 才有），None=按模型名推断
+        "vision": override.get("vision"),
     }
 
 
@@ -101,6 +103,8 @@ def get_runtime_config(capability: str = DEFAULT_CAPABILITY) -> tuple[str, dict,
             # 管理端可配超时/发音人；为空时 provider 回退 settings 默认值
             "timeout": saved.timeout,
             "voice": saved.voice or "",
+            # 图片（多模态）开关：仅 chat 行有意义，供 chat_supports_vision 读取
+            "vision": saved.supports_vision,
         }, "database"
 
     provider, config = _env_capability_config(capability)
@@ -110,3 +114,48 @@ def get_runtime_config(capability: str = DEFAULT_CAPABILITY) -> tuple[str, dict,
 def get_provider(capability: str = DEFAULT_CAPABILITY) -> BaseAIProvider:
     provider, config, _source = get_runtime_config(capability)
     return build_provider(provider, config, capability)
+
+
+# 模型名视觉特征（小写子串匹配）：命中即推断支持图片输入。
+# 选取时避开纯文本模型误判：deepseek-v3（"v3"非"vl"）、glm-4-plus、qwen-plus、
+# moonshot-v1、gpt-3.5-turbo 等均不含以下特征。
+_VISION_MODEL_HINTS = (
+    "vl",        # qwen-vl / qwen2.5-vl / internvl / cogvlm / yi-vl
+    "vision",    # *-vision-* / gpt-4-vision-preview
+    "4v",        # glm-4v 一类命名
+    "gpt-4o",    # OpenAI 多模态
+    "gpt-4.1",
+    "gemini",
+    "claude-3",  # claude-3 全系支持图片
+    "pixtral",
+    "llava",
+    "多模态",
+)
+
+
+def model_name_suggests_vision(model_name: str) -> bool:
+    """按模型名推断是否视觉（多模态）模型。
+
+    用于 env 派生配置的能力判定与管理端「模型疑似支持视觉但开关关闭」提示，
+    DB 显式开关（AICapabilityConfig.supports_vision）始终优先。
+    """
+    name = str(model_name or "").lower()
+    return any(hint in name for hint in _VISION_MODEL_HINTS)
+
+
+def chat_supports_vision() -> bool:
+    """当前对话配置是否支持图片（多模态）输入。
+
+    解析优先级与 build_provider 一致（管理端 DB > 环境变量 > Mock）：
+    - DB：chat 行启用时读管理端「支持图片」开关（显式优先，模型名仅用于提示）；
+      行不存在 / 未启用即 Mock，Mock 不理解图片，视为不支持；
+    - env：AI_CAPABILITY_ENV["chat"]["vision"] 可显式指定，缺省按模型名推断；
+    - 一律取不到时返回 False——隐藏上传入口优于用户发送后接口报错。
+    """
+    provider, config, _source = get_runtime_config("chat")
+    vision = config.get("vision")
+    if isinstance(vision, bool):
+        return vision
+    if provider == "mock":
+        return False
+    return model_name_suggests_vision(config.get("model", ""))

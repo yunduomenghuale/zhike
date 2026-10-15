@@ -291,7 +291,11 @@ def _ai_extract_catalog_tree(pages: list[dict]) -> list[dict]:
         # 示例目录。此时直接放弃 AI 抽取，改由下游规则解析真实文本。
         if getattr(provider, "name", "") == "mock":
             return []
-        messages = [
+        from apps.ai.calllog import ai_scene
+        from apps.ai.models import AICallLog
+
+        with ai_scene(AICallLog.Scene.CATALOG_GEN):
+            messages = [
             {
                 "role": "system",
                 "content": (
@@ -313,10 +317,11 @@ def _ai_extract_catalog_tree(pages: list[dict]) -> list[dict]:
                 ),
             },
         ]
-        # fallback_to_mock=False：真实模型不可用时直接抛错，避免拿到与上传文件无关的
-        # 「第一章 绪论/第二章 基础知识」占位目录；异常由下方 except 捕获后走规则解析。
-        # retries/timeout 收紧：网络挂起时也能快速失败，不拖垮前端 60s 请求预算。
-        raw = provider.chat(messages, temperature=0.1, fallback_to_mock=False, retries=1, timeout=15)
+        #             ]
+            # fallback_to_mock=False：真实模型不可用时直接抛错，避免拿到与上传文件无关的
+            # 「第一章 绪论/第二章 基础知识」占位目录；异常由下方 except 捕获后走规则解析。
+            # retries/timeout 收紧：网络挂起时也能快速失败，不拖垮前端 60s 请求预算。
+            raw = provider.chat(messages, temperature=0.1, fallback_to_mock=False, retries=1, timeout=15)
     except Exception:
         return []
 

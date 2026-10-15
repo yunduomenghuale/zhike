@@ -39,3 +39,14 @@ export const saveAdminAIConfiguration = (capabilities) => (
 export const testAdminAIConnection = (capability, overrides = {}) => (
   request.post('/admin-panel/ai-configuration/test/', { capability, ...overrides }, { timeout: 600000 })
 )
+
+// AI 调用统计与追溯（流水 / 汇总 / 导出 / 配置变更记录）
+export const listAdminAICallLogs = (params) => request.get('/admin-panel/ai-call-logs/', { params })
+// CSV 导出走后端限流上限 5 万条；blob 下载（文件名由后端 Content-Disposition 决定）
+export const exportAdminAICallLogs = (params) => (
+  request.get('/admin-panel/ai-call-logs/export/', { params, responseType: 'blob' })
+)
+export const getAdminAICallStats = (params) => request.get('/admin-panel/ai-call-stats/', { params })
+export const listAdminAIConfigChanges = (params) => (
+  request.get('/admin-panel/ai-config-changes/', { params })
+)

@@ -162,12 +162,28 @@
                     <img v-if="m.image" :src="m.image" class="q-image" alt="提问图片" />
                     <template v-if="!m.imageOnly">{{ m.content }}</template>
                   </div>
+                  <!-- 参考来源须为独立 v-if：若插在 v-else-if 与 v-else 之间会抢走用户消息的 v-else 分支 -->
+                  <div v-if="m.role === 'assistant' && m.cited?.length && !m.streaming" class="chat-sources">
+                    <div class="chat-sources-title">
+                      <el-icon :size="12"><Collection /></el-icon> 参考来源
+                    </div>
+                    <div class="chat-source-tags">
+                      <el-tag
+                        v-for="(g, gi) in groupCitedSources(m.cited)"
+                        :key="gi"
+                        size="small"
+                        effect="plain"
+                        type="info"
+                        round
+                      >{{ citedSourceLabel(g) }}</el-tag>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
 
             <div class="chat-input">
-              <div v-if="chatImage" class="chat-image-preview">
+              <div v-if="chatImage && visionSupported" class="chat-image-preview">
                 <img :src="chatImage" alt="待发送图片" />
                 <button class="preview-remove" title="移除图片" @click="chatImage = ''">
                   <el-icon :size="11"><Close /></el-icon>
@@ -183,11 +199,13 @@
                 @keydown.enter.exact.prevent="askChat()"
               ></textarea>
               <div class="chat-input-bar">
-                <input ref="chatFileRef" type="file" accept="image/*" hidden @change="onPickChatImage" />
-                <button class="chat-tool" title="提交图片提问" @click="chatFileRef?.click()">
-                  <el-icon :size="15"><Picture /></el-icon>
-                  图片
-                </button>
+                <template v-if="visionSupported">
+                  <input ref="chatFileRef" type="file" accept="image/*" hidden @change="onPickChatImage" />
+                  <button class="chat-tool" title="提交图片提问" @click="chatFileRef?.click()">
+                    <el-icon :size="15"><Picture /></el-icon>
+                    图片
+                  </button>
+                </template>
                 <button
                   class="chat-send"
                   title="发送"
@@ -657,7 +675,7 @@
         </div>
         <div class="ppt-page-list">
           <div
-            v-for="page in currentPpt.parsed_pages.slice(0, 5)"
+            v-for="page in currentPpt.parsed_pages"
             :key="page.page"
             class="ppt-page-item"
           >
@@ -877,7 +895,7 @@
 <script setup>
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ArrowLeft, ArrowRight, Plus, Edit, Delete, Upload, MagicStick, Folder, Document, Microphone, Headset, UploadFilled, VideoPlay, VideoPause, ChatDotRound, Close, Promotion, Picture, Loading, Right } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowRight, Plus, Edit, Delete, Upload, MagicStick, Folder, Document, Microphone, Headset, UploadFilled, VideoPlay, VideoPause, ChatDotRound, Close, Promotion, Picture, Loading, Right, Collection } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
 import PageAudioPlayer from '@/components/PageAudioPlayer.vue'
@@ -886,9 +904,10 @@ import {
   previewCatalogFromFile, listPpts, uploadPpt, listVideos, updateVideoScript, regenerateVideoScriptPage,
   regenerateVideoAudioPage,
 } from '@/api/course'
-import { listMaterials } from '@/api/knowledge'
+import { listMaterials, getQaVisionCapability } from '@/api/knowledge'
 import { useGenerationStore } from '@/store/generation'
 import { renderAiMarkdown } from '@/utils/markdown'
+import { groupCitedSources, citedSourceLabel } from '@/utils/cited-sources'
 import { genUid } from '@/utils/uid'
 
 // html:false 会转义原始 HTML 标签，天然防止模型输出注入脚本；
@@ -1313,6 +1332,10 @@ const chatInput = ref('')
 const chatImage = ref('')
 const chatFileRef = ref(null)
 const chatSessionId = genUid()
+// 问答图片上传入口：按对话模型的视觉能力显示（平台级配置，挂载时查一次）；
+// 拉取失败默认 false——没有入口优于用户发送图片后被接口拒绝
+const visionSupported = ref(false)
+watch(visionSupported, (on) => { if (!on) chatImage.value = '' })
 
 function onPickChatImage(e) {
   const file = e.target.files?.[0]
@@ -1723,7 +1746,13 @@ function setPptMapItem(ppt, fallbackCatalogId = null) {
   }
 }
 
-onMounted(() => { loadCourseName(); loadTree() })
+onMounted(async () => {
+  loadCourseName(); loadTree()
+  try {
+    const res = await getQaVisionCapability()
+    visionSupported.value = Boolean(res?.supports_vision)
+  } catch { /* 拉取失败：保持隐藏 */ }
+})
 </script>
 
 <style scoped>
@@ -3164,6 +3193,26 @@ onMounted(() => { loadCourseName(); loadTree() })
 .chat-text {
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* 助教回答的参考来源（与学生端 Learning.vue 同款呈现） */
+.chat-sources {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed #e2e8f0;
+}
+.chat-sources-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+.chat-source-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 /* Markdown 渲染样式（助教回答） */

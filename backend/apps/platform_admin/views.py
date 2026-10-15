@@ -1,10 +1,13 @@
+import csv
 import os
 import time
+from datetime import date, datetime, time as dtime, timedelta
 
 from django.contrib.auth import get_user_model
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Avg, Count, Q, Sum
+from django.db.models.functions import TruncDate
 from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import status
@@ -12,8 +15,20 @@ from rest_framework.generics import get_object_or_404
 from rest_framework.views import APIView
 
 from apps.classroom.models import ClassRoom, ClassStudent
-from apps.ai.models import AICapabilityConfig, AITestRecord
-from apps.ai.providers.factory import build_provider, get_runtime_config, mask_api_key
+from apps.ai.calllog import ai_scene
+from apps.ai.models import (
+    AICallLog,
+    AICapabilityChangeLog,
+    AICapabilityConfig,
+    AITestRecord,
+)
+from apps.ai.providers.factory import (
+    build_provider,
+    chat_supports_vision,
+    get_runtime_config,
+    mask_api_key,
+    model_name_suggests_vision,
+)
 from apps.common.permissions import IsPlatformAdmin
 from apps.common.response import api_response
 from apps.courses.models import Catalog, Course
@@ -25,6 +40,8 @@ from .serializers import (
     AdminCourseSerializer,
     AdminUserSerializer,
     AdminUserWriteSerializer,
+    AICallLogSerializer,
+    AICapabilityChangeLogSerializer,
     AICapabilityConfigSerializer,
     CourseStatusSerializer,
     PasswordResetSerializer,
@@ -319,6 +336,8 @@ def _ai_capability_payload() -> list[dict]:
     """各能力（对话/向量/重排序/语音）的当前生效配置：provider/模型/Key 掩码/来源/实际运行时/最近测试。"""
     rows = {row.capability: row for row in AICapabilityConfig.objects.all()}
     tests = {record.capability: record for record in AITestRecord.objects.all()}
+    # 对话能力的图片（多模态）开关：仅 chat 行有意义，其余能力恒 False
+    chat_vision = chat_supports_vision()
     items = []
     for capability, label in AICapabilityConfig.Capability.choices:
         row = rows.get(capability)
@@ -336,6 +355,12 @@ def _ai_capability_payload() -> list[dict]:
             "model_name": config.get("model", ""),
             "timeout": config.get("timeout"),
             "voice": config.get("voice", ""),
+            # 图片上传入口开关（仅 chat 有效）：supports_vision 为生效值，
+            # model_suggests_vision 为模型名推断，供「疑似视觉模型但开关关闭」提示
+            "supports_vision": (
+                chat_vision if capability == AICapabilityConfig.Capability.CHAT else False
+            ),
+            "model_suggests_vision": model_name_suggests_vision(config.get("model", "")),
             "api_key_configured": bool(key),
             "api_key_masked": mask_api_key(key),
             "source": source,
@@ -471,16 +496,18 @@ class AdminAIConnectionTestView(APIView):
                 built = build_provider(provider, config, capability)
                 if capability == "chat":
                     prompt = "请只回复：连接成功"
-                    reply = built.chat(
-                        [{"role": "user", "content": prompt}],
-                        temperature=0, timeout=20, retries=1, fallback_to_mock=False, max_tokens=16,
-                    )
+                    with ai_scene(AICallLog.Scene.CONNECTION_TEST):
+                        reply = built.chat(
+                            [{"role": "user", "content": prompt}],
+                            temperature=0, timeout=20, retries=1, fallback_to_mock=False, max_tokens=16,
+                        )
                     if not str(reply or "").strip():
                         raise RuntimeError("模型返回内容为空")
                     detail["request"] = prompt
                     detail["response"] = str(reply).strip()[:500]
                 elif capability == "embed":
-                    vectors = built.embed(["连接测试"], allow_fallback=False)
+                    with ai_scene(AICallLog.Scene.CONNECTION_TEST):
+                        vectors = built.embed(["连接测试"], allow_fallback=False)
                     if not vectors or not vectors[0]:
                         raise RuntimeError("向量接口返回为空")
                     detail["request"] = "连接测试"
@@ -491,7 +518,8 @@ class AdminAIConnectionTestView(APIView):
                         "考核方式为平时成绩 30% + 实验 20% + 期末考试 50%。",
                         "路由器根据路由表转发 IP 分组，ICMP 用于网络层差错报告。",
                     ]
-                    ranked = built.rerank("这门课的考核方式是什么？", docs, top_n=3)
+                    with ai_scene(AICallLog.Scene.CONNECTION_TEST):
+                        ranked = built.rerank("这门课的考核方式是什么？", docs, top_n=3)
                     if not ranked:
                         raise RuntimeError("重排序接口返回为空")
                     detail["request"] = "query：这门课的考核方式是什么？；documents：3 条测试文档"
@@ -499,7 +527,8 @@ class AdminAIConnectionTestView(APIView):
                         f"#{item['index']} 相关性 {float(item['score']):.4f}" for item in ranked[:3]
                     )
                 else:
-                    url = built.tts("连接测试")
+                    with ai_scene(AICallLog.Scene.CONNECTION_TEST):
+                        url = built.tts("连接测试")
                     if not url:
                         raise RuntimeError("语音接口未返回音频地址")
                     voice_used = getattr(built, "voice", "") or getattr(settings, "AI_TTS_VOICE", "Cherry")
@@ -603,3 +632,373 @@ class AdminRebuildVectorsView(APIView):
         if report["failed"]:
             message += f"，失败 {len(report['failed'])} 项（详见返回清单，可修复后重试）"
         return api_response(report, message=message)
+
+
+# ---------------------------------------------------------------------------
+# AI 调用统计与追溯（流水 / 汇总 / 导出 / 配置变更记录）
+# ---------------------------------------------------------------------------
+_CALL_LOG_MAX_EXPORT = 50000  # 导出上限保护，避免超长请求把 worker 拖死
+_CALL_LOG_MAX_SPAN_DAYS = 366  # 单次统计最大跨度（约一年，超出直接 400）
+
+# 场景业务域分组：分布卡按组渲染，回答「哪类业务在消耗模型额度」
+_SCENE_GROUPS = {
+    "catalog_gen": "授课生产",
+    "script_gen": "授课生产",
+    "tts": "授课生产",
+    "tts_preview": "授课生产",
+    "question_gen": "授课生产",
+    "grading": "授课生产",
+    "analytics": "授课生产",
+    "qa": "学生学习",
+    "material_embed": "知识库",
+    "ppt_embed": "知识库",
+    "vector_rebuild": "知识库",
+    "rag_eval": "知识库",
+    "connection_test": "平台运维",
+    "other": "其他",
+}
+
+
+class CallLogWindowError(ValueError):
+    """统计窗口参数非法（日期格式错误 / 跨度超限 / start 晚于 end）。"""
+
+
+def _call_log_window(request, default_days: int = 7) -> dict:
+    """解析调用统计窗口。
+
+    优先级：start+end（YYYY-MM-DD 本地时区日历窗）> days（滚动窗，1~365）。
+    返回 {start, end, days, source, previous_start, previous_end}：
+    - 日历窗按本地时区取当日 00:00:00 ~ 23:59:59；只传一侧时另一侧补成今天
+    - end 在未来时截断为当前时刻（数据只可能积累到现在）
+    - 上周期 = 紧邻当前周期前一段等长周期（环比对比基线）
+    - 跨度超过 366 天或 start 晚于 end 抛 CallLogWindowError（由视图转 400）
+    """
+    now = timezone.now()
+    tz = timezone.get_current_timezone()
+    start_raw = (request.query_params.get("start") or "").strip()
+    end_raw = (request.query_params.get("end") or "").strip()
+    if start_raw or end_raw:
+        try:
+            start_date = date.fromisoformat(start_raw) if start_raw else None
+            end_date = date.fromisoformat(end_raw) if end_raw else None
+        except ValueError:
+            raise CallLogWindowError("日期格式不正确，请使用 YYYY-MM-DD") from None
+        if start_date is None:
+            start_date = end_date
+        if end_date is None:
+            end_date = now.astimezone(tz).date()
+        if start_date > end_date:
+            raise CallLogWindowError("开始日期不能晚于结束日期")
+        span_days = (end_date - start_date).days + 1
+        if span_days > _CALL_LOG_MAX_SPAN_DAYS:
+            raise CallLogWindowError(f"时间范围不能超过 {_CALL_LOG_MAX_SPAN_DAYS} 天")
+        window_start = timezone.make_aware(datetime.combine(start_date, datetime.min.time()), tz)
+        window_end = timezone.make_aware(datetime.combine(end_date, dtime(23, 59, 59)), tz)
+        source = "range"
+    else:
+        try:
+            span_days = min(365, max(1, int(request.query_params.get("days", default_days))))
+        except (TypeError, ValueError):
+            span_days = default_days
+        window_end = now
+        window_start = now - timedelta(days=span_days)
+        source = "days"
+    if window_end > now:
+        window_end = now
+    return {
+        "start": window_start,
+        "end": window_end,
+        "days": span_days,
+        "source": source,
+        "previous_start": window_start - timedelta(days=span_days),
+        "previous_end": window_start - timedelta(seconds=1),
+    }
+
+
+def _call_log_qs(start, end):
+    """按 [start, end] 闭区间过滤（end 多为 23:59:59，+1s 兼容微秒级 created_at）。"""
+    return AICallLog.objects.filter(
+        created_at__gte=start, created_at__lt=end + timedelta(seconds=1)
+    )
+
+
+def _filter_ai_call_logs(request):
+    """流水查询的公共筛选：时间范围 + 能力/场景/服务商/成败/触发人/课程/关键字。"""
+    window = _call_log_window(request)
+    queryset = _call_log_qs(window["start"], window["end"]).select_related(
+        "triggered_by", "course"
+    )
+    for param, field in (
+        ("capability", "capability"),
+        ("scene", "scene"),
+        ("provider", "provider"),
+    ):
+        value = request.query_params.get(param, "").strip()
+        if value:
+            queryset = queryset.filter(**{field: value})
+    success = request.query_params.get("success", "").strip()
+    if success in ("true", "false"):
+        queryset = queryset.filter(success=(success == "true"))
+    triggered_by = request.query_params.get("triggered_by", "").strip()
+    if triggered_by.isdigit():
+        queryset = queryset.filter(triggered_by_id=int(triggered_by))
+    course_id = request.query_params.get("course_id", "").strip()
+    if course_id.isdigit():
+        queryset = queryset.filter(course_id=int(course_id))
+    keyword = request.query_params.get("keyword", "").strip()
+    if keyword:
+        queryset = queryset.filter(
+            Q(trace_id__icontains=keyword) | Q(input_preview__icontains=keyword)
+        )
+    return queryset
+
+
+def _percentile(values: list[int], ratio: float) -> int:
+    """Python 侧计算分位数（SQLite 无 percentile 函数；样本已限量）。"""
+    if not values:
+        return 0
+    ordered = sorted(values)
+    index = min(len(ordered) - 1, max(0, int(round(ratio * (len(ordered) - 1)))))
+    return int(ordered[index])
+
+
+def _call_log_breakdown(queryset, field: str) -> list[dict]:
+    """按能力/场景等维度汇总（次数/失败/Mock/平均耗时/Token/条数）；场景附业务域分组。"""
+    rows = list(
+        queryset.values(field)
+        .annotate(
+            calls=Count("id"),
+            failed=Count("id", filter=Q(success=False)),
+            mock_calls=Count("id", filter=Q(is_mock=True)),
+            avg_latency=Avg("latency_ms"),
+            total_tokens=Sum("total_tokens"),
+            item_count=Sum("item_count"),
+        )
+        .order_by("-calls")
+    )
+    if field == "scene":
+        for row in rows:
+            row["group"] = _SCENE_GROUPS.get(row["scene"], "其他")
+    return rows
+
+
+def _call_log_daily(queryset) -> list[dict]:
+    """按日趋势（本地时区）：次数/失败/Token/平均耗时；day 输出 ISO 字符串。"""
+    rows = list(
+        queryset.annotate(day=TruncDate("created_at", tzinfo=timezone.get_current_timezone()))
+        .values("day")
+        .annotate(
+            calls=Count("id"),
+            failed=Count("id", filter=Q(success=False)),
+            total_tokens=Sum("total_tokens"),
+            avg_latency=Avg("latency_ms"),
+        )
+        .order_by("day")
+    )
+    return [
+        {
+            "day": row["day"].isoformat() if row["day"] else None,
+            "calls": row["calls"],
+            "failed": row["failed"],
+            "total_tokens": row["total_tokens"] or 0,
+            "avg_latency_ms": int(row["avg_latency"] or 0),
+        }
+        for row in rows
+    ]
+
+
+class AdminAICallLogListView(APIView):
+    """AI 调用流水明细：筛选 + 分页（默认近 7 天，支持 start/end 日历窗）。"""
+
+    permission_classes = [IsPlatformAdmin]
+    serializer_class = AICallLogSerializer
+
+    def get(self, request):
+        try:
+            queryset = _filter_ai_call_logs(request)
+        except CallLogWindowError as exc:
+            return api_response(message=str(exc), code=400, status=400)
+        return _paginated_response(queryset, request, AICallLogSerializer)
+
+
+class AdminAICallLogExportView(APIView):
+    """流水导出 CSV（带 BOM，Excel 直接打开中文不乱码）。"""
+
+    permission_classes = [IsPlatformAdmin]
+
+    def get(self, request):
+        try:
+            queryset = _filter_ai_call_logs(request).order_by("-created_at")[:_CALL_LOG_MAX_EXPORT]
+        except CallLogWindowError as exc:
+            return api_response(message=str(exc), code=400, status=400)
+        response = HttpResponse(content_type="text/csv; charset=utf-8-sig")
+        filename = f"ai_call_logs_{timezone.now():%Y%m%d_%H%M}.csv"
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        writer = csv.writer(response)
+        writer.writerow(
+            [
+                "时间", "能力", "服务商", "模型", "场景", "成功", "Mock返回", "耗时(ms)",
+                "输入token", "输出token", "token合计", "条数", "输入字符", "输出字符",
+                "输入指纹", "追溯ID", "触发人", "课程", "错误摘要",
+            ]
+        )
+        provider_labels = dict(AICapabilityConfig.Provider.choices)
+        capability_labels = dict(AICapabilityConfig.Capability.choices)
+        scene_labels = dict(AICallLog.Scene.choices)
+        for log in queryset.iterator():
+            writer.writerow(
+                [
+                    log.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                    capability_labels.get(log.capability, log.capability),
+                    provider_labels.get(log.provider, log.provider),
+                    log.model_name,
+                    scene_labels.get(log.scene, log.scene),
+                    "是" if log.success else "否",
+                    "是" if log.is_mock else "否",
+                    log.latency_ms,
+                    log.prompt_tokens if log.prompt_tokens is not None else "",
+                    log.completion_tokens if log.completion_tokens is not None else "",
+                    log.total_tokens if log.total_tokens is not None else "",
+                    log.item_count if log.item_count is not None else "",
+                    log.input_chars if log.input_chars is not None else "",
+                    log.output_chars if log.output_chars is not None else "",
+                    log.input_digest,
+                    log.trace_id,
+                    log.triggered_by.username if log.triggered_by else "",
+                    log.course.name if log.course else "",
+                    log.error,
+                ]
+            )
+        return response
+
+
+class AdminAICallStatsView(APIView):
+    """调用汇总统计：总量 / 按能力 / 按场景 / 按日趋势 / TOP 触发人 / 异常告警。
+
+    窗口：start+end 日历窗（YYYY-MM-DD）或 days 滚动窗（1~365）。
+    除当前周期外，还返回紧邻其前一段等长周期的基线（totals_previous /
+    daily_previous）供环比对比。
+    """
+
+    permission_classes = [IsPlatformAdmin]
+
+    def get(self, request):
+        try:
+            window = _call_log_window(request)
+        except CallLogWindowError as exc:
+            return api_response(message=str(exc), code=400, status=400)
+        current = self._collect(window["start"], window["end"])
+        previous = self._collect(window["previous_start"], window["previous_end"])
+        return api_response({
+            # 统一转本地时区输出：滚动窗源自 timezone.now()（UTC），
+            # 直出 isoformat 会让前端按日期切片时错位一天
+            "window": {
+                "start": timezone.localtime(window["start"]).isoformat(),
+                "end": timezone.localtime(window["end"]).isoformat(),
+                "days": window["days"],
+                "source": window["source"],
+                "previous_start": timezone.localtime(window["previous_start"]).isoformat(),
+                "previous_end": timezone.localtime(window["previous_end"]).isoformat(),
+            },
+            "totals": current["totals"],
+            "totals_previous": previous["totals"],
+            "by_capability": current["by_capability"],
+            "by_scene": current["by_scene"],
+            "top_triggered_by": current["top_triggered_by"],
+            "daily": current["daily"],
+            "daily_previous": previous["daily"],
+            "alerts": self._alerts(_call_log_qs(window["start"], window["end"])),
+        })
+
+    @staticmethod
+    def _collect(start, end) -> dict:
+        """汇总一个时间窗的总量 / 分布 / 日趋势 / TOP 触发人。"""
+        queryset = _call_log_qs(start, end)
+        totals = queryset.aggregate(
+            calls=Count("id"),
+            # 注意：别名不能与 filter 引用的字段名同名（success 是布尔字段），
+            # 否则编译期解析 filter 时会命中聚合别名报 FieldError
+            success_count=Count("id", filter=Q(success=True)),
+            failed=Count("id", filter=Q(success=False)),
+            mock_calls=Count("id", filter=Q(is_mock=True)),
+            avg_latency=Avg("latency_ms"),
+            prompt_tokens=Sum("prompt_tokens"),
+            completion_tokens=Sum("completion_tokens"),
+            total_tokens=Sum("total_tokens"),
+        )
+        # P95：SQLite 无 percentile 函数，窗口内延迟样本（上限 2 万条）Python 侧计算
+        latencies = list(queryset.values_list("latency_ms", flat=True)[:20000])
+        calls = totals["calls"] or 0
+        return {
+            "totals": {
+                "calls": calls,
+                "success": totals["success_count"] or 0,
+                "failed": totals["failed"] or 0,
+                "success_rate": round((totals["success_count"] or 0) / calls, 4) if calls else None,
+                "mock_calls": totals["mock_calls"] or 0,
+                "avg_latency_ms": int(totals["avg_latency"] or 0),
+                "p95_latency_ms": _percentile(latencies, 0.95),
+                "prompt_tokens": totals["prompt_tokens"] or 0,
+                "completion_tokens": totals["completion_tokens"] or 0,
+                "total_tokens": totals["total_tokens"] or 0,
+            },
+            "by_capability": _call_log_breakdown(queryset, "capability"),
+            "by_scene": _call_log_breakdown(queryset, "scene"),
+            "top_triggered_by": list(
+                queryset.exclude(triggered_by=None)
+                .values("triggered_by", "triggered_by__username")
+                .annotate(calls=Count("id"), failed=Count("id", filter=Q(success=False)))
+                .order_by("-calls")[:10]
+            ),
+            "daily": _call_log_daily(queryset),
+        }
+
+    @staticmethod
+    def _alerts(queryset):
+        """近 24 小时的异常提示（页面展示，不做消息推送）。"""
+        recent = queryset.filter(created_at__gte=timezone.now() - timedelta(hours=24))
+        alerts = []
+        stats = recent.aggregate(
+            calls=Count("id"), failed=Count("id", filter=Q(success=False))
+        )
+        calls = stats["calls"] or 0
+        if calls >= 5 and (stats["failed"] or 0) / calls > 0.2:
+            alerts.append(
+                {
+                    "level": "warning",
+                    "message": f"近 24 小时失败率 {(stats['failed'] / calls):.0%}"
+                    f"（{stats['failed']}/{calls}），请检查服务商配置与网络",
+                }
+            )
+        # 真实调用回退 Mock：结果可能是占位内容，业务不可信（已知中危的静默回退）
+        fallback = recent.filter(is_mock=True).exclude(provider="mock").count()
+        if fallback:
+            alerts.append(
+                {
+                    "level": "warning",
+                    "message": f"近 24 小时有 {fallback} 次真实模型调用回退到模拟模式，相关业务结果可能不可信",
+                }
+            )
+        slow = recent.filter(capability="chat").aggregate(avg=Avg("latency_ms"))["avg"]
+        if slow and slow > 15000:
+            alerts.append(
+                {
+                    "level": "info",
+                    "message": f"近 24 小时对话平均耗时 {slow / 1000:.1f}s，本地模型可调大超时或扩容",
+                }
+            )
+        return alerts
+
+
+class AdminAIConfigChangeLogListView(APIView):
+    """大模型能力配置变更记录（字段级 old→new，回答「为什么行为变了」）。"""
+
+    permission_classes = [IsPlatformAdmin]
+    serializer_class = AICapabilityChangeLogSerializer
+
+    def get(self, request):
+        queryset = AICapabilityChangeLog.objects.select_related("changed_by").all()
+        capability = request.query_params.get("capability", "").strip()
+        if capability:
+            queryset = queryset.filter(capability=capability)
+        return _paginated_response(queryset, request, AICapabilityChangeLogSerializer)

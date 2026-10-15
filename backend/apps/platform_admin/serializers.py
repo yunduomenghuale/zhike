@@ -4,7 +4,7 @@ from rest_framework import serializers
 
 from apps.classroom.models import ClassRoom
 from apps.courses.models import Course
-from apps.ai.models import AICapabilityConfig
+from apps.ai.models import AICallLog, AICapabilityChangeLog, AICapabilityConfig
 from apps.ai.providers.factory import get_env_config
 from apps.users.serializers import PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, normalize_phone
 
@@ -164,7 +164,8 @@ class AICapabilityConfigSerializer(serializers.ModelSerializer):
         model = AICapabilityConfig
         fields = [
             "capability", "capability_display", "provider", "provider_display", "enabled",
-            "base_url", "model_name", "timeout", "voice", "api_key", "api_key_configured",
+            "base_url", "model_name", "timeout", "voice", "supports_vision",
+            "api_key", "api_key_configured",
             "updated_at", "updated_by_name",
         ]
         read_only_fields = ["updated_at"]
@@ -179,6 +180,10 @@ class AICapabilityConfigSerializer(serializers.ModelSerializer):
         capability = attrs.get("capability", getattr(self.instance, "capability", None))
         if "voice" in attrs and capability != AICapabilityConfig.Capability.TTS:
             attrs["voice"] = ""
+        # 「支持图片」仅对对话有意义（问答图片上传入口）：其他能力强制关闭，
+        # 防止误开后前端对 embed/rerank/tts 行显示无意义的开关状态
+        if capability != AICapabilityConfig.Capability.CHAT:
+            attrs["supports_vision"] = False
         # 能力-服务商白名单：DeepSeek 无 embedding/TTS 接口、重排序仅通义千问，拒收越界保存
         allowed = AICapabilityConfig.CAPABILITY_PROVIDERS.get(capability)
         if allowed and provider not in allowed:
@@ -245,3 +250,45 @@ class AICapabilityConfigSerializer(serializers.ModelSerializer):
         instance.updated_by = self.context["request"].user
         instance.save()
         return instance
+
+
+class AICallLogSerializer(serializers.ModelSerializer):
+    """AI 调用流水（只读）。token 字段仅 HTTP 类服务有值；本地内置模型看 item_count。"""
+
+    capability_display = serializers.CharField(source="get_capability_display", read_only=True)
+    scene_display = serializers.CharField(source="get_scene_display", read_only=True)
+    provider_display = serializers.SerializerMethodField()
+    triggered_by_name = serializers.CharField(
+        source="triggered_by.username", read_only=True, allow_null=True
+    )
+    course_name = serializers.CharField(source="course.name", read_only=True, allow_null=True)
+
+    class Meta:
+        model = AICallLog
+        fields = [
+            "id", "created_at", "capability", "capability_display", "provider",
+            "provider_display", "model_name", "scene", "scene_display", "success",
+            "is_mock", "error", "latency_ms", "attempts", "prompt_tokens",
+            "completion_tokens", "total_tokens", "item_count", "input_chars",
+            "output_chars", "input_digest", "input_preview", "trace_id",
+            "triggered_by", "triggered_by_name", "course", "course_name",
+        ]
+
+    def get_provider_display(self, obj):
+        return dict(AICapabilityConfig.Provider.choices).get(obj.provider, obj.provider or "—")
+
+
+class AICapabilityChangeLogSerializer(serializers.ModelSerializer):
+    """能力配置变更记录（只读）。changes 为字段级 old→new，API Key 只记存在性。"""
+
+    capability_display = serializers.CharField(source="get_capability_display", read_only=True)
+    changed_by_name = serializers.CharField(
+        source="changed_by.username", read_only=True, allow_null=True
+    )
+
+    class Meta:
+        model = AICapabilityChangeLog
+        fields = [
+            "id", "created_at", "capability", "capability_display",
+            "changed_by", "changed_by_name", "changes",
+        ]

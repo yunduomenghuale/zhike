@@ -16,6 +16,7 @@ import uuid
 import requests
 from django.conf import settings
 
+from ..calllog import record_ai_call, record_stream, suppress_recording
 from .base import BaseAIProvider
 from .mock import MockProvider
 
@@ -104,127 +105,193 @@ class OpenAICompatProvider(BaseAIProvider):
         return {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
 
     def chat(self, messages: list[dict], **kwargs) -> str:
-        # 每次调用先清零，保证 last_chat_error 反映的是「本次」而非历史调用的结果。
-        self.last_chat_error = ""
-        last_error = None
-        for _ in range(kwargs.get("retries", 2)):
-            try:
-                payload = {
-                    "model": kwargs.get("model", self.chat_model),
-                    "messages": messages,
-                    "temperature": kwargs.get("temperature", 0.6),
-                }
-                if "enable_thinking" in kwargs:
-                    payload["enable_thinking"] = kwargs["enable_thinking"]
-                if "max_tokens" in kwargs:
-                    payload["max_tokens"] = kwargs["max_tokens"]
-                resp = requests.post(
-                    f"{self.base_url}/chat/completions",
-                    headers=self._headers(),
-                    json=payload,
-                    timeout=kwargs.get("timeout", 180),
-                )
-                if 400 <= resp.status_code < 500:
-                    # 4xx（含上下文超限）重试无意义：带错误体上抛给上层识别降级，
-                    # 不能当成普通失败吞掉后静默回退 Mock。
-                    hint = ""
-                    try:
-                        hint = str(resp.json().get("error", {}).get("message", ""))
-                    except Exception:
-                        hint = resp.text[:500]
-                    raise _Http4xxError(f"HTTP {resp.status_code}: {hint}")
-                resp.raise_for_status()
-                return resp.json()["choices"][0]["message"]["content"]
-            except _Http4xxError:
-                raise
-            except Exception as exc:
-                last_error = exc
-        self.last_chat_error = str(last_error) if last_error else ""
-        # 目录识别等场景要求「真模型或明确失败」，不接受静默回退到 Mock 的占位内容。
-        if not kwargs.get("fallback_to_mock", True):
-            raise last_error or RuntimeError("AI chat 调用失败")
-        return self._mock.chat(messages, **kwargs)
+        with record_ai_call(
+            "chat", self.name, kwargs.get("model") or self.chat_model, input_text=messages
+        ) as rec:
+            # 每次调用先清零，保证 last_chat_error 反映的是「本次」而非历史调用的结果。
+            self.last_chat_error = ""
+            last_error = None
+            for attempt in range(max(1, kwargs.get("retries", 2))):
+                rec.attempts = attempt + 1
+                try:
+                    payload = {
+                        "model": kwargs.get("model", self.chat_model),
+                        "messages": messages,
+                        "temperature": kwargs.get("temperature", 0.6),
+                    }
+                    if "enable_thinking" in kwargs:
+                        payload["enable_thinking"] = kwargs["enable_thinking"]
+                    if "max_tokens" in kwargs:
+                        payload["max_tokens"] = kwargs["max_tokens"]
+                    resp = requests.post(
+                        f"{self.base_url}/chat/completions",
+                        headers=self._headers(),
+                        json=payload,
+                        timeout=kwargs.get("timeout", 180),
+                    )
+                    if 400 <= resp.status_code < 500:
+                        # 4xx（含上下文超限）重试无意义：带错误体上抛给上层识别降级，
+                        # 不能当成普通失败吞掉后静默回退 Mock。
+                        hint = ""
+                        try:
+                            hint = str(resp.json().get("error", {}).get("message", ""))
+                        except Exception:
+                            hint = resp.text[:500]
+                        raise _Http4xxError(f"HTTP {resp.status_code}: {hint}")
+                    resp.raise_for_status()
+                    data = resp.json()
+                    rec.set_usage(data.get("usage"))
+                    content = data["choices"][0]["message"]["content"]
+                    rec.set_output(content)
+                    return content
+                except _Http4xxError:
+                    raise
+                except Exception as exc:
+                    last_error = exc
+            self.last_chat_error = str(last_error) if last_error else ""
+            # 目录识别等场景要求「真模型或明确失败」，不接受静默回退到 Mock 的占位内容。
+            if not kwargs.get("fallback_to_mock", True):
+                raise last_error or RuntimeError("AI chat 调用失败")
+            rec.mark_mock()
+            with suppress_recording():
+                result = self._mock.chat(messages, **kwargs)
+            rec.set_output(result)
+            return result
 
     def chat_stream(self, messages: list[dict], **kwargs):
         """真流式：OpenAI 兼容 stream=True，逐 token 产出 delta.content。
 
         请求失败时回退到 Mock 的分片流式，保证前端始终能拿到内容。
         """
-        payload = {
-            "model": kwargs.get("model", self.chat_model),
-            "messages": messages,
-            "temperature": kwargs.get("temperature", 0.6),
-            "stream": True,
-        }
-        if "enable_thinking" in kwargs:
-            payload["enable_thinking"] = kwargs["enable_thinking"]
-        if "max_tokens" in kwargs:
-            payload["max_tokens"] = kwargs["max_tokens"]
-        try:
-            with requests.post(
-                f"{self.base_url}/chat/completions",
-                headers=self._headers(),
-                json=payload,
-                stream=True,
-                timeout=kwargs.get("timeout", 120),
-            ) as resp:
-                if 400 <= resp.status_code < 500:
-                    # 4xx（含上下文超限）不能静默回退 Mock——上抛给上层识别降级
-                    hint = ""
-                    try:
-                        hint = str(resp.json().get("error", {}).get("message", ""))
-                    except Exception:
-                        hint = resp.text[:500]
-                    raise _Http4xxError(f"HTTP {resp.status_code}: {hint}")
-                resp.raise_for_status()
-                for raw in resp.iter_lines(decode_unicode=True):
-                    if not raw:
-                        continue
-                    line = raw.strip()
-                    if line.startswith("data:"):
-                        line = line[5:].strip()
-                    if line == "[DONE]":
-                        break
-                    try:
-                        obj = json.loads(line)
-                    except Exception:
-                        continue
-                    choices = obj.get("choices") or [{}]
-                    piece = (choices[0].get("delta") or {}).get("content")
-                    if piece:
-                        yield piece
-        except _Http4xxError:
-            raise
-        except Exception:
-            # 回退：分片产出 Mock 结果，前端仍表现为流式
-            yield from self._mock.chat_stream(messages, **kwargs)
+        state = {"mock": False}
+
+        def _gen():
+            payload = {
+                "model": kwargs.get("model", self.chat_model),
+                "messages": messages,
+                "temperature": kwargs.get("temperature", 0.6),
+                "stream": True,
+            }
+            if "enable_thinking" in kwargs:
+                payload["enable_thinking"] = kwargs["enable_thinking"]
+            if "max_tokens" in kwargs:
+                payload["max_tokens"] = kwargs["max_tokens"]
+            try:
+                with requests.post(
+                    f"{self.base_url}/chat/completions",
+                    headers=self._headers(),
+                    json=payload,
+                    stream=True,
+                    timeout=kwargs.get("timeout", 120),
+                ) as resp:
+                    if 400 <= resp.status_code < 500:
+                        # 4xx（含上下文超限）不能静默回退 Mock——上抛给上层识别降级
+                        hint = ""
+                        try:
+                            hint = str(resp.json().get("error", {}).get("message", ""))
+                        except Exception:
+                            hint = resp.text[:500]
+                        raise _Http4xxError(f"HTTP {resp.status_code}: {hint}")
+                    resp.raise_for_status()
+                    for raw in resp.iter_lines(decode_unicode=True):
+                        if not raw:
+                            continue
+                        line = raw.strip()
+                        if line.startswith("data:"):
+                            line = line[5:].strip()
+                        if line == "[DONE]":
+                            break
+                        try:
+                            obj = json.loads(line)
+                        except Exception:
+                            continue
+                        choices = obj.get("choices") or [{}]
+                        piece = (choices[0].get("delta") or {}).get("content")
+                        if piece:
+                            yield piece
+            except _Http4xxError:
+                raise
+            except Exception:
+                # 回退：分片产出 Mock 结果，前端仍表现为流式
+                state["mock"] = True
+                with suppress_recording():
+                    yield from self._mock.chat_stream(messages, **kwargs)
+
+        yield from record_stream(
+            "chat",
+            self.name,
+            kwargs.get("model") or self.chat_model,
+            _gen(),
+            input_text=messages,
+            state=state,
+        )
 
     def embed(self, texts: list[str], *, allow_fallback: bool = True) -> list[list[float]]:
         # 未配置嵌入模型 -> 直接用 mock（如 DeepSeek 无 embedding 接口）
         if not self.embed_model:
             if allow_fallback:
-                return self._mock.embed(texts)
+                with record_ai_call(
+                    "embed", self.name, "", input_text=texts, item_count=len(texts)
+                ) as rec:
+                    rec.mark_mock()
+                    with suppress_recording():
+                        vectors = self._mock.embed(texts)
+                    rec.set_output(vectors)
+                    return vectors
             raise NotImplementedError(f"{self.name} 未配置向量模型")
         # 向量服务普遍有批量上限：DashScope text-embedding-v3 为 10 条/批，
         # 超限整批 400（batch size is invalid）。课件逐页入库/长资料切分很容易
         # 超过 10 条，这里统一分批请求再按顺序拼接，调用方无感。
-        if len(texts) <= _EMBED_BATCH_SIZE:
-            return self._embed_batch(texts, allow_fallback)
-        vectors: list[list[float]] = []
-        try:
-            for start in range(0, len(texts), _EMBED_BATCH_SIZE):
-                vectors.extend(
-                    self._embed_batch(texts[start : start + _EMBED_BATCH_SIZE], allow_fallback=False)
+        with record_ai_call(
+            "embed", self.name, self.embed_model, input_text=texts, item_count=len(texts)
+        ) as rec:
+            if len(texts) <= _EMBED_BATCH_SIZE:
+                vectors, usage, mocked = self._embed_batch(texts, allow_fallback)
+                if mocked:
+                    rec.mark_mock()
+                if usage:
+                    rec.set_usage(usage)
+                rec.set_output(vectors)
+                return vectors
+            vectors: list[list[float]] = []
+            usages: list[dict] = []
+            try:
+                for start in range(0, len(texts), _EMBED_BATCH_SIZE):
+                    batch_vectors, batch_usage, batch_mocked = self._embed_batch(
+                        texts[start : start + _EMBED_BATCH_SIZE], allow_fallback=False
+                    )
+                    vectors.extend(batch_vectors)
+                    if batch_mocked:
+                        rec.mark_mock()
+                    if batch_usage:
+                        usages.append(batch_usage)
+            except Exception:
+                # 与不分批时语义一致：允许回退则整批换 mock（不混杂真实/假向量），
+                # 否则上抛真实错误（重建/连接测试要求「真模型或明确失败」）
+                if not allow_fallback:
+                    raise
+                rec.mark_mock()
+                with suppress_recording():
+                    vectors = self._mock.embed(texts)
+                rec.set_output(vectors)
+                return vectors
+            if usages:
+                # 多批 usage 合并成一次调用的总量
+                rec.set_usage(
+                    {
+                        "prompt_tokens": sum(int(u.get("prompt_tokens") or 0) for u in usages),
+                        "completion_tokens": sum(
+                            int(u.get("completion_tokens") or 0) for u in usages
+                        ),
+                        "total_tokens": sum(int(u.get("total_tokens") or 0) for u in usages),
+                    }
                 )
-        except Exception:
-            # 与不分批时语义一致：允许回退则整批换 mock（不混杂真实/假向量），
-            # 否则上抛真实错误（重建/连接测试要求「真模型或明确失败」）
-            if not allow_fallback:
-                raise
-            return self._mock.embed(texts)
-        return vectors
+            rec.set_output(vectors)
+            return vectors
 
-    def _embed_batch(self, texts: list[str], allow_fallback: bool) -> list[list[float]]:
+    def _embed_batch(self, texts: list[str], allow_fallback: bool):
+        """返回 (vectors, usage, mocked)：usage 为响应里的 token 统计（可能为 None），
+        mocked=True 表示本批回退了 Mock 向量。"""
         resp = None
         try:
             resp = requests.post(
@@ -235,12 +302,14 @@ class OpenAICompatProvider(BaseAIProvider):
                 timeout=self.timeout or 60,
             )
             resp.raise_for_status()
-            return [item["embedding"] for item in resp.json()["data"]]
+            data = resp.json()
+            return [item["embedding"] for item in data["data"]], data.get("usage"), False
         except Exception as exc:
             # 嵌入不可用时回退，保证知识库入库/检索不中断；
             # allow_fallback=False（连接测试）时上抛真实错误，避免误报成功
             if allow_fallback:
-                return self._mock.embed(texts)
+                with suppress_recording():
+                    return self._mock.embed(texts), None, True
             if resp is not None and resp.status_code >= 400:
                 raise RuntimeError(_http_error_detail(resp)) from exc
             raise
@@ -276,35 +345,41 @@ class OpenAICompatProvider(BaseAIProvider):
         # compatible-mode/v1 -> api/v1（rerank 走原生接口）
         native = self.base_url.replace("/compatible-mode/v1", "/api/v1")
         limit = min(top_n or len(documents), len(documents))
-        resp = requests.post(
-            f"{native}/services/rerank/text-rerank/text-rerank",
-            headers=self._headers(),
-            json={
-                "model": self.rerank_model,
-                "input": {"query": query, "documents": documents},
-                "parameters": {"top_n": limit, "return_documents": False},
-            },
-            # 重排是单次轻量请求，取管理端超时，未配则 60s
-            timeout=self.timeout or 60,
-        )
-        if resp.status_code >= 400:
-            # 透出响应体里的真实原因（模型不存在/输入超限等），连接测试需要它定位
-            raise RuntimeError(_http_error_detail(resp))
-        resp.raise_for_status()
+        with record_ai_call(
+            "rerank", self.name, self.rerank_model, input_text=query, item_count=len(documents)
+        ) as rec:
+            resp = requests.post(
+                f"{native}/services/rerank/text-rerank/text-rerank",
+                headers=self._headers(),
+                json={
+                    "model": self.rerank_model,
+                    "input": {"query": query, "documents": documents},
+                    "parameters": {"top_n": limit, "return_documents": False},
+                },
+                # 重排是单次轻量请求，取管理端超时，未配则 60s
+                timeout=self.timeout or 60,
+            )
+            if resp.status_code >= 400:
+                # 透出响应体里的真实原因（模型不存在/输入超限等），连接测试需要它定位
+                raise RuntimeError(_http_error_detail(resp))
+            resp.raise_for_status()
 
-        results = (resp.json().get("output") or {}).get("results") or []
-        ranked = [
-            {"index": int(item["index"]), "score": float(item.get("relevance_score") or 0.0)}
-            for item in results
-            if isinstance(item, dict) and "index" in item
-        ]
-        if not ranked:
-            # 200 但无结果属于协议异常（不是「全不相关」）：上抛让上层回退纯向量，
-            # 而不是把候选全部丢弃导致问答无资料可用
-            raise RuntimeError("重排序接口未返回结果")
-        ranked.sort(key=lambda x: x["score"], reverse=True)
-        # top_n 限定返回条数（DashScope 按 parameters.top_n 收敛，这里再兜底一次）
-        return ranked[:limit] if top_n else ranked
+            data = resp.json()
+            rec.set_usage(data.get("usage"))
+            results = (data.get("output") or {}).get("results") or []
+            ranked = [
+                {"index": int(item["index"]), "score": float(item.get("relevance_score") or 0.0)}
+                for item in results
+                if isinstance(item, dict) and "index" in item
+            ]
+            if not ranked:
+                # 200 但无结果属于协议异常（不是「全不相关」）：上抛让上层回退纯向量，
+                # 而不是把候选全部丢弃导致问答无资料可用
+                raise RuntimeError("重排序接口未返回结果")
+            ranked.sort(key=lambda x: x["score"], reverse=True)
+            rec.set_output(ranked)
+            # top_n 限定返回条数（DashScope 按 parameters.top_n 收敛，这里再兜底一次）
+            return ranked[:limit] if top_n else ranked
 
     def _tts_uses_dashscope_native(self) -> bool:
         """判断 TTS 是否走 DashScope 原生多模态端点。
@@ -332,10 +407,14 @@ class OpenAICompatProvider(BaseAIProvider):
         """
         if not self.tts_model:
             raise NotImplementedError(f"{self.name} 未配置 TTS 模型")
-        voice = voice or self.voice or getattr(settings, "AI_TTS_VOICE", "Cherry")
-        if self._tts_uses_dashscope_native():
-            return self._tts_dashscope(text, voice)
-        return self._tts_openai_compatible(text, voice, speed)
+        with record_ai_call("tts", self.name, self.tts_model, input_text=text, item_count=1) as rec:
+            voice = voice or self.voice or getattr(settings, "AI_TTS_VOICE", "Cherry")
+            if self._tts_uses_dashscope_native():
+                url = self._tts_dashscope(text, voice)
+            else:
+                url = self._tts_openai_compatible(text, voice, speed)
+            rec.set_output(url)
+            return url
 
     def _tts_timeout(self) -> int:
         return self.timeout or getattr(settings, "AI_TTS_TIMEOUT", 120)

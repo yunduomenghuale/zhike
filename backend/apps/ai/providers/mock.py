@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 
+from ..calllog import record_ai_call, record_stream
 from .base import BaseAIProvider
 
 _DIM = 64
@@ -15,11 +16,24 @@ class MockProvider(BaseAIProvider):
 
     def chat_stream(self, messages: list[dict], **kwargs):
         """把整段回答切成小片段产出，模拟打字机式流式输出。"""
-        text = self.chat(messages, **kwargs)
-        for i in range(0, len(text), 3):
-            yield text[i : i + 3]
+
+        def _gen():
+            text = self._chat(messages, **kwargs)
+            for i in range(0, len(text), 3):
+                yield text[i : i + 3]
+
+        yield from record_stream(
+            "chat", self.name, "mock", _gen(), input_text=messages, is_mock=True
+        )
 
     def chat(self, messages: list[dict], **kwargs) -> str:
+        with record_ai_call("chat", self.name, "mock", input_text=messages) as rec:
+            rec.mark_mock()
+            text = self._chat(messages, **kwargs)
+            rec.set_output(text)
+            return text
+
+    def _chat(self, messages: list[dict], **kwargs) -> str:
         content = messages[-1]["content"] if messages else ""
 
         if "CATALOG_EXTRACT" in content:
@@ -95,7 +109,13 @@ class MockProvider(BaseAIProvider):
         return f"（Mock）已收到：{content[:60]}"
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        return [self._fake_vector(t) for t in texts]
+        with record_ai_call(
+            "embed", self.name, "mock", input_text=texts, item_count=len(texts)
+        ) as rec:
+            rec.mark_mock()
+            vectors = [self._fake_vector(t) for t in texts]
+            rec.set_output(vectors)
+            return vectors
 
     def _fake_vector(self, text: str) -> list[float]:
         vec = [0.0] * _DIM
@@ -106,4 +126,8 @@ class MockProvider(BaseAIProvider):
         return [v / norm for v in vec]
 
     def tts(self, text: str, voice: str = "default", speed: float = 1.0) -> str:
-        return "/media/mock/tts_placeholder.mp3"
+        with record_ai_call("tts", self.name, "mock", input_text=text, item_count=1) as rec:
+            rec.mark_mock()
+            url = "/media/mock/tts_placeholder.mp3"
+            rec.set_output(url)
+            return url

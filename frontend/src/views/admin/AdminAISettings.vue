@@ -1,42 +1,357 @@
 <template>
   <div class="page-container ai-settings" v-loading="loading">
     <header class="page-head">
-      <div><div class="eyebrow">MODEL OPERATIONS</div><h1>大模型配置</h1><p>按能力配置平台 AI 使用的服务商、模型和访问凭证，四项能力可混搭不同服务商。</p></div>
+      <div><div class="eyebrow">MODEL OPERATIONS</div><h1>大模型配置</h1><p>按能力配置平台 AI 使用的服务商、模型和访问凭证，四项能力可混搭不同服务商；调用统计与配置变更记录便于运维追溯。</p></div>
       <div class="runtime-badge" :class="overallTone"><span></span><div><strong>{{ overallTitle }}</strong><small>{{ overallSubtitle }}</small></div></div>
     </header>
 
-    <section class="effective-card">
-      <div class="section-head"><div><h2>当前生效配置</h2></div><el-button :icon="Refresh" @click="load">刷新</el-button></div>
-      <el-table :data="effective" class="effective-table">
-        <el-table-column label="能力" width="120">
-          <template #default="{ row }"><strong>{{ row.capability_display }}</strong><small class="block">{{ capabilityDesc(row.capability) }}</small></template>
-        </el-table-column>
-        <el-table-column label="服务商 / 模型" min-width="230">
-          <template #default="{ row }"><span class="provider-name">{{ row.provider_display }}</span><small class="block">{{ row.model_name || '未设置模型' }}<template v-if="row.timeout || row.voice">（{{ [row.timeout ? '超时 ' + row.timeout + 's' : '', row.voice].filter(Boolean).join(' · ') }}）</template></small></template>
-        </el-table-column>
-        <el-table-column label="API Key" min-width="170">
-          <template #default="{ row }"><code v-if="row.api_key_masked">{{ row.api_key_masked }}</code><span v-else class="muted">未配置</span></template>
-        </el-table-column>
-        <el-table-column label="实际运行时" width="150">
-          <template #default="{ row }">
-            <el-tag v-if="row.runtime_is_mock" type="info" effect="light">模拟模式</el-tag>
-            <el-tag v-else type="success" effect="light">{{ providerLabel(row.runtime_provider) }}</el-tag>
-            <small v-if="row.runtime_is_mock && row.provider !== 'mock'" class="block warn">已配置但回退 Mock</small>
-          </template>
-        </el-table-column>
-        <el-table-column label="来源" width="110">
-          <template #default="{ row }"><el-tag :type="row.source === 'database' ? 'primary' : 'warning'" effect="plain">{{ row.source === 'database' ? '管理端配置' : '环境变量' }}</el-tag></template>
-        </el-table-column>
-        <el-table-column label="最近测试" min-width="230">
-          <template #default="{ row }">
-            <div class="test-cell" :class="row.last_test_status">
-              <el-icon><CircleCheck v-if="row.last_test_status === 'success'" /><CircleClose v-else-if="row.last_test_status === 'failed'" /><InfoFilled v-else /></el-icon>
-              <div><span>{{ row.last_test_message || '尚未测试' }}</span><small v-if="row.last_tested_at">{{ formatTime(row.last_tested_at) }}</small></div>
+    <el-tabs v-model="activeTab" class="ai-tabs" @tab-change="onTabChange">
+      <!-- ================= Tab 1：能力配置 ================= -->
+      <el-tab-pane label="能力配置" name="config">
+        <section class="effective-card">
+          <div class="section-head"><div><h2>当前生效配置</h2></div><el-button :icon="Refresh" @click="load">刷新</el-button></div>
+          <el-table :data="effective" class="effective-table">
+            <el-table-column label="能力" width="120">
+              <template #default="{ row }"><strong>{{ row.capability_display }}</strong><small class="block">{{ capabilityDesc(row.capability) }}</small></template>
+            </el-table-column>
+            <el-table-column label="服务商 / 模型" min-width="230">
+              <template #default="{ row }"><span class="provider-name">{{ row.provider_display }}</span><small class="block">{{ row.model_name || '未设置模型' }}<template v-if="row.timeout || row.voice">（{{ [row.timeout ? '超时 ' + row.timeout + 's' : '', row.voice].filter(Boolean).join(' · ') }}）</template></small><el-tag v-if="row.supports_vision" size="small" type="success" effect="plain" class="vision-tag" title="问答已开启图片上传入口">图片</el-tag></template>
+            </el-table-column>
+            <el-table-column label="API Key" min-width="170">
+              <template #default="{ row }"><code v-if="row.api_key_masked">{{ row.api_key_masked }}</code><span v-else class="muted">未配置</span></template>
+            </el-table-column>
+            <el-table-column label="实际运行时" width="150">
+              <template #default="{ row }">
+                <el-tag v-if="row.runtime_is_mock" type="info" effect="light">模拟模式</el-tag>
+                <el-tag v-else type="success" effect="light">{{ providerLabel(row.runtime_provider) }}</el-tag>
+                <small v-if="row.runtime_is_mock && row.provider !== 'mock'" class="block warn">已配置但回退 Mock</small>
+              </template>
+            </el-table-column>
+            <el-table-column label="来源" width="110">
+              <template #default="{ row }"><el-tag :type="row.source === 'database' ? 'primary' : 'warning'" effect="plain">{{ row.source === 'database' ? '管理端配置' : '环境变量' }}</el-tag></template>
+            </el-table-column>
+            <el-table-column label="最近测试" min-width="230">
+              <template #default="{ row }">
+                <div class="test-cell" :class="row.last_test_status">
+                  <el-icon><CircleCheck v-if="row.last_test_status === 'success'" /><CircleClose v-else-if="row.last_test_status === 'failed'" /><InfoFilled v-else /></el-icon>
+                  <div><span>{{ row.last_test_message || '尚未测试' }}</span><small v-if="row.last_tested_at">{{ formatTime(row.last_tested_at) }}</small></div>
+                </div>
+              </template>
+            </el-table-column>
+          </el-table>
+        </section>
+
+        <section class="capability-grid">
+          <article v-for="cap in capabilityList" :key="cap.value" class="config-card">
+            <div class="card-head">
+              <span class="head-icon" :style="{ color: cap.color, background: cap.bg }"><el-icon><component :is="cap.icon" /></el-icon></span>
+              <div class="card-title"><h2>{{ cap.label }}</h2><p>{{ cap.desc }}</p></div>
+              <el-switch v-model="forms[cap.value].enabled" :disabled="forms[cap.value].provider === 'mock'" active-text="启用" inactive-text="停用" />
             </div>
-          </template>
-        </el-table-column>
-      </el-table>
-    </section>
+            <el-form label-position="top" class="config-form">
+              <el-form-item label="服务商">
+                <el-select v-model="forms[cap.value].provider" @change="(value) => selectProvider(cap.value, value)">
+                  <el-option v-for="item in cap.providers" :key="item.value" :label="item.label" :value="item.value" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="接口地址">
+                <el-input v-model.trim="forms[cap.value].base_url" :disabled="isMock(cap.value) || isLocal(cap.value)" placeholder="https://example.com/v1" />
+                <div v-if="isLocal(cap.value)" class="field-note"><el-icon><InfoFilled /></el-icon><span>系统内置模型在本机推理，权重部署时已自动下载，无需接口地址与 Key。</span></div>
+              </el-form-item>
+              <el-form-item :label="cap.modelLabel">
+                <el-input v-model.trim="forms[cap.value].model_name" :disabled="isMock(cap.value)" :placeholder="cap.modelPlaceholder" />
+              </el-form-item>
+              <template v-if="cap.showVision">
+                <el-form-item label="支持图片（多模态）">
+                  <el-switch v-model="forms[cap.value].supports_vision" :disabled="isMock(cap.value)" active-text="显示图片上传入口" inactive-text="隐藏" />
+                  <div class="field-note"><el-icon><InfoFilled /></el-icon><span>开启后学生/教师端问答显示图片上传入口，图片随问题一起发给对话模型；所用模型无视觉能力时请关闭，否则发送图片会被接口拒绝。</span></div>
+                  <div v-if="visionMismatch" class="field-note warn-note"><el-icon><WarningFilled /></el-icon><span>{{ visionMismatch }}</span></div>
+                </el-form-item>
+              </template>
+              <template v-if="cap.showTimeout">
+                <el-form-item label="超时(秒)">
+                  <el-input-number v-model="forms[cap.value].timeout" :min="1" :max="3600" :step="30" controls-position="right" :disabled="isMock(cap.value)" style="width:100%" />
+                  <div class="field-note"><el-icon><Timer /></el-icon><span>单次请求超时；留空默认 {{ cap.timeoutDefault }} 秒。本地模型推理慢建议调大。</span></div>
+                </el-form-item>
+              </template>
+              <template v-if="cap.showVoice">
+                <el-form-item label="发音人">
+                  <el-input v-model.trim="forms[cap.value].voice" :disabled="isMock(cap.value)" placeholder="默认 Cherry；本地 TTS 填服务端说话人 ID" />
+                </el-form-item>
+              </template>
+              <el-form-item label="API Key">
+                <el-input v-model="forms[cap.value].api_key" type="password" show-password autocomplete="new-password" :disabled="isMock(cap.value) || isLocal(cap.value)" :placeholder="keyPlaceholder(cap.value)" />
+                <div class="secret-note"><el-icon><Lock /></el-icon><span>{{ isLocal(cap.value) ? '系统内置模型无需 Key。' : `加密保存；当前 ${effectiveItem(cap.value).api_key_masked || '未配置'}，留空表示不修改。` }}</span></div>
+              </el-form-item>
+            </el-form>
+            <div class="card-foot">
+              <span class="source-tag">来源：{{ effectiveItem(cap.value).source === 'database' ? '管理端配置' : '环境变量' }}</span>
+              <el-button :icon="Connection" size="small" :loading="testing === cap.value" @click="testConnection(cap.value)">测试连接</el-button>
+            </div>
+          </article>
+        </section>
+
+        <footer class="action-bar">
+          <div><span v-if="dirty">配置有未保存修改</span><span v-else>所有修改已保存</span></div>
+          <el-button type="primary" :icon="Check" :loading="saving" :disabled="!dirty || saving" @click="save">保存并应用</el-button>
+        </footer>
+      </el-tab-pane>
+
+      <!-- ================= Tab 2：调用统计 ================= -->
+      <el-tab-pane label="调用统计" name="stats">
+        <section class="stats-panel" v-loading="statsLoading">
+          <div class="stats-toolbar">
+            <el-date-picker
+              v-model="period.range"
+              type="daterange"
+              value-format="YYYY-MM-DD"
+              unlink-panels
+              range-separator="~"
+              start-placeholder="开始日期"
+              end-placeholder="结束日期"
+              :shortcuts="rangeShortcuts"
+              clearable
+              style="width:270px"
+              @change="onRangeChange"
+            />
+            <span class="days-input">
+              <span class="days-label">近</span>
+              <el-input-number v-model="period.days" :min="1" :max="365" :step="1" controls-position="right" style="width:108px" @change="onDaysChange" />
+              <span class="days-label">天</span>
+            </span>
+            <el-button :icon="Refresh" @click="refreshStatsAndLogs">刷新</el-button>
+            <el-button :icon="Download" :loading="exporting" @click="exportCsv">导出 CSV</el-button>
+            <span class="toolbar-note">统计范围为平台全部 AI 调用（含 Mock 回退）；本地内置模型按条数计量，无 token。</span>
+          </div>
+          <p v-if="windowText" class="window-note">当前窗口 {{ windowText }}</p>
+
+          <div v-if="stats?.alerts?.length" class="alerts">
+            <div v-for="(alert, i) in stats.alerts" :key="i" class="alert" :class="alert.level">
+              <el-icon><WarningFilled v-if="alert.level === 'warning'" /><InfoFilled v-else /></el-icon>
+              <span>{{ alert.message }}</span>
+            </div>
+          </div>
+
+          <div class="stat-cards">
+            <div class="stat-card">
+              <small>总调用</small>
+              <strong>{{ fmtNum(stats?.totals?.calls) }}</strong>
+              <span class="delta" :class="totalsDelta.calls.tone" :title="`上周期 ${fmtNum(stats?.totals_previous?.calls)} 次`">{{ totalsDelta.calls.text }}</span>
+            </div>
+            <div class="stat-card">
+              <small>成功率</small>
+              <strong :class="successTone">{{ fmtPct(stats?.totals?.success_rate) }}</strong>
+              <span class="sub">成功 {{ stats?.totals?.success ?? 0 }} · 失败 {{ stats?.totals?.failed ?? 0 }}</span>
+              <span class="delta" :class="totalsDelta.success_rate.tone" :title="`上周期 ${fmtPct(stats?.totals_previous?.success_rate)}`">{{ totalsDelta.success_rate.text }}</span>
+            </div>
+            <div class="stat-card">
+              <small>Mock 回退</small>
+              <strong :class="{ warn: stats?.totals?.mock_calls }">{{ fmtNum(stats?.totals?.mock_calls) }}</strong>
+              <span class="sub">结果可能是占位内容</span>
+              <span class="delta" :class="totalsDelta.mock_calls.tone" :title="`上周期 ${fmtNum(stats?.totals_previous?.mock_calls)} 次`">{{ totalsDelta.mock_calls.text }}</span>
+            </div>
+            <div class="stat-card">
+              <small>Token 合计</small>
+              <strong>{{ fmtNum(stats?.totals?.total_tokens) }}</strong>
+              <span class="sub">入 {{ fmtNum(stats?.totals?.prompt_tokens) }} · 出 {{ fmtNum(stats?.totals?.completion_tokens) }}</span>
+              <span class="delta" :class="totalsDelta.total_tokens.tone" :title="`上周期 ${fmtNum(stats?.totals_previous?.total_tokens)}`">{{ totalsDelta.total_tokens.text }}</span>
+            </div>
+            <div class="stat-card">
+              <small>平均耗时</small>
+              <strong>{{ avgLatencyText }}</strong>
+              <span class="sub">P95 {{ p95Text }}</span>
+              <span class="delta" :class="totalsDelta.avg_latency_ms.tone" :title="`上周期 ${fmtMs(stats?.totals_previous?.avg_latency_ms)}`">{{ totalsDelta.avg_latency_ms.text }}</span>
+            </div>
+          </div>
+
+          <div class="chart-card">
+            <div class="chart-head">
+              <h3>调用趋势<small v-if="trendPoints.length">（{{ trendPoints.length }} {{ trendWeekly ? '周' : '天' }} · 柱为当前周期，虚线为上周期）</small></h3>
+              <el-radio-group v-model="chartMetric" size="small">
+                <el-radio-button value="calls">调用次数</el-radio-button>
+                <el-radio-button value="total_tokens">Token</el-radio-button>
+                <el-radio-button value="avg_latency_ms">平均耗时</el-radio-button>
+              </el-radio-group>
+            </div>
+            <svg v-if="trendPoints.length" viewBox="0 0 680 220" class="trend-chart" preserveAspectRatio="xMidYMid meet">
+              <line v-for="g in gridValues" :key="'grid' + g" :x1="36" :x2="670" :y1="yOf(g)" :y2="yOf(g)" stroke="#e8eef7" stroke-width="1" />
+              <text :x="30" :y="yOf(axisMax) + 4" text-anchor="end" class="axis-label">{{ fmtMetric(axisMax) }}</text>
+              <text :x="30" :y="yOf(0) + 4" text-anchor="end" class="axis-label">0</text>
+              <polyline v-if="hasPrevSeries" :points="prevPoints" fill="none" stroke="#94a3b8" stroke-width="2" stroke-dasharray="5 4" stroke-linecap="round" />
+              <g v-for="(row, i) in trendPoints" :key="row.day">
+                <rect :x="barX(i)" :y="yOf(row.value)" :width="barWidth" :height="barH(row.value)" rx="2" fill="#2563eb">
+                  <title>{{ row.label }} · {{ metricLabel }} {{ fmtMetric(row.value) }} · 上周期 {{ fmtMetric(row.prev) }}</title>
+                </rect>
+                <rect v-if="chartMetric === 'calls' && row.failed" :x="barX(i)" :y="yOf(row.value)" :width="barWidth" :height="barH(row.failed)" rx="2" fill="#dc2626" />
+                <text v-if="i % labelEvery === 0" :x="barX(i) + barWidth / 2" :y="212" text-anchor="middle" class="axis-label">{{ row.label }}</text>
+              </g>
+            </svg>
+            <el-empty v-else description="该时间范围内暂无调用记录" :image-size="60" />
+            <p v-if="trendSparseHint" class="chart-hint"><el-icon><InfoFilled /></el-icon>{{ trendSparseHint }}</p>
+          </div>
+
+          <div class="dist-card" :class="'dim-' + distDim">
+            <div class="dist-head">
+              <h3>调用分布</h3>
+              <el-radio-group v-model="distDim" size="small">
+                <el-radio-button value="capability">按能力</el-radio-button>
+                <el-radio-button value="scene">按场景</el-radio-button>
+                <el-radio-button value="user">按触发人</el-radio-button>
+              </el-radio-group>
+            </div>
+            <el-empty v-if="!distRows.length" description="该时间范围内暂无调用记录" :image-size="60" />
+            <template v-else>
+              <div v-for="grp in distGroups" :key="grp.group" class="dist-group">
+                <div v-if="grp.group" class="dist-group-title">{{ grp.group }}<small>共 {{ fmtNum(grp.calls) }} 次</small></div>
+                <button v-for="row in grp.rows" :key="row.key" type="button" class="dist-row" @click="filterByDistRow(row)">
+                  <span class="dist-name" :title="row.label">{{ row.label }}</span>
+                  <span class="dist-bar"><i :style="{ width: distBarWidth(row) + '%' }"></i></span>
+                  <span class="dist-calls">{{ fmtNum(row.calls) }}</span>
+                  <span class="dist-pct">{{ distPct(row) }}</span>
+                  <span class="dist-latency" :title="row.calls < 3 ? '样本不足 3 次，不展示耗时' : `平均耗时 ${fmtMs(row.avg_latency)}`">{{ row.calls < 3 ? '—' : fmtMs(row.avg_latency) }}</span>
+                  <span class="dist-badges">
+                    <em v-if="row.failed" class="badge fail" :title="`失败 ${row.failed} 次`">失败 {{ row.failed }}</em>
+                    <em v-if="row.mock_calls" class="badge mock" :title="`Mock 回退 ${row.mock_calls} 次`">Mock {{ row.mock_calls }}</em>
+                  </span>
+                </button>
+              </div>
+              <p class="dist-hint">点击任意一行，可按该维度联动筛选下方调用流水</p>
+            </template>
+          </div>
+
+          <div class="logs-card">
+            <div class="logs-head">
+              <h3>调用流水</h3>
+              <div class="logs-filters">
+                <el-select v-model="logFilters.capability" placeholder="能力" clearable style="width:120px">
+                  <el-option v-for="item in capabilityOptions" :key="item.value" :label="item.label" :value="item.value" />
+                </el-select>
+                <el-select v-model="logFilters.scene" placeholder="场景" clearable style="width:150px">
+                  <el-option v-for="item in sceneOptions" :key="item.value" :label="item.label" :value="item.value" />
+                </el-select>
+                <el-select v-model="logFilters.provider" placeholder="服务商" clearable style="width:140px">
+                  <el-option v-for="item in providerOptions" :key="item.value" :label="item.label" :value="item.value" />
+                </el-select>
+                <el-select v-model="logFilters.triggered_by" placeholder="触发人" clearable style="width:130px">
+                  <el-option v-for="item in triggeredByOptions" :key="item.value" :label="item.label" :value="item.value" />
+                </el-select>
+                <el-select v-model="logFilters.success" placeholder="结果" clearable style="width:100px">
+                  <el-option label="成功" value="true" />
+                  <el-option label="失败" value="false" />
+                </el-select>
+                <el-input v-model.trim="logFilters.keyword" placeholder="追溯ID / 输入摘要" clearable style="width:190px" @keyup.enter="applyLogFilters" />
+                <el-button :icon="Search" @click="applyLogFilters">查询</el-button>
+              </div>
+            </div>
+            <el-table :data="logs" size="small" v-loading="logsLoading">
+              <el-table-column label="时间" width="160">
+                <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+              </el-table-column>
+              <el-table-column label="能力" width="90">
+                <template #default="{ row }">{{ row.capability_display }}</template>
+              </el-table-column>
+              <el-table-column label="场景" width="110">
+                <template #default="{ row }">{{ row.scene_display }}</template>
+              </el-table-column>
+              <el-table-column label="服务商 / 模型" min-width="180">
+                <template #default="{ row }"><span>{{ row.provider_display }}</span><small class="block">{{ row.model_name || '—' }}</small></template>
+              </el-table-column>
+              <el-table-column label="结果" width="110">
+                <template #default="{ row }">
+                  <el-tag :type="row.success ? 'success' : 'danger'" size="small" effect="light">{{ row.success ? '成功' : '失败' }}</el-tag>
+                  <el-tag v-if="row.is_mock" type="info" size="small" effect="plain" class="mock-tag">Mock</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="耗时" width="80">
+                <template #default="{ row }">{{ fmtMs(row.latency_ms) }}</template>
+              </el-table-column>
+              <el-table-column label="Token / 条数" width="110">
+                <template #default="{ row }">
+                  <span v-if="row.total_tokens != null">{{ fmtNum(row.total_tokens) }}</span>
+                  <span v-else-if="row.item_count != null">{{ fmtNum(row.item_count) }} 条</span>
+                  <span v-else class="muted">—</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="触发人" width="100">
+                <template #default="{ row }">{{ row.triggered_by_name || '—' }}</template>
+              </el-table-column>
+              <el-table-column label="课程" min-width="120">
+                <template #default="{ row }"><span :title="row.course_name || ''">{{ row.course_name || '—' }}</span></template>
+              </el-table-column>
+              <el-table-column label="追溯ID" width="150">
+                <template #default="{ row }"><code :title="row.trace_id">{{ row.trace_id || '—' }}</code></template>
+              </el-table-column>
+              <el-table-column label="输入摘要" min-width="140">
+                <template #default="{ row }"><span class="ellipsis" :title="row.input_preview || ''">{{ row.input_preview || '—' }}</span></template>
+              </el-table-column>
+              <el-table-column label="错误" min-width="140">
+                <template #default="{ row }"><span v-if="row.error" class="error-text ellipsis" :title="row.error">{{ row.error }}</span><span v-else class="muted">—</span></template>
+              </el-table-column>
+            </el-table>
+            <el-pagination
+              v-if="logsTotal > logsPageSize"
+              background
+              class="pager"
+              layout="sizes, prev, pager, next, total"
+              :total="logsTotal"
+              :page-size="logsPageSize"
+              :current-page="logsPage"
+              :page-sizes="[10, 20, 50, 100]"
+              @current-change="(page) => { logsPage = page; loadLogs() }"
+              @size-change="(size) => { logsPageSize = size; logsPage = 1; loadLogs() }"
+            />
+          </div>
+        </section>
+      </el-tab-pane>
+
+      <!-- ================= Tab 3：变更记录 ================= -->
+      <el-tab-pane label="变更记录" name="changes">
+        <section class="changes-panel" v-loading="changesLoading">
+          <div class="stats-toolbar">
+            <el-select v-model="changeCapability" placeholder="能力" clearable style="width:140px" @change="reloadChanges">
+              <el-option v-for="item in capabilityOptions" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+            <el-button :icon="Refresh" @click="reloadChanges">刷新</el-button>
+            <span class="toolbar-note">每次管理端保存配置都会记录字段级旧值→新值；API Key 只记录「已配置 / 未配置」，不落密钥内容。</span>
+          </div>
+          <div class="changes-card">
+            <el-table :data="changes" size="small">
+              <el-table-column label="时间" width="170">
+                <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+              </el-table-column>
+              <el-table-column label="能力" width="110">
+                <template #default="{ row }"><el-tag size="small" effect="plain">{{ row.capability_display }}</el-tag></template>
+              </el-table-column>
+              <el-table-column label="操作人" width="140">
+                <template #default="{ row }">{{ row.changed_by_name || '系统' }}</template>
+              </el-table-column>
+              <el-table-column label="变更明细" min-width="360">
+                <template #default="{ row }">
+                  <div class="change-list">
+                    <span v-for="change in row.changes" :key="change.field" class="change-item">
+                      <em>{{ change.label }}</em>
+                      <span class="old">{{ change.old || '（空）' }}</span>
+                      <el-icon><Right /></el-icon>
+                      <span class="new">{{ change.new || '（空）' }}</span>
+                    </span>
+                  </div>
+                </template>
+              </el-table-column>
+            </el-table>
+            <el-pagination
+              v-if="changesTotal > changesPageSize"
+              background
+              class="pager"
+              layout="prev, pager, next, total"
+              :total="changesTotal"
+              :page-size="changesPageSize"
+              :current-page="changesPage"
+              @current-change="(page) => { changesPage = page; loadChanges() }"
+            />
+          </div>
+        </section>
+      </el-tab-pane>
+    </el-tabs>
 
     <el-dialog v-model="testDialog.visible" :title="testDialog.title" width="520px" append-to-body class="test-dialog">
       <div class="test-banner" :class="testDialog.status">
@@ -63,62 +378,17 @@
       </el-descriptions>
       <template #footer><el-button type="primary" @click="testDialog.visible = false">知道了</el-button></template>
     </el-dialog>
-
-    <section class="capability-grid">
-      <article v-for="cap in capabilityList" :key="cap.value" class="config-card">
-        <div class="card-head">
-          <span class="head-icon" :style="{ color: cap.color, background: cap.bg }"><el-icon><component :is="cap.icon" /></el-icon></span>
-          <div class="card-title"><h2>{{ cap.label }}</h2><p>{{ cap.desc }}</p></div>
-          <el-switch v-model="forms[cap.value].enabled" :disabled="forms[cap.value].provider === 'mock'" active-text="启用" inactive-text="停用" />
-        </div>
-        <el-form label-position="top" class="config-form">
-          <el-form-item label="服务商">
-            <el-select v-model="forms[cap.value].provider" @change="(value) => selectProvider(cap.value, value)">
-              <el-option v-for="item in cap.providers" :key="item.value" :label="item.label" :value="item.value" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="接口地址">
-            <el-input v-model.trim="forms[cap.value].base_url" :disabled="isMock(cap.value) || isLocal(cap.value)" placeholder="https://example.com/v1" />
-            <div v-if="isLocal(cap.value)" class="field-note"><el-icon><InfoFilled /></el-icon><span>系统内置模型在本机推理，权重部署时已自动下载，无需接口地址与 Key。</span></div>
-          </el-form-item>
-          <el-form-item :label="cap.modelLabel">
-            <el-input v-model.trim="forms[cap.value].model_name" :disabled="isMock(cap.value)" :placeholder="cap.modelPlaceholder" />
-          </el-form-item>
-          <template v-if="cap.showTimeout">
-            <el-form-item label="超时(秒)">
-              <el-input-number v-model="forms[cap.value].timeout" :min="1" :max="3600" :step="30" controls-position="right" :disabled="isMock(cap.value)" style="width:100%" />
-              <div class="field-note"><el-icon><Timer /></el-icon><span>单次请求超时；留空默认 {{ cap.timeoutDefault }} 秒。本地模型推理慢建议调大。</span></div>
-            </el-form-item>
-          </template>
-          <template v-if="cap.showVoice">
-            <el-form-item label="发音人">
-              <el-input v-model.trim="forms[cap.value].voice" :disabled="isMock(cap.value)" placeholder="默认 Cherry；本地 TTS 填服务端说话人 ID" />
-            </el-form-item>
-          </template>
-          <el-form-item label="API Key">
-            <el-input v-model="forms[cap.value].api_key" type="password" show-password autocomplete="new-password" :disabled="isMock(cap.value) || isLocal(cap.value)" :placeholder="keyPlaceholder(cap.value)" />
-            <div class="secret-note"><el-icon><Lock /></el-icon><span>{{ isLocal(cap.value) ? '系统内置模型无需 Key。' : `加密保存；当前 ${effectiveItem(cap.value).api_key_masked || '未配置'}，留空表示不修改。` }}</span></div>
-          </el-form-item>
-        </el-form>
-        <div class="card-foot">
-          <span class="source-tag">来源：{{ effectiveItem(cap.value).source === 'database' ? '管理端配置' : '环境变量' }}</span>
-          <el-button :icon="Connection" size="small" :loading="testing === cap.value" @click="testConnection(cap.value)">测试连接</el-button>
-        </div>
-      </article>
-    </section>
-
-    <footer class="action-bar">
-      <div><span v-if="dirty">配置有未保存修改</span><span v-else>所有修改已保存</span></div>
-      <el-button type="primary" :icon="Check" :loading="saving" :disabled="!dirty || saving" @click="save">保存并应用</el-button>
-    </footer>
   </div>
 </template>
 
 <script setup>
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { ChatDotRound, Check, CircleCheck, CircleClose, Connection, Files, InfoFilled, Lock, Microphone, Refresh, Sort, Timer } from '@element-plus/icons-vue'
-import { getAdminAIConfiguration, saveAdminAIConfiguration, testAdminAIConnection } from '@/api/admin'
+import { ChatDotRound, Check, CircleCheck, CircleClose, Connection, Download, Files, InfoFilled, Lock, Microphone, Refresh, Right, Search, Sort, Timer, WarningFilled } from '@element-plus/icons-vue'
+import {
+  getAdminAIConfiguration, saveAdminAIConfiguration, testAdminAIConnection,
+  getAdminAICallStats, listAdminAICallLogs, exportAdminAICallLogs, listAdminAIConfigChanges,
+} from '@/api/admin'
 
 // 全量服务商（供生效表格/弹窗按值查标签）；卡片下拉按能力收窄：
 // DeepSeek 无 embedding/TTS 接口；模拟模式不产生真实向量/音频（64 维假向量
@@ -135,6 +405,7 @@ const providers = [
   { value:'mock', label:'模拟模式' },
 ]
 const realProviders = providers.filter(i=>i.value!=='mock')
+const providerOptions = providers
 // 预设按能力区分：选服务商时各卡填各自能力的默认模型（TTS 卡不会再被填成聊天模型）
 const presets = {
   deepseek:{ base_url:'https://api.deepseek.com/v1', chat:'deepseek-chat', embed:'', rerank:'', tts:'' },
@@ -144,10 +415,28 @@ const presets = {
   mock:{ base_url:'', chat:'', embed:'', rerank:'', tts:'' },
 }
 const capabilityList = [
-  { value:'chat', label:'对话生成', desc:'目录识别、逐页讲稿、智能出题、知识问答、学情分析', icon:ChatDotRound, color:'#2563eb', bg:'#eff6ff', modelLabel:'对话模型', modelPlaceholder:'例如 qwen-plus / deepseek-chat', showTimeout:true, timeoutDefault:45, providers },
+  { value:'chat', label:'对话生成', desc:'目录识别、逐页讲稿、智能出题、知识问答、学情分析', icon:ChatDotRound, color:'#2563eb', bg:'#eff6ff', modelLabel:'对话模型', modelPlaceholder:'例如 qwen-plus / deepseek-chat', showTimeout:true, timeoutDefault:45, showVision:true, providers },
   { value:'embed', label:'向量化', desc:'知识库资料入库与检索', icon:Files, color:'#7c3aed', bg:'#f5f3ff', modelLabel:'向量模型', modelPlaceholder:'例如 text-embedding-v3', showTimeout:true, timeoutDefault:60, providers: realProviders.filter(i=>i.value!=='deepseek') },
   { value:'rerank', label:'重排序', desc:'知识库检索结果按问题语义精排，过滤关键词命中的噪声片段', icon:Sort, color:'#0ea5e9', bg:'#f0f9ff', modelLabel:'重排序模型', modelPlaceholder:'例如 gte-rerank-v2', showTimeout:true, timeoutDefault:60, providers: [{ value:'tongyi', label:'通义千问' }, { value:'local', label:'系统内置模型' }] },
   { value:'tts', label:'语音合成', desc:'PPT 逐页 AI 配音', icon:Microphone, color:'#f59e0b', bg:'#fffbeb', modelLabel:'语音模型', modelPlaceholder:'例如 qwen3-tts-flash', showTimeout:true, showVoice:true, timeoutDefault:120, providers: realProviders.filter(i=>i.value!=='deepseek') },
+]
+// 统计/流水页的筛选项（与后端 Scene / Provider 枚举一致）
+const capabilityOptions = capabilityList.map(i=>({ value:i.value, label:i.label }))
+const sceneOptions = [
+  { value:'catalog_gen', label:'目录识别' },
+  { value:'script_gen', label:'讲解稿生成' },
+  { value:'tts', label:'语音合成' },
+  { value:'material_embed', label:'教辅资料向量化' },
+  { value:'ppt_embed', label:'课件向量化' },
+  { value:'qa', label:'知识库问答' },
+  { value:'question_gen', label:'题目生成' },
+  { value:'grading', label:'作业批改' },
+  { value:'analytics', label:'学情分析' },
+  { value:'tts_preview', label:'配音试听' },
+  { value:'connection_test', label:'连接测试' },
+  { value:'vector_rebuild', label:'向量重建' },
+  { value:'rag_eval', label:'检索评测' },
+  { value:'other', label:'其他' },
 ]
 
 const loading=ref(false), saving=ref(false), testing=ref(''), dirty=ref(false), hydrating=ref(false)
@@ -158,11 +447,309 @@ const testDialog=reactive({
   request:'', response:'', elapsed:'', testedAt:'', fromForm:false,
 })
 const forms=reactive({
-  chat:{ provider:'mock', enabled:false, base_url:'', model_name:'', timeout:null, voice:'', api_key:'' },
-  embed:{ provider:'mock', enabled:false, base_url:'', model_name:'', timeout:null, voice:'', api_key:'' },
-  rerank:{ provider:'mock', enabled:false, base_url:'', model_name:'', timeout:null, voice:'', api_key:'' },
-  tts:{ provider:'mock', enabled:false, base_url:'', model_name:'', timeout:null, voice:'', api_key:'' },
+  chat:{ provider:'mock', enabled:false, base_url:'', model_name:'', timeout:null, voice:'', supports_vision:false, api_key:'' },
+  embed:{ provider:'mock', enabled:false, base_url:'', model_name:'', timeout:null, voice:'', supports_vision:false, api_key:'' },
+  rerank:{ provider:'mock', enabled:false, base_url:'', model_name:'', timeout:null, voice:'', supports_vision:false, api_key:'' },
+  tts:{ provider:'mock', enabled:false, base_url:'', model_name:'', timeout:null, voice:'', supports_vision:false, api_key:'' },
 })
+
+// ---------------- Tab 切换 ----------------
+const activeTab=ref('config')
+const statsLoaded=ref(false), changesLoaded=ref(false)
+function onTabChange(name){
+  if(name==='stats' && !statsLoaded.value){ reloadStats(); loadLogs() }
+  if(name==='changes' && !changesLoaded.value){ reloadChanges() }
+}
+
+// ---------------- 调用统计 ----------------
+// 周期三方式并存（后使用者生效）：预设快捷与自定义起止日期走日历窗（start/end），
+// 近 N 天走滚动窗（days）；mode 决定发给后端的参数形态
+const period = reactive({ mode: 'days', days: 7, range: [] })
+const rangeShortcuts = [
+  { text: '今天', value: () => { const t = new Date(); return [t, t] } },
+  { text: '近 7 天', value: () => { const t = new Date(); const s = new Date(t); s.setDate(s.getDate() - 6); return [s, t] } },
+  { text: '近 30 天', value: () => { const t = new Date(); const s = new Date(t); s.setDate(s.getDate() - 29); return [s, t] } },
+  { text: '近 90 天', value: () => { const t = new Date(); const s = new Date(t); s.setDate(s.getDate() - 89); return [s, t] } },
+]
+function periodParams() {
+  if (period.mode === 'range' && period.range?.length === 2) {
+    return { start: period.range[0], end: period.range[1] }
+  }
+  return { days: period.days }
+}
+const statsLoading = ref(false)
+const stats = ref(null)
+const exporting = ref(false)
+
+const windowText = computed(() => {
+  const w = stats.value?.window
+  if (!w) return ''
+  const s = w.start.slice(0, 10), e = w.end.slice(0, 10)
+  const ps = w.previous_start.slice(0, 10), pe = w.previous_end.slice(0, 10)
+  return `${s} ~ ${e}（${w.days} 天）· 对比上周期 ${ps} ~ ${pe}`
+})
+
+// 环比：涨红跌绿（中文语境）；success_rate 反向（越高越好）；上周期无数据时给「新增」
+function deltaInfo(cur, prev, { goodWhenUp = false } = {}) {
+  if (cur == null || prev == null) return { text: '—', tone: 'none' }
+  if (prev === 0) {
+    if (cur === 0) return { text: '持平', tone: 'flat' }
+    return { text: '新增', tone: goodWhenUp ? 'good' : 'up' }
+  }
+  const ratio = (cur - prev) / prev
+  if (Math.abs(ratio) < 0.001) return { text: '持平', tone: 'flat' }
+  const text = `${ratio > 0 ? '↑' : '↓'} ${(Math.abs(ratio) * 100).toFixed(0)}%`
+  if (goodWhenUp) return { text, tone: ratio > 0 ? 'good' : 'bad' }
+  return { text, tone: ratio > 0 ? 'up' : 'down' }
+}
+const totalsDelta = computed(() => ({
+  calls: deltaInfo(stats.value?.totals?.calls, stats.value?.totals_previous?.calls),
+  success_rate: deltaInfo(stats.value?.totals?.success_rate, stats.value?.totals_previous?.success_rate, { goodWhenUp: true }),
+  mock_calls: deltaInfo(stats.value?.totals?.mock_calls, stats.value?.totals_previous?.mock_calls),
+  total_tokens: deltaInfo(stats.value?.totals?.total_tokens, stats.value?.totals_previous?.total_tokens),
+  avg_latency_ms: deltaInfo(stats.value?.totals?.avg_latency_ms, stats.value?.totals_previous?.avg_latency_ms),
+}))
+// 小样本保护：调用 <3 次平均耗时不可信；<10 次 P95 样本不足
+const totalCalls = computed(() => stats.value?.totals?.calls ?? 0)
+const avgLatencyText = computed(() => (totalCalls.value < 3 ? '—' : fmtMs(stats.value?.totals?.avg_latency_ms)))
+const p95Text = computed(() => (totalCalls.value < 10 ? '样本不足' : fmtMs(stats.value?.totals?.p95_latency_ms)))
+
+// ---------------- 趋势图（当前周期柱 + 上周期虚线，按窗口内偏移对齐） ----------------
+const chartMetric = ref('calls')  // calls | total_tokens | avg_latency_ms
+const metricLabel = computed(() => ({ calls: '调用', total_tokens: 'Token', avg_latency_ms: '平均耗时' })[chartMetric.value])
+
+function isoDay(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+function eachDayInclusive(startDay, endDay) {
+  const days = []
+  const end = new Date(endDay + 'T00:00:00')
+  for (let d = new Date(startDay + 'T00:00:00'); d <= end; d.setDate(d.getDate() + 1)) {
+    days.push(isoDay(d))
+    if (days.length > 400) break  // 防御：后端已限制 366 天
+  }
+  return days
+}
+const trendSeries = computed(() => {
+  const w = stats.value?.window
+  if (!w) return []
+  const curMap = Object.fromEntries((stats.value.daily || []).map(r => [r.day, r]))
+  const prevMap = Object.fromEntries((stats.value.daily_previous || []).map(r => [r.day, r]))
+  const curDays = eachDayInclusive(w.start.slice(0, 10), w.end.slice(0, 10))
+  const prevDays = eachDayInclusive(w.previous_start.slice(0, 10), w.previous_end.slice(0, 10))
+  const rows = []
+  for (let i = 0; i < Math.max(curDays.length, prevDays.length); i++) {
+    const cur = i < curDays.length ? curMap[curDays[i]] : null
+    const prev = i < prevDays.length ? prevMap[prevDays[i]] : null
+    rows.push({
+      day: (i < curDays.length ? curDays[i] : prevDays[i]),
+      calls: cur?.calls || 0,
+      failed: cur?.failed || 0,
+      total_tokens: cur?.total_tokens || 0,
+      avg_latency_ms: cur?.avg_latency_ms || 0,
+      prev_calls: prev?.calls || 0,
+      prev_total_tokens: prev?.total_tokens || 0,
+      prev_avg_latency_ms: prev?.avg_latency_ms || 0,
+    })
+  }
+  // 跨度超过 31 天按周聚合（前端分桶，7 天一组从窗口首日起算）
+  if (rows.length > 31) {
+    const buckets = []
+    for (let i = 0; i < rows.length; i += 7) {
+      const chunk = rows.slice(i, i + 7)
+      const sum = k => chunk.reduce((a, r) => a + (r[k] || 0), 0)
+      // 平均耗时按调用次数加权，避免无调用天数稀释
+      const wavg = (vk, ck) => (sum(ck) ? Math.round(chunk.reduce((a, r) => a + (r[vk] || 0) * (r[ck] || 0), 0) / sum(ck)) : 0)
+      buckets.push({
+        day: chunk[0].day,
+        calls: sum('calls'), failed: sum('failed'), total_tokens: sum('total_tokens'),
+        avg_latency_ms: wavg('avg_latency_ms', 'calls'),
+        prev_calls: sum('prev_calls'), prev_total_tokens: sum('prev_total_tokens'),
+        prev_avg_latency_ms: wavg('prev_avg_latency_ms', 'prev_calls'),
+        weekly: true,
+      })
+    }
+    return buckets
+  }
+  return rows
+})
+const trendPoints = computed(() => trendSeries.value.map(r => ({
+  day: r.day,
+  label: r.day.slice(5),
+  calls: r.calls,
+  failed: r.failed,
+  value: chartMetric.value === 'total_tokens' ? r.total_tokens : chartMetric.value === 'avg_latency_ms' ? r.avg_latency_ms : r.calls,
+  prev: chartMetric.value === 'total_tokens' ? r.prev_total_tokens : chartMetric.value === 'avg_latency_ms' ? r.prev_avg_latency_ms : r.prev_calls,
+})))
+const trendWeekly = computed(() => trendSeries.value.some(r => r.weekly))
+const hasPrevSeries = computed(() => trendPoints.value.some(p => p.prev > 0))
+const prevPoints = computed(() => trendPoints.value.map((p, i) => `${barX(i) + barWidth.value / 2},${yOf(p.prev)}`).join(' '))
+const trendMax = computed(() => Math.max(1, ...trendPoints.value.flatMap(p => [p.value, p.prev])))
+const axisMax = computed(() => {
+  const m = trendMax.value
+  if (m <= 5) return 5
+  if (m <= 10) return 10
+  const pow = Math.pow(10, Math.floor(Math.log10(m)))
+  return Math.ceil(m / pow) * pow
+})
+const gridValues = computed(() => [axisMax.value, axisMax.value / 2, 0])
+const barSlot = computed(() => 634 / Math.max(1, trendPoints.value.length))
+const barWidth = computed(() => Math.max(4, Math.min(28, barSlot.value - 4)))
+const labelEvery = computed(() => Math.max(1, Math.ceil(trendPoints.value.length / 10)))
+const PLOT_TOP = 10, PLOT_HEIGHT = 186
+function barX(i) { return 36 + i * barSlot.value + (barSlot.value - barWidth.value) / 2 }
+function barH(v) { return Math.round((v / axisMax.value) * PLOT_HEIGHT) }
+function yOf(v) { return PLOT_TOP + PLOT_HEIGHT - barH(v) }
+function fmtMetric(v) { return chartMetric.value === 'avg_latency_ms' ? fmtMs(v) : fmtNum(v) }
+const trendSparseHint = computed(() => {
+  if (!totalCalls.value) return ''
+  const effective = trendSeries.value.filter(r => r.calls > 0).length
+  return effective < 3 ? `仅 ${effective} 天有调用记录，趋势形态暂不稳定，仅供参考` : ''
+})
+
+// ---------------- 调用分布（能力/场景/触发人三表合一，点击联动流水） ----------------
+const distDim = ref('capability')  // capability | scene | user
+const distRows = computed(() => {
+  const s = stats.value
+  if (!s) return []
+  if (distDim.value === 'scene') {
+    return (s.by_scene || []).map(r => ({ key: r.scene, label: sceneLabel(r.scene), group: r.group || '其他', ...r }))
+  }
+  if (distDim.value === 'user') {
+    return (s.top_triggered_by || []).map(r => ({
+      key: r.triggered_by, label: r.triggered_by__username || '—', group: '',
+      calls: r.calls, failed: r.failed, mock_calls: 0,
+      avg_latency: null, total_tokens: null, item_count: null,
+    }))
+  }
+  return (s.by_capability || []).map(r => ({ key: r.capability, label: capabilityLabel(r.capability), group: '', ...r }))
+})
+const distMax = computed(() => Math.max(1, ...distRows.value.map(r => r.calls || 0)))
+const distTotal = computed(() => stats.value?.totals?.calls || 0)
+function distBarWidth(row) { return Math.max(2, ((row.calls || 0) / distMax.value) * 100) }
+function distPct(row) { return distTotal.value ? ((row.calls / distTotal.value) * 100).toFixed(1) + '%' : '—' }
+const distGroups = computed(() => {
+  const rows = distRows.value
+  if (distDim.value !== 'scene') return rows.length ? [{ group: '', calls: distTotal.value, rows }] : []
+  const map = new Map()
+  for (const r of rows) {
+    if (!map.has(r.group)) map.set(r.group, [])
+    map.get(r.group).push(r)
+  }
+  return [...map.entries()]
+    .map(([group, list]) => ({ group, calls: list.reduce((a, r) => a + (r.calls || 0), 0), rows: list }))
+    .sort((a, b) => b.calls - a.calls)
+})
+function filterByDistRow(row) {
+  if (distDim.value === 'capability') logFilters.capability = row.key
+  else if (distDim.value === 'scene') logFilters.scene = row.key
+  else logFilters.triggered_by = String(row.key)
+  applyLogFilters()
+  document.querySelector('.logs-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+const successTone = computed(() => {
+  const rate = stats.value?.totals?.success_rate
+  if (rate == null) return ''
+  return rate >= 0.95 ? 'good' : (rate >= 0.8 ? '' : 'bad')
+})
+
+function fmtNum(v) {
+  if (v == null) return '0'
+  if (v >= 10000) return (v / 10000).toFixed(1).replace(/\.0$/, '') + ' 万'
+  return String(v)
+}
+function fmtMs(v) {
+  if (!v) return '0ms'
+  return v >= 1000 ? (v / 1000).toFixed(1) + 's' : v + 'ms'
+}
+function fmtPct(v) { return v == null ? '—' : (v * 100).toFixed(1) + '%' }
+function capabilityLabel(value) { return capabilityOptions.find(i => i.value === value)?.label || value }
+function sceneLabel(value) { return sceneOptions.find(i => i.value === value)?.label || value }
+
+async function loadStats() {
+  statsLoading.value = true
+  try {
+    stats.value = await getAdminAICallStats(periodParams())
+    statsLoaded.value = true
+  } finally { statsLoading.value = false }
+}
+function reloadStats() { loadStats() }
+// 周期/筛选变化：汇总与流水共用同一窗口，一并刷新
+function refreshStatsAndLogs() { reloadStats(); logsPage.value = 1; loadLogs() }
+function onRangeChange(value) {
+  if (!value) { period.range = []; return }  // 清空不改变当前生效窗口
+  period.mode = 'range'
+  refreshStatsAndLogs()
+}
+function onDaysChange() {
+  period.mode = 'days'
+  refreshStatsAndLogs()
+}
+
+// ---------------- 调用流水 ----------------
+const logFilters = reactive({ capability: '', scene: '', provider: '', triggered_by: '', success: '', keyword: '' })
+const logs = ref([]), logsTotal = ref(0), logsPage = ref(1), logsPageSize = ref(20), logsLoading = ref(false)
+const triggeredByOptions = computed(() => (stats.value?.top_triggered_by || []).map(r => ({
+  value: String(r.triggered_by), label: r.triggered_by__username || `用户 ${r.triggered_by}`,
+})))
+
+async function loadLogs() {
+  logsLoading.value = true
+  try {
+    const params = { ...periodParams(), page: logsPage.value, page_size: logsPageSize.value }
+    for (const [key, value] of Object.entries(logFilters)) {
+      if (value !== '' && value != null) params[key] = value
+    }
+    const result = await listAdminAICallLogs(params)
+    logs.value = result?.items || []
+    logsTotal.value = result?.total || 0
+  } finally { logsLoading.value = false }
+}
+function applyLogFilters() { logsPage.value = 1; loadLogs() }
+
+async function exportCsv() {
+  exporting.value = true
+  try {
+    const blob = await exportAdminAICallLogs(periodParams())
+    // 后端错误也可能以 blob（JSON）返回，先识别再落盘，避免下载到错误文件
+    if (blob?.type && blob.type.includes('application/json')) {
+      const text = await blob.text()
+      let message = '导出失败'
+      try { message = JSON.parse(text).message || message } catch { /* 保留默认文案 */ }
+      ElMessage.error(message)
+      return
+    }
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `ai_call_logs_${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    ElMessage.success('已开始下载（单次上限 5 万条）')
+  } catch {
+    ElMessage.error('导出失败，请稍后重试')
+  } finally { exporting.value = false }
+}
+
+// ---------------- 配置变更记录 ----------------
+const changeCapability=ref('')
+const changes=ref([]), changesTotal=ref(0), changesPage=ref(1), changesPageSize=ref(20), changesLoading=ref(false)
+
+async function loadChanges(){
+  changesLoading.value=true
+  try{
+    const params={ page: changesPage.value, page_size: changesPageSize.value }
+    if(changeCapability.value) params.capability=changeCapability.value
+    const result=await listAdminAIConfigChanges(params)
+    changes.value=result?.items||[]
+    changesTotal.value=result?.total||0
+    changesLoaded.value=true
+  }finally{ changesLoading.value=false }
+}
+function reloadChanges(){ changesPage.value=1; loadChanges() }
 
 const realCount=computed(()=>effective.value.filter(i=>!i.runtime_is_mock).length)
 const overallTone=computed(()=>realCount.value===0?'muted':'active')
@@ -173,6 +760,25 @@ function capabilityDesc(value){ return capabilityList.find(i=>i.value===value)?.
 function effectiveItem(value){ return effective.value.find(i=>i.capability===value) || {} }
 function isMock(value){ return forms[value].provider==='mock' }
 function isLocal(value){ return forms[value].provider==='local' }
+// 模型名视觉特征（与后端 model_name_suggests_vision 同规则）：仅用于配置页提示
+const VISION_MODEL_HINTS = ['vl', 'vision', '4v', 'gpt-4o', 'gpt-4.1', 'gemini', 'claude-3', 'pixtral', 'llava', '多模态']
+function looksLikeVisionModel(name){
+  const n = String(name || '').toLowerCase()
+  return VISION_MODEL_HINTS.some(h => n.includes(h))
+}
+// 图片开关与模型能力的错配提示（两个方向都提示：qwen3.7-plus 这类实测支持
+// 视觉但名称不带 vl/vision 的模型，关闭时不该误报，只做确认提醒）
+const visionMismatch = computed(() => {
+  if (isMock('chat')) return ''
+  const looks = looksLikeVisionModel(forms.chat.model_name)
+  if (looks && !forms.chat.supports_vision) {
+    return '当前模型名疑似多模态（视觉）模型，但图片上传入口为隐藏；如确认支持图片请开启开关。'
+  }
+  if (!looks && forms.chat.supports_vision) {
+    return '模型名未体现视觉能力（如 qwen3.7-plus 实测支持图片但名称不带 vl/vision）；请确认所用模型确实支持图片输入，否则用户发送图片会被接口拒绝。'
+  }
+  return ''
+})
 function keyPlaceholder(value){ if(isLocal(value)) return '系统内置模型无需 API Key'; return effectiveItem(value).api_key_configured ? '已安全保存，留空表示不修改' : '请输入服务商 API Key' }
 function formatTime(value){ return value ? new Date(value).toLocaleString('zh-CN',{hour12:false}) : '' }
 
@@ -192,6 +798,7 @@ function hydrate(items){
     form.model_name=item.model_name||''
     form.timeout=item.timeout==null?null:Number(item.timeout)
     form.voice=item.voice||''
+    form.supports_vision=Boolean(item.supports_vision)
     form.api_key=''
   }
   nextTick(()=>{ dirty.value=false; hydrating.value=false })
@@ -279,10 +886,30 @@ onMounted(load)
 </script>
 
 <style scoped>
-.ai-settings{color:#0f172a;padding-bottom:110px!important}.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:22px;margin-bottom:22px}.eyebrow{margin-bottom:6px;color:#2563eb;font-size:12px;font-weight:850;letter-spacing:.16em}h1,h2,p{margin:0}h1{font-size:30px}.page-head p{margin-top:7px;color:#8190a8}.runtime-badge{min-width:230px;padding:12px 15px;border:1px solid #e2e8f0;border-radius:16px;display:flex;align-items:center;gap:11px;background:#fff}.runtime-badge>span{width:10px;height:10px;border-radius:50%;background:#94a3b8;box-shadow:0 0 0 5px #f1f5f9}.runtime-badge>div{display:grid;gap:2px}.runtime-badge small{color:#94a3b8}.runtime-badge.active>span{background:#22c55e;box-shadow:0 0 0 5px #dcfce7}
-.effective-card,.config-card{border:1px solid #e5edf8;border-radius:22px;background:rgba(255,255,255,.94);box-shadow:0 16px 40px rgba(37,99,235,.07)}.effective-card{padding:20px;margin-bottom:16px}.section-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:14px}.section-head h2{font-size:18px}.effective-table{width:100%;font-size:14px}.effective-table :deep(.el-table__cell){padding:8px 0;font-size:14px}.effective-table :deep(.el-table__cell .cell){padding:0 10px}.effective-table code{background:#f1f5f9;border-radius:5px;padding:2px 7px;font-size:13px;color:#334155}.provider-name{font-weight:600;color:#0f172a}.muted{color:#64748b;font-size:14px}.warn{color:#d97706;font-size:12px}.block{display:block;margin-top:3px;color:#64748b;font-size:12px}.test-cell{display:flex;align-items:flex-start;gap:7px;color:#334155}.test-cell span{font-size:13px;font-weight:500;word-break:break-all}.test-cell small{display:block;margin-top:2px;color:#64748b;font-size:12px}.test-cell.success{color:#16a34a}.test-cell.failed{color:#dc2626}
-.capability-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.config-card{padding:22px}.card-head{display:flex;align-items:center;gap:12px;padding-bottom:17px;border-bottom:1px solid #edf2f7}.card-title{min-width:0;flex:1}.card-head h2{font-size:17px}.card-head p{margin-top:3px;color:#94a3b8;font-size:12px}.head-icon{width:42px;height:42px;border-radius:13px;display:grid;place-items:center;flex:0 0 auto;font-size:19px}.config-form{margin-top:16px}.secret-note{margin-top:7px;color:#94a3b8;font-size:12px;display:flex;align-items:flex-start;gap:5px;line-height:1.5}.field-note{margin-top:7px;color:#94a3b8;font-size:12px;display:flex;align-items:flex-start;gap:5px;line-height:1.5}.card-foot{margin-top:14px;padding-top:13px;border-top:1px solid #edf2f7;display:flex;align-items:center;justify-content:space-between;gap:10px}.source-tag{color:#94a3b8;font-size:12px}
+.ai-settings{color:#0f172a;padding-bottom:110px!important}.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:22px;margin-bottom:22px}.eyebrow{margin-bottom:6px;color:#2563eb;font-size:12px;font-weight:850;letter-spacing:.16em}h1,h2,h3,p{margin:0}h1{font-size:30px}.page-head p{margin-top:7px;color:#8190a8}.runtime-badge{min-width:230px;padding:12px 15px;border:1px solid #e2e8f0;border-radius:16px;display:flex;align-items:center;gap:11px;background:#fff}.runtime-badge>span{width:10px;height:10px;border-radius:50%;background:#94a3b8;box-shadow:0 0 0 5px #f1f5f9}.runtime-badge>div{display:grid;gap:2px}.runtime-badge small{color:#94a3b8}.runtime-badge.active>span{background:#22c55e;box-shadow:0 0 0 5px #dcfce7}
+.ai-tabs{--el-tabs-header-height:44px}.ai-tabs :deep(.el-tabs__header){margin-bottom:18px}.ai-tabs :deep(.el-tabs__item){font-size:15px;font-weight:700}.ai-tabs :deep(.el-tabs__nav-wrap::after){background:#e8eef7}
+.effective-card,.config-card,.stats-toolbar,.chart-card,.dist-card,.logs-card,.changes-card{border:1px solid #e5edf8;border-radius:22px;background:rgba(255,255,255,.94);box-shadow:0 16px 40px rgba(37,99,235,.07)}.effective-card{padding:20px;margin-bottom:16px}.section-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:14px}.section-head h2{font-size:18px}.effective-table{width:100%;font-size:14px}.effective-table :deep(.el-table__cell){padding:8px 0;font-size:14px}.effective-table :deep(.el-table__cell .cell){padding:0 10px}.effective-table code{background:#f1f5f9;border-radius:5px;padding:2px 7px;font-size:13px;color:#334155}.provider-name{font-weight:600;color:#0f172a}.muted{color:#64748b;font-size:14px}.warn{color:#d97706;font-size:12px}.block{display:block;margin-top:3px;color:#64748b;font-size:12px}.test-cell{display:flex;align-items:flex-start;gap:7px;color:#334155}.test-cell span{font-size:13px;font-weight:500;word-break:break-all}.test-cell small{display:block;margin-top:2px;color:#64748b;font-size:12px}.test-cell.success{color:#16a34a}.test-cell.failed{color:#dc2626}
+.capability-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.config-card{padding:22px}.card-head{display:flex;align-items:center;gap:12px;padding-bottom:17px;border-bottom:1px solid #edf2f7}.card-title{min-width:0;flex:1}.card-head h2{font-size:17px}.card-head p{margin-top:3px;color:#94a3b8;font-size:12px}.head-icon{width:42px;height:42px;border-radius:13px;display:grid;place-items:center;flex:0 0 auto;font-size:19px}.config-form{margin-top:16px}.secret-note{margin-top:7px;color:#94a3b8;font-size:12px;display:flex;align-items:flex-start;gap:5px;line-height:1.5}.field-note{margin-top:7px;color:#94a3b8;font-size:12px;display:flex;align-items:flex-start;gap:5px;line-height:1.5}.card-foot{margin-top:14px;padding-top:13px;border-top:1px solid #edf2f7;display:flex;align-items:center;justify-content:space-between;gap:10px}.source-tag{color:#94a3b8;font-size:12px}.vision-tag{margin-top:5px}.warn-note{color:#b45309}.warn-note .el-icon{color:#d97706}
 .action-bar{position:sticky;bottom:-36px;z-index:5;margin:18px -36px -36px;padding:15px 36px;border-top:1px solid #e5edf8;background:rgba(255,255,255,.92);backdrop-filter:blur(16px);display:flex;justify-content:flex-end;align-items:center;gap:10px}.action-bar>div{margin-right:auto;color:#94a3b8;font-size:12px}
 .test-banner{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;border:1px solid;border-radius:12px;margin-bottom:14px}.test-banner.success{border-color:#bbf7d0;background:#f0fdf4;color:#15803d}.test-banner.failed{border-color:#fecaca;background:#fef2f2;color:#b91c1c}.test-banner.untested{border-color:#e2e8f0;background:#f8fafc;color:#475569}.banner-icon{font-size:22px;margin-top:1px}.banner-text strong{display:block;margin-bottom:4px;font-size:15px}.banner-text p{margin:0;font-size:13px;line-height:1.6;word-break:break-all}.form-note{margin-bottom:12px;padding:8px 12px;border-radius:8px;background:#eff6ff;color:#1d4ed8;font-size:12px;line-height:1.6}.test-dialog :deep(.el-descriptions__content){word-break:break-all;line-height:1.6}
-@media(max-width:1200px){.capability-grid{grid-template-columns:1fr}.page-head{align-items:flex-start;flex-direction:column}}@media(max-width:720px){.action-bar{margin-left:-16px;margin-right:-16px;padding-left:16px;padding-right:16px}.action-bar>div{display:none}}
+/* ---- 调用统计 ---- */
+.stats-panel{display:grid;gap:16px}.stats-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:14px 18px}.toolbar-note{color:#94a3b8;font-size:12px;line-height:1.5}.window-note{padding:0 4px;color:#64748b;font-size:12px}.days-input{display:inline-flex;align-items:center;gap:6px}.days-label{color:#64748b;font-size:13px}
+.alerts{display:grid;gap:8px}.alert{display:flex;align-items:flex-start;gap:8px;padding:11px 15px;border-radius:14px;font-size:13px;line-height:1.6}.alert.warning{background:#fffbeb;border:1px solid #fde68a;color:#b45309}.alert.info{background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8}.alert .el-icon{margin-top:2px;flex:0 0 auto}
+.stat-cards{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}.stat-card{padding:15px 17px;display:grid;gap:3px;border:1px solid #e5edf8;border-radius:18px;background:rgba(255,255,255,.94);box-shadow:0 16px 40px rgba(37,99,235,.07)}.stat-card small{color:#94a3b8;font-size:12px}.stat-card strong{font-size:24px;color:#0f172a}.stat-card strong.good{color:#16a34a}.stat-card strong.bad{color:#dc2626}.stat-card strong.warn{color:#d97706}.stat-card .sub{color:#94a3b8;font-size:12px}
+/* 环比：涨红跌绿（成功率反向：good/bad） */
+.delta{font-size:12px;font-weight:700}.delta.up,.delta.bad{color:#dc2626}.delta.down,.delta.good{color:#16a34a}.delta.flat,.delta.none{color:#94a3b8;font-weight:400}
+.chart-card{padding:18px}.chart-card h3,.dist-card h3,.logs-card h3{font-size:16px;margin-bottom:12px}.chart-card h3 small,.logs-head h3 small{margin-left:8px;color:#94a3b8;font-size:12px;font-weight:400}.chart-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}.chart-head h3{margin-bottom:0}.trend-chart{width:100%;height:220px;display:block}.axis-label{font-size:10px;fill:#94a3b8}.chart-hint{display:flex;align-items:center;gap:6px;margin:10px 0 0;color:#b45309;font-size:12px}
+.dist-card{padding:18px}.dist-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:6px}.dist-head h3{margin-bottom:0}
+.dist-group-title{display:flex;align-items:center;gap:8px;margin:12px 0 4px;font-size:13px;font-weight:700;color:#334155}.dist-group-title small{color:#94a3b8;font-weight:400}.dist-group:first-child .dist-group-title{margin-top:4px}
+.dist-row{display:grid;grid-template-columns:minmax(88px,150px) 1fr 58px 52px 62px auto;align-items:center;gap:10px;width:100%;padding:7px 10px;border:0;border-radius:10px;background:transparent;cursor:pointer;text-align:left;font:inherit;color:#0f172a}.dist-row:hover{background:#f1f7ff}.dist-row:active{background:#e8f1ff}
+.dist-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:600}
+.dist-bar{height:8px;border-radius:5px;background:#eef3fa;overflow:hidden}.dist-bar i{display:block;height:100%;border-radius:5px;transition:width .3s}
+.dist-card.dim-capability .dist-bar i{background:linear-gradient(90deg,#93c5fd,#2563eb)}.dist-card.dim-scene .dist-bar i{background:linear-gradient(90deg,#c4b5fd,#7c3aed)}.dist-card.dim-user .dist-bar i{background:linear-gradient(90deg,#7dd3fc,#0284c7)}
+.dist-calls{font-size:13px;font-weight:700;text-align:right}.dist-pct{font-size:12px;color:#64748b;text-align:right}.dist-latency{font-size:12px;color:#94a3b8;text-align:right}
+.dist-badges{display:inline-flex;gap:5px}.badge{font-style:normal;font-size:11px;padding:1px 7px;border-radius:6px;white-space:nowrap}.badge.fail{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca}.badge.mock{background:#f1f5f9;color:#475569;border:1px solid #e2e8f0}
+.dist-hint{margin:12px 0 0;color:#94a3b8;font-size:12px}
+.logs-card{padding:18px}.logs-head{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:12px}.logs-filters{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.mock-tag{margin-left:5px}.ellipsis{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}.error-text{color:#dc2626}.pager{margin-top:14px;justify-content:flex-end}
+.change-list{display:flex;flex-wrap:wrap;gap:6px 14px}.change-item{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#334155;background:#f8fafc;border:1px solid #e8eef7;border-radius:8px;padding:3px 9px}.change-item em{font-style:normal;color:#64748b}.change-item .old{color:#dc2626;text-decoration:line-through}.change-item .new{color:#16a34a;font-weight:600}.change-item .el-icon{font-size:11px;color:#94a3b8}
+.changes-card{padding:18px}.changes-card :deep(.el-table){font-size:13px}
+@media(max-width:1200px){.capability-grid{grid-template-columns:1fr}.page-head{align-items:flex-start;flex-direction:column}.stat-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:720px){.action-bar{margin-left:-16px;margin-right:-16px;padding-left:16px;padding-right:16px}.action-bar>div{display:none}.stat-cards{grid-template-columns:1fr}.dist-row{grid-template-columns:minmax(72px,1fr) 1fr 52px auto}.dist-latency{display:none}}
 </style>

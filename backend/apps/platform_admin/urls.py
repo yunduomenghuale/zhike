@@ -1,6 +1,10 @@
 from django.urls import path
 
 from .views import (
+    AdminAICallLogExportView,
+    AdminAICallLogListView,
+    AdminAICallStatsView,
+    AdminAIConfigChangeLogListView,
     AdminClassListView,
     AdminCourseListView,
     AdminCourseStatusView,
@@ -29,5 +33,9 @@ urlpatterns = [
     path("classes/", AdminClassListView.as_view(), name="admin-classes"),
     path("ai-configuration/", AdminAIConfigurationView.as_view(), name="admin-ai-configuration"),
     path("ai-configuration/test/", AdminAIConnectionTestView.as_view(), name="admin-ai-test"),
+    path("ai-call-logs/", AdminAICallLogListView.as_view(), name="admin-ai-call-logs"),
+    path("ai-call-logs/export/", AdminAICallLogExportView.as_view(), name="admin-ai-call-logs-export"),
+    path("ai-call-stats/", AdminAICallStatsView.as_view(), name="admin-ai-call-stats"),
+    path("ai-config-changes/", AdminAIConfigChangeLogListView.as_view(), name="admin-ai-config-changes"),
     path("rebuild-vectors/", AdminRebuildVectorsView.as_view(), name="admin-rebuild-vectors"),
 ]

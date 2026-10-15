@@ -8,6 +8,7 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import MethodNotAllowed, NotFound, ValidationError
 from rest_framework.permissions import IsAuthenticated
 
+from apps.ai.providers.factory import chat_supports_vision
 from apps.ai.services import (
     build_qa_history,
     ingest_material,
@@ -262,6 +263,15 @@ class QARecordViewSet(BaseModelViewSet):
 
     def create(self, request, *args, **kwargs):
         raise MethodNotAllowed("POST", detail="请使用 ask 或 ask-stream 接口提问")
+
+    @action(detail=False, methods=["get"], url_path="vision-capability")
+    def vision_capability(self, request):
+        """当前对话模型是否支持图片输入。
+
+        学生/教师端问答据此决定是否显示图片上传入口：不支持时隐藏入口，
+        避免用户发送图片后被接口拒绝。不泄露任何配置与密钥。
+        """
+        return api_response({"supports_vision": chat_supports_vision()})
 
     @action(detail=False, methods=["post"], url_path="ask")
     def ask(self, request):

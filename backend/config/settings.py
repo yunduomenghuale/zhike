@@ -75,6 +75,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "apps.ai.middleware.AiCallUserMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -153,7 +154,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "apps.ai.authentication.AiCallJWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
@@ -318,6 +319,13 @@ def _ai_env_float(name: str, default: float) -> float:
 AI_SCRIPT_TIMEOUT = _ai_env_int("AI_SCRIPT_TIMEOUT", 45)
 AI_TTS_TIMEOUT = _ai_env_int("AI_TTS_TIMEOUT", 120)
 AI_TTS_VOICE = os.getenv("AI_TTS_VOICE") or "Cherry"
+
+# AI 调用流水（埋点见 apps/ai/calllog.py，管理端统计追溯用）：
+# - AI_CALL_LOG_RETENTION_DAYS：流水保留天数，清理命令 cleanup_ai_call_logs 按此删除；
+# - AI_CALL_LOG_SAMPLE：高频场景采样率 {"场景名": 0~1}，未列出的场景全记；
+#   失败调用不受采样影响（排障需要），本地模型/Mock 调用同样入账。
+AI_CALL_LOG_RETENTION_DAYS = _ai_env_int("AI_CALL_LOG_RETENTION_DAYS", 90)
+AI_CALL_LOG_SAMPLE = {}
 
 # RAG 检索编排参数（向量召回 -> 重排序 -> 阈值过滤，见 apps/ai/services.py）：
 # - AI_RERANK_RECALL：重排前的向量召回候选数。向量检索是纯余弦相似度，关键词面

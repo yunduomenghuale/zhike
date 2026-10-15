@@ -30,10 +30,15 @@ _DIMENSION_PROBE = "向量重建维度校验样本"
 _CHUNK_SIZE = 500
 
 
+from apps.ai.calllog import scene_decorator
+from apps.ai.models import AICallLog
+
+
 class RebuildError(RuntimeError):
     """单份资料/课件重建失败（携带可向用户展示的原因）。"""
 
 
+@scene_decorator(AICallLog.Scene.VECTOR_REBUILD)
 def rebuild_vectors(materials=None, ppts=None) -> dict:
     """用当前生效的向量模型重建给定资料与课件的向量。
 

@@ -24,6 +24,9 @@ from pathlib import Path
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
+from apps.ai.calllog import ai_scene
+from apps.ai.models import AICallLog
+
 
 class Command(BaseCommand):
     help = "用 RAGAS 评估课程知识库问答（RAG）质量"
@@ -88,7 +91,8 @@ class Command(BaseCommand):
                 f"资料片段：\n{chunk.content[:1500]}"
             )
             try:
-                q = provider.chat([{"role": "user", "content": prompt}]).strip().splitlines()[0]
+                with ai_scene(AICallLog.Scene.RAG_EVAL):
+                    q = provider.chat([{"role": "user", "content": prompt}]).strip().splitlines()[0]
                 q = q.strip().lstrip("0123456789.、）) ")
                 if q:
                     questions.append(q)
@@ -111,7 +115,8 @@ class Command(BaseCommand):
             # 检索：与线上 _gather_course_context 的知识库检索部分保持一致
             contexts: list[str] = []
             try:
-                query_vec = provider.embed([question])[0]
+                with ai_scene(AICallLog.Scene.RAG_EVAL):
+                    query_vec = provider.embed([question])[0]
                 contexts = [c.content for c, score in search_chunks(course_id, query_vec, top_k=top_k) if score > 0]
             except Exception as exc:
                 self.stdout.write(self.style.WARNING(f"  检索失败：{exc}"))
