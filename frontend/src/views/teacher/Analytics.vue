@@ -128,11 +128,11 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MagicStick, Loading, Notebook, Files, Medal, Cpu } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import MarkdownIt from 'markdown-it'
+import { renderAiMarkdown } from '@/utils/markdown'
 import { listClasses } from '@/api/classroom'
 import { getClassStats, generateClassAiReport } from '@/api/analytics'
 
-const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
+const renderMd = renderAiMarkdown
 
 const classes = ref([])
 const classId = ref(null)
@@ -193,10 +193,6 @@ function fmtRelative(t) {
 
 function fmtDateTime(t) {
   return t ? new Date(t).toLocaleString() : ''
-}
-
-function renderMd(text) {
-  return md.render(text || '')
 }
 
 function resetAi() {

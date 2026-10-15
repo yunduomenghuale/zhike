@@ -63,8 +63,23 @@ function statusOf(e) {
   }
   if (sub.status === 'in_progress') return { label: '继续作答', tone: 'warn' }
   if (sub.status === 'absent') return { label: '缺考', tone: 'muted' }
-  if (sub.score_released) return { label: `已出分 ${sub.total_score ?? '-'} 分`, tone: 'success' }
-  return { label: '已交卷，待出分', tone: '' }
+  if (sub.total_score != null) return { label: `已出分 ${sub.total_score} 分`, tone: 'success' }
+  if (sub.objective_score != null) return { label: `已完成 · 客观 ${sub.objective_score} 分`, tone: '' }
+  return { label: '已完成', tone: '' }
+}
+
+function isEnded(e) {
+  return e.status === 'finished' || (e.end_at && new Date(e.end_at).getTime() < Date.now())
+}
+
+function goTaking(e) {
+  uni.showModal({
+    title: '进入考试',
+    content: '进入后开始计时，中途切出会被记录。确定开始吗？',
+    success: (res) => {
+      if (res.confirm) uni.navigateTo({ url: `/pages/exam/taking?exam=${e.id}` })
+    },
+  })
 }
 
 function fmtTime(t) {
@@ -76,23 +91,26 @@ function fmtTime(t) {
 
 function open(e) {
   const sub = subMap.value[e.id]
+  // 已交卷：直接查看答题情况与成绩（客观题即时出分，主观题批阅后出分）；
+  // 允许重交且考试未结束时提供重考入口
   if (sub && ['submitted', 'timeout'].includes(sub.status)) {
-    if (sub.score_released) {
-      uni.navigateTo({ url: `/pages/exam/review?sub=${sub.id}` })
-    } else {
-      uni.showToast({ title: '成绩尚未发布，请等待教师统一出分', icon: 'none' })
+    if (e.allow_resubmit && !isEnded(e)) {
+      uni.showActionSheet({
+        title: '本场考试已完成',
+        itemList: ['查看答题情况与成绩', '重考'],
+        success: (res) => {
+          if (res.tapIndex === 0) uni.navigateTo({ url: `/pages/exam/review?sub=${sub.id}` })
+          else goTaking(e)
+        },
+      })
+      return
     }
+    uni.navigateTo({ url: `/pages/exam/review?sub=${sub.id}` })
     return
   }
   if (notStarted(e)) return uni.showToast({ title: '考试尚未开始', icon: 'none' })
   if (isOver(e) && !sub) return uni.showToast({ title: '考试已结束', icon: 'none' })
-  uni.showModal({
-    title: '进入考试',
-    content: '进入后开始计时，中途切出会被记录。确定开始吗？',
-    success: (res) => {
-      if (res.confirm) uni.navigateTo({ url: `/pages/exam/taking?exam=${e.id}` })
-    },
-  })
+  goTaking(e)
 }
 </script>
 

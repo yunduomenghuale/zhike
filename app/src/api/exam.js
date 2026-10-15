@@ -13,6 +13,7 @@ export const releaseExamScore = (subId) => post(`/exam-submissions/${subId}/rele
 
 // ===== 学生 =====
 export const startExam = (exam) => post('/exam-submissions/start/', { exam })
+export const saveExamAnswers = (subId, data) => post(`/exam-submissions/${subId}/save/`, data)
 export const submitExam = (subId, data) => post(`/exam-submissions/${subId}/submit/`, data)
 export const reviewExam = (subId) => get(`/exam-submissions/${subId}/review/`)
 export const reportCheat = (data) => post('/exam-logs/', data)

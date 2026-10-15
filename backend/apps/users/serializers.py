@@ -126,6 +126,10 @@ class AvatarUploadSerializer(serializers.Serializer):
             raise serializers.ValidationError("头像大小不能超过 3MB")
         if value.image.format not in {"JPEG", "PNG", "WEBP"}:
             raise serializers.ValidationError("仅支持 JPG、PNG 或 WEBP 图片")
+        # 拦截动图：GIF 已被上面的格式白名单挡住，这里挡 APNG / 动图 WebP
+        # （Pillow 对 JPEG 无 is_animated 属性，getattr 回退 False）
+        if getattr(value.image, "is_animated", False):
+            raise serializers.ValidationError("不支持动图，请选择静态图片")
         return value
 
 

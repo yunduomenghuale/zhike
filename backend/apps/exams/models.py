@@ -27,6 +27,8 @@ class Exam(BaseModel):
 
     # 考试模式（需求 8.3）
     shuffle_questions = models.BooleanField("题目乱序", default=False)
+    # 选项乱序：开启后选择题选项内容随机排列（A/B/C/D 标签位置固定），
+    # 正确答案跟随内容（按内容重映射选项 key），乱序结果随答卷固化不再改变
     shuffle_options = models.BooleanField("选项乱序", default=False)
     show_analysis_after = models.BooleanField("结束后展示解析", default=True)
     allow_resubmit = models.BooleanField("允许重复提交(取最后一次)", default=False)
@@ -95,6 +97,12 @@ class ExamSubmission(BaseModel):
     )
     # 学生作答：{question_id: answer_obj}
     answers = models.JSONField("作答内容", default=dict, blank=True)
+    # 题目/选项乱序结果：开始考试时生成并固化，刷新/重进/切后台都不再重排。
+    # 结构：{"order": [question_id...], "options": {question_id: [原始 options 下标...]}}
+    # options 的 perm[i] = 展示位置 i 对应的原始选项下标（仅选项乱序开启的选择题有条目）
+    question_layout = models.JSONField("题目与选项顺序", default=dict, blank=True)
+    # 最近一次手动保存答案的时间（保存不提交，用于前端「已保存」提示）
+    saved_at = models.DateTimeField("最近保存时间", null=True, blank=True)
     started_at = models.DateTimeField("开始时间", null=True, blank=True)
     submitted_at = models.DateTimeField("提交时间", null=True, blank=True)
     objective_score = models.DecimalField("客观题得分", max_digits=6, decimal_places=1, null=True, blank=True)

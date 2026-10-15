@@ -1,4 +1,6 @@
 <template>
+  <!-- 注意：课程空间内「切换课程」下拉已按需求暂时隐藏。
+       恢复方式：把下方 :courses="courseOptions" 加回 Shell，并在 script 中恢复 courseOptions 的构建 -->
   <CourseWorkspaceShell
     :course-name="course?.name"
     :course-sub="course?.className || '已加入课程'"
@@ -49,11 +51,14 @@ async function loadCourse() {
   rows.forEach((row) => {
     const ids = row.courses?.length ? row.courses : [row.course]
     ids.filter(Boolean).forEach((id, index) => {
-      map.set(Number(id), {
-        id: Number(id),
-        name: row.course_names?.[index] || row.course_name || `课程 ${id}`,
-        className: row.name,
-      })
+      const cid = Number(id)
+      if (!map.has(cid)) {
+        map.set(cid, {
+          id: cid,
+          name: row.course_names?.[index] || row.course_name || `课程 ${cid}`,
+          className: row.name,
+        })
+      }
     })
   })
   course.value = map.get(courseId.value) || null

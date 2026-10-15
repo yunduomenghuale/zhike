@@ -1,4 +1,8 @@
+import os
+import time
+
 from django.contrib.auth import get_user_model
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Count, Q
 from django.http import HttpResponse
@@ -8,8 +12,8 @@ from rest_framework.generics import get_object_or_404
 from rest_framework.views import APIView
 
 from apps.classroom.models import ClassRoom, ClassStudent
-from apps.ai.models import AIConfiguration
-from apps.ai.providers.factory import build_provider, get_runtime_config
+from apps.ai.models import AICapabilityConfig, AITestRecord
+from apps.ai.providers.factory import build_provider, get_runtime_config, mask_api_key
 from apps.common.permissions import IsPlatformAdmin
 from apps.common.response import api_response
 from apps.courses.models import Catalog, Course
@@ -21,9 +25,9 @@ from .serializers import (
     AdminCourseSerializer,
     AdminUserSerializer,
     AdminUserWriteSerializer,
+    AICapabilityConfigSerializer,
     CourseStatusSerializer,
     PasswordResetSerializer,
-    AdminAIConfigurationSerializer,
 )
 from .user_import import (
     MAX_FILE_SIZE,
@@ -311,93 +315,291 @@ class AdminClassListView(APIView):
         return _paginated_response(queryset, request, AdminClassSerializer)
 
 
+def _ai_capability_payload() -> list[dict]:
+    """各能力（对话/向量/重排序/语音）的当前生效配置：provider/模型/Key 掩码/来源/实际运行时/最近测试。"""
+    rows = {row.capability: row for row in AICapabilityConfig.objects.all()}
+    tests = {record.capability: record for record in AITestRecord.objects.all()}
+    items = []
+    for capability, label in AICapabilityConfig.Capability.choices:
+        row = rows.get(capability)
+        provider, config, source = get_runtime_config(capability)
+        runtime = build_provider(provider, config, capability)
+        key = config.get("api_key", "")
+        test = tests.get(capability)
+        items.append({
+            "capability": capability,
+            "capability_display": label,
+            "provider": provider,
+            "provider_display": dict(AICapabilityConfig.Provider.choices).get(provider, provider),
+            "enabled": bool(row.enabled) if row else (provider != "mock" and (provider == "local" or bool(key))),
+            "base_url": config.get("base_url", ""),
+            "model_name": config.get("model", ""),
+            "timeout": config.get("timeout"),
+            "voice": config.get("voice", ""),
+            "api_key_configured": bool(key),
+            "api_key_masked": mask_api_key(key),
+            "source": source,
+            "runtime_provider": runtime.name,
+            "runtime_is_mock": runtime.name == "mock",
+            "last_test_status": test.status if test else "untested",
+            "last_test_message": test.message if test else "",
+            "last_tested_at": test.tested_at if test else None,
+            "updated_at": row.updated_at if row else None,
+            "updated_by_name": row.updated_by.username if row and row.updated_by else None,
+        })
+    return items
+
+
 class AdminAIConfigurationView(APIView):
     permission_classes = [IsPlatformAdmin]
-    serializer_class = AdminAIConfigurationSerializer
-
-    def _instance_or_environment(self):
-        saved = AIConfiguration.objects.order_by("id").first()
-        if saved:
-            return saved, "database"
-        provider, config, source = get_runtime_config()
-        transient = AIConfiguration(
-            provider=provider if provider in AIConfiguration.Provider.values else AIConfiguration.Provider.MOCK,
-            enabled=provider != AIConfiguration.Provider.MOCK and bool(config.get("api_key")),
-            base_url=config.get("base_url", ""),
-            chat_model=config.get("chat_model", ""),
-            embed_model=config.get("embed_model", ""),
-            tts_model=config.get("tts_model", ""),
-            api_key_ciphertext="environment" if config.get("api_key") else "",
-        )
-        return transient, source
 
     def get(self, request):
-        instance, source = self._instance_or_environment()
-        data = AdminAIConfigurationSerializer(instance).data
-        data["source"] = source
-        return api_response(data)
+        return api_response({"items": _ai_capability_payload()})
 
     def put(self, request):
-        instance = AIConfiguration.objects.order_by("id").first()
-        if instance is None:
-            instance = AIConfiguration()
-        serializer = AdminAIConfigurationSerializer(
-            instance, data=request.data, context={"request": request}
-        )
-        serializer.is_valid(raise_exception=True)
-        saved = serializer.save()
-        data = AdminAIConfigurationSerializer(saved).data
-        data["source"] = "database"
-        return api_response(data, message="大模型配置已保存并生效")
+        payload = request.data.get("capabilities")
+        if not isinstance(payload, list) or not payload:
+            return api_response(message="请求格式不正确：capabilities 不能为空", code=400, status=400)
+        valid = dict(AICapabilityConfig.Capability.choices)
+        with transaction.atomic():
+            for item in payload:
+                capability = item.get("capability")
+                if capability not in valid:
+                    return api_response(message=f"未知能力：{capability}", code=400, status=400)
+                instance = AICapabilityConfig.objects.filter(capability=capability).first()
+                if instance is None:
+                    instance = AICapabilityConfig(capability=capability)
+                # 保存前快照生效配置：服务商/接口/模型三项均未变时保留历史测试结论
+                before_provider, before_config, _ = get_runtime_config(capability)
+                before = (before_provider, before_config.get("base_url", ""), before_config.get("model", ""))
+                serializer = AICapabilityConfigSerializer(
+                    instance, data=item, partial=True, context={"request": request}
+                )
+                serializer.is_valid(raise_exception=True)
+                serializer.save()
+                after_provider, after_config, _ = get_runtime_config(capability)
+                after = (after_provider, after_config.get("base_url", ""), after_config.get("model", ""))
+                if before != after:
+                    # 配置变更后历史测试结果作废（避免展示过期结论）
+                    AITestRecord.objects.filter(capability=capability).delete()
+        return api_response({"items": _ai_capability_payload()}, message="大模型配置已保存并生效")
 
 
 class AdminAIConnectionTestView(APIView):
     permission_classes = [IsPlatformAdmin]
-    serializer_class = AdminAIConfigurationSerializer
-
     def post(self, request):
-        config = AIConfiguration.objects.order_by("id").first()
-        if not config:
-            return api_response(message="请先保存大模型配置", code=400, status=400)
+        capability = request.data.get("capability", "chat")
+        if capability not in dict(AICapabilityConfig.Capability.choices):
+            return api_response(message=f"未知能力：{capability}", code=400, status=400)
+
+        # 能力-服务商白名单（与保存接口一致）：表单值同样可能越界，直接拒验
+        form_provider_precheck = str(request.data.get("provider") or "").strip()
+        if form_provider_precheck:
+            allowed = AICapabilityConfig.CAPABILITY_PROVIDERS.get(capability)
+            if allowed and form_provider_precheck not in allowed:
+                capability_label = dict(AICapabilityConfig.Capability.choices).get(capability, capability)
+                allowed_labels = "、".join(
+                    dict(AICapabilityConfig.Provider.choices).get(p, p) for p in allowed
+                )
+                return api_response(
+                    message=f"该服务商暂不支持{capability_label}，请选择：{allowed_labels}",
+                    code=400,
+                    status=400,
+                )
+
+        # 优先测试前端传入的表单值——用户在卡片上刚改的模型/接口应当可测，
+        # 不必先保存；未传或字段为空时回退到当前生效配置（管理端行 > 环境变量）。
+        # API Key 表单恒为空（密码框不留值），留空即沿用已生效配置的 Key。
+        form_provider = str(request.data.get("provider") or "").strip()
+        form_base_url = str(request.data.get("base_url") or "").strip()
+        form_model = str(request.data.get("model_name") or "").strip()
+        form_api_key = str(request.data.get("api_key") or "").strip()
+        form_timeout = request.data.get("timeout")
+        form_voice = str(request.data.get("voice") or "").strip()
+        from_form = bool(form_provider or form_base_url or form_model or form_api_key or form_timeout or form_voice)
+
+        provider, config, source = get_runtime_config(capability)
+        if from_form:
+            provider = form_provider or provider
+            config = {
+                "api_key": form_api_key or config.get("api_key", ""),
+                "base_url": form_base_url or config.get("base_url", ""),
+                "model": form_model or config.get("model", ""),
+                # 表单填了超时/发音人就按表单测；空值沿用生效配置（再由 provider 回退默认）
+                "timeout": form_timeout if form_timeout not in (None, "") else config.get("timeout"),
+                "voice": form_voice or config.get("voice", ""),
+            }
+            source = "form"
 
         now = timezone.now()
+        provider_display = dict(AICapabilityConfig.Provider.choices).get(provider, provider)
+        detail = {
+            "provider": provider,
+            "provider_display": provider_display,
+            "model": config.get("model") or "",
+            "base_url": config.get("base_url", ""),
+            "source": source,
+            "from_form": from_form,
+            "request": "",
+            "response": "",
+            "elapsed_ms": 0,
+        }
+        started = time.monotonic()
         try:
-            if not config.enabled or config.provider == AIConfiguration.Provider.MOCK:
+            if provider == "mock" or (provider != "local" and not config.get("api_key")):
                 message = "模拟模式可用；当前不会调用真实大模型"
+                detail["request"] = "—"
+                detail["response"] = "模拟模式不发起真实请求"
             else:
-                provider = build_provider(config.provider, {
-                    "api_key": config.get_api_key(),
-                    "base_url": config.base_url,
-                    "chat_model": config.chat_model,
-                    "embed_model": config.embed_model,
-                    "tts_model": config.tts_model,
-                })
-                reply = provider.chat(
-                    [{"role": "user", "content": "请只回复：连接成功"}],
-                    temperature=0,
-                    timeout=20,
-                    retries=1,
-                    fallback_to_mock=False,
-                    max_tokens=16,
-                )
-                if not str(reply or "").strip():
-                    raise RuntimeError("模型返回内容为空")
-                message = f"{config.get_provider_display()} / {config.chat_model} 连接成功"
-            config.last_test_status = AIConfiguration.TestStatus.SUCCESS
-            config.last_test_message = message
-            http_status = 200
-            code = 0
+                if provider != "local" and not config.get("base_url"):
+                    raise RuntimeError("请先填写接口地址")
+                if provider == "local":
+                    # 系统内置模型：模型名优先级 = 表单显式填写 > 运行时已是 local 的
+                    # 生效值 > 内置默认（BGE-M3 / Qwen3-Reranker）。不能无差别沿用运行时
+                    # 模型——运行时可能是线上服务商的模型名（如 text-embedding-v3）。
+                    # 权重缺失会惰性下载，连接测试可能因下载+加载耗时较长（数分钟）
+                    from apps.ai.local_models import default_model
+
+                    runtime_provider, runtime_config, _ = get_runtime_config(capability)
+                    carried = runtime_config.get("model", "") if runtime_provider == "local" else ""
+                    config["model"] = form_model or carried or (
+                        default_model(capability) if capability in ("embed", "rerank") else ""
+                    )
+                    detail["model"] = config["model"]  # detail 在 try 前已建好，同步修正展示值
+                elif not config.get("model"):
+                    raise RuntimeError("请先填写模型名称")
+                built = build_provider(provider, config, capability)
+                if capability == "chat":
+                    prompt = "请只回复：连接成功"
+                    reply = built.chat(
+                        [{"role": "user", "content": prompt}],
+                        temperature=0, timeout=20, retries=1, fallback_to_mock=False, max_tokens=16,
+                    )
+                    if not str(reply or "").strip():
+                        raise RuntimeError("模型返回内容为空")
+                    detail["request"] = prompt
+                    detail["response"] = str(reply).strip()[:500]
+                elif capability == "embed":
+                    vectors = built.embed(["连接测试"], allow_fallback=False)
+                    if not vectors or not vectors[0]:
+                        raise RuntimeError("向量接口返回为空")
+                    detail["request"] = "连接测试"
+                    detail["response"] = f"返回 {len(vectors)} 条向量，维度 {len(vectors[0])}"
+                elif capability == "rerank":
+                    docs = [
+                        "Java 程序设计课程总学时 64，其中讲授 48 学时、实验 16 学时。",
+                        "考核方式为平时成绩 30% + 实验 20% + 期末考试 50%。",
+                        "路由器根据路由表转发 IP 分组，ICMP 用于网络层差错报告。",
+                    ]
+                    ranked = built.rerank("这门课的考核方式是什么？", docs, top_n=3)
+                    if not ranked:
+                        raise RuntimeError("重排序接口返回为空")
+                    detail["request"] = "query：这门课的考核方式是什么？；documents：3 条测试文档"
+                    detail["response"] = "；".join(
+                        f"#{item['index']} 相关性 {float(item['score']):.4f}" for item in ranked[:3]
+                    )
+                else:
+                    url = built.tts("连接测试")
+                    if not url:
+                        raise RuntimeError("语音接口未返回音频地址")
+                    voice_used = getattr(built, "voice", "") or getattr(settings, "AI_TTS_VOICE", "Cherry")
+                    detail["request"] = f"文本：连接测试（发音人 {voice_used}）"
+                    size = ""
+                    try:
+                        rel = url.split(settings.MEDIA_URL, 1)[-1] if settings.MEDIA_URL in url else ""
+                        if rel:
+                            size = f"，文件 {os.path.getsize(os.path.join(settings.MEDIA_ROOT, rel)) / 1024:.1f} KB"
+                    except OSError:
+                        pass
+                    detail["response"] = f"音频已生成{size}：{url}"
+                model_label = config.get("model") or "未设置模型"
+                message = f"{provider_display} · {model_label} 连接成功"
+            test_status = AICapabilityConfig.TestStatus.SUCCESS
         except Exception as exc:
-            message = f"连接失败：{str(exc)[:300]}"
-            config.last_test_status = AIConfiguration.TestStatus.FAILED
-            config.last_test_message = message
-            http_status = 400
-            code = 400
-        config.last_tested_at = now
-        config.save(update_fields=["last_test_status", "last_test_message", "last_tested_at", "updated_at"])
-        return api_response(
-            AdminAIConfigurationSerializer(config).data,
-            message=message,
-            code=code,
-            status=http_status,
+            # 失败信息必须带上「实际测试的服务商·模型」——否则使用者无法判断
+            # 测的到底是表单新值还是旧生效值（如 Model not exist 是模型名问题）
+            model_label = config.get("model") or "未设置模型"
+            message = f"连接失败：{provider_display} · {model_label} → {str(exc)[:240]}"
+            test_status = AICapabilityConfig.TestStatus.FAILED
+        detail["elapsed_ms"] = int((time.monotonic() - started) * 1000)
+
+        # 测试结果写入独立记录表，不改变 runtime 生效配置（环境变量模式下同样可测可记录）
+        record, _ = AITestRecord.objects.update_or_create(
+            capability=capability,
+            defaults={
+                "provider": provider,
+                "status": test_status,
+                "message": message,
+                "tested_at": now,
+                "tested_by": request.user,
+            },
         )
+        # 测试动作本身已成功执行（连没连上都是有效结果），统一 200 走 data，
+        # 由前端弹窗按 last_test_status 呈现，避免拦截器 toast 与弹窗重复提示
+        return api_response(
+            {
+                "capability": capability,
+                "last_test_status": record.status,
+                "last_test_message": record.message,
+                "last_tested_at": record.tested_at,
+                "detail": detail,
+            },
+            message=message,
+        )
+
+
+class AdminRebuildVectorsView(APIView):
+    """平台级知识库向量重建（换向量模型后必须执行）。
+
+    覆盖教辅资料与课件 PPT（课件是向量库的主要内容）。
+    范围：course / material / ppt / scope=all（全站，需显式声明防误操作）。
+    出错处理同教师端：事前校验失败返回 400 不动数据；单项失败可续跑。
+    """
+
+    permission_classes = [IsPlatformAdmin]
+
+    def post(self, request):
+        from apps.courses.models import PPTResource
+        from apps.knowledge.models import Material
+        from apps.knowledge.services import rebuild_vectors
+
+        scope = str(request.data.get("scope") or "").strip()
+        course_id = request.data.get("course")
+        material_id = request.data.get("material")
+        ppt_id = request.data.get("ppt")
+        qs = Material.objects.all()
+        ppt_qs = PPTResource.objects.filter(is_active=True)
+        materials = qs.none()
+        ppts = ppt_qs.none()
+        if material_id:
+            materials = qs.filter(pk=material_id)
+            if not materials.exists():
+                return api_response(message="资料不存在", code=400, status=400)
+        elif ppt_id:
+            ppts = ppt_qs.filter(pk=ppt_id)
+            if not ppts.exists():
+                return api_response(message="课件不存在", code=400, status=400)
+        elif course_id:
+            materials = qs.filter(course_id=course_id)
+            ppts = ppt_qs.filter(course_id=course_id)
+        elif scope == "all":
+            materials = qs
+            ppts = ppt_qs
+        else:
+            return api_response(
+                message="请指定 course / material / ppt，或显式传 scope=all 重建全站向量",
+                code=400,
+                status=400,
+            )
+
+        report = rebuild_vectors(materials, ppts)
+        if report.get("error"):
+            return api_response(report, message=report["error"], code=400, status=400)
+        message = (
+            f"向量重建完成：资料 {report['materials']['success']}/{report['materials']['total']} 份，"
+            f"课件 {report['ppts']['success']}/{report['ppts']['total']} 部，"
+            f"共 {report['chunks']} 个片段"
+        )
+        if report["failed"]:
+            message += f"，失败 {len(report['failed'])} 项（详见返回清单，可修复后重试）"
+        return api_response(report, message=message)

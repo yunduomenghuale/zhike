@@ -29,6 +29,13 @@ export const updateAdminCourseStatus = (id, status) => (
 
 export const listAdminClasses = (params) => request.get('/admin-panel/classes/', { params })
 
+// 大模型配置（按能力：chat / embed / tts 分别配置与测试）
 export const getAdminAIConfiguration = () => request.get('/admin-panel/ai-configuration/')
-export const saveAdminAIConfiguration = (data) => request.put('/admin-panel/ai-configuration/', data)
-export const testAdminAIConnection = () => request.post('/admin-panel/ai-configuration/test/')
+export const saveAdminAIConfiguration = (capabilities) => (
+  request.put('/admin-panel/ai-configuration/', { capabilities })
+)
+// 测试连接：overrides 传当前表单值（provider/base_url/model_name/api_key，Key 留空沿用已生效配置）
+// timeout 600s：系统内置模型（local）首次测试可能触发权重下载（BGE-M3 约 2.3GB）
+export const testAdminAIConnection = (capability, overrides = {}) => (
+  request.post('/admin-panel/ai-configuration/test/', { capability, ...overrides }, { timeout: 600000 })
+)

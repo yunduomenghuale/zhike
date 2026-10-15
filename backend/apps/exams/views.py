@@ -2,6 +2,7 @@ from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework.decorators import action
 from rest_framework.exceptions import MethodNotAllowed, PermissionDenied, ValidationError
@@ -12,12 +13,19 @@ from apps.common.access import is_platform_admin
 from apps.common.permissions import IsTeacher, IsTeacherOrReadOnly
 from apps.common.response import api_response
 from apps.common.viewsets import BaseModelViewSet
-from apps.questions.grading import grade_objective
 from apps.questions.models import Question
 
 from .composer import compose_manual, compose_random
 from .models import Exam, ExamLog, ExamSubmission, Paper
-from .resolver import build_for_review, build_for_taking
+from .stats import build_exam_stats
+from .resolver import (
+    build_for_review,
+    build_for_taking,
+    build_layout,
+    layout_matches,
+    score_for_item,
+    unmap_student_answer,
+)
 from .serializers import (
     ExamLogSerializer,
     ExamSerializer,
@@ -33,14 +41,18 @@ class ExamViewSet(BaseModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        qs = Exam.objects.select_related("classroom")
+        qs = Exam.objects.select_related("classroom").prefetch_related("papers")
         if getattr(user, "is_student", False):
-            # 学生仅见已发布、且自己所在班级的考试
+            # 学生可见：已发布且在读班级的考试 + 本人有答卷的考试。
+            # 教师结束考试（finished）或过期后，已交卷学生仍能回看自己的考试记录与成绩。
             qs = qs.filter(
-                status=Exam.Status.PUBLISHED,
-                classroom__students__student=user,
-                classroom__students__learn_status="active",
-            )
+                Q(
+                    status=Exam.Status.PUBLISHED,
+                    classroom__students__student=user,
+                    classroom__students__learn_status="active",
+                )
+                | Q(submissions__student=user)
+            ).distinct()
         elif getattr(user, "is_teacher", False):
             qs = qs.filter(classroom__teacher=user, course__teacher=user)
         elif not is_platform_admin(user):
@@ -61,12 +73,23 @@ class ExamViewSet(BaseModelViewSet):
             link=f"/student/courses/{instance.course_id}/exams",
         )
 
+    def _ensure_composed(self, exam):
+        """发布前必须完成组卷：至少一套含题目的试卷（需求：发布前必须组卷）。"""
+        if not any(p.question_items for p in exam.papers.all()):
+            raise ValidationError("发布前必须先完成组卷")
+
     def perform_create(self, serializer):
+        # 考试必须先建草稿再组卷，不允许创建时直接发布
+        if serializer.validated_data.get("status") == Exam.Status.PUBLISHED:
+            raise ValidationError("请先创建草稿，完成组卷后再发布")
         instance = serializer.save()
         self._notify_if_published(instance, None)
 
     def perform_update(self, serializer):
         previous = serializer.instance.status
+        incoming = serializer.validated_data.get("status", previous)
+        if incoming == Exam.Status.PUBLISHED and previous != Exam.Status.PUBLISHED:
+            self._ensure_composed(serializer.instance)
         instance = serializer.save()
         self._notify_if_published(instance, previous)
 
@@ -116,12 +139,59 @@ class ExamViewSet(BaseModelViewSet):
         exam.save(update_fields=["total_score", "updated_at"])
         return api_response(PaperSerializer(paper).data, message=f"组卷完成，共 {len(items)} 题")
 
+    @action(detail=True, methods=["get"], url_path="paper", permission_classes=[IsTeacher])
+    def paper_detail(self, request, pk=None):
+        """查看试卷（只读）：组卷后、发布后均可查看；发布后不可再组卷。"""
+        exam = self.get_object()
+        papers = list(exam.papers.all())
+        paper = next((p for p in papers if p.student_id is None), None)
+        if paper is None and papers:
+            paper = papers[0]
+        if paper is None:
+            return api_response(message="尚未组卷", code=404, status=404)
+        items = sorted(paper.question_items or [], key=lambda x: x.get("order", 0))
+        q_map = {q.id: q for q in Question.objects.filter(id__in=[i["question_id"] for i in items])}
+        questions = []
+        for idx, item in enumerate(items):
+            q = q_map.get(item["question_id"])
+            questions.append({
+                "order": idx + 1,
+                "question_id": item["question_id"],
+                "score": item.get("score"),
+                "stem": q.stem if q else "（题目已删除）",
+                "qtype": q.qtype if q else "",
+                "qtype_display": q.get_qtype_display() if q else "-",
+                "difficulty": q.difficulty if q else "",
+                "difficulty_display": q.get_difficulty_display() if q else "-",
+                # 完整题目信息：供教师端「查看试卷」hover 详情与组卷界面回填使用
+                "options": q.options if q else [],
+                "answer": q.answer if q else None,
+                "analysis": q.analysis if q else "",
+            })
+        return api_response({
+            "mode": paper.mode,
+            "mode_display": paper.get_mode_display(),
+            "total_score": str(paper.total_score),
+            "per_student": bool(paper.student_id),
+            "questions": questions,
+        })
+
     @action(detail=True, methods=["get"], url_path="monitor", permission_classes=[IsTeacher])
     def monitor(self, request, pk=None):
         """考试监控：各学生答卷状态（需求 T-E-06）。"""
         exam = self.get_object()
         subs = exam.submissions.select_related("student")
         return api_response(ExamSubmissionSerializer(subs, many=True, context={"request": request}).data)
+
+    @action(detail=True, methods=["get"], url_path="stats", permission_classes=[IsTeacher])
+    def stats(self, request, pk=None):
+        """考试统计（需求 T-E-07）：考后全员答题情况分析。
+
+        总览（应考/交卷/缺考、均分、及格率、优秀率）、总分分段分布、
+        逐题得分与选项分布、全班成绩排名。权限同 monitor（本班本校教师）。
+        """
+        exam = self.get_object()
+        return api_response(build_exam_stats(exam))
 
     @action(detail=True, methods=["post"], url_path="release-scores", permission_classes=[IsTeacher])
     def release_scores(self, request, pk=None):
@@ -225,49 +295,100 @@ class ExamSubmissionViewSet(BaseModelViewSet):
             sub.subjective_scores = {}
             sub.score_released = False
             sub.abnormal = False
+            # 重交 = 新一轮作答，乱序重新生成（保存时清掉，下方重建）
+            sub.question_layout = {}
         if created or sub.status != ExamSubmission.Status.IN_PROGRESS or sub.started_at is None:
             sub.started_at = now
             sub.status = ExamSubmission.Status.IN_PROGRESS
             sub.paper = paper
             sub.save()
+        # 题目/选项乱序在开始考试时生成并固化：刷新/误关/重进都按同一顺序作答，
+        # 不再重排（教师改组卷导致题目集合变化时才会重新生成）
+        items = paper.question_items or []
+        if not layout_matches(sub.question_layout, items):
+            q_map = {q.id: q for q in Question.objects.filter(id__in=[i["question_id"] for i in items])}
+            sub.question_layout = build_layout(items, q_map, exam)
+            sub.save(update_fields=["question_layout", "updated_at"])
+        # 交卷截止时间 = 开始时间 + 考试时长（且不晚于考试结束时间）。
+        # 重开/刷新/误关页面都从服务端 started_at 续算剩余时间，避免前端重置倒计时。
+        deadline = sub.started_at + timedelta(minutes=exam.duration)
+        if exam.end_at:
+            deadline = min(deadline, exam.end_at)
+        remaining_seconds = max(0, int((deadline - now).total_seconds()))
         return api_response(
             {
                 "submission": ExamSubmissionSerializer(
                     sub, context={"request": request}
                 ).data,
-                "questions": build_for_taking(paper, exam),
+                "questions": build_for_taking(paper, exam, sub.question_layout),
                 "anti_cheat": exam.anti_cheat,
                 "duration": exam.duration,
+                "remaining_seconds": remaining_seconds,
             },
             message="考试已开始",
         )
 
+    @action(detail=True, methods=["post"], url_path="save")
+    def save(self, request, pk=None):
+        """保存答案（不提交）：考试中途暂存作答，刷新/重进后回填继续答。
+
+        仅更新 answers 与 saved_at：不算分、不改状态、不动开始时间；
+        超过截止时间后不再接受保存（此时应直接交卷）。
+        """
+        if not request.user.is_student:
+            raise PermissionDenied("仅学生可保存答卷")
+        sub = self.get_object()
+        if sub.status != ExamSubmission.Status.IN_PROGRESS or not sub.started_at:
+            raise ValidationError("答卷不在作答状态，不能保存")
+        answers = request.data.get("answers")
+        if not isinstance(answers, dict):
+            raise ValidationError({"answers": "答案格式不正确"})
+        now = timezone.now()
+        deadlines = [sub.started_at + timedelta(minutes=sub.exam.duration)]
+        if sub.exam.end_at:
+            deadlines.append(sub.exam.end_at)
+        if now > min(deadlines):
+            return api_response(message="考试时间已到，请直接交卷", code=400, status=400)
+        sub.answers = answers
+        sub.saved_at = now
+        sub.save(update_fields=["answers", "saved_at", "updated_at"])
+        return api_response(
+            ExamSubmissionSerializer(sub, context={"request": request}).data,
+            message="答案已保存",
+        )
+
     @action(detail=True, methods=["get"], url_path="review")
     def review(self, request, pk=None):
-        """考后回看答卷与解析（需求 S-E-05）。仅本人、成绩已发布且考试允许展示时可见。"""
+        """考后回看答卷与解析（需求 S-E-05）。
+
+        交卷即可查看，不再要求教师统一出分或考试结束：
+        - 客观题：正确答案/解析/得分即时可见
+        - 主观题：展示正确答案与学生作答，得分按批改进度可见
+          （已批阅的题出分，未批阅显示待批阅；全部批阅或统一出分后可见总分）
+        - 「结束后展示解析」开关仅控制解析文本，不影响答案与分数
+        """
         sub = self.get_object()
         if sub.student_id != request.user.id:
             return api_response(message="无权查看", code=403, status=403)
-        if not sub.score_released:
-            return api_response(message="成绩尚未发布，请等待教师统一出分", code=403, status=403)
-        if not sub.exam.show_analysis_after:
-            return api_response(message="本次考试未开放解析", code=403, status=403)
         if sub.status not in (
             ExamSubmission.Status.SUBMITTED,
             ExamSubmission.Status.TIMEOUT,
         ):
             return api_response(message="交卷后才能查看", code=400, status=400)
-        exam_finished = sub.exam.status == Exam.Status.FINISHED or (
-            sub.exam.end_at and timezone.now() >= sub.exam.end_at
-        )
-        if not exam_finished:
-            return api_response(message="考试结束后才能查看解析", code=403, status=403)
         return api_response(
             {
                 "submission": ExamSubmissionSerializer(
                     sub, context={"request": request}
                 ).data,
-                "questions": build_for_review(sub.paper, sub),
+                "questions": build_for_review(sub.paper, sub, sub.exam),
+                "score_released": sub.score_released,
+                # 本场考试是否发生过选项乱序（答卷固化的 layout 含选项 perm）。
+                # 回看按原题顺序展示（S4），前端据此提示学生顺序可能与考试时不同。
+                # 注：random.shuffle 有极小概率产出恒等排列，此处按 perm 存在性判断，
+                # 提示文案为「可能不同」，恒等排列时多一句提示无实质影响。
+                "options_shuffled": bool(
+                    (getattr(sub, "question_layout", None) or {}).get("options")
+                ),
             }
         )
 
@@ -293,17 +414,20 @@ class ExamSubmissionViewSet(BaseModelViewSet):
         objective_total = Decimal("0")
         items = sub.paper.question_items if sub.paper else []
         q_map = {q.id: q for q in Question.objects.filter(id__in=[i["question_id"] for i in items])}
+        option_perms = (sub.question_layout or {}).get("options") or {}
         for item in items:
             q = q_map.get(item["question_id"])
             if not q:
                 continue
             stu_ans = answers.get(str(q.id)) or answers.get(q.id) or {}
-            is_correct, score = grade_objective(q, stu_ans)
+            # 选项乱序时学生答案存于展示 key 空间，先还原回题库原始 key 再判分
+            perm = option_perms.get(str(q.id))
+            if perm:
+                stu_ans = unmap_student_answer(stu_ans, perm, q.options or [])
+            # 按试卷题目分值折算（题库分值与试卷分值可能不同）；主观题不自动评分
+            _, score = score_for_item(q, item.get("score", q.score), stu_ans)
             if score is not None:
-                # 按试卷题目分值折算（题库分值与试卷分值可能不同）
-                full = Decimal(str(q.score)) or Decimal("1")
-                ratio = Decimal(str(item.get("score", q.score))) / full if full else Decimal("0")
-                objective_total += (score * ratio)
+                objective_total += score
 
         sub.answers = answers
         sub.objective_score = objective_total
@@ -339,12 +463,16 @@ class ExamSubmissionViewSet(BaseModelViewSet):
 
     @action(detail=True, methods=["get"], url_path="grading-detail", permission_classes=[IsTeacher])
     def grading_detail(self, request, pk=None):
-        """教师查看答卷的主观题作答明细，用于批改（需求 T-E-07）。"""
+        """教师查看答卷明细，用于批改（需求 T-E-07）。
+
+        返回主观题待批列表 + 全卷作答回看（含标准答案与已得分），批改体验与作业一致。
+        """
         sub = self.get_object()
         return api_response({
             "submission": ExamSubmissionSerializer(sub, context={"request": request}).data,
             "subjective_questions": self._subjective_items(sub),
             "subjective_scores": sub.subjective_scores or {},
+            "answer_review": build_for_review(sub.paper, sub, sub.exam),
         })
 
     @action(detail=True, methods=["post"], url_path="grade", permission_classes=[IsTeacher])

@@ -15,6 +15,16 @@
           </el-select>
         </div>
         <div class="kb-toolbar-actions">
+          <el-select
+            v-if="courseId"
+            v-model="uploadCatalogId"
+            class="kb-catalog-filter"
+            clearable
+            placeholder="归属章节（可选）"
+          >
+            <el-option v-for="c in catalogs" :key="c.id" :label="c.title" :value="c.id" />
+          </el-select>
+          <el-button v-if="courseId" :icon="Brush" @click="openRebuild">重建向量</el-button>
           <el-upload
             v-if="courseId"
             :show-file-list="false"
@@ -58,6 +68,19 @@
                   </el-tag>
                   <el-tag size="small" type="info" effect="plain" round>{{ m.chunk_count || 0 }} 片段</el-tag>
                 </div>
+                <div class="kb-row-sub">
+                  <span class="kb-sub-label">归属章节</span>
+                  <el-select
+                    :model-value="m.catalog || null"
+                    size="small"
+                    clearable
+                    placeholder="未关联章节"
+                    class="kb-catalog-select"
+                    @change="(val) => changeCatalog(m, val)"
+                  >
+                    <el-option v-for="c in catalogs" :key="c.id" :label="c.title" :value="c.id" />
+                  </el-select>
+                </div>
               </div>
             </div>
             <div class="kb-row-actions">
@@ -96,20 +119,63 @@
       :loading="deleting"
       @confirm="confirmDelete"
     />
+
+    <el-dialog v-model="rebuildDialog.visible" title="重建知识库向量" width="600px" append-to-body>
+      <div v-if="rebuildDialog.loading" class="rebuild-running">
+        <el-icon class="is-loading"><Loading /></el-icon>
+        <div>
+          <p class="rebuild-running-title">正在重建向量…</p>
+          <p class="rebuild-running-tip">用当前向量模型重新计算资料与课件的全部向量片段，内容多时需要几分钟，请勿关闭页面。</p>
+        </div>
+      </div>
+      <template v-else-if="rebuildDialog.report">
+        <el-result
+          :icon="rebuildDialog.report.failed.length ? 'warning' : 'success'"
+          :title="rebuildDialog.report.failed.length ? '部分内容重建失败' : '重建完成'"
+        >
+          <template #sub-title>
+            资料 {{ rebuildDialog.report.materials.success }}/{{ rebuildDialog.report.materials.total }} 份，
+            课件 {{ rebuildDialog.report.ppts.success }}/{{ rebuildDialog.report.ppts.total }} 部，
+            共 {{ rebuildDialog.report.chunks }} 个片段；向量模型
+            {{ rebuildDialog.report.model || rebuildDialog.report.provider }}（{{ rebuildDialog.report.dimension }} 维）
+          </template>
+        </el-result>
+        <div v-if="rebuildDialog.report.failed.length" class="rebuild-failed">
+          <p class="rebuild-failed-title">失败清单（旧向量已保留，修复后可逐项重试）：</p>
+          <div
+            v-for="item in rebuildDialog.report.failed"
+            :key="item.kind + (item.material_id || item.ppt_id)"
+            class="rebuild-failed-row"
+          >
+            <el-tag size="small" :type="item.kind === 'ppt' ? 'warning' : 'info'" disable-transitions>
+              {{ item.kind === 'ppt' ? '课件' : '资料' }}
+            </el-tag>
+            <span class="rebuild-failed-name" :title="item.file_name">{{ item.file_name }}</span>
+            <span class="rebuild-failed-reason">{{ item.reason }}</span>
+            <el-button size="small" :loading="item.retrying" @click="retryMaterial(item)">重试</el-button>
+          </div>
+        </div>
+      </template>
+      <div v-else-if="rebuildDialog.error" class="rebuild-error">
+        <el-result icon="error" title="重建未执行" :sub-title="rebuildDialog.error" />
+        <p class="rebuild-error-tip">如为向量模型问题，请让平台管理员在「大模型配置 · 向量化」中检查模型与连接。</p>
+      </div>
+      <template #footer><el-button @click="rebuildDialog.visible = false">关闭</el-button></template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import {
-  UploadFilled, Refresh, Delete, Document, View,
+  UploadFilled, Refresh, Delete, Document, View, Brush, Loading,
 } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
-import { listCourses } from '@/api/course'
+import { listCourses, listCatalogs } from '@/api/course'
 import {
-  listMaterials, uploadMaterial, reparseMaterial, toggleQa, deleteMaterial,
+  listMaterials, uploadMaterial, updateMaterial, reparseMaterial, toggleQa, deleteMaterial, rebuildVectors,
 } from '@/api/knowledge'
 
 const courses = ref([])
@@ -119,11 +185,15 @@ const fixedCourseId = computed(() => Number(route.params.id) || null)
 const inCourseWorkspace = computed(() => Boolean(fixedCourseId.value))
 
 const materials = ref([])
+const catalogs = ref([])
+const uploadCatalogId = ref(null)
 const loadingMaterials = ref(false)
 const uploading = ref(false)
 const deleteVisible = ref(false)
 const deleteTarget = ref(null)
 const deleting = ref(false)
+// 重建向量对话框：loading=重建中；report=结果报告；error=事前校验失败（未执行）
+const rebuildDialog = reactive({ visible: false, loading: false, report: null, error: '' })
 
 function statusType(s) {
   return { done: 'success', failed: 'danger', parsing: 'warning', pending: 'info' }[s] || 'info'
@@ -154,20 +224,39 @@ async function loadMaterials() {
   }
 }
 
+async function loadCatalogs() {
+  if (!courseId.value) {
+    catalogs.value = []
+    return
+  }
+  const data = await listCatalogs({ course: courseId.value })
+  catalogs.value = data.results ?? data
+}
+
 function onCourseChange() {
+  uploadCatalogId.value = null
   loadMaterials()
+  loadCatalogs()
 }
 
 async function handleUpload(file) {
   uploading.value = true
   try {
-    await uploadMaterial({ course: courseId.value, file })
+    await uploadMaterial({ course: courseId.value, catalog: uploadCatalogId.value, file })
     ElMessage.success('上传并入库成功')
     loadMaterials()
   } finally {
     uploading.value = false
   }
   return false
+}
+
+async function changeCatalog(row, catalogId) {
+  await updateMaterial(row.id, { catalog: catalogId || null })
+  row.catalog = catalogId || null
+  const cat = catalogs.value.find((c) => c.id === catalogId)
+  row.catalog_title = cat?.title || ''
+  ElMessage.success(catalogId ? `已关联到「${cat?.title}」` : '已取消章节关联')
 }
 
 async function reparse(row) {
@@ -198,6 +287,59 @@ async function confirmDelete() {
     await loadMaterials()
   } finally {
     deleting.value = false
+  }
+}
+
+// ===== 重建向量（换向量模型后必须执行，否则旧向量与新模型不兼容、检索静默失效）=====
+async function openRebuild() {
+  try {
+    await ElMessageBox.confirm(
+      '将用当前生效的向量模型重新计算本课程全部资料的向量，旧向量会被覆盖。' +
+      '耗时取决于资料量与模型速度（本地模型可能较久），期间请勿关闭页面。确定继续？',
+      '重建知识库向量',
+      { type: 'warning', confirmButtonText: '开始重建', cancelButtonText: '取消' },
+    )
+  } catch {
+    return // 用户取消
+  }
+  rebuildDialog.visible = true
+  rebuildDialog.loading = true
+  rebuildDialog.report = null
+  rebuildDialog.error = ''
+  try {
+    rebuildDialog.report = await rebuildVectors({ course: courseId.value })
+    loadMaterials()
+  } catch (err) {
+    // 拦截器已将 {code,message} 转为 Error(message)：400 的 message 即事前校验失败原因
+    rebuildDialog.error = err?.message || '重建失败，请稍后重试'
+  } finally {
+    rebuildDialog.loading = false
+  }
+}
+
+async function retryMaterial(item) {
+  item.retrying = true
+  const isPpt = item.kind === 'ppt'
+  try {
+    const res = await rebuildVectors(isPpt ? { ppt: item.ppt_id } : { material: item.material_id })
+    if (res.failed && res.failed.length) {
+      item.reason = res.failed[0].reason
+      ElMessage.error(`仍然失败：${res.failed[0].reason}`)
+    } else {
+      rebuildDialog.report.failed = rebuildDialog.report.failed.filter(
+        (f) => isPpt ? f.ppt_id !== item.ppt_id : f.material_id !== item.material_id,
+      )
+      const group = isPpt ? rebuildDialog.report.ppts : rebuildDialog.report.materials
+      group.success += 1
+      rebuildDialog.report.success += 1
+      rebuildDialog.report.chunks += res.chunks || 0
+      ElMessage.success(isPpt ? '该课件重建成功' : '该资料重建成功')
+      loadMaterials()
+    }
+  } catch (err) {
+    ElMessage.error(err?.message || '重试失败')
+  } finally {
+    item.retrying = false
   }
 }
 
@@ -248,6 +390,28 @@ onMounted(loadCourses)
 .kb-upload-btn:hover {
   transform: translateY(-1px);
   box-shadow: 0 6px 14px rgba(37, 99, 235, 0.2);
+}
+
+/* 上传区章节选择 + 行内章节设置 */
+.kb-catalog-filter {
+  width: 200px;
+}
+
+.kb-row-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.kb-sub-label {
+  color: var(--gray-400, #94a3b8);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.kb-catalog-select {
+  width: 180px;
 }
 
 /* 资料行卡片列表 */
@@ -367,6 +531,75 @@ onMounted(loadCourses)
   border-left: 1px solid var(--gray-200);
 }
 .kb-switch-label {
+  font-size: 13px;
+  color: var(--gray-500);
+}
+
+/* 重建向量对话框 */
+.rebuild-running {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 18px 4px 8px;
+}
+.rebuild-running .el-icon {
+  font-size: 26px;
+  color: var(--primary-600);
+  margin-top: 2px;
+}
+.rebuild-running-title {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--gray-900);
+}
+.rebuild-running-tip {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--gray-500);
+}
+.rebuild-failed {
+  margin-top: 4px;
+  border: 1px solid #fde68a;
+  border-radius: 12px;
+  background: #fffbeb;
+  padding: 12px 14px;
+}
+.rebuild-failed-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 650;
+  color: #b45309;
+}
+.rebuild-failed-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  border-top: 1px dashed #fde68a;
+  font-size: 13px;
+}
+.rebuild-failed-row:first-of-type {
+  border-top: 0;
+}
+.rebuild-failed-name {
+  flex: 0 0 200px;
+  font-weight: 600;
+  color: var(--gray-800);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rebuild-failed-reason {
+  flex: 1;
+  min-width: 0;
+  color: var(--gray-500);
+  word-break: break-all;
+}
+.rebuild-error-tip {
+  margin: 0;
+  text-align: center;
   font-size: 13px;
   color: var(--gray-500);
 }

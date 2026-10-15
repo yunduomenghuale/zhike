@@ -39,7 +39,8 @@ class Homework(BaseModel):
     )
     title = models.CharField("标题", max_length=200)
     description = models.TextField("说明", blank=True)
-    attachment = models.FileField("附件", upload_to=_homework_file_path, null=True, blank=True)
+    # 附件列表：[{name, size, type, url}]，由附件即传接口写入；存储文件名为 uuid 防枚举
+    attachments = models.JSONField("附件列表", default=list, blank=True)
     mode = models.CharField("作业模式", max_length=16, choices=Mode.choices, default=Mode.ATTACHMENT)
     start_time = models.DateTimeField("开始时间", null=True, blank=True)
     deadline = models.DateTimeField("截止时间", null=True, blank=True)
@@ -140,6 +141,8 @@ class HomeworkSubmission(BaseModel):
     )
     content = models.TextField("提交内容", blank=True)
     attachment = models.FileField("附件", upload_to=_submission_file_path, null=True, blank=True)
+    # 多附件（含图片）：[{name, size, type, url}]，由提交接口写入；attachment 保留兼容旧数据
+    attachments = models.JSONField("附件列表", default=list, blank=True)
     submitted_at = models.DateTimeField("提交时间", auto_now_add=True)
     is_late = models.BooleanField("逾期提交", default=False)
     score = models.DecimalField("得分", max_digits=6, decimal_places=1, null=True, blank=True)

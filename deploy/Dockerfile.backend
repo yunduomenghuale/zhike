@@ -19,9 +19,24 @@ RUN sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.li
     && rm -rf /var/lib/apt/lists/*
 
 # 国内镜像加速安装依赖
+# torch 必须先于 requirements 安装 CPU 版（PyPI 的 Linux torch 是数 GB 的 CUDA 版；
+# 先装好 CPU 版后，sentence-transformers 对 torch 的依赖即被满足，不会重复拉取）
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt gunicorn \
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir -r requirements.txt gunicorn \
     -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+# 系统内置本地模型预下载（BGE-M3 + Qwen3-Reranker-0.6B，合计约 3.5GB）：
+# 默认开启——「部署时自动下载」；该层在 COPY 源码之前，改代码重建镜像时命中缓存不重复下载。
+# 预置目录 /app/models 不是挂载点；容器启动时 entrypoint 把缺失模型拷入数据卷 /app/data/models。
+# 裁剪镜像可 docker compose build --build-arg PRELOAD_MODELS=false backend，
+# 运行时首次使用会惰性下载，或容器内 manage.py download_models 预热。
+ARG PRELOAD_MODELS=true
+RUN if [ "$PRELOAD_MODELS" = "true" ]; then \
+      python -c "from modelscope import snapshot_download as d; \
+d('BAAI/bge-m3', local_dir='/app/models/BAAI/bge-m3'); \
+d('Qwen/Qwen3-Reranker-0.6B', local_dir='/app/models/Qwen/Qwen3-Reranker-0.6B')"; \
+    fi
 
 COPY . .
 RUN sed -i 's/\r$//' /app/deploy-entrypoint.sh

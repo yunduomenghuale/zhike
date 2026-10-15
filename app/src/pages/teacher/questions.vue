@@ -52,14 +52,16 @@
         <text class="chip pick" :class="{ on: createForm.answerKey === 'B' }" @click="createForm.answerKey = 'B'">错误</text>
       </view>
 
-      <!-- 填空 -->
+      <!-- 填空（按空单独赋分） -->
       <template v-if="createForm.qtype === 'blank'">
-        <view v-for="(_, i) in createForm.blanks" :key="i" class="opt-edit">
+        <view v-for="(b, i) in createForm.blanks" :key="i" class="opt-edit">
           <text class="opt-key">空{{ i + 1 }}</text>
-          <input v-model="createForm.blanks[i]" class="input opt-input" placeholder="该空答案" placeholder-class="ph" />
+          <input v-model="b.text" class="input opt-input" placeholder="该空答案" placeholder-class="ph" />
+          <input v-model="b.score" class="input blank-score" type="digit" placeholder="分值" placeholder-class="ph" />
           <text v-if="createForm.blanks.length > 1" class="opt-del" @click="createForm.blanks.splice(i, 1)">✕</text>
         </view>
-        <button class="ghost-btn" @click="createForm.blanks.push('')">+ 添加空</button>
+        <button class="ghost-btn" @click="createForm.blanks.push({ text: '', score: 1 })">+ 添加空</button>
+        <view class="blank-total">合计 {{ blankScoreTotal }} 分（按空自动累计）</view>
       </template>
 
       <!-- 简答 -->
@@ -70,7 +72,8 @@
         <picker :range="difficulties" range-key="label" @change="createForm.difficulty = difficulties[Number($event.detail.value)].value">
           <view class="input picker">{{ difficultyLabel }}</view>
         </picker>
-        <input v-model="createForm.score" class="input score" type="digit" placeholder="分值" placeholder-class="ph" />
+        <input v-if="createForm.qtype !== 'blank'" v-model="createForm.score" class="input score" type="digit" placeholder="分值" placeholder-class="ph" />
+        <view v-else class="input score blank-total-input">合计 {{ blankScoreTotal }} 分</view>
       </view>
       <picker :range="catalogOptions" range-key="title" @change="createForm.catalog = catalogOptions[Number($event.detail.value)].id">
         <view class="input picker">{{ catalogLabel }}</view>
@@ -114,6 +117,7 @@ import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { listCourses, listCatalogs } from '@/api/course.js'
 import { listQuestions, createQuestion, updateQuestion, deleteQuestion } from '@/api/question.js'
+import { blankAnswerText } from '@/utils/blank-answer.js'
 
 const qtypeOptions = [
   { label: '全部题型', value: '' },
@@ -151,7 +155,7 @@ const emptyForm = () => ({
   ],
   answerKey: '',
   answerKeys: [],
-  blanks: [''],
+  blanks: [{ text: '', score: 1 }],
   answerText: '',
   analysis: '',
   difficulty: 'medium',
@@ -167,6 +171,10 @@ const catalogLabel = computed(() => {
   const c = catalogOptions.value.find((x) => x.id === createForm.value.catalog)
   return c ? c.title : '所属章节（可空）'
 })
+// 填空题总分：按空自动累计（后端以 Σ空分为准）
+const blankScoreTotal = computed(() =>
+  createForm.value.blanks.reduce((sum, b) => sum + (Number(b?.score) || 0), 0),
+)
 
 onShow(async () => {
   try {
@@ -253,7 +261,7 @@ function fmtAns(a) {
   if (!a) return '-'
   if (a.key) return a.key
   if (a.keys) return a.keys.join('、')
-  if (a.blanks) return a.blanks.join(' / ')
+  if (a.blanks) return blankAnswerText(a)
   if (a.text) return a.text
   return '-'
 }
@@ -274,8 +282,12 @@ async function save(status) {
     if (!f.answerKey) return uni.showToast({ title: '请选择正确答案', icon: 'none' })
     answer = { key: f.answerKey }
   } else if (f.qtype === 'blank') {
-    const blanks = f.blanks.map((b) => b.trim()).filter(Boolean)
+    // 按空赋分：每空单独设分，总分由后端按 Σ空分重算
+    const blanks = f.blanks
+      .filter((b) => b.text && b.text.trim())
+      .map((b) => ({ text: b.text.trim(), score: Number(b.score) || 0 }))
     if (!blanks.length) return uni.showToast({ title: '请填写填空答案', icon: 'none' })
+    if (blanks.some((b) => !(b.score > 0))) return uni.showToast({ title: '每个空的分值必须大于 0', icon: 'none' })
     answer = { blanks }
   } else {
     answer = { text: f.answerText.trim() }
@@ -346,6 +358,9 @@ function removeQuestion(q) {
 .opt-edit { display: flex; align-items: center; gap: 14rpx; margin-bottom: 12rpx; }
 .opt-key { width: 64rpx; flex-shrink: 0; font-size: 26rpx; font-weight: 700; color: #64748b; }
 .opt-input { flex: 1; }
+.blank-score { width: 120rpx; flex-shrink: 0; }
+.blank-total { margin-top: 4rpx; font-size: 24rpx; color: #2563eb; }
+.blank-total-input { color: #2563eb; }
 .opt-del { color: #ef4444; font-size: 26rpx; }
 .answer-pick { display: flex; align-items: center; flex-wrap: wrap; gap: 12rpx; }
 .label { font-size: 24rpx; color: #64748b; }

@@ -272,13 +272,17 @@
                 </el-checkbox>
               </el-checkbox-group>
 
-              <el-input
-                v-else-if="q.qtype === 'blank'"
-                v-model="answers[q.id][0]"
-                placeholder="请输入答案"
-                :disabled="submitted"
-                style="max-width: 420px"
-              />
+              <!-- 填空（多空题按空数量渲染输入框） -->
+              <template v-else-if="q.qtype === 'blank'">
+                <el-input
+                  v-for="(_, blankIndex) in answers[q.id]"
+                  :key="blankIndex"
+                  v-model="answers[q.id][blankIndex]"
+                  :placeholder="`第 ${blankIndex + 1} 空`"
+                  :disabled="submitted"
+                  class="blank-item"
+                />
+              </template>
 
               <el-input
                 v-else
@@ -290,13 +294,13 @@
                 resize="none"
               />
 
-              <div v-if="submitted && feedback[q.id]" class="fb" :class="feedback[q.id].is_correct === null ? '' : feedback[q.id].is_correct ? 'ok' : 'no'">
+              <div v-if="submitted && feedback[q.id]" class="fb" :class="feedback[q.id].is_correct === null ? '' : feedback[q.id].is_correct ? 'ok' : (Number(feedback[q.id].score) > 0 ? 'part' : 'no')">
                 <template v-if="feedback[q.id].is_correct === null">
                   <div>本题为简答题，请参考以下答案自行核对：</div>
                   <div class="fb-ana">参考答案：{{ fmt(feedback[q.id].correct_answer) }}</div>
                 </template>
                 <template v-else>
-                  <div>{{ feedback[q.id].is_correct ? '回答正确' : `回答错误，正确答案：${fmt(feedback[q.id].correct_answer)}` }}</div>
+                  <div>{{ fbResultText(feedback[q.id]) }}</div>
                 </template>
                 <div v-if="feedback[q.id].analysis" class="fb-ana">解析：{{ feedback[q.id].analysis }}</div>
               </div>
@@ -387,10 +391,9 @@ import { listCatalogs, listPpts, listVideos, listWatchProgress, reportVideoProgr
 import { chapterProgress } from '@/utils/learningProgress'
 import { listQuestions, practiceSubmit } from '@/api/question'
 import { listMaterials } from '@/api/knowledge'
-import MarkdownIt from 'markdown-it'
+import { renderAiMarkdown } from '@/utils/markdown'
 import { genUid } from '@/utils/uid'
-
-const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
+import { blankAnswerText } from '@/utils/blank-answer'
 
 const courses = ref([])
 const courseId = ref(null)
@@ -919,6 +922,16 @@ async function askChat(preset) {
     const reader = resp.body.getReader()
     const decoder = new TextDecoder('utf-8')
     let buffer = ''
+    // 渲染节流：delta 先进缓冲，60ms 批量落一次 DOM，避免逐 token 全量 markdown 重渲染
+    let pendingText = ''
+    let flushTimer = null
+    const flushAnswer = () => {
+      flushTimer = null
+      if (!pendingText) return
+      chatMessages.value[idx].content += pendingText
+      pendingText = ''
+      scrollChatIfNearBottom()
+    }
     for (;;) {
       const { value, done } = await reader.read()
       if (done) break
@@ -933,13 +946,15 @@ async function askChat(preset) {
         let evt
         try { evt = JSON.parse(jsonStr) } catch { return }
         if (evt.type === 'delta') {
-          chatMessages.value[idx].content += evt.text || ''
-          scrollChatToBottom()
+          pendingText += evt.text || ''
+          if (!flushTimer) flushTimer = setTimeout(flushAnswer, 60)
         } else if (evt.type === 'error') {
-          chatMessages.value[idx].content += `\n[出错] ${evt.message || '生成失败'}`
+          pendingText += `\n[出错] ${evt.message || '生成失败'}`
         }
       })
     }
+    if (flushTimer) clearTimeout(flushTimer)
+    flushAnswer()
   } catch {
     chatMessages.value[idx].content = chatMessages.value[idx].content || '抱歉，AI 助教暂时没有响应，请稍后再试。'
   } finally {
@@ -956,9 +971,14 @@ function scrollChatToBottom() {
   })
 }
 
-function renderMd(text) {
-  return md.render(text || '')
+// 流式期间仅在用户本来就接近底部时跟随滚动，避免打断上翻阅读
+function scrollChatIfNearBottom() {
+  const el = chatScrollRef.value
+  if (!el) return
+  if (el.scrollHeight - el.scrollTop - el.clientHeight < 120) scrollChatToBottom()
 }
+
+const renderMd = renderAiMarkdown
 
 function fileUrl(file) {
   return file || '#'
@@ -1004,7 +1024,7 @@ async function loadPractice() {
     const data = await listQuestions({ course: courseId.value, catalog: current.value.id, status: 'published' })
     questions.value = data.results ?? data
     questions.value.forEach((q) => {
-      answers[q.id] = q.qtype === 'multi' ? [] : q.qtype === 'blank' ? [''] : ''
+      answers[q.id] = q.qtype === 'multi' ? [] : q.qtype === 'blank' ? new Array(Math.max(1, q.blank_count || 1)).fill('') : ''
     })
   } finally {
     practiceLoading.value = false
@@ -1017,7 +1037,7 @@ function resetState() {
 }
 function resetPractice() {
   questions.value.forEach((q) => {
-    answers[q.id] = q.qtype === 'multi' ? [] : q.qtype === 'blank' ? [''] : ''
+    answers[q.id] = q.qtype === 'multi' ? [] : q.qtype === 'blank' ? new Array(Math.max(1, q.blank_count || 1)).fill('') : ''
   })
   Object.keys(feedback).forEach((k) => delete feedback[k])
   submitted.value = false
@@ -1033,9 +1053,15 @@ function fmt(a) {
   if (!a) return '-'
   if (a.key) return a.key
   if (a.keys) return a.keys.join(', ')
-  if (a.blanks) return a.blanks.join(' / ')
+  if (a.blanks) return blankAnswerText(a)
   if (a.text) return a.text
   return '-'
+}
+// 练习结果文案：全对/部分空命中（按空赋分）/全错
+function fbResultText(fb) {
+  if (fb.is_correct) return '回答正确'
+  if (Number(fb.score) > 0) return `部分正确，正确答案：${fmt(fb.correct_answer)}`
+  return `回答错误，正确答案：${fmt(fb.correct_answer)}`
 }
 const answeredCount = computed(() => {
   return questions.value.filter((q) => {
@@ -1371,6 +1397,10 @@ onUnmounted(() => {
   border: 1px solid #e5eaf3;
   border-radius: 16px;
 }
+.blank-item {
+  max-width: 420px;
+  margin-bottom: 10px;
+}
 .q-stem {
   margin-bottom: 12px;
 }
@@ -1395,6 +1425,10 @@ onUnmounted(() => {
 .fb.no {
   background: #fef0f0;
   color: #f56c6c;
+}
+.fb.part {
+  background: #fdf6ec;
+  color: #e6a23c;
 }
 .fb-ana {
   margin-top: 4px;

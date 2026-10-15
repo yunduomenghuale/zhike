@@ -42,15 +42,18 @@
           </view>
         </view>
 
-        <!-- 填空 -->
-        <input
-          v-else-if="q.qtype === 'blank'"
-          class="blank-input"
-          placeholder="请输入答案"
-          placeholder-class="ph"
-          :value="answers[q.question_id]?.blanks?.[0] || ''"
-          @input="answers[q.question_id] = { blanks: [$event.detail.value] }"
-        />
+        <!-- 填空（多空题按空数量渲染输入框） -->
+        <template v-else-if="q.qtype === 'blank'">
+          <input
+            v-for="(_, blankIndex) in (answers[q.question_id]?.blanks || [''])"
+            :key="blankIndex"
+            class="blank-input"
+            :placeholder="`第 ${blankIndex + 1} 空`"
+            placeholder-class="ph"
+            :value="answers[q.question_id]?.blanks?.[blankIndex] || ''"
+            @input="onBlankInput(q.question_id, blankIndex, $event)"
+          />
+        </template>
 
         <!-- 简答 -->
         <textarea
@@ -63,17 +66,25 @@
         />
       </view>
 
-      <button class="submit-btn" :disabled="submitting" :loading="submitting" @click="doSubmit">
-        交卷（{{ answeredCount }}/{{ questions.length }}）
-      </button>
+      <view class="btn-row">
+        <button class="save-btn" :disabled="saving" :loading="saving" @click="saveAnswers">保存答案</button>
+        <button class="submit-btn" :disabled="submitting" :loading="submitting" @click="doSubmit">
+          交卷（{{ answeredCount }}/{{ questions.length }}）
+        </button>
+      </view>
+      <view class="save-hint" :class="{ dirty }">
+        <text v-if="dirty">有未保存的更改，退出或刷新页面将丢失，请及时点击「保存答案」</text>
+        <text v-else-if="savedAtText">已于 {{ savedAtText }} 保存（保存不提交，考试结束时将自动交卷）</text>
+        <text v-else>答题过程中可随时「保存答案」暂存（不提交），到结束时间将自动交卷</text>
+      </view>
     </template>
   </view>
 </template>
 
 <script setup>
-import { computed, reactive, ref } from 'vue'
-import { onHide, onLoad, onUnload } from '@dcloudio/uni-app'
-import { startExam, submitExam, reportCheat } from '@/api/exam.js'
+import { computed, reactive, ref, watch } from 'vue'
+import { onHide, onLoad, onShow, onUnload } from '@dcloudio/uni-app'
+import { startExam, saveExamAnswers, submitExam, reportCheat } from '@/api/exam.js'
 
 const examId = ref(null)
 const submission = ref(null)
@@ -83,7 +94,64 @@ const loading = ref(true)
 const submitting = ref(false)
 const submitted = ref(false)
 const remainSec = ref(0)
+const durationMin = ref(60)
 let timer = null
+
+// ---- 保存答案（不提交）----
+const saving = ref(false)
+const savedAt = ref(null)
+const dirty = ref(false)
+const savedAtText = computed(() => {
+  if (!savedAt.value) return ''
+  const d = new Date(savedAt.value)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+})
+// 答案有任何改动即标记未保存（保存/交卷后清除）
+watch(answers, () => { dirty.value = true }, { deep: true })
+let remindTimer = null
+// 定时提醒保存：每 90 秒检查一次，有未保存答案时提示
+function startSaveReminder() {
+  remindTimer = setInterval(() => {
+    if (dirty.value && !submitted.value) {
+      uni.showToast({ title: '有未保存的答案，请点击「保存答案」', icon: 'none' })
+    }
+  }, 90 * 1000)
+}
+
+// 把已保存的作答回填到答题模型（退出重进后继续答）
+function restoreAnswers(saved) {
+  if (!saved) return
+  questions.value.forEach((q) => {
+    const a = saved[String(q.question_id)]
+    if (!a) return
+    if (q.qtype === 'blank') {
+      const n = Math.max(1, q.blank_count || 1)
+      const blanks = Array.isArray(a.blanks) ? [...a.blanks] : []
+      answers[q.question_id] = { blanks: Array.from({ length: n }, (_, i) => blanks[i] ?? '') }
+    } else if (q.qtype === 'multi') {
+      answers[q.question_id] = { keys: Array.isArray(a.keys) ? [...a.keys] : [] }
+    } else {
+      answers[q.question_id] = { ...a }
+    }
+  })
+}
+
+async function saveAnswers() {
+  if (saving.value || !submission.value) return
+  saving.value = true
+  try {
+    const res = await saveExamAnswers(submission.value.id, { answers })
+    savedAt.value = res.saved_at
+    dirty.value = false
+    uni.showToast({ title: `已保存（${savedAtText.value || '刚刚'}）`, icon: 'success' })
+  } catch {
+    // 失败原因（如已到交卷时间）由请求拦截器统一提示
+  } finally {
+    saving.value = false
+  }
+}
 
 onLoad(async (q) => {
   examId.value = Number(q.exam) || null
@@ -91,18 +159,29 @@ onLoad(async (q) => {
     const res = await startExam(examId.value)
     submission.value = res.submission
     questions.value = res.questions || []
-    uni.setNavigationBarTitle({ title: '考试中' })
-    // 倒计时：开始时间 + 时长
-    const endTs = new Date(res.submission.started_at).getTime() + (res.duration || 60) * 60000
-    remainSec.value = Math.max(0, Math.floor((endTs - Date.now()) / 1000))
-    timer = setInterval(() => {
-      remainSec.value -= 1
-      if (remainSec.value <= 0) {
-        clearInterval(timer)
-        timer = null
-        autoSubmit()
+    // 填空题按空数量初始化作答数组（多空题渲染多个输入框）
+    questions.value.forEach((q) => {
+      if (q.qtype === 'blank') {
+        answers[q.question_id] = { blanks: new Array(Math.max(1, q.blank_count || 1)).fill('') }
       }
-    }, 1000)
+    })
+    // 回填已保存的答案（保存不提交，退出重进后继续作答）
+    restoreAnswers(res.submission.answers)
+    savedAt.value = res.submission.saved_at || null
+    dirty.value = false // 回填属于已保存内容，不算未保存更改
+    uni.setNavigationBarTitle({ title: '考试中' })
+    // 倒计时：服务端按「开始时间 + 时长」续算剩余秒数，
+    // 关闭/重开/切后台再回来都从同一截止点续算，不会重置考试时间
+    durationMin.value = Number(res.duration) || 60
+    const durationSec = durationMin.value * 60
+    remainSec.value = Math.max(0, Math.floor(Number(res.remaining_seconds ?? durationSec)))
+    if (remainSec.value <= 0) {
+      uni.showToast({ title: '考试时间已到，正在自动交卷', icon: 'none' })
+      setTimeout(() => autoSubmit(), 800)
+      return
+    }
+    startTicker()
+    startSaveReminder()
   } catch {
     // 后端已 toast 原因（未开始/已结束/已提交等）
     setTimeout(() => uni.navigateBack(), 1500)
@@ -110,6 +189,28 @@ onLoad(async (q) => {
     loading.value = false
   }
 })
+
+// 从后台恢复：按服务端开始时间重新校准剩余时间（避免后台计时被系统节流）
+onShow(() => {
+  if (!submission.value || submitted.value || submitting.value) return
+  const startedAt = submission.value.started_at
+  if (!startedAt) return
+  const endTs = new Date(startedAt).getTime() + durationMin.value * 60000
+  remainSec.value = Math.max(0, Math.floor((endTs - Date.now()) / 1000))
+  if (remainSec.value <= 0 && !timer) autoSubmit()
+})
+
+function startTicker() {
+  if (timer) clearInterval(timer)
+  timer = setInterval(() => {
+    remainSec.value -= 1
+    if (remainSec.value <= 0) {
+      clearInterval(timer)
+      timer = null
+      autoSubmit()
+    }
+  }, 1000)
+}
 
 const remainText = computed(() => {
   const s = Math.max(0, remainSec.value)
@@ -133,6 +234,13 @@ function toggleMulti(qid, key) {
     ? a.keys.filter((k) => k !== key)
     : [...(a.keys || []), key]
   answers[qid] = { keys }
+}
+
+// 多空填空：按空数量维护数组，逐空写入
+function onBlankInput(qid, index, e) {
+  const cur = answers[qid]?.blanks ? [...answers[qid].blanks] : []
+  cur[index] = e.detail.value
+  answers[qid] = { blanks: cur }
 }
 
 async function doSubmit() {
@@ -160,6 +268,7 @@ async function finalize() {
   try {
     await submitExam(submission.value.id, { answers })
     submitted.value = true
+    dirty.value = false
     uni.showToast({ title: '交卷成功', icon: 'success' })
     setTimeout(() => uni.navigateBack(), 800)
   } finally {
@@ -171,11 +280,16 @@ onHide(() => {
   // 防作弊：考试中切出页面上报日志
   if (submission.value && !submitted.value) {
     reportCheat({ exam: examId.value, action: 'blur', note: '切出考试页面' }).catch(() => {})
+    // 退出前提醒保存：有未保存答案时 toast 提示，重进后可继续作答
+    if (dirty.value) {
+      uni.showToast({ title: '有未保存的答案，重进后请及时保存', icon: 'none' })
+    }
   }
 })
 
 onUnload(() => {
   if (timer) clearInterval(timer)
+  if (remindTimer) clearInterval(remindTimer)
 })
 </script>
 
@@ -199,4 +313,10 @@ onUnload(() => {
 .ph { color: #94a3b8; }
 .submit-btn { margin-top: 12rpx; height: 92rpx; line-height: 92rpx; border-radius: 24rpx; background: #2563eb; color: #fff; font-size: 30rpx; font-weight: 600; }
 .submit-btn::after { border: none; }
+.btn-row { display: flex; gap: 18rpx; margin-top: 16rpx; }
+.btn-row .submit-btn { flex: 1; margin-top: 0; }
+.save-btn { flex: 1; height: 92rpx; line-height: 92rpx; border-radius: 24rpx; background: #fff; border: 2rpx solid #2563eb; color: #2563eb; font-size: 30rpx; font-weight: 600; }
+.save-btn::after { border: none; }
+.save-hint { margin: 16rpx 0 24rpx; text-align: center; font-size: 22rpx; line-height: 1.6; color: #94a3b8; }
+.save-hint.dirty { color: #d97706; font-weight: 600; }
 </style>

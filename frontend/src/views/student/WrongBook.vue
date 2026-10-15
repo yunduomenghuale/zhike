@@ -188,6 +188,7 @@ import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
 import { listClasses } from '@/api/classroom'
 import { getMyWrongQuestions } from '@/api/analytics'
 import { createWrongNote, deleteWrongNote, listWrongMastery, listWrongNotes, toggleWrongMastery } from '@/api/question'
+import { blankAnswerText } from '@/utils/blank-answer'
 
 const route = useRoute()
 const courses = ref([])
@@ -249,7 +250,7 @@ function fmt(a) {
   if (!a) return '（未作答）'
   if (a.key) return a.key
   if (a.keys) return a.keys.join(', ')
-  if (a.blanks) return a.blanks.join(' / ')
+  if (a.blanks) return blankAnswerText(a)
   if (a.text) return a.text
   return '—'
 }

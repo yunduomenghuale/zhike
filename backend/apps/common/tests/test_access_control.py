@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.utils import timezone
@@ -304,8 +305,9 @@ class ExamFlowTests(PlatformFixtureMixin, APITestCase):
         )
         self.assertEqual(submitted.status_code, 200)
         self.assertEqual(submitted.data["data"]["status"], ExamSubmission.Status.SUBMITTED)
-        self.assertIsNone(submitted.data["data"]["objective_score"])
-        self.assertIsNone(submitted.data["data"]["total_score"])
+        # 现行规则（提交即可查分）：客观题得分即时可见；本卷无主观题，总分同步可见
+        self.assertEqual(submitted.data["data"]["objective_score"], Decimal("5"))
+        self.assertEqual(submitted.data["data"]["total_score"], Decimal("5"))
         self.assertEqual(submitted.data["data"]["subjective_scores"], {})
 
         repeated = self.client.post(
@@ -332,7 +334,8 @@ class ExamFlowTests(PlatformFixtureMixin, APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["data"]["status"], ExamSubmission.Status.TIMEOUT)
 
-    def test_analysis_stays_hidden_until_exam_finishes(self):
+    def test_review_visible_immediately_after_submit(self):
+        """现行规则（交卷即可回看）：提交后无需等考试结束即可查看答卷。"""
         sub = ExamSubmission.objects.create(
             exam=self.exam,
             paper=self.paper,
@@ -345,7 +348,8 @@ class ExamFlowTests(PlatformFixtureMixin, APITestCase):
 
         response = self.client.get(f"/api/exam-submissions/{sub.id}/review/")
 
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["data"]["questions"])
 
 
 class PasswordPolicyTests(APITestCase):

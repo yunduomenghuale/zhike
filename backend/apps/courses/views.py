@@ -2,6 +2,7 @@ import os
 import tempfile
 
 from rest_framework.decorators import action
+from django.conf import settings
 from django.db import transaction
 from django.db.models.deletion import ProtectedError
 from django.db.models import Max
@@ -12,6 +13,7 @@ from apps.common.access import courses_for_user
 from apps.common.permissions import IsStudent, IsTeacher, IsTeacherOrReadOnly
 from apps.common.response import api_response
 from apps.common.viewsets import BaseModelViewSet
+from apps.knowledge.models import KnowledgeChunk
 
 from .models import Catalog, Course, CourseResource, CourseVideo, PPTResource, TeachingVideo, VideoWatchProgress
 from .serializers import (
@@ -288,6 +290,14 @@ class PPTResourceViewSet(BaseModelViewSet):
             if pages:
                 existing.exclude(pk=ppt.pk).update(is_active=False)
                 _invalidate_teaching_video_for_new_ppt(catalog, ppt)
+                # 旧版本课件的向量片段随之失效（可能还是另一套向量空间），先删后建
+                KnowledgeChunk.objects.filter(ppt__in=existing.exclude(pk=ppt.pk)).delete()
+
+        # 课件是向量库的主要内容：解析成功即逐页入库（失败静默，QA 有原文兜底）
+        if pages:
+            from apps.ai.services import ingest_ppt_pages
+
+            ingest_ppt_pages(ppt)
 
     @action(detail=True, methods=["post"], url_path="reparse")
     def reparse(self, request, pk=None):
@@ -301,7 +311,14 @@ class PPTResourceViewSet(BaseModelViewSet):
         ppt.parsed_pages = pages
         ppt.parse_status = ppt.ParseStatus.DONE if pages else ppt.ParseStatus.FAILED
         ppt.save(update_fields=["parsed_pages", "parse_status", "updated_at"])
-        return api_response({"page_count": len(pages)}, message="重新解析完成")
+        chunk_count = 0
+        if pages:
+            from apps.ai.services import ingest_ppt_pages
+
+            chunk_count = ingest_ppt_pages(ppt)
+        return api_response(
+            {"page_count": len(pages), "chunk_count": chunk_count}, message="重新解析完成"
+        )
 
 
 class TeachingVideoViewSet(BaseModelViewSet):
@@ -420,6 +437,53 @@ class TeachingVideoViewSet(BaseModelViewSet):
         video.gen_status = TeachingVideo.GenStatus.SCRIPT_READY
         video.save(update_fields=["scripts", "audio_url", "subtitle_url", "video_url", "gen_status", "is_published", "updated_at"])
         return api_response(self.get_serializer(video).data, message="该页讲稿已重新生成，需要重新配音")
+
+    @action(detail=True, methods=["post"], url_path="regenerate-audio-page", permission_classes=[IsTeacher])
+    def regenerate_audio_page(self, request, pk=None):
+        """只重新合成指定页的配音（讲稿不变），覆盖该页音频地址。"""
+        video = self.get_object()
+        page = request.data.get("page")
+        if page in (None, ""):
+            return api_response(message="缺少页码", code=400, status=400)
+        try:
+            page = int(page)
+        except (TypeError, ValueError):
+            return api_response(message="页码格式不正确", code=400, status=400)
+
+        scripts = list(video.scripts or [])
+        target = None
+        for item in scripts:
+            if int(item.get("page") or 0) == page:
+                target = item
+                break
+        if target is None or not str(target.get("script") or "").strip():
+            return api_response(message="该页还没有讲解稿，请先生成讲稿", code=400, status=400)
+
+        from apps.ai.providers.factory import get_provider
+
+        provider = get_provider("tts")
+        if getattr(provider, "name", "") == "mock":
+            return api_response(message="当前为模拟模式，无法合成真实配音", code=400, status=400)
+        try:
+            # 发音人优先级：管理端配置 > AI_TTS_VOICE 环境变量 > Cherry（DashScope 音色名/本地说话人ID）
+            voice = getattr(provider, "voice", "") or getattr(settings, "AI_TTS_VOICE", "Cherry")
+            audio_url = provider.tts(target["script"].strip(), voice=voice)
+        except Exception as exc:
+            target["audio_error"] = str(exc)[:300]
+            video.scripts = scripts
+            video.save(update_fields=["scripts", "updated_at"])
+            return api_response(message=f"配音合成失败：{str(exc)[:200]}", code=502, status=502)
+
+        target["audio_url"] = audio_url
+        target.pop("audio_error", None)
+        video.scripts = scripts
+        # 该页补齐后若全部页均有配音，回到配音就绪态
+        script_count = len([item for item in scripts if (item.get("script") or "").strip()])
+        audio_count = len([item for item in scripts if item.get("audio_url")])
+        if script_count > 0 and audio_count == script_count:
+            video.gen_status = TeachingVideo.GenStatus.AUDIO_READY
+        video.save(update_fields=["scripts", "gen_status", "updated_at"])
+        return api_response(self.get_serializer(video).data, message=f"第 {page} 页配音已重新生成")
 
     @action(detail=True, methods=["post"], url_path="report-progress", permission_classes=[IsStudent])
     def report_progress(self, request, pk=None):

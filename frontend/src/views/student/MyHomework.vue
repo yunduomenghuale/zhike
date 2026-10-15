@@ -45,46 +45,38 @@
           </div>
 
           <div :class="{ 'submit-cols': splitAnswer }">
-            <section v-if="current?.attachment" class="assignment-resource">
+            <section v-if="teacherAttachments.length" class="assignment-resource">
               <div class="resource-heading">
                 <div>
                   <div class="section-kicker">作业资料</div>
-                  <div class="resource-title">教师附件</div>
-                </div>
-                <div class="resource-actions">
-                  <a
-                    class="resource-action"
-                    :href="current.attachment"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <el-icon><View /></el-icon>打开文件
-                  </a>
-                  <a class="resource-action primary" :href="current.attachment" download>
-                    <el-icon><Download /></el-icon>下载附件
-                  </a>
+                  <div class="resource-title">教师附件（{{ teacherAttachments.length }}）</div>
                 </div>
               </div>
-              <div class="resource-file">
-                <span class="resource-file-icon"><el-icon><Document /></el-icon></span>
-                <div>
-                  <strong>{{ teacherAttachmentName }}</strong>
-                  <span>{{ isTeacherAttachmentPdf ? 'PDF 文档，可直接在线预览' : '教师提供的作业文件' }}</span>
+              <div class="resource-file-list">
+                <div v-for="file in teacherAttachments" :key="file.url" class="resource-file">
+                  <span class="resource-file-icon"><el-icon><Document /></el-icon></span>
+                  <div>
+                    <strong>{{ file.name }}</strong>
+                    <span>{{ isPdfName(file.name) ? 'PDF 文档，可直接在线预览' : '教师提供的作业文件' }}{{ file.size ? ` · ${formatFileSize(file.size)}` : '' }}</span>
+                  </div>
+                  <div class="resource-file-actions">
+                    <a class="resource-action" :href="file.url" target="_blank" rel="noopener noreferrer">
+                      <el-icon><View /></el-icon>打开文件
+                    </a>
+                    <a class="resource-action primary" :href="file.url" download>
+                      <el-icon><Download /></el-icon>下载
+                    </a>
+                  </div>
                 </div>
               </div>
-              <div v-if="isTeacherAttachmentPdf && pdfPreviewLoading" class="resource-preview-state">
-                <el-icon class="is-loading"><Loading /></el-icon>
-                <span>正在加载 PDF 预览…</span>
-              </div>
-              <div v-else-if="isTeacherAttachmentPdf && pdfPreviewError" class="resource-preview-state is-error">
-                <span>在线预览加载失败，请使用右上角“打开文件”或“下载附件”。</span>
-              </div>
-              <iframe
-                v-else-if="isTeacherAttachmentPdf && pdfPreviewUrl"
+              <!-- PDF 无工具栏连续滚动预览：与教师端同一组件，上下滚动查看 -->
+              <PdfScrollPreview
+                v-if="previewTeacherUrl"
                 class="resource-preview"
-                :src="pdfPreviewUrl"
-                title="作业附件 PDF 预览"
-              ></iframe>
+                :homework-id="current.id"
+                :url="previewTeacherUrl"
+                max-height="min(52vh, 520px)"
+              />
             </section>
 
             <template v-if="detailMode === 'submit'">
@@ -93,17 +85,18 @@
                 <div class="question-title">
                   <div class="question-heading">
                     <span class="question-index">{{ String(index + 1).padStart(2, '0') }}</span>
+                    <span class="question-type-tag" :class="`qt-${item.snapshot.qtype}`">{{ abbrQtype(item.snapshot) }}</span>
                     <span>{{ item.snapshot.stem }}</span>
                   </div>
                   <span class="question-score">{{ item.score }} 分</span>
                 </div>
                 <el-radio-group v-if="['single', 'judge'].includes(item.snapshot.qtype)" v-model="answerOf(item.id).key">
-                  <el-radio v-for="option in item.snapshot.options" :key="option.key" :value="option.key">
+                  <el-radio v-for="option in optionsOf(item)" :key="option.key" :value="option.key">
                     {{ option.key }}. {{ option.text }}
                   </el-radio>
                 </el-radio-group>
                 <el-checkbox-group v-else-if="item.snapshot.qtype === 'multi'" v-model="answerOf(item.id).keys">
-                  <el-checkbox v-for="option in item.snapshot.options" :key="option.key" :value="option.key">
+                  <el-checkbox v-for="option in optionsOf(item)" :key="option.key" :value="option.key">
                     {{ option.key }}. {{ option.text }}
                   </el-checkbox>
                 </el-checkbox-group>
@@ -132,22 +125,54 @@
                 <div class="answer-dock-bar">
                   <div class="upload-info">
                     <div class="upload-title">作业附件</div>
-                    <div class="upload-tip">可选，最多上传一个文件</div>
+                    <div class="upload-tip">支持图片与文档，可多选，单个不超过 20MB；选择后立即上传</div>
                   </div>
                   <div class="upload-side">
-                    <el-tag v-if="submitFile" size="small" effect="plain" round closable @close="clearSubmitFile">
-                      {{ submitFile.name }}
-                    </el-tag>
                     <el-upload
                       ref="uploadRef"
                       :auto-upload="false"
-                      :limit="1"
+                      multiple
+                      :limit="9"
                       :show-file-list="false"
+                      accept="image/*,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.zip,.rar"
                       :on-change="onSubmitFile"
                       :on-exceed="onExceedFile"
                     >
                       <el-button class="upload-btn" :icon="Upload">选择文件</el-button>
                     </el-upload>
+                  </div>
+                </div>
+                <!-- 已选文件：图片缩略图预览 + 上传进度/状态 + 失败重试 + 大小统计 -->
+                <div v-if="submitFiles.length" class="submit-file-list">
+                  <div v-for="(file, index) in submitFiles" :key="file.key" class="submit-file-item" :class="`is-${file.status}`">
+                    <el-image
+                      v-if="file.isImage"
+                      :src="file.previewUrl"
+                      fit="cover"
+                      class="submit-file-thumb"
+                      :preview-src-list="submitImageUrls"
+                    />
+                    <span v-else class="submit-file-icon"><el-icon><Document /></el-icon></span>
+                    <div class="submit-file-info">
+                      <div class="submit-file-name" :title="file.name">{{ file.name }}</div>
+                      <div class="submit-file-meta">
+                        <span>{{ formatFileSize(file.size) }}</span>
+                        <span v-if="file.status === 'uploading'" class="submit-file-status is-uploading">上传中 {{ file.progress }}%</span>
+                        <span v-else-if="file.status === 'success'" class="submit-file-status is-success">已上传</span>
+                        <span v-else-if="file.status === 'error'" class="submit-file-status is-error">上传失败</span>
+                      </div>
+                      <div v-if="file.status === 'uploading'" class="submit-progress-track">
+                        <div class="submit-progress-bar" :style="{ width: file.progress + '%' }"></div>
+                      </div>
+                      <div v-else-if="file.status === 'error'" class="submit-file-error">{{ file.error || '上传失败，请重试' }}</div>
+                    </div>
+                    <div class="submit-file-actions">
+                      <el-button v-if="file.status === 'error'" link type="primary" @click="retrySubmitFile(file)">重试</el-button>
+                      <el-button link type="danger" @click="removeSubmitFile(index)">移除</el-button>
+                    </div>
+                  </div>
+                  <div class="submit-file-summary">
+                    已选 {{ submitFiles.length }} 个文件，{{ submitUploadedCount }} 个已上传（单个上限 20MB，最多 9 个）
                   </div>
                 </div>
               </div>
@@ -176,7 +201,7 @@
             <div v-else class="pending-review">
               <span class="pending-dot"></span>
               <div v-if="viewData?.correct_status === 'graded'"><strong>老师已批改完成</strong><span>成绩发布后这里会显示得分与评语</span></div>
-              <div v-else><strong>作业已提交</strong><span>老师批改后会在这里显示成绩与评语</span></div>
+              <div v-else><strong>作业已提交</strong><span>答案与解析已开放学习，主观题批改后公布总成绩与评语</span></div>
             </div>
 
             <div class="view-block">
@@ -185,18 +210,47 @@
                 <div v-for="(item, index) in viewData?.answer_items" :key="item.id" class="answer-result-item">
                   <div class="result-question-title">
                     <span class="question-index">{{ String(index + 1).padStart(2, '0') }}</span>
+                    <span class="question-type-tag" :class="`qt-${item.snapshot.qtype}`">{{ abbrQtype(item.snapshot) }}</span>
                     <strong>{{ item.snapshot.stem }}</strong>
                   </div>
-                  <div class="submitted-answer">我的答案：{{ formatAnswer(item.student_answer) || '未作答' }}</div>
-                  <template v-if="viewData?.correct_status === 'returned'">
-                    <el-tag v-if="item.needs_manual_grading && item.score == null" type="warning" size="small">等待教师批改</el-tag>
-                    <el-tag v-else :type="item.is_correct === false ? 'danger' : 'success'" size="small">
-                      得分 {{ item.score ?? 0 }} 分
+                  <div class="submitted-answer">我的答案：{{ formatAnswer(item.student_answer, item.snapshot) || '未作答' }}</div>
+                  <!-- 提交即可学习：客观题答案/解析/得分即时可见；主观题得分待批改，解析同样开放 -->
+                  <div v-if="correctAnswerText(item.snapshot)" class="correct-answer">{{ answerLabel(item) }}：{{ correctAnswerText(item.snapshot) }}</div>
+                  <div v-if="item.snapshot.analysis" class="answer-analysis">解析：{{ item.snapshot.analysis }}</div>
+                  <div class="result-score-row">
+                    <template v-if="item.needs_manual_grading">
+                      <el-tag v-if="item.score == null" type="warning" size="small">等待教师批改</el-tag>
+                      <el-tag v-else type="success" size="small">得分 {{ item.score }} 分</el-tag>
+                    </template>
+                    <el-tag v-else :type="objectiveResultTag(item).type" size="small">
+                      {{ objectiveResultTag(item).text }} · 得分 {{ item.score ?? 0 }} 分
                     </el-tag>
-                  </template>
+                  </div>
+                  <div v-if="item.comment" class="answer-comment">老师评语：{{ item.comment }}</div>
                 </div>
               </div>
-              <div v-else class="view-text">{{ viewData?.content || '附件提交' }}</div>
+              <template v-else>
+                <div class="view-text">{{ viewData?.content || '附件提交' }}</div>
+                <div v-if="submittedAttachments.length" class="submitted-attachments">
+                  <div class="section-kicker">提交的附件</div>
+                  <div class="submitted-attachment-list">
+                    <template v-for="(file, fileIndex) in submittedAttachments" :key="fileIndex">
+                      <el-image
+                        v-if="isImageFile(file.name)"
+                        :src="file.url"
+                        fit="cover"
+                        class="submitted-attachment-thumb"
+                        :preview-src-list="submittedImageUrls"
+                      />
+                      <a v-else class="submitted-attachment-file" :href="file.url" target="_blank" rel="noopener">
+                        <el-icon><Document /></el-icon>
+                        <span class="submitted-attachment-name" :title="file.name">{{ file.name }}</span>
+                        <small>{{ file.size ? formatFileSize(file.size) : '' }}</small>
+                      </a>
+                    </template>
+                  </div>
+                </div>
+              </template>
             </div>
 
             <div v-if="viewData?.correct_status === 'returned' && viewData?.comment" class="teacher-comment">
@@ -246,10 +300,14 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, markRaw, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowLeft, Check, Clock, Document, Download, Loading, Trophy, Upload, View } from '@element-plus/icons-vue'
+import { ArrowLeft, Check, Clock, Document, Download, Trophy, Upload, View } from '@element-plus/icons-vue'
+import PdfScrollPreview from '@/components/PdfScrollPreview.vue'
+import { uploadWithProgress, isImageFile, fileNameFromUrl } from '@/utils/upload'
+import { abbrQtype } from '@/utils/question-abbr'
+import { blankAnswerText } from '@/utils/blank-answer'
 import { listHomeworks, listSubmissions, submitHomework } from '@/api/homework'
 
 const route = useRoute()
@@ -278,6 +336,18 @@ function hasStarted(row) {
 
 function formatTime(value, fallback) {
   return value ? new Date(value).toLocaleString() : fallback
+}
+
+// 题目选项：判断题快照缺 options 时回退默认对错项（兼容历史数据；答案 key 为 T/F 时用 T/F 选项保持一致）
+function optionsOf(item) {
+  const snapshot = item?.snapshot || {}
+  if (Array.isArray(snapshot.options) && snapshot.options.length) return snapshot.options
+  if (snapshot.qtype === 'judge') {
+    const key = String(snapshot.answer?.key || '').toUpperCase()
+    if (key === 'T' || key === 'F') return [{ key: 'T', text: '正确' }, { key: 'F', text: '错误' }]
+    return [{ key: 'A', text: '正确' }, { key: 'B', text: '错误' }]
+  }
+  return []
 }
 
 function statusInfo(row) {
@@ -310,42 +380,140 @@ const detailMode = ref(null)
 const submitting = ref(false)
 const current = ref(null)
 const submitForm = reactive({ content: '', answers: {} })
-const submitFile = ref(null)
+// 多附件提交：[{key, raw, name, size, isImage, previewUrl}]
+const submitFiles = ref([])
 const uploadRef = ref(null)
+const SUBMIT_ALLOWED_EXT = ['.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx', '.txt', '.zip', '.rar', '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']
+const submitImageUrls = computed(() => submitFiles.value.filter((f) => f.isImage).map((f) => f.previewUrl))
+let submitFileSeq = 0
 
-function clearSubmitFile() {
-  submitFile.value = null
-  uploadRef.value?.clearFiles?.()
+function isPdfName(name) {
+  return String(name || '').toLowerCase().endsWith('.pdf')
 }
-
-function onExceedFile(files) {
-  // 超过 1 个文件限制时：清空旧文件并以新文件替换
-  uploadRef.value?.clearFiles?.()
-  const f = files?.[0]
-  if (f) uploadRef.value?.handleStart?.(f)
+function formatFileSize(bytes) {
+  const size = Number(bytes || 0)
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / 1024 / 1024).toFixed(2)} MB`
 }
-const teacherAttachmentName = computed(() => {
-  const url = String(current.value?.attachment || '')
-  const rawName = url.split('/').pop()?.split('?')[0] || '作业附件'
-  try {
-    return decodeURIComponent(rawName)
-  } catch {
-    return rawName
-  }
+// 教师作业附件（多附件）：后端序列化直接返回原文件名（存储文件名为 uuid）
+const teacherAttachments = computed(() => (current.value?.attachments || []).map((item) => ({ ...item })))
+// 自动在线预览第一个 PDF 附件（无工具栏连续滚动，与教师端一致）
+const previewTeacherUrl = computed(() => {
+  const pdf = teacherAttachments.value.find((item) => isPdfName(item.name))
+  return pdf?.url || ''
 })
-const isTeacherAttachmentPdf = computed(() => teacherAttachmentName.value.toLowerCase().endsWith('.pdf'))
+function correctAnswerText(snapshot) {
+  const answer = snapshot?.answer || {}
+  const options = snapshot?.options || []
+  // 带选项内容展示，避免只显示 A/B/C/D 字母造成困惑
+  const label = (key) => {
+    const opt = options.find((o) => o.key === key)
+    return opt ? `${key}. ${opt.text}` : String(key)
+  }
+  if (answer.key != null && String(answer.key) !== '') return label(answer.key)
+  if (answer.keys?.length) return answer.keys.map(label).join('、')
+  if (answer.blanks?.length) return blankAnswerText(answer)
+  if (answer.text != null && String(answer.text).trim()) return String(answer.text)
+  return ''
+}
+// 客观题结果徽章：全对「答对」、部分空命中「部分正确」（填空题按空赋分）、全错「答错」
+function objectiveResultTag(item) {
+  if (item.is_correct !== false) return { type: 'success', text: '答对' }
+  if (Number(item.score) > 0) return { type: 'warning', text: '部分正确' }
+  return { type: 'danger', text: '答错' }
+}
 
-// 附件 PDF 作业：左资料右作答的分栏布局（仅提交页、附件/文本作业）
+function onSubmitFile(file) {
+  const raw = file?.raw
+  if (!raw) return
+  const name = String(raw.name || '')
+  const ext = name.includes('.') ? `.${name.split('.').pop().toLowerCase()}` : ''
+  if (!SUBMIT_ALLOWED_EXT.includes(ext)) {
+    ElMessage.warning('不支持该文件格式，支持图片与 PDF、Office 文档、TXT、压缩包')
+    return
+  }
+  if (Number(raw.size || 0) > 20 * 1024 * 1024) {
+    ElMessage.warning('单个附件大小不能超过 20MB')
+    return
+  }
+  if (submitFiles.value.length >= 9) {
+    ElMessage.warning('一次最多上传 9 个附件')
+    return
+  }
+  const isImage = isImageFile(name)
+  // reactive 任务：status/progress 变更才能触发重渲染；raw 文件对象 markRaw 防代理破坏 FormData
+  const task = reactive({
+    key: `f${(submitFileSeq += 1)}`,
+    raw: markRaw(raw),
+    name,
+    size: Number(raw.size || 0),
+    isImage,
+    previewUrl: isImage ? URL.createObjectURL(raw) : '',
+    // 上传流程状态：pending 排队 / uploading 上传中 / success 已暂存 / error 失败
+    status: 'pending',
+    progress: 0,
+    error: '',
+    staged: null,
+  })
+  submitFiles.value.push(task)
+  // 选择即暂存上传：进度/状态/结果即时展示，提交时仅传引用（uploaded）
+  stageSubmitFile(task)
+}
+
+// 暂存上传到服务端（提交前落地，提交仅引用）；失败可原任务重试
+async function stageSubmitFile(task) {
+  if (!task || task.status === 'uploading') return
+  task.status = 'uploading'
+  task.progress = 0
+  task.error = ''
+  try {
+    const body = new FormData()
+    body.append('attachments', task.raw)
+    const payload = await uploadWithProgress(
+      'POST',
+      '/api/homework-submissions/attachments/',
+      body,
+      (percent) => { task.progress = percent },
+    )
+    const added = payload?.data?.added || []
+    task.staged = added[0] || null
+    task.status = 'success'
+    task.progress = 100
+  } catch (error) {
+    task.status = 'error'
+    task.error = error?.message || '上传失败，请重试'
+  }
+}
+
+function retrySubmitFile(task) {
+  stageSubmitFile(task)
+}
+
+function removeSubmitFile(index) {
+  const [removed] = submitFiles.value.splice(index, 1)
+  if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl)
+  // 已暂存到服务端的文件在此成为孤儿，由 cleanup_submission_staging 管理命令定期清理
+}
+
+function releaseSubmitPreviews() {
+  submitFiles.value.forEach((f) => {
+    if (f.previewUrl) URL.revokeObjectURL(f.previewUrl)
+  })
+  submitFiles.value = []
+}
+
+function onExceedFile() {
+  ElMessage.warning('一次最多上传 9 个附件')
+}
+const submitUploadedCount = computed(() => submitFiles.value.filter((f) => f.status === 'success').length)
+
+// 附件 PDF 作业：左资料右作答的分栏布局（仅提交页、附件/文本作业且有 PDF 可预览）
 const splitAnswer = computed(() => (
   detailMode.value === 'submit'
   && current.value?.mode !== 'questions'
-  && Boolean(current.value?.attachment)
-  && isTeacherAttachmentPdf.value
+  && Boolean(previewTeacherUrl.value)
 ))
-const pdfPreviewUrl = ref('')
-const pdfPreviewLoading = ref(false)
-const pdfPreviewError = ref(false)
-let pdfPreviewRequestId = 0
 const questionTotal = computed(() => current.value?.questions?.length || 0)
 const answeredCount = computed(() => (current.value?.questions || []).filter((item) => {
   const answer = submitForm.answers[item.id] || {}
@@ -376,36 +544,50 @@ function openSubmit(row) {
   current.value = row
   submitForm.content = ''
   submitForm.answers = Object.fromEntries((row.questions || []).map((item) => [item.id, initialAnswer(item)]))
-  submitFile.value = null
+  releaseSubmitPreviews()
+  uploadRef.value?.clearFiles?.()
   detailMode.value = 'submit'
-}
-function onSubmitFile(file) {
-  submitFile.value = file.raw
 }
 async function doSubmit() {
   if (current.value.mode === 'questions' && answeredCount.value < questionTotal.value) {
     return ElMessage.warning(`还有 ${questionTotal.value - answeredCount.value} 道题未作答`)
   }
-  if (current.value.mode !== 'questions' && !submitForm.content.trim() && !submitFile.value) {
+  if (current.value.mode !== 'questions' && !submitForm.content.trim() && !submitFiles.value.length) {
     return ElMessage.warning('请输入作业内容或上传附件')
+  }
+  // 附件为选择即暂存上传：提交前不能有上传中/失败的任务，避免漏交或静默丢弃
+  if (submitFiles.value.some((f) => f.status === 'uploading')) {
+    return ElMessage.warning('附件正在上传中，请稍候再提交')
+  }
+  if (submitFiles.value.some((f) => f.status === 'error')) {
+    return ElMessage.warning('有附件上传失败，请重试或移除后再提交')
   }
   submitting.value = true
   try {
     let payload
     if (current.value.mode === 'questions') {
       payload = { homework: current.value.id, answers: submitForm.answers }
-    } else if (submitFile.value) {
+    } else {
       payload = new FormData()
       payload.append('homework', current.value.id)
       payload.append('content', submitForm.content)
-      payload.append('attachment', submitFile.value)
-    } else {
-      payload = { homework: current.value.id, content: submitForm.content }
+      // 附件已在选择时暂存上传，提交仅传引用（uploaded 为 JSON 字符串）
+      const uploaded = submitFiles.value
+        .filter((f) => f.status === 'success' && f.staged)
+        .map((f) => f.staged)
+      if (uploaded.length) payload.append('uploaded', JSON.stringify(uploaded))
     }
-    await submitHomework(payload)
+    const submission = await submitHomework(payload)
     ElMessage.success('提交成功')
-    closeWorkspace()
-    await load()
+    // 提交后直接进入该作业的结果展示页（即时看成绩/逐题判定），不再返回列表
+    if (submission && submission.id) {
+      subMap.value = { ...subMap.value, [current.value.id]: submission }
+      openView(current.value)
+      load().catch(() => {}) // 后台静默刷新列表状态，不阻塞结果页
+    } else {
+      closeWorkspace()
+      await load()
+    }
   } finally {
     submitting.value = false
   }
@@ -423,62 +605,41 @@ function closeWorkspace() {
   detailMode.value = null
   current.value = null
   viewData.value = null
-  submitFile.value = null
+  releaseSubmitPreviews()
 }
 
-function formatAnswer(answer) {
+// 已提交附件（兼容旧的单附件字段 attachment）
+const submittedAttachments = computed(() => {
+  const list = []
+  if (viewData.value?.attachment) {
+    list.push({ name: fileNameFromUrl(viewData.value.attachment), url: viewData.value.attachment, size: 0 })
+  }
+  ;(viewData.value?.attachments || []).forEach((f) => list.push(f))
+  return list
+})
+const submittedImageUrls = computed(() => submittedAttachments.value.filter((f) => isImageFile(f.name)).map((f) => f.url))
+
+function formatAnswer(answer, snapshot) {
   if (!answer) return ''
-  if (answer.key != null) return String(answer.key)
-  if (answer.keys) return answer.keys.join('、')
-  if (answer.blanks) return answer.blanks.join(' / ')
-  if (answer.text != null) return String(answer.text)
-  return JSON.stringify(answer)
-}
-
-function releasePdfPreview() {
-  if (pdfPreviewUrl.value) {
-    URL.revokeObjectURL(pdfPreviewUrl.value)
-    pdfPreviewUrl.value = ''
+  const options = snapshot?.options || []
+  // 选择题：选项字母附带选项内容，避免只显示 A/B/C/D 造成困惑（与正确答案展示一致）
+  const label = (key) => {
+    const opt = options.find((o) => o.key === key)
+    return opt ? `${key}. ${opt.text}` : String(key)
   }
-}
-
-function mediaProxyUrl(url) {
-  try {
-    const parsed = new URL(url, window.location.origin)
-    if (parsed.pathname.startsWith('/media/')) return `${parsed.pathname}${parsed.search}`
-  } catch {
-    // 保留原地址作为兜底
+  if (answer.key != null && String(answer.key) !== '') return label(answer.key)
+  if (Array.isArray(answer.keys)) return answer.keys.length ? answer.keys.map(label).join('、') : ''
+  if (Array.isArray(answer.blanks)) {
+    const filled = answer.blanks.map((b) => String(b ?? '').trim()).filter((b) => b !== '')
+    return filled.length ? filled.join('；') : ''
   }
-  return url
+  if (answer.text != null && String(answer.text).trim() !== '') return String(answer.text)
+  return ''
 }
-
-async function loadPdfPreview(url, isPdf) {
-  const requestId = ++pdfPreviewRequestId
-  releasePdfPreview()
-  pdfPreviewLoading.value = false
-  pdfPreviewError.value = false
-  if (!url || !isPdf) return
-
-  pdfPreviewLoading.value = true
-  try {
-    const response = await fetch(mediaProxyUrl(url))
-    if (!response.ok) throw new Error(`PDF 请求失败：${response.status}`)
-    const blob = await response.blob()
-    if (requestId !== pdfPreviewRequestId) return
-    pdfPreviewUrl.value = URL.createObjectURL(blob.type === 'application/pdf'
-      ? blob
-      : new Blob([blob], { type: 'application/pdf' }))
-  } catch {
-    if (requestId === pdfPreviewRequestId) pdfPreviewError.value = true
-  } finally {
-    if (requestId === pdfPreviewRequestId) pdfPreviewLoading.value = false
-  }
+// 简答题无唯一标准答案：展示为「参考答案」（取自题目自身的 answer 字段，教师在题目编辑中维护）
+function answerLabel(item) {
+  return item?.snapshot?.qtype === 'short' ? '参考答案' : '正确答案'
 }
-
-watch(
-  [() => current.value?.attachment, isTeacherAttachmentPdf],
-  ([url, isPdf]) => loadPdfPreview(url, isPdf),
-)
 
 watch(fixedCourseId, () => {
   closeWorkspace()
@@ -487,8 +648,7 @@ watch(fixedCourseId, () => {
 
 onMounted(load)
 onBeforeUnmount(() => {
-  pdfPreviewRequestId += 1
-  releasePdfPreview()
+  releaseSubmitPreviews()
 })
 </script>
 
@@ -838,15 +998,27 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 
+/* PDF 滚动预览（无工具栏，师生端同一组件）挂载点 */
 .resource-preview {
-  width: 100%;
-  height: min(52vh, 520px);
-  min-height: 360px;
   margin-top: 14px;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  display: block;
-  background: #f8fafc;
+}
+
+.resource-file-list {
+  margin-top: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.resource-file-list .resource-file {
+  margin-top: 0;
+}
+
+.resource-file-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 /* 附件 PDF 作业：左资料右作答分栏 */
@@ -864,9 +1036,6 @@ onBeforeUnmount(() => {
 
 .submit-cols .resource-preview {
   flex: 1;
-  min-height: 460px;
-  max-height: 660px;
-  height: auto;
 }
 
 .submit-cols .attachment-answer {
@@ -883,35 +1052,6 @@ onBeforeUnmount(() => {
   .submit-cols {
     grid-template-columns: minmax(0, 1fr);
   }
-
-  .submit-cols .resource-preview {
-    min-height: 420px;
-  }
-}
-
-.resource-preview-state {
-  min-height: 180px;
-  margin-top: 14px;
-  border: 1px dashed #bfdbfe;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 9px;
-  color: #64748b;
-  background: #f8fbff;
-  font-size: 13px;
-}
-
-.resource-preview-state .el-icon {
-  color: #2563eb;
-  font-size: 20px;
-}
-
-.resource-preview-state.is-error {
-  border-color: #fed7aa;
-  color: #9a3412;
-  background: #fff7ed;
 }
 
 .view-block {
@@ -977,6 +1117,25 @@ onBeforeUnmount(() => {
   font-size: 12px;
   font-weight: 800;
 }
+
+/* 题型徽章：与序号/分值同一视觉体系，按题型着色 */
+.question-type-tag {
+  height: 22px;
+  margin-top: 3px;
+  padding: 0 8px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.question-type-tag.qt-single { color: #2563eb; background: #eff6ff; }
+.question-type-tag.qt-multi { color: #7c3aed; background: #f5f3ff; }
+.question-type-tag.qt-judge { color: #059669; background: #ecfdf5; }
+.question-type-tag.qt-blank { color: #d97706; background: #fffbeb; }
+.question-type-tag.qt-short { color: #475569; background: #f1f5f9; }
 
 .question-score {
   height: 26px;
@@ -1328,4 +1487,125 @@ onBeforeUnmount(() => {
     margin: 0;
   }
 }
+
+/* ---- 学生提交：多附件（图片预览 + 大小统计） ---- */
+.submit-file-list {
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+}
+.submit-file-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+.submit-file-thumb {
+  flex: none;
+  width: 52px;
+  height: 52px;
+  border-radius: 8px;
+  background: #e2e8f0;
+  cursor: zoom-in;
+}
+.submit-file-icon {
+  flex: none;
+  width: 52px;
+  height: 52px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: #64748b;
+  background: #eef2f7;
+  font-size: 22px;
+}
+.submit-file-info { flex: 1; min-width: 0; }
+.submit-file-name {
+  color: #1e293b;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.submit-file-meta { margin-top: 2px; color: #94a3b8; font-size: 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.submit-file-status.is-uploading { color: #2563eb; font-weight: 700; }
+.submit-file-status.is-success { color: #16a34a; font-weight: 700; }
+.submit-file-status.is-error { color: #dc2626; font-weight: 700; }
+.submit-file-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.submit-progress-track {
+  height: 6px;
+  margin-top: 6px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+.submit-progress-bar {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #60a5fa, #2563eb);
+  transition: width 0.2s ease;
+}
+.submit-file-error { margin-top: 4px; color: #dc2626; font-size: 12px; }
+.submit-file-summary {
+  padding: 2px 4px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+/* ---- 查看结果：正确答案/解析/对错 ---- */
+.correct-answer { color: #059669; font-weight: 700; }
+.answer-analysis { color: #64748b; font-size: 13px; line-height: 1.6; }
+.result-score-row { display: flex; gap: 8px; }
+/* 逐题老师评语（成绩发布后随答案一并放行） */
+.answer-comment {
+  margin-top: 2px;
+  padding: 6px 10px;
+  border-left: 3px solid #93c5fd;
+  border-radius: 6px;
+  background: #f0f7ff;
+  color: #1e40af;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* ---- 查看结果：已提交附件预览 ---- */
+.submitted-attachments { margin-top: 14px; }
+.submitted-attachment-list {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.submitted-attachment-thumb {
+  width: 112px;
+  height: 84px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f1f5f9;
+  cursor: zoom-in;
+}
+.submitted-attachment-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 260px;
+  padding: 8px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  color: #334155;
+  background: #f8fafc;
+  font-size: 13px;
+  text-decoration: none;
+}
+.submitted-attachment-file:hover { border-color: #93c5fd; background: #eff6ff; }
+.submitted-attachment-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.submitted-attachment-file small { color: #94a3b8; }
 </style>

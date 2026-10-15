@@ -19,8 +19,8 @@
         <view class="r-q">Q：{{ r.question }}</view>
         <view class="r-a">{{ r.answer }}</view>
         <view v-if="r.cited_chunks?.length" class="sources">
-          <text v-for="(c, i) in r.cited_chunks" :key="i" class="chip">
-            📄 {{ c.material_name || '课程资料' }}{{ c.page ? ` P${c.page}` : '' }}
+          <text v-for="(g, i) in groupCitedSources(r.cited_chunks)" :key="i" class="chip">
+            📄 {{ citedSourceLabel(g) }}
           </text>
         </view>
       </view>
@@ -33,6 +33,7 @@ import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { listClasses } from '@/api/classroom.js'
 import { listQaRecords } from '@/api/knowledge.js'
+import { groupCitedSources, citedSourceLabel } from '@/utils/cited-sources.js'
 
 const courses = ref([])
 const currentCourse = ref(null)

@@ -1,8 +1,15 @@
 <template>
   <view class="page">
     <view class="toolbar">
-      <button class="ghost-btn" :disabled="loading" @click="load">刷新</button>
+      <view class="toolbar-left">
+        <button class="ghost-btn" :disabled="loading" @click="load">刷新</button>
+        <text class="auto-tip">每 5 秒自动刷新</text>
+      </view>
       <button class="primary-btn small" @click="releaseAll">批量发布成绩</button>
+    </view>
+
+    <view v-if="!loading && subs.length" class="summary">
+      已交卷 {{ submittedCount }} 份 · 待批改 {{ pendingCount }} 份
     </view>
 
     <view v-if="loading" class="tip">加载中…</view>
@@ -12,7 +19,7 @@
         <view class="s-head" @click="toggle(s.id)">
           <view class="s-main">
             <text class="s-name">{{ s.student_name || `学生#${s.student}` }}</text>
-            <text v-if="s.abnormal" class="chip danger">异常</text>
+            <text v-if="s.abnormal_count" class="chip danger">异常 {{ s.abnormal_count }} 次</text>
             <text v-if="s.score_released" class="chip success">已发布</text>
           </view>
           <text class="chip" :class="tone(s.status)">{{ s.status_display || s.status }}</text>
@@ -59,8 +66,8 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { computed, ref } from 'vue'
+import { onHide, onLoad, onShow, onUnload } from '@dcloudio/uni-app'
 import {
   monitorExam, releaseExamScores, examGradingDetail, gradeExamSubmission, releaseExamScore,
 } from '@/api/exam.js'
@@ -71,22 +78,53 @@ const loading = ref(false)
 const expandedId = ref(null)
 const grading = ref({})
 
+// 已交卷份数 / 待批改份数（含主观题且未批完）
+const submittedCount = computed(() =>
+  subs.value.filter((s) => ['submitted', 'timeout'].includes(s.status)).length,
+)
+const pendingCount = computed(() =>
+  subs.value.filter(
+    (s) =>
+      ['submitted', 'timeout'].includes(s.status) &&
+      s.has_subjective &&
+      (s.graded_subjective_count ?? 0) < (s.subjective_count ?? 0),
+  ).length,
+)
+
 onLoad((q) => {
   examId.value = Number(q.id) || null
   if (q.name) uni.setNavigationBarTitle({ title: decodeURIComponent(q.name) })
   load()
 })
 
-async function load() {
+async function load(silent = false) {
   if (!examId.value) return
-  loading.value = true
+  if (!silent) loading.value = true
   try {
     const data = await monitorExam(examId.value)
     subs.value = data.results ?? data
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
+
+// 页面显示期间每 5 秒静默自动刷新；退后台/卸载即停
+let monitorTimer = null
+function startAutoRefresh() {
+  stopAutoRefresh()
+  monitorTimer = setInterval(() => {
+    if (!loading.value) load(true)
+  }, 5000)
+}
+function stopAutoRefresh() {
+  if (monitorTimer) {
+    clearInterval(monitorTimer)
+    monitorTimer = null
+  }
+}
+onShow(startAutoRefresh)
+onHide(stopAutoRefresh)
+onUnload(stopAutoRefresh)
 
 async function toggle(id) {
   if (expandedId.value === id) {
@@ -102,7 +140,8 @@ async function toggle(id) {
     const scores = {}
     ;(res.subjective_questions || []).forEach((q) => {
       const existing = (res.subjective_scores || {})[q.question_id]
-      scores[q.question_id] = existing ?? ''
+      // 未评分默认预设 0 分（不与空值混淆，教师直接改分即可）
+      scores[q.question_id] = existing != null ? existing : 0
     })
     grading.value = {
       ...grading.value,
@@ -170,6 +209,9 @@ function releaseAll() {
 <style scoped>
 .page { padding: 28rpx; }
 .toolbar { display: flex; justify-content: space-between; gap: 14rpx; margin-bottom: 20rpx; }
+.toolbar-left { display: flex; align-items: center; gap: 16rpx; }
+.auto-tip { font-size: 21rpx; color: #94a3b8; }
+.summary { margin-bottom: 20rpx; padding: 18rpx 24rpx; border-radius: 16rpx; background: #f8fafc; border: 1rpx solid #f1f5f9; font-size: 23rpx; color: #475569; line-height: 1.6; }
 .tip { padding: 80rpx 0; text-align: center; font-size: 26rpx; color: #94a3b8; }
 .card { margin-bottom: 18rpx; padding: 26rpx 28rpx; border-radius: 20rpx; background: #fff; border: 1rpx solid #f1f5f9; box-shadow: 0 2rpx 6rpx rgba(15,23,42,0.04); }
 .s-head { display: flex; align-items: center; justify-content: space-between; }

@@ -7,6 +7,9 @@ from __future__ import annotations
 
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
+
+from django.conf import settings
 
 from .providers.factory import get_provider
 from .vectorstore import search_chunks
@@ -35,7 +38,7 @@ def _safe_json(text: str, default):
 # 授课计划 -> 课程目录（需求 T-D-02）
 # ---------------------------------------------------------------------------
 def generate_catalog_from_plan(plan_text: str) -> list[dict]:
-    provider = get_provider()
+    provider = get_provider("chat")
     messages = [
         {"role": "system", "content": "你是课程建设助手，需从授课计划中识别章节结构。"},
         {
@@ -54,7 +57,7 @@ def generate_catalog_from_plan(plan_text: str) -> list[dict]:
 # PPT 逐页讲解稿（需求 T-V-01）
 # ---------------------------------------------------------------------------
 def generate_scripts_for_video(pages: list[dict]) -> list[dict]:
-    provider = get_provider()
+    provider = get_provider("chat")
     pages = pages or []
     fallback = [_local_script_for_page(page) for page in pages]
     if not pages:
@@ -92,8 +95,16 @@ def generate_script_pages_batched(video, pages: list[dict], batch_size: int = 6)
     对 video.scripts 中尚无讲解稿的页，每批 batch_size 页调用一次 AI，
     每批完成立即落库（请求中断不丢进度）；AI 失败的页用本地兜底文本。
     返回 {generated, pages, script_pages, remaining, done}。
+
+    性能：单次请求内把待生成页拆成两半并发调用（各 batch_size 页，实测每半批约 13s）——
+    两批无顺序依赖，生成吞吐被并行化，30 页课件从约 65s 降到约 40s。
+
+    超时：每半批的请求超时取管理端该能力配置的 timeout，未配则
+    settings.AI_SCRIPT_TIMEOUT（默认 45s，可用 AI_SCRIPT_TIMEOUT 环境变量调大）——
+    本地模型推理慢，不调大易整批超时落兜底。
     """
-    provider = get_provider()
+    provider = get_provider("chat")
+    timeout = getattr(provider, "timeout", None) or getattr(settings, "AI_SCRIPT_TIMEOUT", 45)
     pages = pages or []
     scripts = list(video.scripts or [])
     if not scripts:
@@ -101,7 +112,7 @@ def generate_script_pages_batched(video, pages: list[dict], batch_size: int = 6)
     page_map = {page.get("page"): page for page in pages}
 
     pending = [item for item in scripts if not str(item.get("script") or "").strip()]
-    batch = pending[:batch_size]
+    batch = pending[: batch_size * 2]
     generated = 0
     if batch:
         compact_pages = []
@@ -114,7 +125,19 @@ def generate_script_pages_batched(video, pages: list[dict], batch_size: int = 6)
                     "body": _dedupe_page_body(page_data.get("body") or "")[:500],
                 }
             )
-        by_page = _request_script_batch(provider, compact_pages, timeout=60)
+        # 两半并发：线程间只读共享数据、各产各的 {page: script} 字典，主线程统一合并
+        mid = (len(compact_pages) + 1) // 2
+        chunks = [chunk for chunk in (compact_pages[:mid], compact_pages[mid:]) if chunk]
+        if len(chunks) > 1:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                chunk_results = list(
+                    pool.map(lambda chunk: _request_script_batch(provider, chunk, timeout=timeout), chunks)
+                )
+        else:
+            chunk_results = [_request_script_batch(provider, compact_pages, timeout=timeout)]
+        by_page = {}
+        for result in chunk_results:
+            by_page.update(result)
         for item in batch:
             page_data = page_map.get(item.get("page"), {})
             script = by_page.get(item.get("page")) or _local_script_for_page(page_data)["script"]
@@ -176,7 +199,7 @@ def _request_script_batch(provider, compact_pages: list[dict], timeout: int) -> 
 
     try:
         result = _safe_json(
-            provider.chat(messages, temperature=0.4, timeout=timeout, retries=3, enable_thinking=False),
+            provider.chat(messages, temperature=0.4, timeout=timeout, retries=2, enable_thinking=False),
             default=[],
         )
     except Exception:
@@ -462,34 +485,47 @@ def _dedupe_script_clauses(text: str) -> str:
 # ---------------------------------------------------------------------------
 # 逐页 AI 配音（需求 T-V-03）：对讲解稿合成语音，落地音频地址
 # ---------------------------------------------------------------------------
-def synthesize_audio_for_video(video, voice: str = "Cherry", limit: int | None = None) -> int:
+def synthesize_audio_for_video(video, voice: str | None = None, limit: int | None = None) -> int:
     """为教学视频的逐页讲解稿补齐配音，音频地址写回 scripts 每页。返回本批新增成功页数。
 
     limit：本批最多合成的页数（分段生成，避免多页同步合成超过网关超时）；None 表示不限制。
-    每页处理完立即落库——即使请求中断，已合成的进度也不丢失，下次调用可继续补齐。
+    voice：发音人；优先级 调用参数 > 管理端该能力配置 > settings.AI_TTS_VOICE > Cherry。
+    本地 TTS 的发音人是服务端说话人 ID，在管理端「语音合成」配置里填写。
+
+    性能：本批页在线程池中并发合成（每页是独立的无状态 API 调用，实测单页约 6s）——
+    并发 3 路可把 30 页课件的配音时间从约 3 分钟压到约 1 分钟；
+    整批结束统一写库（此前每页各写一次）。中断/失败的页下次调用补齐。
     """
-    provider = get_provider()
+    provider = get_provider("tts")
+    voice = voice or getattr(provider, "voice", "") or getattr(settings, "AI_TTS_VOICE", "Cherry")
     scripts = video.scripts or []
-    ok = 0
-    processed = 0
+
+    todo = []
     for item in scripts:
         if item.get("audio_url"):
             item.pop("audio_error", None)
             continue
-        text = (item.get("script") or "").strip()
-        if not text:
+        if not (item.get("script") or "").strip():
             continue
-        if limit is not None and processed >= limit:
-            break
-        processed += 1
-        try:
-            item["audio_url"] = provider.tts(text, voice=voice)
+        todo.append(item)
+    if limit is not None:
+        todo = todo[:limit]
+
+    ok = 0
+    if todo:
+        def _synthesize(item):
+            # 每个 item 是独立 dict，线程间无共享状态；provider 只读配置，requests 线程安全
+            try:
+                item["audio_url"] = provider.tts(item["script"].strip(), voice=voice)
+            except Exception as exc:
+                item["audio_error"] = str(exc)[:300]
+                return False
             item.pop("audio_error", None)
-            ok += 1
-        except Exception as exc:
-            item["audio_error"] = str(exc)[:300]
-        video.scripts = scripts
-        video.save(update_fields=["scripts", "updated_at"])
+            return True
+
+        with ThreadPoolExecutor(max_workers=min(3, len(todo))) as pool:
+            results = list(pool.map(_synthesize, todo))
+        ok = sum(1 for flag in results if flag)
 
     audio_count = sum(1 for item in scripts if item.get("audio_url"))
     script_count = len([item for item in scripts if item.get("script")])
@@ -515,7 +551,7 @@ def ingest_material(material, chunk_size: int = 500) -> int:
     from apps.knowledge.extractor import extract_text
     from apps.knowledge.models import KnowledgeChunk
 
-    provider = get_provider()
+    provider = get_provider("embed")
     file_path = material.file.path if material.file else ""
     raw_text = (getattr(material, "_extracted_text", "") or extract_text(file_path)).strip()
 
@@ -544,6 +580,64 @@ def ingest_material(material, chunk_size: int = 500) -> int:
     return len(objs)
 
 
+def ingest_ppt_pages(ppt) -> int:
+    """把课件 PPT 逐页文本向量化写入知识库片段（每页一个片段）。
+
+    课件是向量库的主要内容：QA 检索主要依赖它，因此上传解析成功后
+    即入库（与教辅资料 ingest_material 对称）。
+
+    与 ingest_material 的区别——失败必须「静默」：
+    - 向量模型未配置/不可用（allow_fallback=False 下真实报错）时返回 0，
+      旧片段原样保留，也不修改 PPT 的任何状态（QA 侧有原文拼接兜底，
+      见 _gather_course_context 第 2 步）；
+    - 全链路 allow_fallback=False，杜绝 64 维 Mock 假向量混入真实向量空间。
+    """
+    from django.db import transaction
+
+    from apps.knowledge.models import KnowledgeChunk
+
+    pieces: list[str] = []
+    page_nos: list = []
+    for pg in ppt.parsed_pages or []:
+        if not isinstance(pg, dict):
+            continue
+        text = f"{pg.get('title', '') or ''}\n{pg.get('body', '') or ''}".strip()
+        if not text:
+            continue
+        pieces.append(text)
+        page_nos.append(pg.get("page") or len(pieces))
+    if not pieces:
+        return 0
+
+    provider = get_provider("embed")
+    # 未配置向量模型（回退模拟模式）：本次不入库，QA 侧走原文拼接兜底
+    from apps.ai.providers.mock import MockProvider
+
+    if isinstance(provider, MockProvider):
+        return 0
+    try:
+        embeddings = provider.embed(pieces, allow_fallback=False)
+    except Exception:
+        return 0
+    if len(embeddings) != len(pieces) or any(not emb for emb in embeddings):
+        return 0
+
+    objs = [
+        KnowledgeChunk(
+            ppt=ppt,
+            course_id=ppt.course_id,
+            content=piece,
+            page=page_no,
+            embedding=emb,
+        )
+        for piece, page_no, emb in zip(pieces, page_nos, embeddings)
+    ]
+    with transaction.atomic():
+        ppt.chunks.all().delete()
+        KnowledgeChunk.objects.bulk_create(objs)
+    return len(objs)
+
+
 # ---------------------------------------------------------------------------
 # 知识库问答（需求 S-K-01/02/04）
 # ---------------------------------------------------------------------------
@@ -555,6 +649,78 @@ QA_SYSTEM_PROMPT = (
     "并友好地引导学生围绕本课程内容提问。"
     "遇到寒暄、问候或与课程无关的闲聊，友好、简短地回应即可，不要生硬地拒答。"
 )
+
+
+# ---------------------------------------------------------------------------
+# 检索编排：向量召回 -> 重排序 -> 阈值过滤（RAG 引用质量治理）
+# ---------------------------------------------------------------------------
+def _search_relevant_chunks(
+    course_id: int,
+    question: str,
+    *,
+    student_access: bool = False,
+    classroom_id=None,
+    top_k: int = 5,
+) -> list[tuple]:
+    """检索并精排课程知识库片段，返回 [(chunk, score)]（按相关性降序）。
+
+    为什么需要重排：向量检索是纯余弦相似度，关键词面重合但语义不相关的片段
+    也会拿高分——实测「Java 程序设计这门课的考核方式是什么？」一问，噪声页
+    （网络层/多线程课件页）与目标页分数带重叠（0.54~0.76），直接取 top_k=5
+    会把 4 页噪声当「参考来源」展示，用户感知为「乱引用」。
+
+    编排（配了重排能力时）：
+    1. 向量召回 AI_RERANK_RECALL 条候选（比 top_k 多，给重排留筛选余地）；
+    2. 重排模型按 query 语义相关性精排，低于 AI_RERANK_THRESHOLD 的片段
+       判定「实际未参考」，不进上下文也不进引用来源；
+    3. 取前 top_k 条返回，score 为重排相关性分。
+
+    回退（重排是增强项，不能拖垮问答主链路）：未配置重排能力（Mock）/
+    非 DashScope 端点 / 网络或接口异常 / 响应结构异常时，按原行为返回
+    向量 top_k——噪声问题回到治理前，但问答链路始终可用。
+    """
+    embed_provider = get_provider("embed")
+    # 召回数显式配小（< top_k）时尊重配置：候选池小，最终结果就少，不强行抬回 top_k
+    recall = max(int(getattr(settings, "AI_RERANK_RECALL", 15) or 15), 1)
+    threshold = float(getattr(settings, "AI_RERANK_THRESHOLD", 0.3) or 0.3)
+
+    query_vec = embed_provider.embed([question])[0]
+    candidates = [
+        (chunk, score)
+        for chunk, score in search_chunks(
+            course_id,
+            query_vec,
+            top_k=recall,
+            student_access=student_access,
+            classroom_id=classroom_id,
+        )
+        if score > 0
+    ]
+    if not candidates:
+        return []
+
+    try:
+        ranked = get_provider("rerank").rerank(
+            question, [chunk.content for chunk, _ in candidates], top_n=top_k
+        )
+    except Exception:
+        return candidates[:top_k]
+
+    picked: list[tuple] = []
+    for item in ranked:
+        if not isinstance(item, dict):
+            continue
+        index = item.get("index")
+        score = item.get("score")
+        if not isinstance(index, int) or not 0 <= index < len(candidates):
+            continue
+        if not isinstance(score, (int, float)) or score < threshold:
+            continue
+        chunk, _ = candidates[index]
+        picked.append((chunk, float(score)))
+    # 全部低于阈值：判定本课资料确实没有与问题直接相关的内容，返回空——
+    # 上层据此走「资料无相关内容」的话术，而不是把关键词命中的噪声当参考来源
+    return picked[:top_k]
 
 
 def _gather_course_context(
@@ -571,40 +737,64 @@ def _gather_course_context(
     资料来源（按优先级）：知识库检索片段 → 课件 PPT 讲义 → 逐页讲解稿。
     把 PPT / 讲解稿也当作「资料」，避免知识库为空时一律拒答。
     传入 catalog_id 时优先取该章节的课件与讲稿。返回 (context, cited)。
+
+    知识库检索走 _search_relevant_chunks 编排：向量召回多路候选后按问题
+    语义重排并过滤低相关片段（未配重排则回退纯向量 top_k）。
     """
     from apps.courses.models import PPTResource, TeachingVideo
 
-    provider = get_provider()
     parts: list[str] = []
     cited: list[dict] = []
 
-    # 1) 知识库向量检索（若有片段）
-    try:
-        query_vec = provider.embed([question])[0]
-        for chunk, score in search_chunks(
-            course_id,
-            query_vec,
-            top_k=5,
-            student_access=student_access,
-            classroom_id=classroom_id,
-        ):
-            if score <= 0:
-                continue
-            parts.append(chunk.content)
-            cited.append(
-                {
-                    "chunk_id": chunk.id,
-                    "material_name": chunk.material.file_name,
-                    "page": chunk.page,
-                    "snippet": chunk.content[:120],
-                    "score": round(score, 4),
-                }
-            )
-    except Exception:
-        pass
+    # 1) 知识库向量检索（若有片段）。课程没有任何片段时跳过 embed 调用，
+    #    省一次 embedding API 往返（首字延迟的主要来源之一）。
+    #    检索走 _search_relevant_chunks 编排（向量召回 + 重排 + 阈值过滤）：
+    #    关键词命中但语义不相关的噪声片段不会进上下文与引用来源。
+    from apps.knowledge.models import KnowledgeChunk
 
-    # 2) 课件 PPT 讲义（把 PPT 当资料）
-    ppt_qs = PPTResource.objects.filter(course_id=course_id, is_active=True)
+    if KnowledgeChunk.objects.filter(course_id=course_id).exists():
+        try:
+            for chunk, score in _search_relevant_chunks(
+                course_id,
+                question,
+                student_access=student_access,
+                classroom_id=classroom_id,
+            ):
+                parts.append(chunk.content)
+                material = chunk.material
+                # 参考来源优先展示真实章节名（教师上传文件名可能与章节无关/混乱）：
+                # 已关联章节 → 「章节标题 · 资料」；未关联回退原文件名。
+                # 课件片段（material 为空）→「章节标题课件」，回退文件名
+                if material is not None:
+                    if material.catalog_id and material.catalog:
+                        material_name = f"{material.catalog.title} · 资料"
+                    else:
+                        material_name = material.file_name
+                elif chunk.ppt is not None:
+                    ppt_obj = chunk.ppt
+                    if ppt_obj.catalog_id and ppt_obj.catalog:
+                        material_name = f"{ppt_obj.catalog.title}课件"
+                    else:
+                        material_name = ppt_obj.file_name or "课程课件"
+                else:
+                    material_name = "课程资料"
+                cited.append(
+                    {
+                        "chunk_id": chunk.id,
+                        "material_name": material_name,
+                        "page": chunk.page,
+                        "snippet": chunk.content[:120],
+                        "score": round(score, 4),
+                    }
+                )
+        except Exception:
+            pass
+
+    # 2) 课件 PPT 讲义（把 PPT 当资料）。
+    #    正常情况下课件已逐页入向量库（ingest_ppt_pages），检索即可覆盖；
+    #    仅当该课件没有任何向量片段（向量模型不可用/从未重建）时才原文拼接兜底，
+    #    避免同一份内容既进检索结果又进原文、挤占上下文预算。
+    ppt_qs = PPTResource.objects.filter(course_id=course_id, is_active=True).select_related("catalog")
     if student_access:
         ppt_qs = ppt_qs.filter(catalog__is_published=True)
     if catalog_id:
@@ -614,6 +804,8 @@ def _gather_course_context(
         if ppt.catalog_id in seen_catalogs:  # 每个章节只取最新启用版本
             continue
         seen_catalogs.add(ppt.catalog_id)
+        if ppt.chunks.exists():
+            continue  # 已入向量库：走检索，不重复拼接原文
         page_segs = []
         for pg in (ppt.parsed_pages or [])[:40]:
             seg = f"{pg.get('title', '')} {pg.get('body', '')}".strip()
@@ -621,9 +813,14 @@ def _gather_course_context(
                 page_segs.append(seg)
         if page_segs:
             parts.extend(page_segs)
+            # 参考来源展示真实章节名：「章节标题课件」，无章节时回退文件名
+            if ppt.catalog_id and ppt.catalog:
+                ppt_name = f"{ppt.catalog.title}课件"
+            else:
+                ppt_name = ppt.file_name or "课程课件"
             cited.append(
                 {
-                    "material_name": ppt.file_name or "课程课件",
+                    "material_name": ppt_name,
                     "page": None,
                     "snippet": page_segs[0][:120],
                 }
@@ -741,7 +938,7 @@ def _build_qa_messages(question, user_content, image_b64, history):
     return messages
 
 
-def _chat_with_history_fallback(provider, messages, history):
+def _chat_with_history_fallback(provider, messages, history, **kwargs):
     """chat 并处理上下文超限：预算裁剪失手时（罕见），丢历史降级重试一次。
 
     返回 (answer, degraded)。degraded=True 表示本次丢弃了多轮历史。
@@ -749,12 +946,12 @@ def _chat_with_history_fallback(provider, messages, history):
     from apps.ai.providers.base import token_limit_error_hint
 
     try:
-        return provider.chat(messages), False
+        return provider.chat(messages, **kwargs), False
     except Exception as exc:
         if history and token_limit_error_hint(str(exc)):
             # 降级：只保留 system + 当前问题（完整丢弃多轮历史）
             retry = [messages[0], messages[-1]]
-            return provider.chat(retry), True
+            return provider.chat(retry, **kwargs), True
         raise
 
 
@@ -768,7 +965,7 @@ def knowledge_qa(
     classroom_id=None,
     history: list[dict] | None = None,
 ) -> tuple[str, list[dict]]:
-    provider = get_provider()
+    provider = get_provider("chat")
     context, cited = _gather_course_context(
         course_id,
         question,
@@ -778,7 +975,7 @@ def knowledge_qa(
     )
     user_content = _qa_user_text(context, question, history)
     messages = _build_qa_messages(question, user_content, image_b64, history)
-    answer, _ = _chat_with_history_fallback(provider, messages, history)
+    answer, _ = _chat_with_history_fallback(provider, messages, history, **_QA_NO_THINKING)
     return answer, cited
 
 
@@ -790,6 +987,13 @@ def _qa_user_content(text: str, image_b64: str | None):
         {"type": "text", "text": text},
         {"type": "image_url", "image_url": {"url": image_b64}},
     ]
+
+
+# 学生 QA 用 enable_thinking=False 关闭思考模式：Qwen3 系列默认先输出
+# reasoning_content（思考流）再出正文，实测简单问题首 token 也要 ~4.7s，
+# 课程问答是封闭域检索回答，思考对质量无实质帮助、徒增延迟；其他 Provider
+# （mock 等）不识别该参数，直接忽略无副作用。
+_QA_NO_THINKING = {"enable_thinking": False}
 
 
 def knowledge_qa_stream(
@@ -810,7 +1014,7 @@ def knowledge_qa_stream(
     上下文超限时（预算裁剪失手的罕见场景）自动丢弃多轮历史重试一次，
     并追加一条 {"type":"history_dropped"} 事件告知前端。
     """
-    provider = get_provider()
+    provider = get_provider("chat")
     context, cited = _gather_course_context(
         course_id,
         question,
@@ -827,7 +1031,7 @@ def knowledge_qa_stream(
 
     produced = False
     try:
-        for piece in provider.chat_stream(messages):
+        for piece in provider.chat_stream(messages, **_QA_NO_THINKING):
             if piece:
                 produced = True
                 yield {"type": "delta", "text": piece}
@@ -836,7 +1040,7 @@ def knowledge_qa_stream(
             # 降级：完整丢弃历史，仅 system + 当前问题重试
             retry = [messages[0], messages[-1]]
             yield {"type": "history_dropped"}
-            for piece in provider.chat_stream(retry):
+            for piece in provider.chat_stream(retry, **_QA_NO_THINKING):
                 if piece:
                     yield {"type": "delta", "text": piece}
             return
@@ -848,7 +1052,7 @@ def knowledge_qa_stream(
 # ---------------------------------------------------------------------------
 def generate_questions(course_id: int, catalog_id, count: int, qtype: str, objective: str = "") -> list[dict]:
     """基于章节 PPT + 知识库资料 + 教学目标生成题目（需求 T-Q-01 / 7.1）。"""
-    provider = get_provider()
+    provider = get_provider("chat")
     from apps.courses.models import Catalog, PPTResource
     from apps.knowledge.models import KnowledgeChunk
 
@@ -876,7 +1080,8 @@ def generate_questions(course_id: int, catalog_id, count: int, qtype: str, objec
 
     qtype_hint = (
         "判断题 options 固定为 [{\"key\":\"A\",\"text\":\"正确\"},{\"key\":\"B\",\"text\":\"错误\"}]，answer={\"key\":\"A\"或\"B\"}；"
-        "单选 answer={\"key\":\"X\"}；多选 answer={\"keys\":[...]}；填空 options=[]，answer={\"blanks\":[...]}；"
+        "单选 answer={\"key\":\"X\"}；多选 answer={\"keys\":[...]}；"
+        "填空 options=[]，answer={\"blanks\":[{\"text\":\"答案\",\"score\":2},...]}（每个空单独赋分，score 为该空分值）；"
         "简答 options=[]，answer={}。"
     )
     user_prompt = (
@@ -901,7 +1106,7 @@ def generate_questions(course_id: int, catalog_id, count: int, qtype: str, objec
 # 作业自动批改（二期，需求 T-H-04）—— 预留接口
 # ---------------------------------------------------------------------------
 def auto_grade_homework(content: str, reference: str, rubric: str) -> dict:
-    provider = get_provider()
+    provider = get_provider("chat")
     messages = [
         {"role": "system", "content": "你是作业批改助手，给出分数、评语、错误定位与修改建议。"},
         {"role": "user", "content": f"评分标准：{rubric}\n参考答案：{reference}\n学生作业：{content}"},
@@ -920,7 +1125,7 @@ def analyze_class_stats(stats: dict) -> dict:
     """
     from django.utils import timezone
 
-    provider = get_provider()
+    provider = get_provider("chat")
     now = timezone.now()
     summary = stats.get("summary", {})
 

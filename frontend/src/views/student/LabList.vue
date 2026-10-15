@@ -107,10 +107,15 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import LabGuideDialog from '@/components/LabGuideDialog.vue'
 import { listLabs, listLabSubmissions, startLab } from '@/api/labs'
+
+const route = useRoute()
+// 课程空间内（/student/courses/:id/labs）只展示当前课程的实验；独立访问时展示全部
+const fixedCourseId = computed(() => Number(route.params.id) || null)
 
 const labs = ref([])
 const submissions = ref([])
@@ -210,7 +215,8 @@ function reviewCommentOf(row) {
 async function load() {
   loading.value = true
   try {
-    const [labRes, subRes] = await Promise.all([listLabs(), listLabSubmissions()])
+    const params = fixedCourseId.value ? { course: fixedCourseId.value } : undefined
+    const [labRes, subRes] = await Promise.all([listLabs(params), listLabSubmissions()])
     labs.value = labRes.results ?? labRes
     submissions.value = subRes.results ?? subRes
   } finally {
@@ -234,6 +240,9 @@ async function enter(row) {
     entering.value = null
   }
 }
+
+// 课程空间内切换课程时重新加载（保持工作台/空间内体验一致）
+watch(fixedCourseId, () => load())
 
 onMounted(load)
 </script>

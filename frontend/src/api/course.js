@@ -38,15 +38,20 @@ export const deletePpt = (id) => request.delete(`/ppts/${id}/`)
 // 教学视频 / 讲解稿
 export const listVideos = (params) => request.get('/videos/', { params })
 // 分批生成讲解稿：每批最多 limit 页（后端默认 6），前端循环调用直至 done=true
+// 超时 5 分钟：本地模型（vLLM/Ollama）推理慢，需大于后端 AI_SCRIPT_TIMEOUT×重试次数
 export const generateScript = (catalogId, data = {}) =>
-  request.post(`/catalogs/${catalogId}/generate-script/`, data, { timeout: 120000 })
+  request.post(`/catalogs/${catalogId}/generate-script/`, data, { timeout: 300000 })
 // 分段配音：每批最多 limit 页（后端默认 3），前端循环调用直至 done=true
+// 超时 5 分钟：本地 TTS（尤其 CPU 推理）合成慢，需大于后端 AI_TTS_TIMEOUT
 export const generateAudio = (catalogId, limit = 3) =>
-  request.post(`/catalogs/${catalogId}/generate-audio/`, { limit }, { timeout: 120000 })
+  request.post(`/catalogs/${catalogId}/generate-audio/`, { limit }, { timeout: 300000 })
 export const updateVideoScript = (videoId, data) =>
   request.post(`/videos/${videoId}/update-script/`, data)
 export const regenerateVideoScriptPage = (videoId, data) =>
-  request.post(`/videos/${videoId}/regenerate-script-page/`, data, { timeout: 180000 })
+  request.post(`/videos/${videoId}/regenerate-script-page/`, data, { timeout: 300000 })
+// 单页重新合成配音（讲稿不变）
+export const regenerateVideoAudioPage = (videoId, data) =>
+  request.post(`/videos/${videoId}/regenerate-audio-page/`, data, { timeout: 300000 })
 
 // 视频学习进度（PPT+配音连播）
 export const listWatchProgress = (params) => request.get('/watch-progress/', { params })

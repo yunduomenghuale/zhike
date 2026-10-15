@@ -1,5 +1,6 @@
 <template>
-  <div class="page-container exam-page">
+  <div class="page-container exam-page" :class="{ 'is-editing': editVisible }">
+    <template v-if="!editVisible">
     <div class="page-header">
       <div>
         <div class="page-title">考试管理</div>
@@ -41,18 +42,37 @@
                     <span class="exam-meta-pill duration">{{ row.duration }} 分钟</span>
                     <span class="exam-score">{{ row.total_score || 0 }} 分</span>
                     <span class="exam-status-pill" :class="row.status">{{ row.status_display }}</span>
+                    <span v-if="!row.has_paper" class="exam-meta-pill orange">未组卷</span>
+                    <span v-else class="exam-meta-pill slate">共 {{ row.question_count }} 题</span>
                     <span v-if="row.shuffle_questions" class="exam-meta-pill blue">题目乱序</span>
-                    <span v-if="row.shuffle_options" class="exam-meta-pill orange">选项乱序</span>
+                    <span v-if="row.shuffle_options" class="exam-meta-pill blue">选项乱序</span>
                     <span v-if="row.per_student_paper" class="exam-meta-pill slate">一人一卷</span>
                   </div>
                 </div>
               </div>
               <div class="exam-card-actions">
-                <el-button link type="primary" :icon="EditPen" @click="openEdit(row)">编辑</el-button>
-                <el-button link type="primary" :icon="EditPen" @click="openCompose(row)">组卷</el-button>
-                <el-button v-if="row.status === 'draft'" link type="success" :icon="VideoPlay" @click="setStatus(row, 'published')">发布</el-button>
-                <el-button v-if="row.status === 'published'" link type="info" :icon="CircleClose" @click="setStatus(row, 'finished')">结束</el-button>
-                <el-button link type="primary" :icon="View" @click="openMonitor(row)">监控</el-button>
+                <!-- 草稿：编辑（基础信息与组卷已合并为同一整页）→ 必须组卷后才能发布 -->
+                <template v-if="row.status === 'draft'">
+                  <el-tooltip content="编辑基础信息并组卷" placement="top">
+                    <el-button link type="primary" :icon="EditPen" @click="openEdit(row)">编辑</el-button>
+                  </el-tooltip>
+                  <el-tooltip :disabled="row.has_paper" content="请先完成组卷才能发布" placement="top">
+                    <span class="action-wrap">
+                      <el-button link type="success" :icon="VideoPlay" :disabled="!row.has_paper" @click="setStatus(row, 'published')">发布</el-button>
+                    </span>
+                  </el-tooltip>
+                </template>
+                <!-- 发布后：只能查看试卷，不能组卷/编辑 -->
+                <template v-else>
+                  <el-button link type="primary" :icon="View" @click="openPaper(row)">查看试卷</el-button>
+                  <el-button v-if="row.status === 'published'" link type="info" :icon="CircleClose" @click="setStatus(row, 'finished')">结束</el-button>
+                </template>
+                <el-button link type="primary" :icon="Monitor" @click="openMonitor(row)">监控 / 批改</el-button>
+                <el-tooltip :disabled="row.has_paper" content="组卷后即可查看答题统计" placement="top">
+                  <span class="action-wrap">
+                    <el-button link type="warning" :icon="TrendCharts" :disabled="!row.has_paper" @click="openStats(row)">考试统计</el-button>
+                  </span>
+                </el-tooltip>
                 <el-button link type="danger" :icon="Delete" @click="openDelete(row)">删除</el-button>
               </div>
             </article>
@@ -61,72 +81,310 @@
       </div>
     </el-card>
 
-    <!-- 新建考试 -->
-    <el-dialog v-model="createVisible" width="720px" align-center :show-close="false" class="exam-create-dialog">
-      <template #header>
-        <div class="creation-dialog-header">
-          <span class="creation-dialog-icon exam-create-icon"><el-icon><Document /></el-icon></span>
-          <div class="creation-dialog-heading">
-            <div class="creation-dialog-title">{{ editingExam ? '编辑考试' : '新建考试' }}</div>
-            <div class="creation-dialog-subtitle">设置考试时间、时长与防作弊规则</div>
+    </template>
+
+    <!-- 新建/编辑考试：整页工作台（版式对齐发布作业：左基础信息 + 右组卷选题与试卷预览） -->
+    <Teleport to="body">
+      <div v-if="editVisible" class="exam-editor">
+        <div class="exam-editor-topbar">
+          <div class="exam-editor-title-wrap">
+            <span class="exam-editor-icon"><el-icon><Document /></el-icon></span>
+            <div class="exam-editor-heading">
+              <div class="exam-editor-title-line">
+                <span class="exam-editor-title">{{ editingExam ? '编辑考试' : '新建考试' }}</span>
+                <span class="exam-editor-kicker">{{ editorContext }}</span>
+              </div>
+              <div class="exam-editor-subtitle">设置考试信息并完成组卷，发布后学生方可参加</div>
+            </div>
           </div>
-          <el-button text circle class="creation-dialog-close" :icon="Close" @click="createVisible = false" />
-        </div>
-      </template>
-      <el-form :model="form" label-position="top" class="exam-creation-form">
-        <div class="creation-form-grid">
-          <el-form-item label="考试名称" class="form-span-full"><el-input v-model="form.name" placeholder="请输入考试名称" /></el-form-item>
-          <el-form-item label="考试时长（分钟）"><el-input-number v-model="form.duration" :min="1" /></el-form-item>
-          <el-form-item label="满分"><el-input-number v-model="form.total_score" :min="0" :precision="1" /></el-form-item>
-          <el-form-item label="开始时间">
-            <el-date-picker
-              v-model="form.start_at"
-              type="datetime"
-              value-format="YYYY-MM-DDTHH:mm:ss"
-              format="YYYY年MM月DD日 HH:mm"
-              placeholder="选择开始时间"
-              popper-class="exam-datetime-popper"
-              style="width: 100%"
-            />
-          </el-form-item>
-          <el-form-item label="结束时间">
-            <el-date-picker
-              v-model="form.end_at"
-              type="datetime"
-              value-format="YYYY-MM-DDTHH:mm:ss"
-              format="YYYY年MM月DD日 HH:mm"
-              placeholder="选择结束时间"
-              popper-class="exam-datetime-popper"
-              style="width: 100%"
-            />
-          </el-form-item>
-          <el-form-item label="发布状态" class="form-span-full"><div class="exam-status-note">{{ editingExam ? '修改考试基础信息后，会同步影响学生端考试入口展示。' : '创建后先保存为草稿，可完成组卷后发布。' }}</div></el-form-item>
-          <el-form-item label="考试模式" class="form-span-full setting-item">
-          <div class="checkbox-group">
-            <el-checkbox v-model="form.shuffle_questions">题目乱序</el-checkbox>
-            <el-checkbox v-model="form.shuffle_options">选项乱序</el-checkbox>
-            <el-checkbox v-model="form.per_student_paper">每人不同卷</el-checkbox>
-            <el-checkbox v-model="form.show_analysis_after">考后看解析</el-checkbox>
-            <el-checkbox v-model="form.allow_resubmit">允许重交</el-checkbox>
+          <div class="exam-editor-stats">
+            <span><strong>{{ manualSelected.length }}</strong> 道题目</span>
+            <span class="exam-stats-split" />
+            <span><strong>{{ manualTotal }}</strong> 总分</span>
+            <el-tag :type="form.status === 'published' ? 'success' : 'warning'" effect="light" round>
+              {{ form.status === 'published' ? '已发布' : '草稿' }}
+            </el-tag>
           </div>
-        </el-form-item>
-          <el-form-item label="防作弊" class="form-span-full setting-item">
-          <div class="checkbox-group">
-            <el-checkbox v-model="form.anti.detect_blur">记录切屏</el-checkbox>
-            <el-checkbox v-model="form.anti.forbid_copy">禁止复制</el-checkbox>
-            <el-checkbox v-model="form.anti.forbid_paste">禁止粘贴</el-checkbox>
-            <el-checkbox v-model="form.anti.forbid_contextmenu">禁止右键</el-checkbox>
+          <div class="exam-editor-actions">
+            <el-button @click="editVisible = false">退出编辑</el-button>
+            <el-button type="primary" :loading="saving" @click="saveBasic(false)">{{ editingExam ? '保存修改' : '创建考试' }}</el-button>
+            <el-button :loading="composing" :disabled="composeConfirming" @click="doCompose">生成试卷</el-button>
+            <el-tooltip popper-class="exam-editor-tooltip" :disabled="paperReady" content="请先完成组卷才能发布" placement="top">
+              <span class="action-wrap">
+                <el-button type="success" plain :loading="publishing" :disabled="!paperReady" @click="publishExam">发布考试</el-button>
+              </span>
+            </el-tooltip>
           </div>
-        </el-form-item>
         </div>
-      </el-form>
-      <template #footer>
-        <div class="creation-dialog-footer">
-          <el-button @click="createVisible = false">取消</el-button>
-          <el-button type="primary" :loading="saving" @click="save">{{ editingExam ? '保存修改' : '创建' }}</el-button>
+
+        <div class="exam-editor-body">
+          <el-form :model="form" label-position="top" class="exam-creation-form">
+            <div class="creation-form-grid">
+              <!-- 左列：基础信息 -->
+              <div class="form-col form-col-left">
+                <div class="exam-card exam-info-card">
+                  <div class="exam-card-head"><el-icon><Tickets /></el-icon>基础信息</div>
+                  <el-form-item label="考试名称"><el-input v-model="form.name" placeholder="请输入考试名称" /></el-form-item>
+                  <el-form-item label="考试时长（分钟）"><el-input-number v-model="form.duration" :min="1" /></el-form-item>
+                  <el-form-item label="满分"><el-input-number v-model="form.total_score" :min="0" :precision="1" /></el-form-item>
+                  <el-form-item label="开始时间">
+                    <el-date-picker
+                      v-model="form.start_at"
+                      type="datetime"
+                      value-format="YYYY-MM-DDTHH:mm:ss"
+                      format="YYYY年MM月DD日 HH:mm"
+                      placeholder="选择开始时间"
+                      popper-class="exam-datetime-popper"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                  <el-form-item label="结束时间">
+                    <el-date-picker
+                      v-model="form.end_at"
+                      type="datetime"
+                      value-format="YYYY-MM-DDTHH:mm:ss"
+                      format="YYYY年MM月DD日 HH:mm"
+                      placeholder="选择结束时间"
+                      popper-class="exam-datetime-popper"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                  <el-form-item label="考试模式" class="setting-item">
+                    <div class="checkbox-group">
+                      <el-checkbox v-model="form.shuffle_questions">题目乱序</el-checkbox>
+                      <el-checkbox v-model="form.shuffle_options">选项乱序</el-checkbox>
+                      <el-checkbox v-model="form.per_student_paper">每人不同卷</el-checkbox>
+                      <el-checkbox v-model="form.show_analysis_after">考后看解析</el-checkbox>
+                      <el-checkbox v-model="form.allow_resubmit">允许重交</el-checkbox>
+                    </div>
+                    <div class="mode-tip">题目乱序在单选/多选/判断/填空/简答五类内部打乱（类间顺序不变）；选项乱序将打乱选择题选项内容（ABCD 标签位置不变，正确答案跟随内容），开始考试后顺序固定不再改变。</div>
+                  </el-form-item>
+                  <el-form-item label="防作弊" class="setting-item">
+                    <div class="checkbox-group">
+                      <el-checkbox v-model="form.anti.detect_blur">记录切屏</el-checkbox>
+                      <el-checkbox v-model="form.anti.forbid_copy">禁止复制</el-checkbox>
+                      <el-checkbox v-model="form.anti.forbid_paste">禁止粘贴</el-checkbox>
+                      <el-checkbox v-model="form.anti.forbid_contextmenu">禁止右键</el-checkbox>
+                    </div>
+                  </el-form-item>
+                </div>
+              </div>
+
+              <!-- 右列：组卷（页签比作业多：随机抽题 / 题库选题 / 自写题目） -->
+              <div class="form-col form-col-right">
+                <div class="exam-card exam-compose-card">
+                  <div class="exam-card-head">
+                    <el-icon><EditPen /></el-icon>组卷
+                    <span class="compose-head-hint">左侧组卷选题，右侧实时预览试卷</span>
+                  </div>
+                  <el-alert
+                    v-if="composedPaper"
+                    class="compose-paper-alert"
+                    type="info"
+                    :closable="false"
+                    show-icon
+                    :title="`当前试卷已生成：共 ${composedPaper.count} 题，总分 ${composedPaper.total} 分。调整后再次点击「生成试卷」将覆盖原试卷。`"
+                  />
+                  <div class="compose-layout">
+                    <el-tabs v-model="composeMode" class="compose-tabs">
+                      <el-tab-pane label="随机抽题" name="random">
+                        <div class="compose-pane">
+                          <div class="compose-pane-tip">按题型/难度从课程题库随机抽题；请确保题库中已有【已发布】状态的题目。</div>
+                          <el-table :data="rules" class="compose-rule-table" size="small">
+                            <el-table-column label="题型" width="150">
+                              <template #default="{ row }">
+                                <el-select v-model="row.qtype" size="small" popper-class="exam-compose-popper">
+                                  <el-option v-for="t in qtypes" :key="t.value" :label="t.label" :value="t.value" />
+                                </el-select>
+                              </template>
+                            </el-table-column>
+                            <el-table-column label="难度" width="140">
+                              <template #default="{ row }">
+                                <el-select v-model="row.difficulty" size="small" clearable placeholder="不限" popper-class="exam-compose-popper">
+                                  <el-option label="简单" value="easy" />
+                                  <el-option label="中等" value="medium" />
+                                  <el-option label="困难" value="hard" />
+                                </el-select>
+                              </template>
+                            </el-table-column>
+                            <el-table-column label="数量" width="130">
+                              <template #default="{ row }"><el-input-number v-model="row.count" :min="1" size="small" /></template>
+                            </el-table-column>
+                            <el-table-column label="每题分" width="130">
+                              <template #default="{ row }"><el-input-number v-model="row.score" :min="1" size="small" /></template>
+                            </el-table-column>
+                            <el-table-column width="80" align="center">
+                              <template #default="{ $index }"><el-button link type="danger" :icon="Delete" @click="rules.splice($index, 1)"></el-button></template>
+                            </el-table-column>
+                          </el-table>
+                          <el-button link type="primary" :icon="Plus" class="compose-add-rule" @click="addRule">添加规则</el-button>
+                        </div>
+                      </el-tab-pane>
+
+                      <el-tab-pane label="题库选题" name="manual">
+                        <div class="compose-pane compose-pane-manual">
+                          <div class="question-filters">
+                            <el-select v-model="poolFilters.catalog" clearable placeholder="章节" popper-class="exam-filter-popper" @change="loadPoolQuestions">
+                              <el-option v-for="item in catalogOptions" :key="item.id" :label="item.label" :value="item.id" />
+                            </el-select>
+                            <el-select v-model="poolFilters.qtype" clearable placeholder="题型" popper-class="exam-filter-popper" @change="loadPoolQuestions">
+                              <el-option v-for="t in qtypes" :key="t.value" :label="t.label" :value="t.value" />
+                            </el-select>
+                            <el-select v-model="poolFilters.difficulty" clearable placeholder="难度" popper-class="exam-filter-popper" @change="loadPoolQuestions">
+                              <el-option label="简单" value="easy" />
+                              <el-option label="中等" value="medium" />
+                              <el-option label="困难" value="hard" />
+                            </el-select>
+                            <button
+                              class="pool-select-all"
+                              :class="{ active: allFilteredSelected }"
+                              type="button"
+                              :disabled="!poolQuestions.length"
+                              @click="toggleSelectAllFiltered"
+                            >
+                              {{ allFilteredSelected ? '取消全选' : `全选 ${poolQuestions.length} 题` }}
+                            </button>
+                          </div>
+                          <el-table
+                            :data="poolQuestions"
+                            height="100%"
+                            v-loading="poolLoading"
+                            class="question-pool-table"
+                            :row-class-name="poolRowClass"
+                          >
+                            <el-table-column prop="stem" label="题干" min-width="150">
+                              <template #default="{ row }">
+                                <QuestionDetailPopover v-bind="questionDetailOf(row)">
+                                  <span class="pool-stem">{{ row.stem }}</span>
+                                </QuestionDetailPopover>
+                              </template>
+                            </el-table-column>
+                            <el-table-column label="题型" width="64" align="center">
+                              <template #default="{ row }">
+                                <span class="pool-tag type">{{ abbrQtype(row) }}</span>
+                              </template>
+                            </el-table-column>
+                            <el-table-column label="难度" width="56" align="center">
+                              <template #default="{ row }">
+                                <span class="pool-tag difficulty" :class="`difficulty-${row.difficulty}`">{{ abbrDifficulty(row) }}</span>
+                              </template>
+                            </el-table-column>
+                            <el-table-column label="操作" width="72" align="center">
+                              <template #default="{ row }">
+                                <button class="pool-action" :class="{ selected: isPoolSelected(row.id) }" type="button" @click="togglePoolQuestion(row)">
+                                  {{ isPoolSelected(row.id) ? '移除' : '添加' }}
+                                </button>
+                              </template>
+                            </el-table-column>
+                          </el-table>
+                        </div>
+                      </el-tab-pane>
+
+                      <el-tab-pane label="自写题目" name="custom">
+                        <div class="compose-pane">
+                          <el-form :model="draftQuestion" label-position="top" class="compose-custom-form">
+                            <div class="custom-question-grid">
+                              <el-form-item label="章节">
+                                <el-select v-model="draftQuestion.catalog" placeholder="选择章节" popper-class="exam-compose-popper">
+                                  <el-option v-for="item in catalogOptions" :key="item.id" :label="item.label" :value="item.id" />
+                                </el-select>
+                              </el-form-item>
+                              <el-form-item label="题型">
+                                <el-select v-model="draftQuestion.qtype" popper-class="exam-compose-popper" @change="resetDraftAnswer">
+                                  <el-option v-for="t in qtypes" :key="t.value" :label="t.label" :value="t.value" />
+                                </el-select>
+                              </el-form-item>
+                              <el-form-item label="难度">
+                                <el-select v-model="draftQuestion.difficulty" popper-class="exam-compose-popper">
+                                  <el-option label="简单" value="easy" />
+                                  <el-option label="中等" value="medium" />
+                                  <el-option label="困难" value="hard" />
+                                </el-select>
+                              </el-form-item>
+                              <el-form-item label="分值">
+                                <el-input-number v-model="draftQuestion.score" :min="1" />
+                              </el-form-item>
+                              <el-form-item label="题干" class="custom-span-full">
+                                <el-input v-model="draftQuestion.stem" type="textarea" :rows="3" resize="none" placeholder="请输入题干" />
+                              </el-form-item>
+                              <template v-if="['single', 'multi'].includes(draftQuestion.qtype)">
+                                <el-form-item v-for="option in draftQuestion.options" :key="option.key" :label="`选项 ${option.key}`">
+                                  <el-input v-model="option.text" />
+                                </el-form-item>
+                              </template>
+                              <el-form-item label="答案" class="custom-span-full">
+                                <el-select v-if="draftQuestion.qtype === 'single'" v-model="draftQuestion.answerKey" placeholder="选择正确答案" popper-class="exam-compose-popper">
+                                  <el-option v-for="option in draftQuestion.options" :key="option.key" :label="option.key" :value="option.key" />
+                                </el-select>
+                                <el-select v-else-if="draftQuestion.qtype === 'multi'" v-model="draftQuestion.answerKeys" multiple placeholder="选择正确答案" popper-class="exam-compose-popper">
+                                  <el-option v-for="option in draftQuestion.options" :key="option.key" :label="option.key" :value="option.key" />
+                                </el-select>
+                                <el-select v-else-if="draftQuestion.qtype === 'judge'" v-model="draftQuestion.answerKey" placeholder="选择正确答案" popper-class="exam-compose-popper">
+                                  <el-option label="正确" value="true" />
+                                  <el-option label="错误" value="false" />
+                                </el-select>
+                                <el-input v-else v-model="draftQuestion.answerText" placeholder="填空题可用 / 分隔多个答案，简答题填写参考答案" />
+                              </el-form-item>
+                              <el-form-item label="解析" class="custom-span-full">
+                                <el-input v-model="draftQuestion.analysis" type="textarea" :rows="2" resize="none" placeholder="可选" />
+                              </el-form-item>
+                            </div>
+                            <div class="custom-compose-actions">
+                              <el-button type="primary" :loading="creatingQuestion" @click="saveDraftQuestion">保存到题库并加入试卷</el-button>
+                            </div>
+                          </el-form>
+                        </div>
+                      </el-tab-pane>
+                    </el-tabs>
+
+                    <!-- 右列：试卷预览（结构对齐作业已选题目，hover 看题目详情） -->
+                    <div class="selected-panel">
+                      <div class="selected-header">
+                        <strong>试卷预览 · {{ manualSelected.length }} 题</strong>
+                        <span>总分 {{ manualTotal }} 分</span>
+                      </div>
+                      <div v-if="!manualSelected.length" class="selected-empty">
+                        <el-icon><Plus /></el-icon>
+                        <span>{{ composeMode === 'random' ? '设置抽题规则后点击「生成试卷」，抽出的题目会显示在这里' : '从左侧题库「添加」题目，或切换到「自写题目」页签' }}</span>
+                      </div>
+                      <el-scrollbar v-else class="selected-list-scroll">
+                        <div class="selected-list">
+                          <div v-for="(item, index) in manualSelected" :key="item.question_id" class="selected-item">
+                            <div class="selected-item-main">
+                              <span class="question-order">{{ index + 1 }}</span>
+                              <QuestionDetailPopover v-bind="questionDetailOf(item)">
+                                <span class="selected-stem">{{ item.stem }}</span>
+                              </QuestionDetailPopover>
+                            </div>
+                            <div class="selected-item-sub">
+                              <span class="pool-tag type selected-qtype">{{ abbrQtype(item) }}</span>
+                              <el-input
+                                v-model.number="item.score"
+                                class="score-input"
+                                type="number"
+                                min="0.5"
+                                max="100"
+                                step="0.5"
+                              />
+                              <span class="score-unit">分</span>
+                              <div class="selected-actions">
+                                <el-button link circle :icon="ArrowUp" :disabled="index === 0" title="上移" @click="moveSelected(index, -1)" />
+                                <el-button link circle :icon="ArrowDown" :disabled="index === manualSelected.length - 1" title="下移" @click="moveSelected(index, 1)" />
+                                <el-button link type="danger" @click="manualSelected.splice(index, 1)">删除</el-button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </el-scrollbar>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </el-form>
         </div>
-      </template>
-    </el-dialog>
+      </div>
+    </Teleport>
 
     <DeleteConfirmDialog
       v-model="deleteVisible"
@@ -137,153 +395,24 @@
       @confirm="confirmDelete"
     />
 
-    <!-- 组卷 -->
-    <el-dialog v-model="composeVisible" title="组卷" width="980px" align-center class="exam-compose-dialog">
-      <el-tabs v-model="composeMode" class="compose-tabs">
-        <el-tab-pane label="随机抽题" name="random">
-          <el-alert type="info" :closable="false" show-icon description="按题型/难度从课程题库随机抽题；请确保题库中已有【已发布】状态的题目。" style="margin-bottom: 16px" />
-          <el-table :data="rules" class="compose-rule-table" size="small">
-            <el-table-column label="题型" width="150">
-              <template #default="{ row }">
-                <el-select v-model="row.qtype" size="small" popper-class="exam-compose-popper">
-                  <el-option v-for="t in qtypes" :key="t.value" :label="t.label" :value="t.value" />
-                </el-select>
-              </template>
-            </el-table-column>
-            <el-table-column label="难度" width="140">
-              <template #default="{ row }">
-                <el-select v-model="row.difficulty" size="small" clearable placeholder="不限" popper-class="exam-compose-popper">
-                  <el-option label="简单" value="easy" />
-                  <el-option label="中等" value="medium" />
-                  <el-option label="困难" value="hard" />
-                </el-select>
-              </template>
-            </el-table-column>
-            <el-table-column label="数量" width="130">
-              <template #default="{ row }"><el-input-number v-model="row.count" :min="1" size="small" /></template>
-            </el-table-column>
-            <el-table-column label="每题分" width="130">
-              <template #default="{ row }"><el-input-number v-model="row.score" :min="1" size="small" /></template>
-            </el-table-column>
-            <el-table-column width="80" align="center">
-              <template #default="{ $index }"><el-button link type="danger" :icon="Delete" @click="rules.splice($index, 1)"></el-button></template>
-            </el-table-column>
-          </el-table>
-          <el-button link type="primary" :icon="Plus" style="margin-top: 12px" @click="addRule">添加规则</el-button>
-        </el-tab-pane>
-
-        <el-tab-pane label="题库选题" name="manual">
-          <div class="compose-filter-row">
-            <el-select v-model="manualFilters.catalog" clearable placeholder="全部章节" popper-class="exam-compose-popper" @change="loadManualQuestions">
-              <el-option v-for="item in catalogOptions" :key="item.id" :label="item.label" :value="item.id" />
-            </el-select>
-            <el-select v-model="manualFilters.qtype" clearable placeholder="全部题型" popper-class="exam-compose-popper" @change="loadManualQuestions">
-              <el-option v-for="t in qtypes" :key="t.value" :label="t.label" :value="t.value" />
-            </el-select>
-            <el-select v-model="manualFilters.difficulty" clearable placeholder="全部难度" popper-class="exam-compose-popper" @change="loadManualQuestions">
-              <el-option label="简单" value="easy" />
-              <el-option label="中等" value="medium" />
-              <el-option label="困难" value="hard" />
-            </el-select>
-          </div>
-          <div class="compose-manual-grid">
-            <el-table :data="manualQuestions" v-loading="manualLoading" class="compose-question-table" height="300" size="small">
-              <el-table-column prop="stem" label="题干" min-width="300" show-overflow-tooltip />
-              <el-table-column prop="qtype_display" label="题型" width="90" align="center" />
-              <el-table-column prop="difficulty_display" label="难度" width="90" align="center" />
-              <el-table-column label="操作" width="90" align="center">
-                <template #default="{ row }">
-                  <el-button link type="primary" :disabled="isManualSelected(row.id)" @click="addManualQuestion(row)">
-                    {{ isManualSelected(row.id) ? '已选' : '加入' }}
-                  </el-button>
-                </template>
-              </el-table-column>
-            </el-table>
-            <div class="selected-paper-box">
-              <div class="selected-paper-head">
-                <strong>已选 {{ manualSelected.length }} 题</strong>
-                <span>总分 {{ manualTotal }}</span>
-              </div>
-              <el-empty v-if="!manualSelected.length" description="从左侧题库加入题目" :image-size="72" />
-              <div v-else class="paper-question-list">
-                <div v-for="(item, index) in manualSelected" :key="item.question_id" class="paper-question-item">
-                  <span class="paper-question-order">{{ index + 1 }}</span>
-                  <span class="paper-question-stem">{{ item.stem }}</span>
-                  <el-input-number v-model="item.score" class="compose-score-input" :min="1" size="small" controls-position="right" />
-                  <el-button link type="danger" @click="manualSelected.splice(index, 1)">移除</el-button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </el-tab-pane>
-
-        <el-tab-pane label="自写题目" name="custom">
-          <el-form :model="draftQuestion" label-position="top" class="compose-custom-form">
-            <div class="custom-question-grid">
-              <el-form-item label="章节">
-                <el-select v-model="draftQuestion.catalog" placeholder="选择章节" popper-class="exam-compose-popper">
-                  <el-option v-for="item in catalogOptions" :key="item.id" :label="item.label" :value="item.id" />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="题型">
-                <el-select v-model="draftQuestion.qtype" popper-class="exam-compose-popper" @change="resetDraftAnswer">
-                  <el-option v-for="t in qtypes" :key="t.value" :label="t.label" :value="t.value" />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="难度">
-                <el-select v-model="draftQuestion.difficulty" popper-class="exam-compose-popper">
-                  <el-option label="简单" value="easy" />
-                  <el-option label="中等" value="medium" />
-                  <el-option label="困难" value="hard" />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="分值">
-                <el-input-number v-model="draftQuestion.score" :min="1" />
-              </el-form-item>
-              <el-form-item label="题干" class="custom-span-full">
-                <el-input v-model="draftQuestion.stem" type="textarea" :rows="3" resize="none" placeholder="请输入题干" />
-              </el-form-item>
-              <template v-if="['single', 'multi'].includes(draftQuestion.qtype)">
-                <el-form-item v-for="option in draftQuestion.options" :key="option.key" :label="`选项 ${option.key}`">
-                  <el-input v-model="option.text" />
-                </el-form-item>
-              </template>
-              <el-form-item label="答案" class="custom-span-full">
-                <el-select v-if="draftQuestion.qtype === 'single'" v-model="draftQuestion.answerKey" placeholder="选择正确答案" popper-class="exam-compose-popper">
-                  <el-option v-for="option in draftQuestion.options" :key="option.key" :label="option.key" :value="option.key" />
-                </el-select>
-                <el-select v-else-if="draftQuestion.qtype === 'multi'" v-model="draftQuestion.answerKeys" multiple placeholder="选择正确答案" popper-class="exam-compose-popper">
-                  <el-option v-for="option in draftQuestion.options" :key="option.key" :label="option.key" :value="option.key" />
-                </el-select>
-                <el-select v-else-if="draftQuestion.qtype === 'judge'" v-model="draftQuestion.answerKey" placeholder="选择正确答案" popper-class="exam-compose-popper">
-                  <el-option label="正确" value="true" />
-                  <el-option label="错误" value="false" />
-                </el-select>
-                <el-input v-else v-model="draftQuestion.answerText" placeholder="填空题可用 / 分隔多个答案，简答题填写参考答案" />
-              </el-form-item>
-              <el-form-item label="解析" class="custom-span-full">
-                <el-input v-model="draftQuestion.analysis" type="textarea" :rows="2" resize="none" placeholder="可选" />
-              </el-form-item>
-            </div>
-            <div class="custom-compose-actions">
-              <el-button type="primary" :loading="creatingQuestion" @click="saveDraftQuestion">保存到题库并加入试卷</el-button>
-            </div>
-          </el-form>
-        </el-tab-pane>
-      </el-tabs>
-      <template #footer>
-        <div class="dialog-footer">
-          <el-button @click="composeVisible = false">取消</el-button>
-          <el-button type="primary" :loading="composing" @click="doCompose">生成试卷</el-button>
-        </div>
-      </template>
-    </el-dialog>
-
-    <!-- 监控 -->
-    <el-drawer v-model="monitorVisible" title="考试监控" size="52%">
+    <!-- 监控与成绩批改 -->
+    <el-drawer v-model="monitorVisible" title="考试监控与成绩批改" size="64%" class="monitor-drawer">
       <div class="monitor-toolbar">
-        <el-button type="primary" :loading="releasing" @click="doReleaseAll">统一出分（发布全部成绩）</el-button>
-        <span class="text-muted">发布后学生才可见分数与解析；含主观题的答卷需先完成批改</span>
+        <div class="monitor-toolbar-left">
+          <el-button type="primary" :loading="releasing" @click="doReleaseAll">统一出分（发布全部成绩）</el-button>
+          <el-button :icon="TrendCharts" @click="openStats(monitorExamRow)">考试统计</el-button>
+        </div>
+        <div class="monitor-toolbar-right">
+          <span class="monitor-auto-tip">
+            每 5 秒自动刷新<span v-if="monitorLastAt"> · 更新于 {{ monitorLastAt }}</span>
+          </span>
+          <el-button :icon="Refresh" :loading="monitorRefreshing" @click="refreshMonitor">刷新</el-button>
+        </div>
+      </div>
+      <div class="monitor-summary">
+        <span class="summary-stat">已交卷 <strong>{{ submittedCount }}</strong> 份</span>
+        <span class="summary-split" />
+        <span class="summary-stat">待批改 <strong :class="{ warn: pendingCount > 0 }">{{ pendingCount }}</strong> 份</span>
       </div>
       <el-table :data="monitorRows" v-loading="monitorLoading" stripe>
         <el-table-column prop="student_name" label="学生" width="110" />
@@ -292,9 +421,9 @@
         </el-table-column>
         <el-table-column prop="objective_score" label="客观题分" width="90" align="center" />
         <el-table-column prop="total_score" label="总分" width="80" align="center" />
-        <el-table-column label="异常" width="80" align="center">
+        <el-table-column label="异常次数" width="90" align="center">
           <template #default="{ row }">
-            <el-tag v-if="row.abnormal" type="danger" size="small" effect="light" round>异常</el-tag>
+            <el-tag v-if="row.abnormal_count" type="danger" size="small" effect="light" round>{{ row.abnormal_count }} 次</el-tag>
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
@@ -307,9 +436,9 @@
         <el-table-column label="操作" width="150" align="center">
           <template #default="{ row }">
             <el-button
-              v-if="row.has_subjective && (row.status === 'submitted' || row.status === 'timeout')"
+              v-if="row.status === 'submitted' || row.status === 'timeout'"
               link type="primary" @click="openGrading(row)"
-            >批改</el-button>
+            >批改{{ row.subjective_count ? ` ${row.graded_subjective_count}/${row.subjective_count}` : '' }}</el-button>
             <el-button
               v-if="(row.status === 'submitted' || row.status === 'timeout') && !row.score_released"
               link type="success" @click="doReleaseOne(row)"
@@ -322,55 +451,105 @@
       </el-table>
     </el-drawer>
 
-    <!-- 主观题批改 -->
-    <el-dialog v-model="gradingVisible" title="主观题批改" width="720px" :close-on-click-modal="false">
+    <!-- 批改答卷：全卷回看 + 主观题评分（与作业批改一致） -->
+    <el-dialog v-model="gradingVisible" title="批改答卷" width="720px" align-center :close-on-click-modal="false" class="exam-grade-dialog">
       <div v-loading="gradingLoading">
-        <div v-if="gradingSub" class="grading-head">
+        <div v-if="gradingSub" class="grade-mode-brief">
           <span>学生：<strong>{{ gradingSub.student_name }}</strong></span>
-          <span>客观题得分：<strong>{{ gradingSub.objective_score ?? 0 }}</strong></span>
+          <span class="grade-brief-split" />
+          <span>客观题得分 <strong>{{ gradingSub.objective_score ?? 0 }}</strong></span>
+          <span class="grade-brief-split" />
+          <span>共 {{ gradingReview.length }} 题</span>
+          <template v-if="gradingPendingCount > 0">
+            <span class="grade-brief-split" />
+            <span class="grade-brief-pending">{{ gradingPendingCount }} 道主观题待评分</span>
+          </template>
+          <span v-else-if="gradingSubjectiveCount" class="grade-brief-done">主观题已全部评分</span>
         </div>
-        <el-empty v-if="!gradingQuestions.length" description="该试卷没有主观题" :image-size="80" />
-        <div v-for="(q, i) in gradingQuestions" :key="q.question_id" class="grading-item">
-          <div class="grading-stem">{{ i + 1 }}. {{ q.stem }}（{{ q.score }} 分）</div>
-          <div class="grading-answer">
-            <div class="grading-label">学生答案</div>
-            <div class="grading-answer-text">{{ q.student_answer?.text || '（未作答）' }}</div>
+        <el-empty v-if="!gradingReview.length" description="暂无答卷内容" :image-size="80" />
+        <div
+          v-for="(q, i) in gradingReview"
+          :key="q.question_id"
+          class="answer-review-item"
+          :class="{ 'is-pending': !q.is_objective && q.pending }"
+        >
+          <div class="answer-review-head">
+            <strong>{{ i + 1 }}. {{ q.stem }}</strong>
+            <span>{{ q.pending ? '待批' : (q.my_score ?? '-') }} / {{ q.score }} 分</span>
           </div>
-          <div v-if="q.reference_answer?.text" class="grading-ref">
-            <div class="grading-label">参考答案</div>
-            <div class="grading-answer-text">{{ q.reference_answer.text }}</div>
+          <div v-if="q.options?.length" class="q-options">
+            <div v-for="opt in q.options" :key="String(opt.key)" class="q-opt" :class="optClass(q, opt.key)">
+              <span class="opt-key">{{ opt.key }}.</span>
+              <span>{{ opt.text }}</span>
+            </div>
           </div>
-          <div class="grading-score-row">
-            <span>得分</span>
-            <el-input-number
-              v-model="gradingScores[q.question_id]"
-              :min="0" :max="Number(q.score)" :step="0.5"
-              controls-position="right"
-            />
+          <div class="student-answer">学生答案：{{ fmtGradingAnswer(q.student_answer) }}</div>
+          <div class="correct-answer">正确答案：{{ fmtGradingAnswer(q.correct_answer) }}</div>
+          <div v-if="q.analysis" class="answer-analysis">解析：{{ q.analysis }}</div>
+          <div v-if="!q.is_objective" class="manual-grade-row">
+            <span class="manual-grade-label">评分</span>
+            <el-input-number v-model="gradingScores[q.question_id]" :min="0" :max="Number(q.score)" :step="0.5" controls-position="right" />
             <span class="text-muted">/ {{ q.score }} 分</span>
           </div>
+          <el-tag v-else :type="q.is_correct ? 'success' : 'danger'" size="small">
+            {{ q.is_correct ? '自动判定正确' : '自动判定错误' }}
+          </el-tag>
         </div>
+        <el-empty v-if="gradingReview.length && !gradingSubjectiveCount" description="该试卷没有主观题，客观题已自动评分" :image-size="80" />
       </div>
       <template #footer>
         <el-button @click="gradingVisible = false">取消</el-button>
-        <el-button type="primary" :loading="gradingSaving" @click="doGrade">保存批改</el-button>
+        <el-button v-if="gradingSubjectiveCount" type="primary" :loading="gradingSaving" @click="doGrade">保存批改</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 查看试卷（只读）：题干 hover 显示题目详情，与查看作业一致 -->
+    <el-dialog v-model="paperVisible" title="查看试卷" width="720px" align-center class="exam-paper-dialog">
+      <div v-loading="paperLoading">
+        <template v-if="paperDetail">
+          <div class="paper-brief">
+            <span>{{ paperDetail.mode_display }}</span>
+            <span class="paper-brief-split" />
+            <span>共 <strong>{{ paperDetail.questions.length }}</strong> 题</span>
+            <span class="paper-brief-split" />
+            <span>总分 <strong>{{ paperDetail.total_score }}</strong> 分</span>
+            <template v-if="paperDetail.per_student">
+              <span class="paper-brief-split" />
+              <span>展示为首位学生的个人试卷</span>
+            </template>
+          </div>
+          <div v-for="(q, i) in paperDetail.questions" :key="q.question_id" class="paper-q-item">
+            <span class="paper-q-order">{{ i + 1 }}</span>
+            <QuestionDetailPopover v-bind="questionDetailOf(q)">
+              <span class="paper-q-stem">{{ q.stem }}</span>
+            </QuestionDetailPopover>
+            <el-tag size="small" effect="plain" round class="paper-q-type">{{ q.qtype_display }}</el-tag>
+            <span class="paper-q-score">{{ q.score }} 分</span>
+          </div>
+        </template>
+      </div>
+      <template #footer>
+        <el-button @click="paperVisible = false">关闭</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, nextTick, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
-  Plus, EditPen, VideoPlay, CircleClose, View, Delete, Document, Close,
+  Plus, EditPen, VideoPlay, CircleClose, View, Delete, Document, Close, Monitor,
+  ArrowUp, ArrowDown, Tickets, Refresh, TrendCharts,
 } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
 import { listClasses } from '@/api/classroom'
-import { listExams, createExam, updateExam, deleteExam, composePaper, monitorExam, releaseExamScores, examGradingDetail, gradeExamSubmission, releaseExamScore } from '@/api/exam'
+import { listExams, createExam, updateExam, deleteExam, composePaper, getExamPaper, monitorExam, releaseExamScores, examGradingDetail, gradeExamSubmission, releaseExamScore } from '@/api/exam'
 import { listCatalogs } from '@/api/course'
 import { listQuestions, createQuestion } from '@/api/question'
+import { blankItems } from '@/utils/blank-answer'
+import { abbrQtype, abbrDifficulty } from '@/utils/question-abbr'
 
 const qtypes = [
   { value: 'single', label: '单选题' },
@@ -385,7 +564,16 @@ const classId = ref(null)
 const exams = ref([])
 const loading = ref(false)
 const route = useRoute()
+const router = useRouter()
 const fixedCourseId = computed(() => Number(route.params.id) || null)
+
+// 打开考试统计页（课程空间内走课程内嵌路由，保留课程导航）
+function openStats(row) {
+  const base = fixedCourseId.value
+    ? `/teacher/courses/${fixedCourseId.value}/exams/${row.id}/stats`
+    : `/teacher/exams/${row.id}/stats`
+  router.push(base)
+}
 
 function classCourseNames(item) {
   return item.course_names?.join('、') || item.course_name || '未关联课程'
@@ -431,132 +619,35 @@ function formatExamWindow(row) {
   return start || end
 }
 
-// ---- 新建 ----
-const createVisible = ref(false)
+// ---- 新建 / 编辑（整页工作台：基础信息 + 组卷）----
+const editVisible = ref(false)
 const saving = ref(false)
+const publishing = ref(false)
 const editingExam = ref(null)
 const form = reactive({})
-function openCreate() {
-  editingExam.value = null
-  Object.assign(form, {
-    id: null, course: null, classroom: classId.value,
-    name: '', start_at: '', end_at: '', duration: 60, total_score: 100, status: 'draft',
-    shuffle_questions: true, shuffle_options: true,
-    per_student_paper: false, show_analysis_after: true, allow_resubmit: false,
-    anti: { detect_blur: true, forbid_copy: true, forbid_paste: true, forbid_contextmenu: true },
-  })
-  createVisible.value = true
-}
-function openEdit(row) {
-  editingExam.value = row
-  Object.assign(form, {
-    id: row.id,
-    course: row.course,
-    classroom: row.classroom,
-    name: row.name,
-    start_at: row.start_at || '',
-    end_at: row.end_at || '',
-    duration: row.duration,
-    total_score: row.total_score,
-    status: row.status,
-    shuffle_questions: row.shuffle_questions,
-    shuffle_options: row.shuffle_options,
-    per_student_paper: row.per_student_paper,
-    show_analysis_after: row.show_analysis_after,
-    allow_resubmit: row.allow_resubmit,
-    anti: {
-      detect_blur: true,
-      forbid_copy: true,
-      forbid_paste: true,
-      forbid_contextmenu: true,
-      ...(row.anti_cheat || {}),
-    },
-  })
-  createVisible.value = true
-}
-async function save() {
-  if (!form.name) return ElMessage.warning('请填写考试名称')
-  const cls = classes.value.find((c) => c.id === classId.value)
-  const courseId = form.course || fixedCourseId.value || cls?.course
-  if (!courseId) return ElMessage.warning('该班级尚未关联课程')
-  if (form.start_at && form.end_at && new Date(form.end_at) <= new Date(form.start_at)) {
-    return ElMessage.warning('结束时间必须晚于开始时间')
-  }
-  const payload = {
-    course: courseId,
-    classroom: form.classroom || classId.value,
-    name: form.name,
-    start_at: form.start_at || null,
-    end_at: form.end_at || null,
-    duration: form.duration,
-    total_score: form.total_score || 0,
-    shuffle_questions: form.shuffle_questions,
-    shuffle_options: form.shuffle_options,
-    per_student_paper: form.per_student_paper,
-    show_analysis_after: form.show_analysis_after,
-    allow_resubmit: form.allow_resubmit,
-    anti_cheat: form.anti,
-    status: form.status || 'draft',
-  }
-  saving.value = true
-  try {
-    if (editingExam.value) {
-      await updateExam(form.id, payload)
-      ElMessage.success('已保存修改')
-    } else {
-      await createExam(payload)
-      ElMessage.success('已创建')
-    }
-    createVisible.value = false
-    editingExam.value = null
-    loadExams()
-  } finally {
-    saving.value = false
-  }
-}
-
-async function setStatus(row, status) {
-  await updateExam(row.id, { ...row, status })
-  ElMessage.success(status === 'published' ? '已发布' : '已结束')
-  loadExams()
-}
-const deleteVisible = ref(false)
-const deleteTarget = ref(null)
-const deleting = ref(false)
-
-function openDelete(row) {
-  deleteTarget.value = row
-  deleteVisible.value = true
-}
-
-async function confirmDelete() {
-  if (!deleteTarget.value) return
-  deleting.value = true
-  try {
-    await deleteExam(deleteTarget.value.id)
-    ElMessage.success('考试已删除')
-    deleteVisible.value = false
-    deleteTarget.value = null
-    loadExams()
-  } finally {
-    deleting.value = false
-  }
-}
-
-// ---- 组卷 ----
-const composeVisible = ref(false)
-const composing = ref(false)
-const currentExam = ref(null)
+// 组卷状态：composeMode 与三个页签对应；rules 随机抽题规则；manualSelected 既是题库选题数据也是试卷预览
 const composeMode = ref('random')
 const rules = ref([])
-const catalogOptions = ref([])
-const manualQuestions = ref([])
 const manualSelected = ref([])
-const manualLoading = ref(false)
+// 已生成试卷摘要（打开已组卷考试时回填 / 组卷成功后更新），控制发布按钮可用与覆盖提示
+const composedPaper = ref(null)
+const composing = ref(false)
+// 覆盖确认框打开中：禁用按钮并忽略连点，防止堆叠多个确认框（编辑器关闭后集中爆发）
+const composeConfirming = ref(false)
+const catalogOptions = ref([])
+const poolQuestions = ref([])
+const poolLoading = ref(false)
 const creatingQuestion = ref(false)
-const manualFilters = reactive({ catalog: null, qtype: '', difficulty: '' })
+const poolFilters = reactive({ catalog: null, qtype: '', difficulty: '' })
 const draftQuestion = reactive({})
 const manualTotal = computed(() => manualSelected.value.reduce((sum, item) => sum + Number(item.score || 0), 0))
+const paperReady = computed(() => Boolean(composedPaper.value?.count))
+
+const editorContext = computed(() => {
+  const cls = classes.value.find((item) => item.id === (form.classroom || classId.value))
+  if (!cls) return fixedCourseId.value ? '当前课程' : '请选择班级'
+  return `${classCourseNames(cls)} · ${cls.name}`
+})
 
 function flattenCatalogs(items, depth = 0) {
   return (items || []).flatMap((item) => [
@@ -566,8 +657,8 @@ function flattenCatalogs(items, depth = 0) {
 }
 
 function activeExamCourseId() {
-  const cls = classes.value.find((c) => c.id === classId.value)
-  return currentExam.value?.course || fixedCourseId.value || cls?.course
+  const cls = classes.value.find((c) => c.id === (form.classroom || classId.value))
+  return form.course || fixedCourseId.value || cls?.course
 }
 
 async function loadCatalogOptions() {
@@ -580,19 +671,19 @@ async function loadCatalogOptions() {
   }
 }
 
-async function loadManualQuestions() {
+async function loadPoolQuestions() {
   const course = activeExamCourseId()
   if (!course) return
-  manualLoading.value = true
+  poolLoading.value = true
   try {
     const params = { course, status: 'published', page_size: 1000 }
-    if (manualFilters.catalog) params.catalog = manualFilters.catalog
-    if (manualFilters.qtype) params.qtype = manualFilters.qtype
-    if (manualFilters.difficulty) params.difficulty = manualFilters.difficulty
+    if (poolFilters.catalog) params.catalog = poolFilters.catalog
+    if (poolFilters.qtype) params.qtype = poolFilters.qtype
+    if (poolFilters.difficulty) params.difficulty = poolFilters.difficulty
     const data = await listQuestions(params)
-    manualQuestions.value = data.results ?? data
+    poolQuestions.value = data.results ?? data
   } finally {
-    manualLoading.value = false
+    poolLoading.value = false
   }
 }
 
@@ -622,17 +713,344 @@ function resetDraftQuestion() {
   resetDraftAnswer()
 }
 
-function isManualSelected(id) {
-  return manualSelected.value.some((item) => Number(item.question_id) === Number(id))
+function resetComposeState() {
+  composeMode.value = 'random'
+  rules.value = [{ qtype: 'single', difficulty: '', count: 5, score: 2 }]
+  manualSelected.value = []
+  composedPaper.value = null
+  poolFilters.catalog = null
+  poolFilters.qtype = ''
+  poolFilters.difficulty = ''
+  resetDraftQuestion()
 }
 
-function addManualQuestion(question) {
-  if (isManualSelected(question.id)) return
+function openCreate() {
+  editingExam.value = null
+  Object.assign(form, {
+    id: null, course: null, classroom: classId.value,
+    name: '', start_at: '', end_at: '', duration: 60, total_score: 100, status: 'draft',
+    shuffle_questions: true,
+    // 选项乱序默认开启（ABCD 标签位置不变，正确答案跟随内容）
+    shuffle_options: true,
+    per_student_paper: false, show_analysis_after: true, allow_resubmit: false,
+    anti: { detect_blur: true, forbid_copy: true, forbid_paste: true, forbid_contextmenu: true },
+  })
+  resetComposeState()
+  editVisible.value = true
+  loadCatalogOptions()
+  loadPoolQuestions()
+}
+
+async function openEdit(row) {
+  editingExam.value = row
+  Object.assign(form, {
+    id: row.id,
+    course: row.course,
+    classroom: row.classroom,
+    name: row.name,
+    start_at: row.start_at || '',
+    end_at: row.end_at || '',
+    duration: row.duration,
+    total_score: row.total_score,
+    status: row.status,
+    shuffle_questions: row.shuffle_questions,
+    shuffle_options: row.shuffle_options ?? true,
+    per_student_paper: row.per_student_paper,
+    show_analysis_after: row.show_analysis_after,
+    allow_resubmit: row.allow_resubmit,
+    anti: {
+      detect_blur: true,
+      forbid_copy: true,
+      forbid_paste: true,
+      forbid_contextmenu: true,
+      ...(row.anti_cheat || {}),
+    },
+  })
+  resetComposeState()
+  editVisible.value = true
+  loadCatalogOptions()
+  loadPoolQuestions()
+  // 已组卷：回填试卷信息（题目/分值/模式），再次进入组卷界面不再空白
+  if (row.has_paper) {
+    try {
+      applyPaperToEditor(await getExamPaper(row.id))
+    } catch {
+      // 错误信息由拦截器提示；回填失败时组卷区为空，教师可重新组卷
+    }
+  }
+}
+
+function buildPayload() {
+  const cls = classes.value.find((c) => c.id === (form.classroom || classId.value))
+  const courseId = form.course || fixedCourseId.value || cls?.course
+  return {
+    course: courseId,
+    classroom: form.classroom || classId.value,
+    name: form.name?.trim() || '',
+    start_at: form.start_at || null,
+    end_at: form.end_at || null,
+    duration: form.duration,
+    total_score: form.total_score || 0,
+    shuffle_questions: form.shuffle_questions,
+    shuffle_options: form.shuffle_options,
+    per_student_paper: form.per_student_paper,
+    show_analysis_after: form.show_analysis_after,
+    allow_resubmit: form.allow_resubmit,
+    anti_cheat: form.anti,
+    status: form.status || 'draft',
+  }
+}
+
+// 保存基础信息（组卷/发布前会自动调用）；silent 用于内部流程（不弹成功提示）
+async function saveBasic(silent = false) {
+  if (!form.name?.trim()) {
+    ElMessage.warning('请填写考试名称')
+    return null
+  }
+  const payload = buildPayload()
+  if (!payload.course) {
+    ElMessage.warning('该班级尚未关联课程')
+    return null
+  }
+  if (form.start_at && form.end_at && new Date(form.end_at) <= new Date(form.start_at)) {
+    ElMessage.warning('结束时间必须晚于开始时间')
+    return null
+  }
+  saving.value = true
+  try {
+    const isNew = !form.id
+    const saved = isNew ? await createExam(payload) : await updateExam(form.id, payload)
+    if (saved?.id) {
+      form.id = saved.id
+      form.status = saved.status || form.status
+      if (isNew) editingExam.value = { id: saved.id }
+    }
+    if (!silent) ElMessage.success(isNew ? '已创建草稿，可继续组卷' : '已保存修改')
+    loadExams()
+    return form.id
+  } catch {
+    return null
+  } finally {
+    saving.value = false
+  }
+}
+
+// 试卷详情 → 预览数据（题库选题数据与试卷预览共用）
+function paperQuestionsToSelected(questions) {
+  return (questions || []).map((q) => ({
+    question_id: q.question_id,
+    stem: q.stem,
+    score: Number(q.score) || 5,
+    qtype: q.qtype || '',
+    difficulty: q.difficulty || '',
+    qtype_display: q.qtype_display || '',
+    difficulty_display: q.difficulty_display || '',
+    options: Array.isArray(q.options) ? q.options : [],
+    answer: q.answer ?? '',
+    analysis: q.analysis || '',
+  }))
+}
+
+function refreshPreviewFromPaper(detail) {
+  manualSelected.value = paperQuestionsToSelected(detail?.questions)
+  composedPaper.value = {
+    count: detail?.questions?.length || 0,
+    total: detail?.total_score ?? 0,
+  }
+}
+
+// 打开已组卷考试：按试卷内容反推组卷信息（手动卷→已选题目；随机卷→按题型/难度聚合规则）
+function applyPaperToEditor(detail) {
+  refreshPreviewFromPaper(detail)
+  if (detail?.mode === 'random') {
+    composeMode.value = 'random'
+    rules.value = rebuildRulesFromPaper(detail.questions || [])
+  } else {
+    composeMode.value = 'manual'
+  }
+}
+
+function rebuildRulesFromPaper(questions) {
+  const groups = new Map()
+  ;(questions || []).forEach((q) => {
+    const key = `${q.qtype || ''}|${q.difficulty || ''}`
+    if (!groups.has(key)) {
+      groups.set(key, {
+        qtype: q.qtype || 'single',
+        difficulty: q.difficulty || '',
+        count: 0,
+        score: Number(q.score) || 2,
+      })
+    }
+    groups.get(key).count += 1
+  })
+  return [...groups.values()]
+}
+
+function addRule() {
+  rules.value.push({ qtype: 'single', difficulty: '', count: 1, score: 2 })
+}
+
+async function doCompose() {
+  // 组卷进行中/覆盖确认框打开中：忽略连点（确认框期间按钮同时置禁用）
+  if (composing.value || composeConfirming.value) return
+  if (composeMode.value === 'random') {
+    if (!rules.value.some((r) => Number(r.count) > 0)) {
+      return ElMessage.warning('请至少添加一条有效的抽题规则')
+    }
+  } else if (!manualSelected.value.length) {
+    return ElMessage.warning('请先选择或新建题目')
+  }
+  if (composedPaper.value) {
+    composeConfirming.value = true
+    try {
+      await ElMessageBox.confirm('重新生成试卷将覆盖当前试卷，确定继续吗？', '覆盖试卷', {
+        type: 'warning',
+        confirmButtonText: '重新生成',
+        cancelButtonText: '取消',
+      })
+    } catch {
+      return // 用户取消
+    } finally {
+      composeConfirming.value = false
+    }
+  }
+  composing.value = true
+  try {
+    // 考试必须先落库才能组卷：新建态先自动创建草稿
+    const examId = await saveBasic(true)
+    if (!examId) return
+    const payload = composeMode.value === 'random'
+      ? { mode: 'random', rules: rules.value }
+      : { mode: 'manual', questions: manualSelected.value.map((item) => ({ question_id: item.question_id, score: item.score })) }
+    const res = await composePaper(examId, payload)
+    const count = res.question_items?.length || 0
+    composedPaper.value = { count, total: res.total_score }
+    form.total_score = Number(res.total_score) || form.total_score
+    ElMessage.success(`组卷完成，共 ${count} 题，总分 ${res.total_score}`)
+    // 用试卷详情刷新预览，保证与后端真实试卷一致（随机抽题后也能回看题目）
+    try {
+      refreshPreviewFromPaper(await getExamPaper(examId))
+    } catch {
+      // 预览刷新失败不影响组卷结果
+    }
+    loadExams()
+  } catch {
+    // 错误信息由拦截器提示
+  } finally {
+    composing.value = false
+  }
+}
+
+async function publishExam() {
+  if (!paperReady.value) return ElMessage.warning('请先完成组卷再发布')
+  // 组卷必须落在已保存的考试上，此时 form.id 必然存在
+  if (!form.id) return ElMessage.warning('请先保存考试信息')
+  publishing.value = true
+  try {
+    await updateExam(form.id, { ...buildPayload(), status: 'published' })
+    form.status = 'published'
+    ElMessage.success('已发布，学生端考试入口已可见')
+    editVisible.value = false
+    loadExams()
+  } catch {
+    // 错误信息由拦截器提示（如组卷被清空导致发布失败）
+  } finally {
+    publishing.value = false
+  }
+}
+
+async function setStatus(row, status) {
+  try {
+    await updateExam(row.id, { ...row, status })
+    ElMessage.success(status === 'published' ? '已发布' : '已结束')
+    loadExams()
+  } catch {
+    // 错误信息由拦截器提示（如未组卷不能发布）
+  }
+}
+const deleteVisible = ref(false)
+const deleteTarget = ref(null)
+const deleting = ref(false)
+
+function openDelete(row) {
+  deleteTarget.value = row
+  deleteVisible.value = true
+}
+
+async function confirmDelete() {
+  if (!deleteTarget.value) return
+  deleting.value = true
+  try {
+    await deleteExam(deleteTarget.value.id)
+    ElMessage.success('考试已删除')
+    deleteVisible.value = false
+    deleteTarget.value = null
+    loadExams()
+  } finally {
+    deleting.value = false
+  }
+}
+
+// ---- 题库选题 ----
+function poolRowClass({ row }) {
+  return isPoolSelected(row.id) ? 'is-added' : ''
+}
+function isPoolSelected(id) {
+  return manualSelected.value.some((item) => Number(item.question_id) === Number(id))
+}
+function addPoolQuestion(question) {
+  if (isPoolSelected(question.id)) return
   manualSelected.value.push({
     question_id: question.id,
     stem: question.stem,
     score: Number(question.score) || 5,
+    qtype: question.qtype,
+    difficulty: question.difficulty,
+    qtype_display: question.qtype_display,
+    difficulty_display: question.difficulty_display,
+    options: Array.isArray(question.options) ? question.options : [],
+    answer: question.answer ?? '',
+    analysis: question.analysis || '',
   })
+}
+function togglePoolQuestion(question) {
+  const index = manualSelected.value.findIndex((item) => Number(item.question_id) === Number(question.id))
+  if (index >= 0) manualSelected.value.splice(index, 1)
+  else addPoolQuestion(question)
+}
+const allFilteredSelected = computed(() =>
+  poolQuestions.value.length > 0 && poolQuestions.value.every((q) => isPoolSelected(q.id)),
+)
+function toggleSelectAllFiltered() {
+  if (allFilteredSelected.value) {
+    // 取消全选只移除当前筛选范围内的题目，其他批次已选题目保留
+    const ids = new Set(poolQuestions.value.map((q) => Number(q.id)))
+    manualSelected.value = manualSelected.value.filter((item) => !ids.has(Number(item.question_id)))
+  } else {
+    poolQuestions.value.forEach((q) => addPoolQuestion(q))
+  }
+}
+function moveSelected(index, offset) {
+  const target = index + offset
+  if (target < 0 || target >= manualSelected.value.length) return
+  const [item] = manualSelected.value.splice(index, 1)
+  manualSelected.value.splice(target, 0, item)
+}
+
+// 题干详情浮层入参（题库行 / 试卷预览 / 查看试卷通用）
+function questionDetailOf(q) {
+  return {
+    stem: q?.stem || '',
+    qtype: q?.qtype || '',
+    difficulty: q?.difficulty || '',
+    qtypeDisplay: q?.qtype_display || '',
+    difficultyDisplay: q?.difficulty_display || '',
+    score: q?.score ?? '',
+    options: Array.isArray(q?.options) ? q.options : [],
+    answer: q?.answer ?? '',
+    analysis: q?.analysis || '',
+  }
 }
 
 function buildDraftAnswer() {
@@ -683,64 +1101,106 @@ async function saveDraftQuestion() {
       source: 'manual',
       status: 'published',
     })
-    addManualQuestion(question)
+    addPoolQuestion(question)
+    // 自写题目加入的是「已选试卷」，切到题库选题页签以便继续调整后统一生成试卷
     composeMode.value = 'manual'
-    await loadManualQuestions()
+    await loadPoolQuestions()
     resetDraftQuestion()
-    ElMessage.success('题目已加入试卷')
+    ElMessage.success('题目已加入试卷预览，点击「生成试卷」后生效')
   } finally {
     creatingQuestion.value = false
-  }
-}
-
-function openCompose(row) {
-  currentExam.value = row
-  composeMode.value = 'random'
-  rules.value = [{ qtype: 'single', difficulty: '', count: 5, score: 2 }]
-  manualSelected.value = []
-  manualFilters.catalog = null
-  manualFilters.qtype = ''
-  manualFilters.difficulty = ''
-  resetDraftQuestion()
-  composeVisible.value = true
-  loadCatalogOptions()
-  loadManualQuestions()
-}
-function addRule() {
-  rules.value.push({ qtype: 'single', difficulty: '', count: 1, score: 2 })
-}
-async function doCompose() {
-  if (composeMode.value !== 'random' && !manualSelected.value.length) {
-    return ElMessage.warning('请先选择或新建题目')
-  }
-  composing.value = true
-  try {
-    const payload = composeMode.value === 'random'
-      ? { mode: 'random', rules: rules.value }
-      : { mode: 'manual', questions: manualSelected.value.map((item) => ({ question_id: item.question_id, score: item.score })) }
-    const res = await composePaper(currentExam.value.id, payload)
-    ElMessage.success(`组卷完成，共 ${res.question_items.length} 题，总分 ${res.total_score}`)
-    composeVisible.value = false
-    loadExams()
-  } finally {
-    composing.value = false
   }
 }
 
 // ---- 监控 ----
 const monitorVisible = ref(false)
 const monitorLoading = ref(false)
+const monitorRefreshing = ref(false)
 const monitorRows = ref([])
 const monitorExamRow = ref(null)
+const monitorLastAt = ref('')
 const releasing = ref(false)
+let monitorTimer = null
+
+// 拉取监控数据（静默刷新不显示整表 loading，避免闪烁）
+async function loadMonitor(showSpinner = true) {
+  if (!monitorExamRow.value) return
+  if (showSpinner) monitorLoading.value = true
+  try {
+    monitorRows.value = await monitorExam(monitorExamRow.value.id)
+    monitorLastAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
+  } finally {
+    if (showSpinner) monitorLoading.value = false
+  }
+}
+
+function stopMonitorPolling() {
+  if (monitorTimer) {
+    clearInterval(monitorTimer)
+    monitorTimer = null
+  }
+}
+
+// 抽屉打开期间每 5 秒静默轮询；关闭/卸载即停
+function startMonitorPolling() {
+  stopMonitorPolling()
+  monitorTimer = setInterval(() => {
+    if (monitorVisible.value && !monitorLoading.value && !monitorRefreshing.value) {
+      loadMonitor(false)
+    }
+  }, 5000)
+}
+
+// 已交卷份数 / 待批改份数（含主观题且未批完的答卷）
+const submittedCount = computed(() =>
+  monitorRows.value.filter((r) => ['submitted', 'timeout'].includes(r.status)).length,
+)
+const pendingCount = computed(() =>
+  monitorRows.value.filter(
+    (r) =>
+      ['submitted', 'timeout'].includes(r.status) &&
+      r.has_subjective &&
+      (r.graded_subjective_count ?? 0) < (r.subjective_count ?? 0),
+  ).length,
+)
+
 async function openMonitor(row) {
   monitorExamRow.value = row
   monitorVisible.value = true
-  monitorLoading.value = true
+  await loadMonitor(true)
+  startMonitorPolling()
+}
+
+// 手动刷新（保留loading态，按钮转圈）
+async function refreshMonitor() {
+  monitorRefreshing.value = true
   try {
-    monitorRows.value = await monitorExam(row.id)
+    await loadMonitor(false)
   } finally {
-    monitorLoading.value = false
+    monitorRefreshing.value = false
+  }
+}
+
+watch(monitorVisible, (v) => {
+  if (!v) stopMonitorPolling()
+})
+onBeforeUnmount(stopMonitorPolling)
+
+// ---- 查看试卷（只读）----
+const paperVisible = ref(false)
+const paperLoading = ref(false)
+const paperDetail = ref(null)
+
+async function openPaper(row) {
+  paperVisible.value = true
+  paperLoading.value = true
+  paperDetail.value = null
+  try {
+    paperDetail.value = await getExamPaper(row.id)
+  } catch {
+    // 错误信息（如尚未组卷）由拦截器提示
+  } finally {
+    paperLoading.value = false
   }
 }
 
@@ -755,7 +1215,7 @@ async function doReleaseAll() {
     } else {
       ElMessage.success(`已发布 ${res.released} 份成绩`)
     }
-    monitorRows.value = await monitorExam(monitorExamRow.value.id)
+    await loadMonitor(false)
   } finally {
     releasing.value = false
   }
@@ -766,7 +1226,7 @@ async function doReleaseOne(row) {
   try {
     await releaseExamScore(row.id)
     ElMessage.success('成绩已发布')
-    monitorRows.value = await monitorExam(monitorExamRow.value.id)
+    await loadMonitor(false)
   } catch {
     // 错误信息由拦截器提示
   }
@@ -777,22 +1237,64 @@ const gradingVisible = ref(false)
 const gradingLoading = ref(false)
 const gradingSaving = ref(false)
 const gradingSub = ref(null)
-const gradingQuestions = ref([])
+const gradingReview = ref([])
 const gradingScores = reactive({})
+
+// 主观题数量 / 待评分数量（批改弹窗摘要用）
+const gradingSubjectiveCount = computed(() =>
+  gradingReview.value.filter((q) => !q.is_objective).length,
+)
+const gradingPendingCount = computed(() =>
+  gradingReview.value.filter((q) => !q.is_objective && q.pending).length,
+)
+
+function fmtGradingAnswer(a) {
+  if (!a) return '（未作答）'
+  if (a.blanks) {
+    // 学生答案为字符串数组、正确答案可能为按空赋分对象数组，统一走 blankItems 取文本
+    const filled = blankItems(a).map((it) => it.text.trim()).filter((b) => b !== '')
+    if (!filled.length) return '（未作答）'
+    return filled.map((b, i) => `第 ${i + 1} 空：${b}`).join('；')
+  }
+  if (a.key != null && String(a.key) !== '') return String(a.key)
+  if (a.keys?.length) return a.keys.join('、')
+  if (a.text != null && String(a.text).trim() !== '') return String(a.text)
+  return '（未作答）'
+}
+
+function optClass(q, key) {
+  const c = q.correct_answer || {}
+  if (String(c.key ?? '') === String(key) || (c.keys || []).map(String).includes(String(key))) return 'opt-right'
+  const m = q.student_answer || {}
+  if (String(m.key ?? '') === String(key) || (m.keys || []).map(String).includes(String(key))) return 'opt-wrong'
+  return ''
+}
 
 async function openGrading(row) {
   gradingVisible.value = true
   gradingLoading.value = true
   gradingSub.value = null
-  gradingQuestions.value = []
+  gradingReview.value = []
   try {
     const data = await examGradingDetail(row.id)
     gradingSub.value = data.submission
-    gradingQuestions.value = data.subjective_questions || []
+    gradingReview.value = data.answer_review || []
     Object.keys(gradingScores).forEach((k) => delete gradingScores[k])
-    gradingQuestions.value.forEach((q) => {
+    gradingReview.value.forEach((q) => {
+      if (q.is_objective) return
       const saved = data.subjective_scores?.[String(q.question_id)]
-      gradingScores[q.question_id] = saved != null ? Number(saved) : null
+      // 未评分默认预设 0 分（不与空值混淆，教师直接改分即可）
+      gradingScores[q.question_id] = saved != null ? Number(saved) : 0
+    })
+    // 与作业批改一致：打开后自动定位到第一道待评分主观题，
+    // 避免评分行藏在折叠线下方被漏看
+    nextTick(() => {
+      setTimeout(() => {
+        const first = document.querySelector(
+          '.exam-grade-dialog .answer-review-item.is-pending .manual-grade-row',
+        )
+        if (first) first.scrollIntoView({ block: 'center' })
+      }, 60)
     })
   } finally {
     gradingLoading.value = false
@@ -803,7 +1305,7 @@ async function doGrade() {
   if (!gradingSub.value) return
   gradingSaving.value = true
   try {
-    // 未填写的题目不上报，后端支持分批批改
+    // 未填写的题目不上报（默认 0 分会正常提交），后端支持分批批改
     const scores = {}
     Object.entries(gradingScores).forEach(([qid, v]) => {
       if (v !== null && v !== undefined && v !== '') scores[qid] = v
@@ -811,7 +1313,7 @@ async function doGrade() {
     await gradeExamSubmission(gradingSub.value.id, { scores })
     ElMessage.success('批改已保存')
     gradingVisible.value = false
-    monitorRows.value = await monitorExam(monitorExamRow.value.id)
+    await loadMonitor(false)
   } catch {
     // 错误信息由拦截器提示
   } finally {
@@ -826,58 +1328,236 @@ onMounted(loadClasses)
 .monitor-toolbar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
   margin-bottom: 14px;
 }
-
-.grading-head {
+.monitor-toolbar-left,
+.monitor-toolbar-right {
   display: flex;
-  gap: 24px;
-  margin-bottom: 14px;
-  color: #475569;
+  align-items: center;
+  gap: 12px;
+}
+.monitor-toolbar-right {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.monitor-auto-tip {
+  font-size: 12.5px;
+  color: #64748b;
+  white-space: nowrap;
 }
 
-.grading-item {
+.monitor-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  font-size: 13px;
+  color: #475569;
+}
+.monitor-summary strong {
+  color: #0f172a;
+  font-weight: 700;
+}
+.monitor-summary strong.warn {
+  color: #d97706;
+}
+/* 统计项单行显示，不随抽屉宽度换行 */
+.monitor-summary .summary-stat {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.monitor-summary .summary-split {
+  width: 1px;
+  height: 14px;
+  background: #cbd5e1;
+  flex-shrink: 0;
+}
+
+/* 监控抽屉宽屏封顶，与作业批改抽屉一致 */
+.monitor-drawer :deep(.el-drawer) {
+  max-width: 820px;
+}
+
+/* 发布按钮禁用态外层包裹，保证 tooltip 可触发 */
+.action-wrap {
+  display: inline-flex;
+  vertical-align: middle;
+}
+
+/* 查看试卷（只读） */
+.paper-brief {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  font-size: 13px;
+  color: #475569;
+}
+.paper-brief strong {
+  color: #0f172a;
+}
+.paper-brief-split {
+  width: 1px;
+  height: 14px;
+  background: #cbd5e1;
+}
+.paper-q-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border: 1px solid #e5eaf3;
+  border-radius: 10px;
+  background: #fff;
+}
+.paper-q-order {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  color: #2563eb;
+  background: #eff6ff;
+  font-size: 13px;
+  font-weight: 700;
+}
+.paper-q-stem {
+  flex: 1;
+  min-width: 0;
+  color: #1f2937;
+  font-size: 14px;
+  line-height: 1.6;
+  cursor: help;
+}
+.paper-q-type {
+  flex-shrink: 0;
+}
+.paper-q-score {
+  flex-shrink: 0;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* 批改答卷弹窗（版式对齐作业批改） */
+.grade-mode-brief {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  font-size: 13px;
+  color: #475569;
+}
+.grade-mode-brief strong {
+  color: #0f172a;
+}
+.grade-brief-split {
+  width: 1px;
+  height: 14px;
+  background: #cbd5e1;
+}
+.grade-brief-pending {
+  color: #d97706;
+  font-weight: 600;
+}
+.grade-brief-done {
+  color: #059669;
+  font-weight: 600;
+}
+.answer-review-item {
   margin-bottom: 14px;
   padding: 14px;
   border: 1px solid #e5eaf3;
   border-radius: 12px;
 }
-
-.grading-stem {
+.answer-review-item.is-pending {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+.answer-review-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
   margin-bottom: 10px;
   font-weight: 700;
   color: #0f172a;
+  line-height: 1.6;
 }
-
-.grading-label {
-  margin-bottom: 4px;
-  color: #94a3b8;
-  font-size: 12px;
+.answer-review-head span {
+  flex-shrink: 0;
+  color: #64748b;
+  font-size: 13px;
 }
-
-.grading-answer-text {
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: #f8fafc;
-  color: #334155;
-  white-space: pre-wrap;
+.student-answer,
+.correct-answer,
+.answer-analysis {
+  margin-top: 6px;
+  font-size: 13.5px;
   line-height: 1.7;
+  color: #334155;
 }
-
-.grading-ref {
-  margin-top: 8px;
+.correct-answer {
+  color: #047857;
 }
-
-.grading-ref .grading-answer-text {
-  background: #eff6ff;
+.answer-analysis {
+  color: #64748b;
 }
-
-.grading-score-row {
+.manual-grade-row {
   display: flex;
   align-items: center;
   gap: 10px;
   margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed #e2e8f0;
+}
+.manual-grade-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #475569;
+}
+.q-options {
+  margin-bottom: 6px;
+}
+.q-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: #f8fafc;
+  font-size: 13.5px;
+  color: #334155;
+}
+.q-opt.opt-right {
+  background: #ecfdf5;
+  color: #047857;
+}
+.q-opt.opt-wrong {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+.opt-key {
+  font-weight: 700;
 }
 
 .exam-page :deep(.data-card) {
@@ -1124,69 +1804,802 @@ onMounted(loadClasses)
 .exam-list-shell :deep(.el-empty) {
   min-height: 420px;
 }
-.exam-create-dialog :deep(.el-dialog),
-:global(.exam-create-dialog.el-dialog),
-.exam-compose-dialog :deep(.el-dialog),
-:global(.exam-compose-dialog.el-dialog) {
-  overflow: hidden;
-  border: 1px solid rgba(147, 197, 253, 0.45);
-  border-radius: 22px;
-  background: rgba(255, 255, 255, 0.98);
-  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.2), 0 0 0 8px rgba(219, 234, 254, 0.18);
+
+/* ============ 整页编辑器（版式对齐发布作业）============ */
+/* EP 弹层（消息/确认框/下拉/日期/题干浮层）均内联 z-index（2000 起步），
+   会被 z-index 3000 的全屏编辑器盖住，必须显式抬高。
+   注意 EP 2.14.2 的 MessageBox 根节点是 el-overlay（类名 el-overlay is-message-box，
+   z-index 内联在根节点上），旧版类名 el-message-box__wrapper 已不存在，勿写错选择器。 */
+:global(.el-message) {
+  z-index: 5200 !important;
 }
-.exam-create-dialog :deep(.el-dialog__header),
-:global(.exam-create-dialog.el-dialog .el-dialog__header),
-.exam-create-dialog :deep(.el-dialog__footer),
-:global(.exam-create-dialog.el-dialog .el-dialog__footer) { margin: 0; padding: 0; }
-.exam-create-dialog :deep(.el-dialog__body),
-:global(.exam-create-dialog.el-dialog .el-dialog__body) { padding: 0; }
-.creation-dialog-header {
+:global(.el-overlay.is-message-box) {
+  z-index: 5400 !important;
+}
+:global(.exam-editor-tooltip.el-popper) {
+  z-index: 5400 !important;
+}
+:global(.exam-filter-popper.el-popper) {
+  z-index: 5200 !important;
+  overflow: hidden;
+  border: 1px solid #bfdbfe !important;
+  border-radius: 16px !important;
+  background: rgba(255, 255, 255, 0.98) !important;
+  box-shadow: 0 18px 38px rgba(37, 99, 235, 0.14), 0 0 0 5px rgba(219, 234, 254, 0.24) !important;
+}
+:global(.exam-filter-popper .el-popper__arrow) {
+  display: none;
+}
+:global(.exam-filter-popper .el-select-dropdown) {
+  border: 0;
+  border-radius: 16px;
+  background: transparent;
+  box-shadow: none;
+}
+:global(.exam-filter-popper .el-select-dropdown__list) {
+  padding: 8px 0;
+}
+:global(.exam-filter-popper .el-select-dropdown__item) {
+  height: 40px;
+  padding: 0 16px;
+  color: #475569;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 40px;
+}
+:global(.exam-filter-popper .el-select-dropdown__item.is-selected) {
+  color: #2563eb;
+  background: #eff6ff;
+}
+.exam-editor {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: linear-gradient(180deg, #f8fbff 0%, #eef5ff 100%);
+  color: #0f172a;
+}
+.exam-editor,
+.exam-editor * {
+  scrollbar-width: none;
+}
+.exam-editor::-webkit-scrollbar,
+.exam-editor *::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+.exam-editor-topbar {
   display: flex;
   align-items: center;
-  gap: 13px;
-  min-height: 82px;
-  padding: 18px 22px;
-  border-bottom: 1px solid #edf2f8;
-  background: linear-gradient(115deg, #fff 0%, #f6faff 100%);
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(37, 99, 235, 0.08);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 8px 22px rgba(37, 99, 235, 0.06);
+  backdrop-filter: blur(18px) saturate(1.08);
 }
-.creation-dialog-icon {
+.exam-editor-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.exam-editor-icon {
   display: grid;
-  width: 46px;
-  height: 46px;
-  flex: 0 0 46px;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
   place-items: center;
-  border-radius: 15px;
+  border-radius: 14px;
   color: #2563eb;
   background: #eaf2ff;
-  font-size: 21px;
+  font-size: 20px;
 }
-.creation-dialog-heading { min-width: 0; }
-.creation-dialog-title { color: #14213d; font-size: 19px; font-weight: 800; line-height: 1.25; }
-.creation-dialog-subtitle { margin-top: 4px; color: #94a3b8; font-size: 13px; }
-.creation-dialog-close { width: 32px; height: 32px; margin-left: auto; color: #94a3b8; }
-.creation-dialog-close:hover { color: #2563eb; background: #eff6ff; }
-.exam-creation-form { padding: 22px 24px 26px; }
-.creation-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
-.form-span-full { grid-column: 1 / -1; }
+.exam-editor-heading { min-width: 0; }
+.exam-editor-title-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.exam-editor-title {
+  color: #14213d;
+  font-size: 18px;
+  font-weight: 850;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+.exam-editor-kicker {
+  overflow: hidden;
+  max-width: 260px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  color: #2563eb;
+  background: #eff6ff;
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.exam-editor-subtitle {
+  margin-top: 3px;
+  color: #94a3b8;
+  font-size: 12.5px;
+}
+.exam-editor-stats {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-left: auto;
+  padding: 7px 12px;
+  border: 1px solid rgba(191, 219, 254, 0.7);
+  border-radius: 999px;
+  color: #64748b;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.86);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.exam-editor-stats strong {
+  color: #2563eb;
+  font-size: 16px;
+}
+.exam-stats-split {
+  width: 1px;
+  height: 14px;
+  background: #cbd5e1;
+}
+.exam-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.exam-editor-actions :deep(.el-button) {
+  height: 38px;
+  border-radius: 11px;
+  font-weight: 700;
+}
+.exam-editor-actions :deep(.el-button--primary) {
+  border-color: #3b82f6;
+  background: #3b82f6;
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.2);
+}
+.exam-editor-body {
+  min-width: 0;
+  min-height: 0;
+  padding: 12px 14px 14px;
+  overflow: hidden;
+}
+.exam-editor .exam-creation-form {
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+}
+.creation-form-grid {
+  display: grid;
+  grid-template-columns: clamp(340px, 25vw, 430px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+  height: 100%;
+  min-height: 0;
+}
+.form-col { min-width: 0; min-height: 0; display: flex; }
+
+/* 分组卡片（左右等高） */
+.exam-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  padding: 14px 14px 16px;
+  border: 1px solid rgba(191, 219, 254, 0.58);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow:
+    0 24px 64px rgba(37, 99, 235, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82);
+  overflow: hidden;
+  backdrop-filter: blur(18px) saturate(1.08);
+}
+.exam-info-card {
+  overflow: auto;
+}
+/* 左卡（基础信息）表单项间距收紧 */
+.exam-info-card :deep(.el-form-item) {
+  margin-bottom: 12px;
+}
+.exam-compose-card {
+  overflow: hidden;
+}
+.exam-card :deep(.el-form-item:last-child) {
+  margin-bottom: 0;
+}
+.exam-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.9);
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 800;
+}
+.exam-card-head :deep(.el-icon) {
+  color: #2563eb;
+  font-size: 15px;
+}
+.compose-head-hint {
+  margin-left: auto;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 600;
+}
 .exam-creation-form :deep(.el-form-item) { margin-bottom: 18px; }
 .exam-creation-form :deep(.el-form-item__label) {
+  height: auto;
+  margin-bottom: 8px;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1.35;
+}
+.exam-creation-form :deep(.el-input__wrapper),
+.exam-creation-form :deep(.el-date-editor.el-input),
+.exam-creation-form :deep(.el-input-number) {
+  min-height: 44px;
+  border: 1px solid #dbe5f2;
+  border-radius: 12px;
+  background: #f8fbff;
+  box-shadow: none;
+}
+.exam-creation-form :deep(.el-input__wrapper:focus-within),
+.exam-creation-form :deep(.el-date-editor.el-input:focus-within) {
+  border-color: #60a5fa;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.13);
+}
+.exam-creation-form :deep(.el-input-number) { width: 100%; }
+.setting-item {
+  padding: 13px 14px 7px;
+  border: 1px solid #e4edf7;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+.checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  padding-top: 2px;
+}
+.checkbox-group :deep(.el-checkbox) { margin-right: 0; color: #475569; font-weight: 600; }
+.mode-tip { margin-top: 8px; color: #94a3b8; font-size: 12px; line-height: 1.6; }
+
+/* 组卷卡：左页签（组卷方式）+ 右试卷预览 */
+.compose-paper-alert {
+  flex: none;
+  margin-bottom: 10px;
+}
+.compose-layout {
+  flex: 1;
+  display: flex;
+  gap: 10px;
+  min-height: 0;
+  min-width: 0;
+}
+.compose-tabs {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.compose-tabs :deep(.el-tabs__header) {
+  margin-bottom: 14px;
+}
+.compose-tabs :deep(.el-tabs__content) {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.compose-tabs :deep(.el-tab-pane) {
+  height: 100%;
+}
+.compose-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+/* 题库选题：筛选行（auto）+ 题库表格（剩余高度） */
+.compose-pane-manual {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  overflow: hidden;
+}
+.compose-pane-tip {
+  color: #64748b;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.compose-add-rule {
+  align-self: flex-start;
+}
+
+/* 组卷页签（随机/题库/自写） */
+.compose-tabs :deep(.el-tabs__nav-wrap::after) {
+  display: none;
+}
+.compose-tabs :deep(.el-tabs__nav) {
+  gap: 8px;
+}
+.compose-tabs :deep(.el-tabs__active-bar) {
+  display: none;
+}
+.compose-tabs :deep(.el-tabs__item) {
+  height: 38px;
+  padding: 0 18px !important;
+  border: 1px solid #dbeafe;
+  border-radius: 11px;
+  color: #64748b;
+  background: #f8fbff;
+  font-weight: 780;
+  transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.compose-tabs :deep(.el-tabs__item:hover) {
+  border-color: #bfdbfe;
+  color: #2563eb;
+  background: #eff6ff;
+}
+.compose-tabs :deep(.el-tabs__item.is-active) {
+  border-color: transparent;
+  color: #fff;
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.18);
+}
+
+/* 抽题规则表 */
+.compose-rule-table {
+  overflow: hidden;
+  border: 1px solid #e5edf7;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.045);
+}
+.compose-rule-table :deep(.el-table__inner-wrapper::before) {
+  display: none;
+}
+.compose-rule-table :deep(th.el-table__cell) {
+  height: 44px;
+  border-bottom: 1px solid #e2ebf7;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 820;
+  background: linear-gradient(180deg, #f8fbff 0%, #f3f7fc 100%);
+}
+.compose-rule-table :deep(td.el-table__cell) {
+  height: 54px;
+  border-bottom-color: #edf2f8;
+  color: #334155;
+}
+.compose-rule-table :deep(.el-table__row:hover > td.el-table__cell) {
+  background: #f8fbff;
+}
+.compose-rule-table :deep(.el-select__wrapper),
+.compose-rule-table :deep(.el-input-number) {
+  min-height: 42px;
+  border: 1px solid #dbe5f2;
+  border-radius: 12px;
+  background: #f8fbff;
+  box-shadow: none;
+}
+.compose-rule-table :deep(.el-input-number),
+.compose-rule-table :deep(.el-input-number .el-input__wrapper) {
+  width: 96px;
+}
+
+/* 题库筛选行 */
+.question-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+.question-filters :deep(.el-select) {
+  flex: 1 1 128px;
+  min-width: 0;
+}
+.question-filters :deep(.el-select__wrapper) {
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: 11px;
+  background: rgba(248, 251, 255, 0.94);
+  box-shadow: inset 0 0 0 1px #dbe5ef, 0 4px 12px rgba(37, 99, 235, 0.035);
+  transition: background-color 0.18s ease, box-shadow 0.18s ease;
+}
+.question-filters :deep(.el-select__wrapper:hover),
+.question-filters :deep(.el-select__wrapper.is-focused) {
+  background: #fff;
+  box-shadow: inset 0 0 0 1px #bfdbfe, 0 0 0 3px rgba(59, 130, 246, 0.09);
+}
+/* 全选当前筛选范围（范围已全选时变为「取消全选」） */
+.pool-select-all {
+  flex: 0 0 auto;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid #bfdbfe;
+  border-radius: 11px;
+  color: #2563eb;
+  background: rgba(239, 246, 255, 0.78);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+.pool-select-all:hover:not(:disabled) {
+  border-color: #60a5fa;
+  color: #fff;
+  background: #3b82f6;
+}
+.pool-select-all:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.pool-select-all.active {
+  border-color: #fecaca;
+  color: #ef4444;
+  background: #fef2f2;
+}
+.pool-select-all.active:hover:not(:disabled) {
+  border-color: #ef4444;
+  color: #fff;
+  background: #ef4444;
+}
+
+/* 题库表格 */
+.question-pool-table {
+  overflow: hidden;
+  border: 1px solid #e5edf7;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.045);
+}
+.question-pool-table :deep(.el-table__inner-wrapper::before) { display: none; }
+.question-pool-table :deep(.el-table__body tr) {
+  transition: background-color 0.18s ease;
+}
+.question-pool-table :deep(th.el-table__cell) {
+  height: 36px;
+  border-bottom: 1px solid #e2ebf7;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+  background: linear-gradient(180deg, #f8fbff 0%, #f3f7fc 100%);
+}
+.question-pool-table :deep(td.el-table__cell) {
+  height: 44px;
+  padding: 0 6px;
+  border-bottom-color: #edf2f8;
+  color: #334155;
+}
+/* 题库列表列宽很紧，必须把 .cell 内边距清零，空间全部留给标签与按钮 */
+.question-pool-table :deep(.el-table__cell .cell) {
+  padding: 0;
+}
+.question-pool-table :deep(.el-table__row:hover > td.el-table__cell) {
+  background: #f8fbff;
+}
+/* 已添加题目：整行浅蓝高亮 + 首列左侧蓝色竖条 + 题干加粗变色 */
+.question-pool-table :deep(.el-table__row.is-added > td.el-table__cell) {
+  background: #e8f1fe;
+}
+.question-pool-table :deep(.el-table__row.is-added:hover > td.el-table__cell) {
+  background: #d9e8fd;
+}
+.question-pool-table :deep(.el-table__row.is-added > td.el-table__cell:first-child) {
+  box-shadow: inset 3px 0 0 #3b82f6;
+}
+.question-pool-table :deep(.el-table__row.is-added .pool-stem) {
+  color: #1d4ed8;
+  font-weight: 700;
+}
+.pool-stem {
+  display: block;
+  overflow: hidden;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 560;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: help;
+}
+.pool-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 20px;
+  padding: 0 4px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+.pool-tag.type {
+  border: 1px solid #bfdbfe;
+  color: #2563eb;
+  background: rgba(239, 246, 255, 0.72);
+}
+.pool-tag.difficulty {
+  border: 1px solid #dbeafe;
+  color: #64748b;
+  background: #f8fbff;
+}
+.pool-tag.difficulty-easy {
+  border-color: #bbf7d0;
+  color: #16a34a;
+  background: rgba(240, 253, 244, 0.72);
+}
+.pool-tag.difficulty-medium {
+  border-color: #fed7aa;
+  color: #d97706;
+  background: rgba(255, 247, 237, 0.78);
+}
+.pool-tag.difficulty-hard {
+  border-color: #fecaca;
+  color: #ef4444;
+  background: rgba(254, 242, 242, 0.78);
+}
+.pool-action {
+  height: 24px;
+  min-width: 44px;
+  padding: 0 6px;
+  border: 1px solid #bfdbfe;
+  border-radius: 7px;
+  color: #2563eb;
+  background: rgba(239, 246, 255, 0.78);
+  font-size: 11.5px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+.pool-action:hover {
+  border-color: #60a5fa;
+  color: #fff;
+  background: #3b82f6;
+}
+.pool-action.selected {
+  border-color: #fecaca;
+  color: #ef4444;
+  background: #fef2f2;
+}
+.pool-action.selected:hover {
+  border-color: #ef4444;
+  color: #fff;
+  background: #ef4444;
+}
+.question-pool-table :deep(.el-scrollbar__bar),
+.selected-list-scroll :deep(.el-scrollbar__bar) {
+  display: none !important;
+}
+
+/* 试卷预览（右列，结构对齐作业已选题目） */
+.selected-panel {
+  flex: 0 0 384px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  padding: 12px 12px 10px;
+  border: 1px solid #e5edf7;
+  border-radius: 18px;
+  background: rgba(248, 251, 255, 0.68);
+}
+.selected-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 2px 10px;
+  border-bottom: 1px solid #e8eef7;
+  color: #334155;
+  font-size: 14px;
+}
+.selected-header strong {
+  font-weight: 800;
+  white-space: nowrap;
+}
+.selected-header span { color: #2563eb; font-weight: 700; white-space: nowrap; }
+.selected-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 140px;
+  margin-top: 10px;
+  padding: 15px 14px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 12px;
+  color: #94a3b8;
+  font-size: 13px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.5);
+}
+.selected-empty :deep(.el-icon) { font-size: 22px; }
+.selected-list-scroll {
+  flex: 1;
+  min-height: 0;
+  margin-top: 10px;
+}
+.selected-list-scroll :deep(.el-scrollbar__wrap) {
+  overflow-x: hidden;
+}
+.selected-list-scroll :deep(.el-scrollbar__view) {
+  min-height: 100%;
+}
+.selected-list {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 0;
+  padding: 0 2px 2px 0;
+}
+/* 紧凑双行卡片：上行序号+题干（两行截断），下行简写题型+分值+操作 */
+.selected-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #e8eef7;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 5px 14px rgba(37, 99, 235, 0.035);
+}
+.selected-item-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+.selected-item-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 34px;
+}
+.selected-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+.question-order {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  place-items: center;
+  border-radius: 8px;
+  color: #2563eb;
+  background: #eff6ff;
+  font-size: 13px;
+  font-weight: 800;
+  box-shadow: inset 0 0 0 1px rgba(191, 219, 254, 0.72);
+}
+.selected-stem {
+  display: -webkit-box;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+  cursor: help;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.selected-qtype { min-width: 36px; height: 22px; padding: 0 6px; font-size: 12px; }
+.score-input {
+  width: 64px;
+  flex: none;
+}
+.score-input :deep(.el-input__wrapper) {
+  min-height: 30px;
+  border-radius: 9px;
+  background: #f8fbff;
+  box-shadow: inset 0 0 0 1px #dbeafe;
+}
+.score-input :deep(.el-input__inner) {
+  text-align: center;
+  font-weight: 700;
+}
+.score-input :deep(input::-webkit-outer-spin-button),
+.score-input :deep(input::-webkit-inner-spin-button) {
+  margin: 0;
+  appearance: none;
+}
+.score-input :deep(input[type='number']) {
+  appearance: textfield;
+}
+.score-unit {
+  color: #64748b;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* 自写题目表单 */
+.compose-custom-form {
+  padding: 4px 2px 0;
+}
+.custom-question-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0 14px;
+}
+.custom-span-full {
+  grid-column: 1 / -1;
+}
+.compose-custom-form :deep(.el-form-item) {
+  margin-bottom: 16px;
+}
+.compose-custom-form :deep(.el-form-item__label) {
   height: auto;
   margin-bottom: 7px;
   color: #475569;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 780;
   line-height: 1.35;
 }
-.exam-creation-form :deep(.el-input__wrapper),
-.exam-creation-form :deep(.el-input-number),
-.exam-creation-form :deep(.el-date-editor.el-input) {
+.compose-custom-form :deep(.el-select__wrapper),
+.compose-custom-form :deep(.el-input__wrapper),
+.compose-custom-form :deep(.el-textarea__inner),
+.compose-custom-form :deep(.el-input-number) {
   min-height: 42px;
   border: 1px solid #dbe5f2;
-  border-radius: 11px;
+  border-radius: 12px;
   background: #f8fbff;
   box-shadow: none;
+  transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
 }
-.exam-creation-form :deep(.el-input-number) { width: 100%; }
+.compose-custom-form :deep(.el-select__wrapper:hover),
+.compose-custom-form :deep(.el-select__wrapper.is-focused),
+.compose-custom-form :deep(.el-input__wrapper:hover),
+.compose-custom-form :deep(.el-input__wrapper.is-focus),
+.compose-custom-form :deep(.el-textarea__inner:focus) {
+  border-color: #bfdbfe;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.09);
+}
+.custom-compose-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 4px;
+}
+.custom-compose-actions :deep(.el-button) {
+  height: 38px;
+  border-radius: 11px;
+  font-weight: 780;
+}
+
+/* 弹层（日期选择 / 下拉）样式：编辑器 z-index 3000，弹层需更高 */
 :global(.exam-datetime-popper.el-popper) {
   z-index: 5200 !important;
   overflow: hidden;
@@ -1360,298 +2773,8 @@ onMounted(loadClasses)
   color: #fff;
   background: #3b82f6;
 }
-.setting-item {
-  padding: 13px 14px 7px;
-  border: 1px solid #e4edf7;
-  border-radius: 12px;
-  background: #f8fbff;
-}
-.checkbox-group { gap: 12px 18px; padding-top: 2px; }
-.checkbox-group :deep(.el-checkbox) { margin-right: 0; color: #475569; font-weight: 600; }
-.exam-status-note { min-height: 42px; display: flex; align-items: center; color: #94a3b8; font-size: 12px; line-height: 1.5; }
-.creation-dialog-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  padding: 16px 22px 18px;
-  border-top: 1px solid #edf2f8;
-  background: rgba(248, 250, 252, 0.82);
-}
-.creation-dialog-footer :deep(.el-button) { min-width: 88px; height: 38px; border-radius: 10px; font-weight: 700; }
-.checkbox-group {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  padding-top: 6px;
-}
 
-.empty-text {
-  font-size: 14px;
-  color: #64748b;
-  margin-bottom: 4px;
-}
-
-.empty-tip {
-  font-size: 12px;
-  color: #94a3b8;
-}
-
-.text-muted {
-  color: #94a3b8;
-}
-.exam-compose-dialog :deep(.el-dialog__header),
-:global(.exam-compose-dialog.el-dialog .el-dialog__header) {
-  margin: 0;
-  padding: 20px 24px 14px;
-  border-bottom: 1px solid #edf2f8;
-  background: linear-gradient(115deg, #ffffff 0%, #f6faff 100%);
-}
-.exam-compose-dialog :deep(.el-dialog__title),
-:global(.exam-compose-dialog.el-dialog .el-dialog__title) {
-  color: #0f172a;
-  font-size: 20px;
-  font-weight: 850;
-}
-.exam-compose-dialog :deep(.el-dialog__body),
-:global(.exam-compose-dialog.el-dialog .el-dialog__body) {
-  padding: 18px 22px 20px;
-  background: #ffffff;
-}
-.exam-compose-dialog :deep(.el-dialog__footer),
-:global(.exam-compose-dialog.el-dialog .el-dialog__footer) {
-  margin: 0;
-  padding: 14px 22px 18px;
-  border-top: 1px solid #edf2f8;
-  background: #f8fbff;
-}
-.exam-compose-dialog :deep(.dialog-footer .el-button) {
-  min-width: 92px;
-  height: 38px;
-  border-radius: 11px;
-  font-weight: 760;
-}
-.compose-tabs :deep(.el-tabs__header) {
-  margin-bottom: 18px;
-}
-.compose-tabs :deep(.el-tabs__nav-wrap::after) {
-  display: none;
-}
-.compose-tabs :deep(.el-tabs__nav) {
-  gap: 8px;
-}
-.compose-tabs :deep(.el-tabs__active-bar) {
-  display: none;
-}
-.compose-tabs :deep(.el-tabs__item) {
-  height: 38px;
-  padding: 0 18px !important;
-  border: 1px solid #dbeafe;
-  border-radius: 11px;
-  color: #64748b;
-  background: #f8fbff;
-  font-weight: 780;
-  transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
-}
-.compose-tabs :deep(.el-tabs__item:hover) {
-  border-color: #bfdbfe;
-  color: #2563eb;
-  background: #eff6ff;
-}
-.compose-tabs :deep(.el-tabs__item.is-active) {
-  border-color: transparent;
-  color: #fff;
-  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.18);
-}
-.compose-tabs :deep(.el-alert) {
-  border: 1px solid #dbeafe;
-  border-radius: 13px;
-  background: #f8fbff;
-}
-.compose-filter-row {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 14px;
-}
-.compose-filter-row :deep(.el-select__wrapper),
-.compose-custom-form :deep(.el-select__wrapper),
-.compose-custom-form :deep(.el-input__wrapper),
-.compose-custom-form :deep(.el-textarea__inner),
-.compose-custom-form :deep(.el-input-number),
-.compose-rule-table :deep(.el-select__wrapper),
-.compose-rule-table :deep(.el-input-number) {
-  min-height: 42px;
-  border: 1px solid #dbe5f2;
-  border-radius: 12px;
-  background: #f8fbff;
-  box-shadow: none;
-  transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
-}
-.compose-filter-row :deep(.el-select__wrapper:hover),
-.compose-filter-row :deep(.el-select__wrapper.is-focused),
-.compose-custom-form :deep(.el-select__wrapper:hover),
-.compose-custom-form :deep(.el-select__wrapper.is-focused),
-.compose-custom-form :deep(.el-input__wrapper:hover),
-.compose-custom-form :deep(.el-input__wrapper.is-focus),
-.compose-custom-form :deep(.el-textarea__inner:focus),
-.compose-rule-table :deep(.el-select__wrapper:hover),
-.compose-rule-table :deep(.el-select__wrapper.is-focused) {
-  border-color: #bfdbfe;
-  background: #fff;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.09);
-}
-.compose-rule-table,
-.compose-question-table {
-  overflow: hidden;
-  border: 1px solid #e5edf7;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.045);
-}
-.compose-rule-table :deep(.el-table__inner-wrapper::before),
-.compose-question-table :deep(.el-table__inner-wrapper::before) {
-  display: none;
-}
-.compose-rule-table :deep(th.el-table__cell),
-.compose-question-table :deep(th.el-table__cell) {
-  height: 44px;
-  border-bottom: 1px solid #e2ebf7;
-  color: #64748b;
-  font-size: 13px;
-  font-weight: 820;
-  background: linear-gradient(180deg, #f8fbff 0%, #f3f7fc 100%);
-}
-.compose-rule-table :deep(td.el-table__cell),
-.compose-question-table :deep(td.el-table__cell) {
-  height: 54px;
-  border-bottom-color: #edf2f8;
-  color: #334155;
-}
-.compose-rule-table :deep(.el-table__row:hover > td.el-table__cell),
-.compose-question-table :deep(.el-table__row:hover > td.el-table__cell) {
-  background: #f8fbff;
-}
-.compose-rule-table :deep(.el-input-number),
-.compose-rule-table :deep(.el-input-number .el-input__wrapper) {
-  width: 96px;
-}
-.compose-manual-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
-  gap: 14px;
-  align-items: stretch;
-}
-.selected-paper-box {
-  display: flex;
-  flex-direction: column;
-  min-height: 300px;
-  padding: 14px;
-  border: 1px solid #e2ebf7;
-  border-radius: 16px;
-  background: rgba(248, 251, 255, 0.78);
-}
-.selected-paper-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-  color: #334155;
-  font-size: 15px;
-}
-.selected-paper-head strong {
-  font-weight: 820;
-}
-.selected-paper-head span {
-  color: #2563eb;
-  font-weight: 820;
-}
-.paper-question-list {
-  display: grid;
-  align-content: start;
-  gap: 8px;
-  max-height: 248px;
-  overflow: auto;
-}
-.paper-question-item {
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) 82px auto;
-  align-items: center;
-  gap: 9px;
-  min-height: 48px;
-  padding: 8px 10px;
-  border: 1px solid #e5edf7;
-  border-radius: 12px;
-  background: #fff;
-  box-shadow: 0 5px 14px rgba(37, 99, 235, 0.035);
-}
-.paper-question-order {
-  display: grid;
-  width: 26px;
-  height: 26px;
-  place-items: center;
-  border-radius: 9px;
-  color: #2563eb;
-  background: #eff6ff;
-  font-weight: 850;
-  box-shadow: inset 0 0 0 1px rgba(191, 219, 254, 0.72);
-}
-.paper-question-stem {
-  overflow: hidden;
-  color: #1f2937;
-  font-size: 14px;
-  font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.compose-score-input {
-  width: 82px;
-}
-.compose-score-input :deep(.el-input__wrapper) {
-  min-height: 34px;
-  border: 1px solid #dbeafe;
-  border-radius: 10px;
-  background: #f8fbff;
-  box-shadow: none;
-}
-.compose-score-input :deep(.el-input__inner) {
-  color: #334155;
-  font-weight: 750;
-  text-align: center;
-}
-.compose-custom-form {
-  padding: 4px 2px 0;
-}
-.custom-question-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0 14px;
-}
-.custom-span-full {
-  grid-column: 1 / -1;
-}
-.compose-custom-form :deep(.el-form-item) {
-  margin-bottom: 16px;
-}
-.compose-custom-form :deep(.el-form-item__label) {
-  height: auto;
-  margin-bottom: 7px;
-  color: #475569;
-  font-size: 13px;
-  font-weight: 780;
-  line-height: 1.35;
-}
-.custom-compose-actions {
-  display: flex;
-  justify-content: flex-end;
-  padding-top: 4px;
-}
-.custom-compose-actions :deep(.el-button) {
-  height: 38px;
-  border-radius: 11px;
-  font-weight: 780;
-}
+/* 组卷相关下拉（规则表 / 自写题目） */
 :global(.exam-compose-popper.el-popper) {
   z-index: 5200 !important;
   overflow: hidden;
@@ -1686,6 +2809,22 @@ onMounted(loadClasses)
   color: #2563eb;
   background: #eff6ff;
 }
+
+.empty-text {
+  font-size: 14px;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+.empty-tip {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.text-muted {
+  color: #94a3b8;
+}
+
 @media (max-width: 1120px) {
   .exam-list-card {
     grid-template-columns: 1fr;
@@ -1697,13 +2836,23 @@ onMounted(loadClasses)
     min-width: 0;
   }
 }
+
 @media (max-width: 920px) {
-  .compose-manual-grid,
-  .compose-filter-row,
+  .creation-form-grid {
+    grid-template-columns: 1fr;
+  }
+  .compose-layout {
+    flex-direction: column;
+  }
+  .selected-panel {
+    flex: 0 0 auto;
+    max-height: 40%;
+  }
   .custom-question-grid {
     grid-template-columns: 1fr;
   }
 }
+
 @media (max-width: 640px) {
   .exam-page :deep(.data-card > .el-card__body) {
     padding: 20px 18px 24px;

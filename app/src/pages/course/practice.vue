@@ -42,15 +42,18 @@
           </view>
         </view>
 
-        <!-- 填空 -->
-        <input
-          v-else-if="q.qtype === 'blank'"
-          v-model="answers[q.id][0]"
-          class="blank-input"
-          placeholder="请输入答案"
-          placeholder-class="ph"
-          :disabled="submitted"
-        />
+        <!-- 填空（多空题按空数量渲染输入框） -->
+        <template v-else-if="q.qtype === 'blank'">
+          <input
+            v-for="(_, blankIndex) in answers[q.id]"
+            :key="blankIndex"
+            v-model="answers[q.id][blankIndex]"
+            class="blank-input"
+            :placeholder="`第 ${blankIndex + 1} 空`"
+            placeholder-class="ph"
+            :disabled="submitted"
+          />
+        </template>
 
         <!-- 简答 -->
         <textarea
@@ -66,16 +69,14 @@
         <view
           v-if="submitted && feedback[q.id]"
           class="fb"
-          :class="feedback[q.id].is_correct === null ? '' : feedback[q.id].is_correct ? 'ok' : 'no'"
+          :class="feedback[q.id].is_correct === null ? '' : feedback[q.id].is_correct ? 'ok' : (Number(feedback[q.id].score) > 0 ? 'part' : 'no')"
         >
           <template v-if="feedback[q.id].is_correct === null">
             <view>本题为简答题，请参考答案自行核对：</view>
             <view class="fb-ana">参考答案：{{ fmt(feedback[q.id].correct_answer) }}</view>
           </template>
           <template v-else>
-            <view>
-              {{ feedback[q.id].is_correct ? '回答正确' : `回答错误，正确答案：${fmt(feedback[q.id].correct_answer)}` }}
-            </view>
+            <view>{{ fbResultText(feedback[q.id]) }}</view>
           </template>
           <view v-if="feedback[q.id].analysis" class="fb-ana">解析：{{ feedback[q.id].analysis }}</view>
         </view>
@@ -102,6 +103,7 @@
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { listQuestions, practiceSubmit } from '@/api/question.js'
+import { blankAnswerText } from '@/utils/blank-answer.js'
 
 const courseId = ref(null)
 const catalogId = ref(null)
@@ -142,7 +144,7 @@ async function loadPractice() {
 function resetAnswers() {
   const init = {}
   questions.value.forEach((q) => {
-    init[q.id] = q.qtype === 'multi' ? [] : q.qtype === 'blank' ? [''] : ''
+    init[q.id] = q.qtype === 'multi' ? [] : q.qtype === 'blank' ? new Array(Math.max(1, q.blank_count || 1)).fill('') : ''
   })
   answers.value = init
   feedback.value = {}
@@ -173,9 +175,15 @@ function fmt(a) {
   if (!a) return '-'
   if (a.key) return a.key
   if (a.keys) return a.keys.join(', ')
-  if (a.blanks) return a.blanks.join(' / ')
+  if (a.blanks) return blankAnswerText(a)
   if (a.text) return a.text
   return '-'
+}
+// 练习结果文案：全对/部分空命中（按空赋分）/全错
+function fbResultText(fb) {
+  if (fb.is_correct) return '回答正确'
+  if (Number(fb.score) > 0) return `部分正确，正确答案：${fmt(fb.correct_answer)}`
+  return `回答错误，正确答案：${fmt(fb.correct_answer)}`
 }
 
 const answeredCount = computed(() => questions.value.filter((q) => {
@@ -340,6 +348,11 @@ async function submitPractice() {
 .fb.no {
   background: #fef2f2;
   color: #ef4444;
+}
+
+.fb.part {
+  background: #fffbeb;
+  color: #d97706;
 }
 
 .fb-ana {

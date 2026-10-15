@@ -76,9 +76,15 @@
                 </el-checkbox>
               </el-checkbox-group>
 
-              <!-- 填空 -->
+              <!-- 填空（多空题按空数量渲染输入框） -->
               <div v-else-if="q.qtype === 'blank'" class="blank-input">
-                <el-input v-model="answers[q.question_id][0]" placeholder="请输入答案" />
+                <el-input
+                  v-for="(_, blankIndex) in answers[q.question_id]"
+                  :key="blankIndex"
+                  v-model="answers[q.question_id][blankIndex]"
+                  :placeholder="`第 ${blankIndex + 1} 空`"
+                  class="blank-item"
+                />
               </div>
 
               <!-- 简答 -->
@@ -93,9 +99,21 @@
             </el-card>
 
             <div class="submit-bar">
+              <el-button size="large" :icon="Finished" :loading="saving" @click="saveAnswers">
+                保存答案
+              </el-button>
               <el-button type="primary" size="large" :loading="submitting" :icon="CircleCheck" @click="() => submit(false)">
                 提交答卷
               </el-button>
+            </div>
+            <div class="save-hint">
+              <span v-if="dirty" class="save-hint-dirty">
+                有未保存的更改，刷新或误关页面将丢失，请及时点击「保存答案」
+              </span>
+              <span v-else-if="savedAtText" class="save-hint-ok">
+                已于 {{ savedAtText }} 保存（保存不提交，考试结束时将自动交卷）
+              </span>
+              <span v-else>答题过程中可随时「保存答案」暂存（不提交），到结束时间将自动交卷</span>
             </div>
           </el-col>
 
@@ -127,51 +145,33 @@
         </el-row>
       </template>
 
-      <!-- 结果 -->
+      <!-- 结果：只展示交卷成功摘要，题目回看点击「查看答题情况」跳转独立页 -->
       <template v-else-if="phase === 'result'">
-        <el-result
-          icon="success"
-          title="交卷成功"
-          :sub-title="result.score_released
-            ? `客观题得分：${result.objective_score ?? '-'} / ${result.total_score ?? '-'} 分`
-            : '答卷已提交，成绩将在教师统一发布后可见'"
-        >
+        <el-result icon="success" title="交卷成功" :sub-title="resultSubtitle">
           <template #extra>
-            <el-button v-if="canReview && result.score_released" type="primary" :icon="View" @click="loadReview">查看解析</el-button>
-            <el-button :icon="ArrowLeft" @click="$router.push('/student/exams')">返回考试列表</el-button>
+            <el-button type="primary" :icon="View" @click="goReview">查看答题情况</el-button>
+            <el-button :icon="ArrowLeft" @click="router.push(examListPath())">返回考试列表</el-button>
           </template>
         </el-result>
-
-        <div v-if="reviewList.length" class="review">
-          <el-card v-for="(q, i) in reviewList" :key="q.question_id" class="q-card" shadow="never">
-            <div class="q-stem">
-              <span class="q-index">{{ i + 1 }}.</span>
-              <el-tag size="small" effect="light" class="q-type">{{ q.qtype_display }}</el-tag>
-              <span>{{ q.stem }}</span>
-            </div>
-            <div class="review-line">
-              你的答案：<span class="answer">{{ fmtAnswer(q.student_answer) }}</span>
-            </div>
-            <div v-if="q.is_objective" class="review-line correct">
-              正确答案：<span>{{ fmtAnswer(q.correct_answer) }}</span>
-            </div>
-            <div v-if="q.analysis" class="review-line analysis">解析：{{ q.analysis }}</div>
-          </el-card>
-        </div>
       </template>
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Document, Clock, CircleCheck, Grid, View, ArrowLeft } from '@element-plus/icons-vue'
-import { startExam, submitExam, reviewExam, reportCheat } from '@/api/exam'
+import { Document, Clock, CircleCheck, Grid, View, ArrowLeft, Finished } from '@element-plus/icons-vue'
+import { startExam, saveExamAnswers, submitExam, reportCheat } from '@/api/exam'
 
 const route = useRoute()
 const router = useRouter()
+// 课程空间进入时携带 course 查询参数：交卷后的返回/回看都回到课程空间内
+const courseId = computed(() => Number(route.query.course) || null)
+function examListPath() {
+  return courseId.value ? `/student/courses/${courseId.value}/exams` : '/student/exams'
+}
 const examId = Number(route.params.id)
 
 const loading = ref(true)
@@ -183,8 +183,15 @@ const subId = ref(null)
 const antiCheat = ref({})
 const submitting = ref(false)
 const result = ref({})
-const canReview = ref(false)
-const reviewList = ref([])
+
+// 交卷结果摘要：客观题提交即出分；主观题批阅后（或统一出分后）展示总分
+const resultSubtitle = computed(() => {
+  const total = result.value.total_score
+  const obj = result.value.objective_score
+  if (total != null) return `总分：${total} 分（客观题 ${obj ?? 0} 分）`
+  if (obj != null) return `客观题得分：${obj} 分；主观题待教师批阅后出分`
+  return '答卷已提交'
+})
 
 const remaining = ref(0)
 const totalSeconds = ref(0)
@@ -200,13 +207,83 @@ const timePercent = computed(() =>
 
 const cheatCount = ref(0)
 
+// ---- 保存答案（不提交）----
+const saving = ref(false)
+const savedAt = ref(null)
+const dirty = ref(false)
+const savedAtText = computed(() => {
+  if (!savedAt.value) return ''
+  const d = new Date(savedAt.value)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+})
+// 答案有任何改动即标记未保存（保存/提交后清除）
+watch(answers, () => { dirty.value = true }, { deep: true })
+let remindTimer = null
+// 定时提醒保存：每 90 秒检查一次，有未保存答案时提示
+function startSaveReminder() {
+  remindTimer = setInterval(() => {
+    if (dirty.value && phase.value === 'taking') {
+      ElMessage.warning({
+        message: '有未保存的答案，请点击「保存答案」暂存，避免刷新或误关页面丢失',
+        duration: 5000,
+      })
+    }
+  }, 90 * 1000)
+}
+function onPageLeave(e) {
+  // 浏览器原生确认框：刷新/关闭前提醒有未保存答案
+  if (dirty.value && phase.value === 'taking') {
+    e.preventDefault()
+    e.returnValue = ''
+    return ''
+  }
+  return undefined
+}
+
+// 把已保存的作答回填到答题模型（刷新/重进后继续答）
+function restoreAnswers(saved) {
+  if (!saved) return
+  questions.value.forEach((q) => {
+    const a = saved[String(q.question_id)]
+    if (!a) return
+    if (q.qtype === 'multi') answers[q.question_id] = Array.isArray(a.keys) ? [...a.keys] : []
+    else if (q.qtype === 'blank') {
+      const n = Math.max(1, q.blank_count || 1)
+      const blanks = Array.isArray(a.blanks) ? [...a.blanks] : []
+      answers[q.question_id] = Array.from({ length: n }, (_, i) => blanks[i] ?? '')
+    } else if (q.qtype === 'short') answers[q.question_id] = a.text ?? ''
+    else answers[q.question_id] = a.key ?? ''
+  })
+}
+
+async function saveAnswers() {
+  if (saving.value || !subId.value) return
+  saving.value = true
+  try {
+    const data = await saveExamAnswers(subId.value, { answers: buildPayload() })
+    savedAt.value = data.saved_at
+    dirty.value = false
+    ElMessage.success(`已保存（${savedAtText.value || '刚刚'}），刷新页面也不会丢失`)
+  } catch {
+    // 失败原因（如已到交卷时间）由请求拦截器统一提示
+  } finally {
+    saving.value = false
+  }
+}
+
 function optionsOf(q) {
   return q.options || []
 }
 
 function isAnswered(q) {
   const v = answers[q.question_id]
-  if (Array.isArray(v)) return v.length > 0 && !(v.length === 1 && v[0] === '')
+  if (Array.isArray(v)) {
+    // 填空题初始化为 ['',''] 占位数组：有任意一个非空才算已作答
+    if (q.qtype === 'blank') return v.some((s) => String(s ?? '').trim() !== '')
+    return v.length > 0
+  }
   return v !== '' && v != null
 }
 
@@ -218,7 +295,7 @@ function scrollToQuestion(id) {
 function initAnswerModel() {
   questions.value.forEach((q) => {
     if (q.qtype === 'multi') answers[q.question_id] = []
-    else if (q.qtype === 'blank') answers[q.question_id] = ['']
+    else if (q.qtype === 'blank') answers[q.question_id] = new Array(Math.max(1, q.blank_count || 1)).fill('')
     else answers[q.question_id] = ''
   })
 }
@@ -264,9 +341,9 @@ function unbindAntiCheat() {
   document.removeEventListener('contextmenu', onContextMenu)
 }
 
-function startTimer(minutes) {
-  totalSeconds.value = minutes * 60
-  remaining.value = minutes * 60
+function startTimer() {
+  // 倒计时锚定服务端开始时间：init 已把 remaining 初始化为「截止时间 - 现在」，
+  // 刷新/误关/重开页面都从同一截止点续算，不会重置考试时间
   timer = setInterval(() => {
     remaining.value -= 1
     if (remaining.value <= 0) {
@@ -284,12 +361,26 @@ async function init() {
     questions.value = data.questions
     antiCheat.value = data.anti_cheat || {}
     initAnswerModel()
+    // 回填已保存的答案（保存不提交，刷新/重进后继续作答）
+    restoreAnswers(data.submission.answers)
+    savedAt.value = data.submission.saved_at || null
+    dirty.value = false // 回填属于已保存内容，不算未保存更改
     bindAntiCheat()
-    startTimer(data.duration || 60)
+    startSaveReminder()
+    const durationSeconds = (data.duration || 60) * 60
+    totalSeconds.value = durationSeconds
+    // 优先用服务端续算的剩余秒数（关闭页面重开不重置考试时间）
+    remaining.value = Math.max(0, Math.floor(Number(data.remaining_seconds ?? durationSeconds)))
+    if (remaining.value <= 0) {
+      ElMessage.warning('考试时间已到，正在自动交卷')
+      submit(true)
+    } else {
+      startTimer()
+    }
   } catch {
     // 失败原因（未开始/已结束等）由请求拦截器统一弹出，这里直接返回列表页，
     // 避免停留在「试卷暂无题目」的空白答题页
-    router.replace('/student/exams')
+    router.replace(examListPath())
   } finally {
     loading.value = false
   }
@@ -307,37 +398,34 @@ async function submit(isTimeout) {
   try {
     const data = await submitExam(subId.value, { answers: buildPayload(), timeout: isTimeout })
     result.value = data
-    canReview.value = true
     phase.value = 'result'
     clearInterval(timer)
     unbindAntiCheat()
+    dirty.value = false
   } finally {
     submitting.value = false
   }
 }
 
-async function loadReview() {
-  try {
-    const data = await reviewExam(subId.value)
-    reviewList.value = data.questions
-  } catch {
-    ElMessage.info('成绩尚未发布或本次考试未开放解析')
+// 交卷成功页只展示摘要；题目回看跳转独立页面（按需加载，交卷页不直接展开）
+function goReview() {
+  // 课程空间来源：回到课程内嵌回看路由（保留课程导航栏）
+  if (courseId.value) {
+    router.push(`/student/courses/${courseId.value}/exams/${examId}/review`)
+  } else {
+    router.push({ name: 'exam-review', params: { id: examId } })
   }
 }
 
-function fmtAnswer(a) {
-  if (!a) return '（未作答）'
-  if (a.key) return a.key
-  if (a.keys) return a.keys.join(', ')
-  if (a.blanks) return a.blanks.join(' / ')
-  if (a.text) return a.text
-  return '（未作答）'
-}
-
-onMounted(init)
+onMounted(() => {
+  init()
+  window.addEventListener('beforeunload', onPageLeave)
+})
 onBeforeUnmount(() => {
   clearInterval(timer)
+  clearInterval(remindTimer)
   unbindAntiCheat()
+  window.removeEventListener('beforeunload', onPageLeave)
 })
 </script>
 
@@ -477,11 +565,39 @@ onBeforeUnmount(() => {
 
 .blank-input {
   max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pending {
+  color: #d97706;
+  font-weight: 600;
 }
 
 .submit-bar {
   text-align: center;
-  margin: 32px 0;
+  margin: 32px 0 8px;
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+
+.save-hint {
+  text-align: center;
+  margin-bottom: 24px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #64748b;
+}
+
+.save-hint-dirty {
+  color: #d97706;
+  font-weight: 600;
+}
+
+.save-hint-ok {
+  color: #16a34a;
 }
 
 .nav-col {
@@ -558,30 +674,6 @@ onBeforeUnmount(() => {
 .dot.answered {
   background: #2563eb;
   border-color: #2563eb;
-}
-
-.review-line {
-  margin-top: 8px;
-  font-size: 14px;
-  color: #475569;
-}
-
-.review-line .answer {
-  font-weight: 600;
-  color: #1e293b;
-}
-
-.review-line.correct {
-  color: #10b981;
-  font-weight: 500;
-}
-
-.review-line.analysis {
-  color: #64748b;
-  background: #f8fafc;
-  padding: 10px 12px;
-  border-radius: 8px;
-  margin-top: 10px;
 }
 
 .empty-text {

@@ -4,7 +4,8 @@ from rest_framework import serializers
 
 from apps.classroom.models import ClassRoom
 from apps.courses.models import Course
-from apps.ai.models import AIConfiguration
+from apps.ai.models import AICapabilityConfig
+from apps.ai.providers.factory import get_env_config
 from apps.users.serializers import PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, normalize_phone
 
 User = get_user_model()
@@ -145,52 +146,102 @@ class AdminClassSerializer(serializers.ModelSerializer):
         ]
 
 
-class AdminAIConfigurationSerializer(serializers.ModelSerializer):
+class AICapabilityConfigSerializer(serializers.ModelSerializer):
+    capability_display = serializers.CharField(source="get_capability_display", read_only=True)
     provider_display = serializers.CharField(source="get_provider_display", read_only=True)
     api_key = serializers.CharField(write_only=True, required=False, allow_blank=True, trim_whitespace=False)
     api_key_configured = serializers.BooleanField(read_only=True)
     updated_by_name = serializers.CharField(source="updated_by.username", read_only=True, allow_null=True)
+    # 管理端可配的超时/发音人：留空(null/"")表示按环境变量/默认值
+    timeout = serializers.IntegerField(
+        required=False, allow_null=True, min_value=1, max_value=3600, label="超时(秒)"
+    )
+    voice = serializers.CharField(
+        required=False, allow_blank=True, max_length=64, label="发音人"
+    )
 
     class Meta:
-        model = AIConfiguration
+        model = AICapabilityConfig
         fields = [
-            "provider", "provider_display", "enabled", "base_url", "chat_model",
-            "embed_model", "tts_model", "api_key", "api_key_configured",
-            "last_test_status", "last_test_message", "last_tested_at",
+            "capability", "capability_display", "provider", "provider_display", "enabled",
+            "base_url", "model_name", "timeout", "voice", "api_key", "api_key_configured",
             "updated_at", "updated_by_name",
         ]
-        read_only_fields = [
-            "last_test_status", "last_test_message", "last_tested_at", "updated_at",
-        ]
+        read_only_fields = ["updated_at"]
 
     def validate(self, attrs):
-        provider = attrs.get("provider", getattr(self.instance, "provider", AIConfiguration.Provider.MOCK))
+        provider = attrs.get("provider", getattr(self.instance, "provider", AICapabilityConfig.Provider.MOCK))
         enabled = attrs.get("enabled", getattr(self.instance, "enabled", False))
         api_key = attrs.get("api_key", None)
         previous_provider = getattr(self.instance, "provider", None)
         has_saved_key = bool(getattr(self.instance, "api_key_ciphertext", "")) and provider == previous_provider
+        # 发音人仅对语音合成有意义：其他能力传了也清掉，避免保存无意义值
+        capability = attrs.get("capability", getattr(self.instance, "capability", None))
+        if "voice" in attrs and capability != AICapabilityConfig.Capability.TTS:
+            attrs["voice"] = ""
+        # 能力-服务商白名单：DeepSeek 无 embedding/TTS 接口、重排序仅通义千问，拒收越界保存
+        allowed = AICapabilityConfig.CAPABILITY_PROVIDERS.get(capability)
+        if allowed and provider not in allowed:
+            capability_label = dict(AICapabilityConfig.Capability.choices).get(capability, capability)
+            allowed_labels = "、".join(
+                dict(AICapabilityConfig.Provider.choices).get(p, p) for p in allowed
+            )
+            raise serializers.ValidationError(
+                {"provider": f"该服务商暂不支持{capability_label}，请选择：{allowed_labels}"}
+            )
 
-        if enabled and provider != AIConfiguration.Provider.MOCK:
+        if enabled and provider != AICapabilityConfig.Provider.MOCK:
+            if provider == AICapabilityConfig.Provider.LOCAL:
+                # 系统内置模型：无需 Key/接口地址；模型名留空补默认（BGE-M3 / Qwen3-Reranker）
+                if not attrs.get("model_name", getattr(self.instance, "model_name", "")):
+                    from apps.ai.local_models import default_model
+
+                    attrs["model_name"] = default_model(capability) if capability in ("embed", "rerank") else ""
+                attrs["base_url"] = ""
+                return attrs
             if not (api_key or has_saved_key):
-                raise serializers.ValidationError({"api_key": "启用真实模型时必须填写 API Key"})
+                # 表单 Key 留空即"不修改"（密码框不留值）：回退到环境变量里同服务商已生效的
+                # Key，与「测试连接」同源；取到后物化进本记录——否则空 Key 的 DB 行会影子
+                # 覆盖环境变量，保存后 build_provider 拿不到 Key 将静默回落 mock。
+                fallback = self._env_api_key(provider, attrs.get("capability"))
+                if not fallback:
+                    raise serializers.ValidationError({"api_key": "启用真实模型时必须填写 API Key"})
+                attrs["api_key"] = fallback
             if not attrs.get("base_url", getattr(self.instance, "base_url", "")):
                 raise serializers.ValidationError({"base_url": "请填写接口地址"})
-            if not attrs.get("chat_model", getattr(self.instance, "chat_model", "")):
-                raise serializers.ValidationError({"chat_model": "请填写对话模型名称"})
+            if not attrs.get("model_name", getattr(self.instance, "model_name", "")):
+                raise serializers.ValidationError({"model_name": "请填写模型名称"})
         return attrs
+
+    def _env_api_key(self, provider: str, capability=None) -> str:
+        """环境变量派生配置中同服务商的 API Key（服务商不匹配或未配置时返回空串）。"""
+        capability = capability or getattr(self.instance, "capability", None)
+        if capability not in dict(AICapabilityConfig.Capability.choices):
+            return ""
+        try:
+            env_provider, env_config = get_env_config(capability)
+        except Exception:
+            return ""
+        return env_config.get("api_key", "") if env_provider == provider else ""
+
+    def create(self, validated_data):
+        # api_key 是 write_only 序列化字段而非模型字段，需弹出后单独加密落库
+        api_key = validated_data.pop("api_key", None)
+        instance = AICapabilityConfig(**validated_data)
+        if api_key:
+            instance.set_api_key(api_key)
+        request = self.context.get("request")
+        if request is not None:
+            instance.updated_by = request.user
+        instance.save()
+        return instance
 
     def update(self, instance, validated_data):
         api_key = validated_data.pop("api_key", None)
-        provider_changed = "provider" in validated_data and validated_data["provider"] != instance.provider
         for field, value in validated_data.items():
             setattr(instance, field, value)
         if api_key:
             instance.set_api_key(api_key)
-        elif provider_changed:
-            instance.api_key_ciphertext = ""
-        instance.last_test_status = AIConfiguration.TestStatus.UNTESTED
-        instance.last_test_message = ""
-        instance.last_tested_at = None
         instance.updated_by = self.context["request"].user
         instance.save()
         return instance

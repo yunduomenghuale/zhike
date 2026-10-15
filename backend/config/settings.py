@@ -233,6 +233,8 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # ---------------------------------------------------------------------------
 # 大模型配置（供 apps.ai 读取）
 # ---------------------------------------------------------------------------
+# 旧版全局配置：AI_PROVIDER + AI_SETTINGS 按服务商提供一套凭证，
+# 由工厂按能力（chat/embed/tts）派生（chat→chat_model，embed→embed_model，tts→tts_model）。
 AI_PROVIDER = os.getenv("AI_PROVIDER", "mock")
 AI_SETTINGS = {
     "deepseek": {
@@ -248,20 +250,87 @@ AI_SETTINGS = {
         "chat_model": os.getenv("OPENAI_CHAT_MODEL", ""),
         "embed_model": os.getenv("OPENAI_EMBED_MODEL", ""),
     },
-    "zhipu": {
-        "api_key": os.getenv("ZHIPU_API_KEY", ""),
-        "chat_model": os.getenv("ZHIPU_CHAT_MODEL", "glm-4-flash"),
-        "embed_model": os.getenv("ZHIPU_EMBED_MODEL", "embedding-3"),
-    },
     "tongyi": {
         "api_key": os.getenv("TONGYI_API_KEY", ""),
         "base_url": os.getenv("TONGYI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
         "chat_model": os.getenv("TONGYI_CHAT_MODEL", "qwen-plus"),
         "embed_model": os.getenv("TONGYI_EMBED_MODEL", ""),
+        "rerank_model": os.getenv("TONGYI_RERANK_MODEL", "gte-rerank-v2"),
         "tts_model": os.getenv("TONGYI_TTS_MODEL", ""),
     },
-    "baidu": {
-        "api_key": os.getenv("BAIDU_API_KEY", ""),
-        "secret_key": os.getenv("BAIDU_SECRET_KEY", ""),
+    # 系统内置本地模型：无需 API Key/接口地址，权重在系统内推理（见 apps/ai/local_models.py）
+    "local": {
+        "embed_model": os.getenv("LOCAL_EMBED_MODEL", "BAAI/bge-m3"),
+        "rerank_model": os.getenv("LOCAL_RERANK_MODEL", "Qwen/Qwen3-Reranker-0.6B"),
     },
 }
+# 按能力的环境变量覆盖（可选）：AI_CHAT_PROVIDER / AI_CHAT_API_KEY / AI_CHAT_BASE_URL / AI_CHAT_MODEL
+# 等，未设置的字段回退到 AI_PROVIDER + AI_SETTINGS 的对应项。
+AI_CAPABILITY_ENV = {
+    "chat": {
+        "provider": os.getenv("AI_CHAT_PROVIDER", ""),
+        "api_key": os.getenv("AI_CHAT_API_KEY", ""),
+        "base_url": os.getenv("AI_CHAT_BASE_URL", ""),
+        "model": os.getenv("AI_CHAT_MODEL", ""),
+    },
+    "embed": {
+        "provider": os.getenv("AI_EMBED_PROVIDER", ""),
+        "api_key": os.getenv("AI_EMBED_API_KEY", ""),
+        "base_url": os.getenv("AI_EMBED_BASE_URL", ""),
+        "model": os.getenv("AI_EMBED_MODEL", ""),
+    },
+    "rerank": {
+        "provider": os.getenv("AI_RERANK_PROVIDER", ""),
+        "api_key": os.getenv("AI_RERANK_API_KEY", ""),
+        "base_url": os.getenv("AI_RERANK_BASE_URL", ""),
+        "model": os.getenv("AI_RERANK_MODEL", ""),
+    },
+    "tts": {
+        "provider": os.getenv("AI_TTS_PROVIDER", ""),
+        "api_key": os.getenv("AI_TTS_API_KEY", ""),
+        "base_url": os.getenv("AI_TTS_BASE_URL", ""),
+        "model": os.getenv("AI_TTS_MODEL", ""),
+    },
+}
+
+
+def _ai_env_int(name: str, default: int) -> int:
+    """读取 AI 超时类环境变量：空值/非法值回退默认，避免启动崩溃。"""
+    try:
+        return int(os.getenv(name) or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def _ai_env_float(name: str, default: float) -> float:
+    """读取 AI 浮点类环境变量（阈值）：空值/非法值回退默认。"""
+    try:
+        return float(os.getenv(name) or default)
+    except (TypeError, ValueError):
+        return default
+
+
+# AI 调用超时（秒）与默认发音人：
+# - 本地模型（vLLM / Ollama / localai 等）推理慢，讲稿分批与 TTS 合成超时必须
+#   可调大，否则请求超时后讲稿整批落本地兜底文案、配音页记 audio_error；
+# - AI_TTS_VOICE 是 DashScope 音色名（如 Cherry）；接本地 TTS 时改为服务端的
+#   发音人/说话人 ID（本地服务自行解释该值）。
+AI_SCRIPT_TIMEOUT = _ai_env_int("AI_SCRIPT_TIMEOUT", 45)
+AI_TTS_TIMEOUT = _ai_env_int("AI_TTS_TIMEOUT", 120)
+AI_TTS_VOICE = os.getenv("AI_TTS_VOICE") or "Cherry"
+
+# RAG 检索编排参数（向量召回 -> 重排序 -> 阈值过滤，见 apps/ai/services.py）：
+# - AI_RERANK_RECALL：重排前的向量召回候选数。向量检索是纯余弦相似度，关键词面
+#   重合但语义不相关的片段也会拿高分（实测「Java 程序设计考核方式」一问，噪声页
+#   与目标页分数带重叠 0.54~0.76，top_k=5 硬取必混入噪声），故多召回再精排；
+# - AI_RERANK_THRESHOLD：重排相关性分低于该值的片段判定「实际未参考」，不进上下文
+#   与引用来源（gte-rerank-v2 实测目标页 0.63、噪声页 ≤0.15，0.3 可干净分离）。
+#   未配置重排能力或调用失败时，检索编排自动回退纯向量 top_k（原有行为）。
+AI_RERANK_RECALL = _ai_env_int("AI_RERANK_RECALL", 15)
+AI_RERANK_THRESHOLD = _ai_env_float("AI_RERANK_THRESHOLD", 0.3)
+
+# 系统内置本地模型的权重目录：生产容器内 /app/data 是 bind mount（见 docker-compose），
+# 故默认落点随之持久化、重建容器不丢；本地开发即 backend/data/models。
+# 下载源为 ModelScope（国内可达）；首次使用惰性下载，也可 manage.py download_models
+# 预热，或镜像构建时 PRELOAD_MODELS=true 预置（见 deploy/Dockerfile.backend）。
+AI_MODELS_DIR = os.getenv("AI_MODELS_DIR", str(BASE_DIR / "data" / "models"))

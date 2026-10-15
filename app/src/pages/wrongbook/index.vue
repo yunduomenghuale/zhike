@@ -76,6 +76,7 @@ import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { listClasses } from '@/api/classroom.js'
 import { getMyWrongQuestions } from '@/api/analytics.js'
+import { blankAnswerText } from '@/utils/blank-answer.js'
 import {
   createWrongNote,
   deleteWrongNote,
@@ -197,7 +198,7 @@ function fmt(a) {
   if (typeof a === 'string') return a || '（未作答）'
   if (a.key) return a.key
   if (a.keys) return a.keys.join(', ')
-  if (a.blanks) return a.blanks.join(' / ')
+  if (a.blanks) return blankAnswerText(a)
   if (a.text) return a.text
   return '—'
 }

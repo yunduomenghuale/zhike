@@ -7,7 +7,9 @@ from django.test import override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
+from apps.ai.providers.mock import MockProvider
 from apps.courses.models import Catalog, Course, PPTResource, TeachingVideo, VideoWatchProgress
+from apps.knowledge.models import KnowledgeChunk
 
 
 User = get_user_model()
@@ -87,6 +89,8 @@ class PptReplacementTests(APITestCase):
                 "apps.courses.ppt_parser.attach_slide_images",
                 side_effect=lambda pages, images: pages,
             ),
+            # 向量入库走模拟替身：上传测试不依赖真实 embedding 服务
+            patch("apps.ai.services.get_provider", return_value=MockProvider()),
         ):
             return self.client.post(
                 "/api/ppts/",
@@ -338,3 +342,240 @@ class CourseVideoTests(APITestCase):
             "file": self._tiny_mp4(),
         }, format="multipart")
         self.assertEqual(res.status_code, 400)
+
+
+class RegenerateAudioPageTests(APITestCase):
+    """单页配音重生成（讲解稿与配音页「重新配音」按钮，POST /videos/{id}/regenerate-audio-page/）。"""
+
+    class _FakeTTS:
+        name = "fake-tts"
+
+        def __init__(self):
+            self.calls = []
+
+        def tts(self, text, voice="Cherry"):
+            self.calls.append(text)
+            return f"/media/tts/new-{len(self.calls)}.wav"
+
+    def setUp(self):
+        self.teacher = User.objects.create_user(
+            username="ra-teacher", password="StrongPass!123", role=User.Role.TEACHER
+        )
+        self.other = User.objects.create_user(
+            username="ra-other", password="StrongPass!123", role=User.Role.TEACHER
+        )
+        self.course = Course.objects.create(name="计网", teacher=self.teacher)
+        self.catalog = Catalog.objects.create(course=self.course, title="第1章 概述")
+        self.video = TeachingVideo.objects.create(
+            course=self.course,
+            catalog=self.catalog,
+            scripts=[
+                {"page": 1, "script": "第一页讲稿", "audio_url": "/media/tts/old1.wav"},
+                {"page": 2, "script": "第二页讲稿"},
+                {"page": 3, "script": ""},
+            ],
+        )
+        self.url = f"/api/videos/{self.video.id}/regenerate-audio-page/"
+
+    def test_success_only_target_page_and_status(self):
+        fake = self._FakeTTS()
+        self.client.force_authenticate(self.teacher)
+        with patch("apps.ai.providers.factory.get_provider", return_value=fake):
+            res = self.client.post(self.url, {"page": 2}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(fake.calls, ["第二页讲稿"])
+        self.video.refresh_from_db()
+        scripts = self.video.scripts
+        self.assertEqual(scripts[0]["audio_url"], "/media/tts/old1.wav")  # 其他页不受影响
+        self.assertEqual(scripts[1]["audio_url"], "/media/tts/new-1.wav")
+        # 第 3 页无讲稿不计入分母，1/2 页均有配音 → 与批量配音口径一致，升为 audio_ready
+        self.assertEqual(self.video.gen_status, TeachingVideo.GenStatus.AUDIO_READY)
+
+    def test_all_done_upgrades_to_audio_ready(self):
+        self.video.scripts = [
+            {"page": 1, "script": "第一页讲稿", "audio_url": "/media/tts/old1.wav"},
+            {"page": 2, "script": "第二页讲稿"},
+        ]
+        self.video.gen_status = TeachingVideo.GenStatus.SCRIPT_READY
+        self.video.save(update_fields=["scripts", "gen_status"])
+        self.client.force_authenticate(self.teacher)
+        with patch("apps.ai.providers.factory.get_provider", return_value=self._FakeTTS()):
+            res = self.client.post(self.url, {"page": 2}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.video.refresh_from_db()
+        self.assertEqual(self.video.gen_status, TeachingVideo.GenStatus.AUDIO_READY)
+
+    def test_page_without_script_rejected(self):
+        fake = self._FakeTTS()
+        self.client.force_authenticate(self.teacher)
+        with patch("apps.ai.providers.factory.get_provider", return_value=fake):
+            res = self.client.post(self.url, {"page": 3}, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(fake.calls, [])
+
+    def test_mock_provider_rejected(self):
+        from apps.ai.providers.mock import MockProvider
+
+        self.client.force_authenticate(self.teacher)
+        with patch("apps.ai.providers.factory.get_provider", return_value=MockProvider()):
+            res = self.client.post(self.url, {"page": 1}, format="json")
+        self.assertEqual(res.status_code, 400)
+
+    def test_row_level_permission(self):
+        fake = self._FakeTTS()
+        self.client.force_authenticate(self.other)  # 非课程 owner
+        with patch("apps.ai.providers.factory.get_provider", return_value=fake):
+            res = self.client.post(self.url, {"page": 1}, format="json")
+        self.assertIn(res.status_code, (403, 404))
+        self.assertEqual(fake.calls, [])
+
+
+class _FakePptEmbedProvider:
+    """课件入库测试用的真实向量服务替身（断言禁用 mock 兜底）。"""
+
+    name = "tongyi"
+    embed_model = "text-embedding-v3"
+
+    def __init__(self, dimension=4):
+        self.dimension = dimension
+        self.calls = []
+
+    def embed(self, texts, *, allow_fallback=True):
+        assert allow_fallback is False, "课件入库必须传 allow_fallback=False"
+        self.calls.append(list(texts))
+        return [[0.5] * self.dimension for _ in texts]
+
+
+class PptVectorIngestTests(APITestCase):
+    """课件上传/重新解析后自动入向量库（每页一个片段）；旧版本片段随之清理。"""
+
+    def setUp(self):
+        self.media_directory = TemporaryDirectory()
+        self.media_override = override_settings(MEDIA_ROOT=self.media_directory.name)
+        self.media_override.enable()
+
+        self.teacher = User.objects.create_user(
+            username="ppt-vec-teacher", password="StrongPass!123", role=User.Role.TEACHER
+        )
+        self.course = Course.objects.create(name="Java", teacher=self.teacher)
+        self.catalog = Catalog.objects.create(
+            course=self.course, title="第一章", is_published=True
+        )
+        self.old_ppt = PPTResource.objects.create(
+            course=self.course,
+            catalog=self.catalog,
+            file_name="old.pptx",
+            file="ppts/old.pptx",
+            version=1,
+            is_active=True,
+            parse_status=PPTResource.ParseStatus.DONE,
+            parsed_pages=[{"page": 1, "title": "旧课件", "body": "旧内容"}],
+        )
+        KnowledgeChunk.objects.create(
+            ppt=self.old_ppt,
+            course_id=self.course.id,
+            content="旧课件\n旧内容",
+            page=1,
+            embedding=[0.1] * 3,
+        )
+        self.client.force_authenticate(user=self.teacher)
+
+    def tearDown(self):
+        self.media_override.disable()
+        self.media_directory.cleanup()
+
+    def _upload(self, parsed_pages):
+        upload = SimpleUploadedFile(
+            "new.pptx",
+            b"test presentation",
+            content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        )
+        with (
+            patch("apps.courses.ppt_parser.parse_teaching_file_pages", return_value=parsed_pages),
+            patch("apps.courses.ppt_parser.render_presentation_slide_images", return_value=[]),
+            patch("apps.courses.ppt_parser.attach_slide_images", side_effect=lambda pages, images: pages),
+            patch("apps.ai.services.get_provider", return_value=_FakePptEmbedProvider()),
+        ):
+            return self.client.post(
+                "/api/ppts/",
+                {
+                    "course": self.course.id,
+                    "catalog": self.catalog.id,
+                    "file_name": upload.name,
+                    "file": upload,
+                },
+                format="multipart",
+            )
+
+    def test_upload_ingests_new_ppt_and_clears_old_version_chunks(self):
+        response = self._upload(
+            [
+                {"page": 1, "title": "新课件", "body": "新内容"},
+                {"page": 2, "title": "第二章", "body": "更多内容"},
+            ]
+        )
+        self.assertEqual(response.status_code, 201)
+        new_ppt = PPTResource.objects.get(pk=response.data["data"]["id"])
+
+        chunks = list(new_ppt.chunks.order_by("page"))
+        self.assertEqual([c.page for c in chunks], [1, 2])
+        self.assertEqual(chunks[0].content, "新课件\n新内容")
+        self.assertEqual(chunks[0].course_id, self.course.id)
+        self.assertEqual(len(chunks[0].embedding), 4)
+        # 旧版本课件的片段被清理（避免旧内容参与检索）
+        self.assertEqual(self.old_ppt.chunks.count(), 0)
+
+    def test_failed_upload_keeps_old_chunks_and_ingests_nothing(self):
+        response = self._upload([])
+        self.assertEqual(response.status_code, 201)
+        failed_ppt = PPTResource.objects.get(pk=response.data["data"]["id"])
+        self.assertEqual(failed_ppt.chunks.count(), 0)
+        self.assertEqual(self.old_ppt.chunks.count(), 1)
+
+    def test_upload_without_embed_provider_ingests_nothing(self):
+        """未配置向量模型（回退模拟模式）：上传照常成功，只是暂不入库。"""
+        upload = SimpleUploadedFile(
+            "new.pptx",
+            b"test presentation",
+            content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        )
+        with (
+            patch("apps.courses.ppt_parser.parse_teaching_file_pages",
+                  return_value=[{"page": 1, "title": "新课件", "body": "新内容"}]),
+            patch("apps.courses.ppt_parser.render_presentation_slide_images", return_value=[]),
+            patch("apps.courses.ppt_parser.attach_slide_images", side_effect=lambda pages, images: pages),
+            patch("apps.ai.services.get_provider", return_value=MockProvider()),
+        ):
+            response = self.client.post(
+                "/api/ppts/",
+                {
+                    "course": self.course.id,
+                    "catalog": self.catalog.id,
+                    "file_name": upload.name,
+                    "file": upload,
+                },
+                format="multipart",
+            )
+        self.assertEqual(response.status_code, 201)
+        new_ppt = PPTResource.objects.get(pk=response.data["data"]["id"])
+        # 新课件暂不入库（等配置好向量模型后重建）；旧版本被替换、其片段按设计清理
+        self.assertEqual(new_ppt.chunks.count(), 0)
+        self.assertEqual(self.old_ppt.chunks.count(), 0)
+
+    def test_reparse_reingests_chunks(self):
+        with (
+            patch("apps.courses.ppt_parser.parse_teaching_file_pages",
+                  return_value=[
+                      {"page": 1, "title": "重解析一", "body": "内容一"},
+                      {"page": 2, "title": "重解析二", "body": "内容二"},
+                  ]),
+            patch("apps.courses.ppt_parser.render_presentation_slide_images", return_value=[]),
+            patch("apps.courses.ppt_parser.attach_slide_images", side_effect=lambda pages, images: pages),
+            patch("apps.ai.services.get_provider", return_value=_FakePptEmbedProvider()),
+        ):
+            response = self.client.post(f"/api/ppts/{self.old_ppt.id}/reparse/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["data"]["chunk_count"], 2)
+        chunks = list(self.old_ppt.chunks.order_by("page"))
+        self.assertEqual([c.page for c in chunks], [1, 2])
+        self.assertEqual(chunks[1].content, "重解析二\n内容二")

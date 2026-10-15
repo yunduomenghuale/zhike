@@ -22,3 +22,9 @@ pywin32==312; platform_system == "Windows"
 ragas==0.4.3
 langchain-openai==1.4.1
 langchain-community==0.3.31  # 与 langchain-core 1.x 兼容，并保留 ragas 需要的旧版集成路径
+# 系统内置本地模型（BGE-M3 向量化 / Qwen3-Reranker-0.6B 重排序，见 apps/ai/local_models.py）
+# 注意：torch 不在此钉——Windows 开发装 PyPI 版（自带 CPU wheel）即可；
+# Linux 生产由 Dockerfile 先装 CPU 版 torch（download.pytorch.org/whl/cpu），避免拉到数 GB 的 CUDA 版
+modelscope==1.30.0          # 模型权重下载源（国内可达）
+transformers==4.51.3        # Qwen3 系列原生支持起点
+sentence-transformers==3.4.1  # BGE-M3 dense 向量（依赖 torch，会被上面已装的 CPU 版满足）

@@ -8,7 +8,7 @@
 ## 技术栈
 - 后端：Python + Django 5 + DRF（`backend/`），JWT 认证，默认 SQLite（`DATABASE_URL` 可切 Postgres）
 - 前端：Vue 3 + Vite + Element Plus + Pinia（`frontend/`）
-- AI：mock / openai 兼容 / 智谱等 Provider，TTS 配音（DashScope）
+- AI：mock / DeepSeek / 通义千问 / 本地模型服务（OpenAI 兼容）/ 系统内置模型（local）等 Provider，**按能力（chat/embed/rerank/tts）分别配置**（管理端 AICapabilityConfig 或 env 派生），TTS 配音（DashScope qwen3-tts-flash）。系统内置模型：向量化内置 BGE-M3、重排序内置 Qwen3-Reranker-0.6B（`apps/ai/local_models.py`，权重在 `backend/data/models/`，ModelScope 惰性下载/`manage.py download_models` 预热/镜像 PRELOAD_MODELS 预置）
 
 ## 目录结构
 - `backend/apps/`：users / courses / classroom / knowledge / questions / homework / exams / ai / analytics / platform_admin
@@ -32,7 +32,7 @@
 ## 当前状态（2026-08-21）
 - 已完成：学习进度记录/断点续播、章节练习 UI、考试主观题批改、统一出分、作业成绩发布、学生 Excel 批量导入（模板下载/解析预览/确认三段式）、注册收口与首登改密提示
 - 待办见 `docs/需求对照排查.md` 第六节（P2/P3）
-- 无自动化测试；AI 生成、PPT 解析为同步执行（待异步化）
+- 测试：Django 单测 186 例全绿（`cd backend && venv\Scripts\python.exe manage.py test`）；AI 生成、PPT 解析为同步执行（待异步化）
 
 ## 生产部署（2026-08-24 更新）
 - SSH 密钥：本机 `~/.ssh/id_claude_server`（`ssh -i ~/.ssh/id_claude_server -o IdentitiesOnly=yes root@124.70.107.64`）；`~/.ssh/config` 若首行带 BOM 会导致所有 ssh 命令报配置错误（2026-08-24 已修复）
@@ -48,8 +48,8 @@
 - 前端 dist 更新注意：bind 挂载的是 `frontend/dist` 目录本身，**不能 `rm -rf dist` 再解压**（目录 inode 变化会导致容器内挂载失效、全站 403）；应 `rm -rf dist/*` 只清内容，或替换后 `docker compose restart frontend`
 - `.env.production` 改动注意：`env_file` 在容器创建时注入，`docker compose restart` **不会**重读，需 `docker compose up -d --force-recreate backend`
 - 生产无 TLS：`deploy/.env.production` 必须含 `DJANGO_SECURE_SSL_REDIRECT=False`（主线 settings 在非 DEBUG 下默认 301 跳转 https，前端 nginx 仅 80 端口，不开会导致 API 全部 301 不可用）
-- **打包部署会携带本地 `deploy/.env.production`**（gitignore 但本地磁盘存在，tar 不忽略）：2026-08-17 曾因本地旧版（cosyvoice-v1、无 SSL 行）上传覆盖服务器修正版，导致 TTS 与 SSL 修复被还原。服务器改过的配置必须同步回本地，当前本地已是正确版本（qwen-tts + SSL=False）
-- TTS 模型：必须用 `qwen-tts`（DashScope 原生 multimodal-generation 端点 + Cherry 发音人）；`cosyvoice-v1` 不被该端点接受（400 InvalidParameter），如需 cosyvoice 要走 WebSocket（未实现）
+- **打包部署会携带本地 `deploy/.env.production`**（gitignore 但本地磁盘存在，tar 不忽略）：2026-08-17 曾因本地旧版（cosyvoice-v1、无 SSL 行）上传覆盖服务器修正版，导致 TTS 与 SSL 修复被还原。服务器改过的配置必须同步回本地，当前本地已是正确版本（qwen3-tts-flash + SSL=False）
+- TTS 模型：**必须用 `qwen3-tts-flash`**（DashScope 原生 multimodal-generation 端点 + Cherry 发音人）。旧模型 `qwen-tts` 已于 2026-10-13 实测下线（404 `InvalidParameter: Model not exist`，同 Key 下 qwen3-tts-flash 正常）；更早的 `cosyvoice-v1` 不被该端点接受（400 InvalidParameter），如需 cosyvoice 要走 WebSocket（未实现）
 - AI 配音为**分段生成**（2026-08-17）：`POST /catalogs/{id}/generate-audio/` 带 `limit`（默认 3），每页合成后即时落库，前端循环调用直至 `done=true`，按钮实时显示 `配音 x/y`；此前 18 页同步合成超 nginx 180s 导致 504 无反馈
 - 讲解稿同为**分批生成**（2026-08-18）：`POST /catalogs/{id}/generate-script/` 带 `limit`（默认 6），每批一次 AI 调用、批后落库，前端循环调用显示 `讲稿 x/y`；此前 44 页一次性生成（含 retries=3 重试）超 180s 被 499。换新版本 PPT 或 `force=true` 自动重置讲稿重新生成
 - 移动端（uni-app，主线 2026-08-18 合入）：**H5 形态部署在 `http://124.70.107.64:8088/m/`**（与 Web 同域，API/media 同源零 CORS）；`app/` 构建 `npm run build:h5` → `dist/build/h5`；`manifest.json h5.router.base` 与 `vite.config.js base` 均为 `/m/`；compose 挂载到容器 `/usr/share/nginx/m`（**不可挂 html/m**——html 是 ro 的 dist 挂载，嵌套建目录会启动失败，2026-08-18 曾致 Web 中断约 2 分钟）；小程序/App 打包另行操作（`app/src/config.js` 的 `USE_PROD=true` 切生产后端地址）
@@ -60,7 +60,8 @@
 ## 注意事项
 - **DRF FileField 绝对 URL 依赖 Host 端口**（2026-09-17 修复）：DRF 序列化 FileField（知识库资料 file、作业/提交附件 attachment、课件 file）时会 `request.build_absolute_uri()` 生成绝对 URL，容器 nginx 必须用 `proxy_set_header Host $http_host`（保留端口）；此前用 `$host`（丢端口）导致所有文件链接变成 `http://ip/media/...`（80 端口），而 80 端口是宿主机 nginx/默认站（/media 不存在）→ 404 页来自同机 cv_nginx（1.31.2），极易误判为本系统问题。改配置只需 scp deploy/nginx.conf + `docker compose restart frontend`（scp 覆盖不换 inode，单文件 bind mount 安全）
 - PPT 页面渲染管线：Windows 开发机走 PowerPoint COM；Linux 生产走 LibreOffice（trixie 镜像自带 25.x）转 PDF → pypdfium2 出图（150 DPI，纯 pip 依赖，已弃用 pdftoppm/poppler）；老格式 .ppt 先预转 .pptx 再渲染；Windows 中文字体 → 开源字体替换映射见 `deploy/fonts.conf`（挂载为容器 `/etc/fonts/local.conf`）
-- 向量检索为全表暴力余弦，embed 失败会静默回退 Mock 向量
+- 向量检索为全表暴力余弦；**课件 PPT 与教辅资料均已入向量库**（2026-10-14）：`KnowledgeChunk` 片段来源二选一（`material` 或 `ppt`，每页一片段、页码保留），PPT 上传解析成功即入库（`apps/ai/services.py ingest_ppt_pages`，失败静默、QA 有原文拼接兜底）；换向量模型/修复 mock 向量后用「重建向量」刷新（教师端课程级/管理端/`manage.py rebuild_vectors --course|--material|--ppt|--all`，四条出错防线：事前校验失败即止、先算后删事务替换、单项失败可续跑、全链路 `allow_fallback=False`）；DashScope text-embedding-v3 批量上限 10 条/批，provider 层已自动分批
+- 能力-服务商白名单（`AICapabilityConfig.CAPABILITY_PROVIDERS`）：对话（chat）= DeepSeek/通义千问/本地模型服务/模拟模式；**向量化与语音合成仅通义千问/本地模型服务**（DeepSeek 无 embed/TTS 接口；模拟模式 64 维假向量会污染真实向量空间）；**向量化/重排序另开放系统内置模型 local**（BGE-M3 / Qwen3-Reranker-0.6B，本机 CPU 推理，无需 Key/接口地址），保存与连接测试接口双重校验
 
 ## 安全基线（2026-09-02）
 - 登录防爆破：同 用户名+IP 连续失败 5 次锁 15 分钟（`users/views.py` LoginView；计数用 `login_fail` 文件缓存 **跨 worker 共享**，勿改回 locmem——2 worker 下 locmem 会把阈值稀释成约 10 次且不稳定，已实测）；初始密码规则（Lylg+学号后6位）为需求约定保留，首登改密维持前端提示可跳过

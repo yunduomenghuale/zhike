@@ -319,7 +319,9 @@
                 <el-button class="node-action-btn" :icon="Upload" @click.stop="openPpt(data)">课件</el-button>
                 <el-button class="node-action-btn" :icon="Microphone" :loading="!!genStore.scriptTasks[data.id]" @click.stop="openScript(data)">
                   {{ genStore.scriptTasks[data.id]
-                    ? `讲稿 ${genStore.scriptTasks[data.id].done}/${genStore.scriptTasks[data.id].total}`
+                    ? (genStore.scriptTasks[data.id].total
+                        ? `讲稿 ${genStore.scriptTasks[data.id].done}/${genStore.scriptTasks[data.id].total}`
+                        : '讲稿生成中…')
                     : scriptState(data).complete
                       ? '讲稿'
                       : scriptState(data).done
@@ -328,8 +330,12 @@
                 </el-button>
                 <el-button class="node-action-btn" :icon="Headset" :loading="!!genStore.audioTasks[data.id]" @click.stop="genAudio(data)">
                   {{ genStore.audioTasks[data.id]
-                    ? `配音 ${genStore.audioTasks[data.id].done}/${genStore.audioTasks[data.id].total}`
-                    : '配音' }}
+                    ? (genStore.audioTasks[data.id].total
+                        ? `配音 ${genStore.audioTasks[data.id].done}/${genStore.audioTasks[data.id].total}`
+                        : '配音生成中…')
+                    : audioState(data).done && !audioState(data).complete
+                      ? `续配音 ${audioState(data).done}/${audioState(data).total}`
+                      : '配音' }}
                 </el-button>
                 <el-button class="node-action-btn" :icon="VideoPlay" @click.stop="openVideo(data, 'player')">完整讲解</el-button>
               </div>
@@ -781,6 +787,20 @@
           title="这里用于查看和校对逐页讲解稿；完整连续播放请切到「完整讲解」。"
         />
 
+        <div
+          v-if="videoMode === 'script' && videoNode && (genStore.scriptTasks[videoNode.id] || genStore.audioTasks[videoNode.id])"
+          class="script-gen-banner"
+        >
+          <el-icon class="is-loading"><Loading /></el-icon>
+          <span v-if="genStore.scriptTasks[videoNode.id]">
+            正在生成讲解稿 {{ genStore.scriptTasks[videoNode.id].done }}/{{ genStore.scriptTasks[videoNode.id].total || '…' }}…
+          </span>
+          <span v-else>
+            正在合成配音 {{ genStore.audioTasks[videoNode.id].done }}/{{ genStore.audioTasks[videoNode.id].total || '…' }}…
+            已完成的页可先试听，其余页会自动补齐
+          </span>
+        </div>
+
         <div v-if="videoMode === 'script' && videoScripts.length" class="script-list">
           <div
             v-for="item in videoScripts"
@@ -797,9 +817,21 @@
                   text
                   type="primary"
                   :loading="pageScriptLoading === item.page"
+                  :disabled="pageAudioLoading === item.page"
                   @click="regenerateScriptPage(item)"
                 >
                   重新生成本页
+                </el-button>
+                <el-button
+                  v-if="String(item.script || '').trim()"
+                  size="small"
+                  text
+                  type="warning"
+                  :loading="pageAudioLoading === item.page"
+                  :disabled="pageScriptLoading === item.page"
+                  @click="regenerateAudioPage(item)"
+                >
+                  重新配音
                 </el-button>
               </div>
             </div>
@@ -828,7 +860,12 @@
                 保存修改
               </el-button>
             </div>
-            <audio v-if="item.audio_url" class="script-audio" :src="item.audio_url" controls @play="stopPlayer" />
+            <PageAudioPlayer
+              v-if="item.audio_url"
+              :key="item.audio_url"
+              :src="item.audio_url"
+              @play="stopPlayer"
+            />
           </div>
         </div>
         <el-empty v-else-if="videoMode === 'script' && !videoLoading" description="还没有讲稿，先点击章节右侧「讲稿」生成" />
@@ -843,20 +880,20 @@ import { useRoute } from 'vue-router'
 import { ArrowLeft, ArrowRight, Plus, Edit, Delete, Upload, MagicStick, Folder, Document, Microphone, Headset, UploadFilled, VideoPlay, VideoPause, ChatDotRound, Close, Promotion, Picture, Loading, Right } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
+import PageAudioPlayer from '@/components/PageAudioPlayer.vue'
 import {
   listCourses, listCatalogs, createCatalog, updateCatalog, deleteCatalog,
   previewCatalogFromFile, listPpts, uploadPpt, listVideos, updateVideoScript, regenerateVideoScriptPage,
+  regenerateVideoAudioPage,
 } from '@/api/course'
 import { listMaterials } from '@/api/knowledge'
 import { useGenerationStore } from '@/store/generation'
-import MarkdownIt from 'markdown-it'
+import { renderAiMarkdown } from '@/utils/markdown'
 import { genUid } from '@/utils/uid'
 
-// html:false 会转义原始 HTML 标签，天然防止模型输出注入脚本
-const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
-function renderMd(text) {
-  return md.render(text || '')
-}
+// html:false 会转义原始 HTML 标签，天然防止模型输出注入脚本；
+// linkify 关闭 + 链接纯文本化，避免名词被链化成跳转搜索页的超链接
+const renderMd = renderAiMarkdown
 
 const route = useRoute()
 const courseId = Number(route.params.id)
@@ -1149,6 +1186,14 @@ function scriptState(node) {
     : 0
   return { done, total, complete: total > 0 && done >= total }
 }
+// 配音完成度：与讲稿一致，刷新页面后未完成的持久化进度直接显示为「续配音 x/y」
+function audioState(node) {
+  const video = videoMap[String(node.id)]
+  const scripts = Array.isArray(video?.scripts) ? video.scripts : []
+  const total = scripts.filter((s) => String(s.script || '').trim()).length
+  const done = scripts.filter((s) => s.audio_url).length
+  return { done, total, complete: total > 0 && done >= total }
+}
 async function openScript(node) {
   if (scriptState(node).complete) {
     await openVideo(node, 'script')
@@ -1164,10 +1209,38 @@ async function genScript(node) {
 }
 
 async function genAudio(node) {
-  await genStore.runAudio(node.id)
-  await loadVideos()
-  await openVideo(node, 'player')
+  // 先打开「讲解稿与配音」页（逐页进度与音频都在里面可见）；
+  // 配音未完成则后台续跑生成（store 循环，页面跳转/刷新不中断），对话框内实时显示进度
+  await openVideo(node, 'script')
+  if (!audioState(node).complete) genStore.runAudio(node.id)
 }
+
+// 后台恢复/进行的生成任务完成后，自动刷新视频数据（按钮从任务态回到持久化进度）
+watch(() => genStore.completedTick, () => { loadVideos() })
+
+// 对话框打开期间的实时进度：批次推进时只把新配音合并进弹窗（绝不覆盖正在编辑的讲稿文本）
+async function refreshOpenVideoAudio() {
+  if (!videoVisible.value || !videoNode.value || !videoDetail.value) return
+  try {
+    const data = await listVideos({ catalog: videoNode.value.id })
+    const list = Array.isArray(data?.results) ? data.results : Array.isArray(data) ? data : []
+    const fresh = list[0]
+    if (!fresh) return
+    const byPage = new Map((fresh.scripts || []).map((s) => [String(s.page), s]))
+    for (const item of videoDetail.value.scripts || []) {
+      const f = byPage.get(String(item.page))
+      if (!f) continue
+      item.audio_url = f.audio_url || ''
+      if (f.audio_error) item.audio_error = f.audio_error
+      else delete item.audio_error
+    }
+    videoDetail.value.gen_status = fresh.gen_status
+    videoDetail.value.gen_status_display = fresh.gen_status_display
+    setVideoMapItem(fresh)
+  } catch { /* 静默：下一轮批次还会再刷 */ }
+}
+watch(() => genStore.audioTasks, () => { refreshOpenVideoAudio() }, { deep: true })
+watch(() => genStore.completedTick, () => { refreshOpenVideoAudio() })
 
 // ---- 讲解稿 / 配音查看 ----
 const videoVisible = ref(false)
@@ -1177,6 +1250,7 @@ const videoDetail = ref(null)
 const videoMode = ref('player')
 const scriptSaving = ref(null)
 const pageScriptLoading = ref(null)
+const pageAudioLoading = ref(null)
 const scriptOriginals = ref({})
 const videoScripts = computed(() => (
   Array.isArray(videoDetail.value?.scripts) ? videoDetail.value.scripts : []
@@ -1471,10 +1545,11 @@ async function saveScriptItem(item) {
 
 async function regenerateScriptPage(item) {
   if (!videoDetail.value?.id || !item?.page) return
-  if (item.audio_url) {
+  const hadAudio = Boolean(item.audio_url)
+  if (hadAudio) {
     try {
       await ElMessageBox.confirm(
-        '重新生成只会覆盖当前页讲稿，并清空当前页配音。确认继续吗？',
+        '重新生成会覆盖当前页讲稿，并自动重新合成该页配音。确认继续吗？',
         `重新生成第 ${item.page} 页`,
         {
           type: 'warning',
@@ -1492,10 +1567,33 @@ async function regenerateScriptPage(item) {
     videoDetail.value = updated
     setVideoMapItem(updated)
     resetScriptOriginals()
-    ElMessage.success(`第 ${item.page} 页讲稿已重新生成，该页需要重新配音`)
+    // 该页原本有配音：讲稿变了配音必然失效，直接连带重配，一步到位
+    if (hadAudio) {
+      ElMessage.success(`第 ${item.page} 页讲稿已重新生成，正在重新合成配音…`)
+      await regenerateAudioPageByNumber(item.page)
+    } else {
+      ElMessage.success(`第 ${item.page} 页讲稿已重新生成，可点击「重新配音」合成语音`)
+    }
   } finally {
     pageScriptLoading.value = null
   }
+}
+
+async function regenerateAudioPageByNumber(page) {
+  if (!videoDetail.value?.id || !page) return
+  pageAudioLoading.value = page
+  try {
+    const updated = await regenerateVideoAudioPage(videoDetail.value.id, { page })
+    videoDetail.value = updated
+    setVideoMapItem(updated)
+    ElMessage.success(`第 ${page} 页配音已重新生成`)
+  } finally {
+    pageAudioLoading.value = null
+  }
+}
+
+async function regenerateAudioPage(item) {
+  await regenerateAudioPageByNumber(item?.page)
 }
 
 function togglePlayer() {
@@ -3789,6 +3887,20 @@ onMounted(() => { loadCourseName(); loadTree() })
 
 .script-alert {
   margin-bottom: 12px;
+}
+
+.script-gen-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #b45309;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .ppt-player {

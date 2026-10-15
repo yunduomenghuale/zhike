@@ -6,6 +6,7 @@ from .views import (
     AdminCourseStatusView,
     AdminOverviewView,
     AdminPasswordResetView,
+    AdminRebuildVectorsView,
     AdminUserDetailView,
     AdminUserImportConfirmView,
     AdminUserImportPreviewView,
@@ -28,4 +29,5 @@ urlpatterns = [
     path("classes/", AdminClassListView.as_view(), name="admin-classes"),
     path("ai-configuration/", AdminAIConfigurationView.as_view(), name="admin-ai-configuration"),
     path("ai-configuration/test/", AdminAIConnectionTestView.as_view(), name="admin-ai-test"),
+    path("rebuild-vectors/", AdminRebuildVectorsView.as_view(), name="admin-rebuild-vectors"),
 ]

@@ -77,6 +77,7 @@ class QuestionViewSet(BaseModelViewSet):
             results.append({
                 "question_id": q.id,
                 "is_correct": is_correct,
+                "score": float(score) if score is not None else None,
                 "correct_answer": q.answer,
                 "analysis": q.analysis,
             })

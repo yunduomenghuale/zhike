@@ -135,23 +135,33 @@
           </el-radio-group>
         </el-form-item>
 
-        <!-- 填空答案 -->
+        <!-- 填空答案（按空单独赋分） -->
         <el-form-item v-else-if="form.qtype === 'blank'" label="答案">
           <div class="opt-editor">
-            <div v-for="(b, i) in form.blanks" :key="i" class="opt-row">
+            <div v-for="(b, i) in form.blanks" :key="i" class="opt-row blank-row">
               <span class="blank-idx">第{{ i + 1 }}空</span>
-              <el-input v-model="form.blanks[i]" placeholder="正确答案" />
+              <el-input v-model="b.text" placeholder="正确答案" />
+              <el-input-number v-model="b.score" class="blank-score-input" :min="1" :max="100" :controls="false" placeholder="分值" />
+              <span class="blank-score-unit">分</span>
               <el-button link type="danger" :icon="Delete" @click="form.blanks.splice(i, 1)" />
             </div>
-            <el-button link type="primary" :icon="Plus" @click="form.blanks.push('')">添加空</el-button>
+            <el-button link type="primary" :icon="Plus" @click="addBlank">添加空</el-button>
           </div>
+        </el-form-item>
+
+        <!-- 简答题参考答案（主观题无唯一标准答案，供学生作答与教师批改参考） -->
+        <el-form-item v-else-if="form.qtype === 'short'" label="参考答案">
+          <el-input v-model="form.answerText" type="textarea" :rows="2" placeholder="选填：本题的参考要点，学生端以「参考答案」展示" />
         </el-form-item>
 
         <el-form-item label="解析">
           <el-input v-model="form.analysis" type="textarea" :rows="2" placeholder="选填" />
         </el-form-item>
         <el-form-item label="分值/难度">
-          <el-input-number v-model="form.score" :min="1" :max="100" />
+          <span v-if="form.qtype === 'blank'" class="blank-total-score">
+            合计 <b>{{ blankScoreTotal }}</b> 分<em>（按空自动累计）</em>
+          </span>
+          <el-input-number v-else v-model="form.score" :min="1" :max="100" />
           <el-select v-model="form.difficulty" class="module-select" popper-class="module-select-popper" style="width: 120px; margin-left: 12px">
             <el-option label="简单" value="easy" />
             <el-option label="中等" value="medium" />
@@ -162,7 +172,10 @@
       <template #footer>
         <div class="creation-dialog-footer">
           <el-button @click="editVisible = false">取消</el-button>
-          <el-button type="primary" :loading="saving" @click="save">{{ form.id ? '保存修改' : '创建题目' }}</el-button>
+          <el-button :loading="saving" @click="save(false)">{{ form.id ? '保存修改' : '创建题目' }}</el-button>
+          <el-button v-if="!form.id || form.status !== 'published'" type="primary" :loading="saving" @click="save(true)">
+            {{ form.id ? '保存并发布' : '创建并发布' }}
+          </el-button>
         </div>
       </template>
     </el-dialog>
@@ -325,9 +338,22 @@ function blankForm() {
   return {
     id: null, catalog: null, qtype: 'single', stem: '',
     options: [{ key: 'A', text: '' }, { key: 'B', text: '' }, { key: 'C', text: '' }, { key: 'D', text: '' }],
-    answerKey: '', answerKeys: [], blanks: [''],
-    analysis: '', score: 5, difficulty: 'medium',
+    answerKey: '', answerKeys: [], blanks: [{ text: '', score: 1 }], answerText: '',
+    analysis: '', score: 5, difficulty: 'medium', status: 'draft',
   }
+}
+
+/** 载入既有填空题答案：旧版字符串按题库总分均分预填（与后端 _split_score 同口径：余数补给前几个空） */
+function loadBlanks(blanks, totalScore) {
+  const list = Array.isArray(blanks) && blanks.length ? blanks : ['']
+  const n = list.length
+  const tenths = Math.round(Number(totalScore || 0) * 10)
+  const base = Math.floor(tenths / n)
+  const rem = tenths % n
+  return list.map((b, i) => {
+    if (typeof b === 'string') return { text: b, score: (base + (i < rem ? 1 : 0)) / 10 || 1 }
+    return { text: b?.text || '', score: Number(b?.score) || 1 }
+  })
 }
 
 function openEdit(row) {
@@ -341,10 +367,12 @@ function openEdit(row) {
     form.options = (row.options && row.options.length) ? JSON.parse(JSON.stringify(row.options)) : form.options
     form.answerKey = row.answer?.key || ''
     form.answerKeys = row.answer?.keys || []
-    form.blanks = row.answer?.blanks?.length ? [...row.answer.blanks] : ['']
+    form.blanks = loadBlanks(row.answer?.blanks, row.score)
+    form.answerText = row.answer?.text || ''
     form.analysis = row.analysis || ''
     form.score = Number(row.score) || 5
     form.difficulty = row.difficulty || 'medium'
+    form.status = row.status || 'draft'
   }
   editVisible.value = true
 }
@@ -352,6 +380,7 @@ function openEdit(row) {
 function onTypeChange() {
   form.answerKey = ''
   form.answerKeys = []
+  form.answerText = ''
 }
 
 function isCorrect(key) {
@@ -370,11 +399,27 @@ function addOption() {
   const key = String.fromCharCode(65 + form.options.length)
   form.options.push({ key, text: '' })
 }
+function addBlank() {
+  form.blanks.push({ text: '', score: 1 })
+}
+
+const blankScoreTotal = computed(() =>
+  form.blanks.reduce((sum, b) => sum + (Number(b?.score) || 0), 0)
+)
 
 function buildAnswer() {
   if (form.qtype === 'single' || form.qtype === 'judge') return { key: form.answerKey }
   if (form.qtype === 'multi') return { keys: form.answerKeys }
-  if (form.qtype === 'blank') return { blanks: form.blanks.filter((b) => b !== '') }
+  // 填空题：按空赋分，总分由后端按 Σ空分重算
+  if (form.qtype === 'blank') {
+    return {
+      blanks: form.blanks
+        .filter((b) => b.text && b.text.trim())
+        .map((b) => ({ text: b.text.trim(), score: Number(b.score) || 0 })),
+    }
+  }
+  // 简答题：参考答案（answer.text），学生端/教师端批改页以「参考答案」展示
+  if (form.qtype === 'short') return form.answerText.trim() ? { text: form.answerText.trim() } : {}
   return {}
 }
 function buildOptions() {
@@ -383,13 +428,20 @@ function buildOptions() {
   return []
 }
 
-async function save() {
+async function save(publish = false) {
   if (!form.stem) return ElMessage.warning('请填写题干')
   if (!form.catalog) return ElMessage.warning('请选择题目所属章节')
+  if (form.qtype === 'blank') {
+    const filled = form.blanks.filter((b) => b.text && b.text.trim())
+    if (!filled.length) return ElMessage.warning('请至少填写一个空的答案')
+    if (filled.some((b) => !(Number(b.score) > 0))) return ElMessage.warning('每个空的分值必须大于 0')
+  }
+  // 新建默认草稿；“创建并发布/保存并发布”直接发布，减少后续单独点发布的操作
+  const status = publish ? 'published' : (form.id ? form.status || 'draft' : 'draft')
   const payload = {
     course: courseId.value, catalog: form.catalog, qtype: form.qtype, stem: form.stem,
     options: buildOptions(), answer: buildAnswer(), analysis: form.analysis,
-    score: form.score, difficulty: form.difficulty,
+    score: form.score, difficulty: form.difficulty, status,
   }
   saving.value = true
   try {
@@ -398,7 +450,7 @@ async function save() {
       ElMessage.success('已更新')
     } else {
       await createQuestion(payload)
-      ElMessage.success('已创建（草稿）')
+      ElMessage.success(publish ? '已创建并发布' : '已创建（草稿）')
     }
     editVisible.value = false
     load()
@@ -869,5 +921,36 @@ watch(
   color: #64748b;
   font-size: 13px;
   white-space: nowrap;
+}
+.blank-row .el-input {
+  flex: 1;
+  min-width: 0;
+}
+.blank-score-input {
+  width: 72px;
+  flex: none;
+}
+.blank-score-input :deep(.el-input__wrapper) {
+  padding: 0 8px;
+}
+.blank-score-unit {
+  color: #64748b;
+  font-size: 13px;
+  flex: none;
+}
+.blank-total-score {
+  color: #1e293b;
+  font-size: 14px;
+}
+.blank-total-score b {
+  color: #2563eb;
+  font-size: 16px;
+  margin: 0 2px;
+}
+.blank-total-score em {
+  color: #94a3b8;
+  font-size: 12px;
+  font-style: normal;
+  margin-left: 6px;
 }
 </style>

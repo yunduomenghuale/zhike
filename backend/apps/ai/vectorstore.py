@@ -27,21 +27,38 @@ def search_chunks(
     student_access: bool = False,
     classroom_id=None,
 ):
-    """返回按相似度降序的 (chunk, score) 列表。"""
+    """返回按相似度降序的 (chunk, score) 列表。
+
+    片段来源有二：教辅资料（material）与课件 PPT（ppt，每页一片段）。
+    旧版本课件（is_active=False）的片段不参与检索——上传新版本时已随之删除，
+    这里再兜底一道，防止历史数据残留。
+    """
+    from django.db.models import Q
+
     from apps.knowledge.models import KnowledgeChunk
 
-    chunks = KnowledgeChunk.objects.filter(course_id=course_id).exclude(embedding=[])
+    chunks = (
+        KnowledgeChunk.objects.filter(course_id=course_id)
+        .exclude(embedding=[])
+        # 只保留资料片段与当前启用版本课件的片段
+        .filter(Q(ppt__isnull=True) | Q(ppt__is_active=True))
+        # 引用展示要取 material.file_name / material.catalog.title /
+        # ppt.file_name / ppt.catalog.title，一次带出避免 N+1
+        .select_related("material", "material__catalog", "ppt", "ppt__catalog")
+    )
     if student_access:
-        from django.db.models import Q
-
-        chunks = chunks.filter(material__qa_open=True)
+        # 资料片段：qa_open 开启且班级可见；课件片段：已发布章节的当前版本
+        material_q = Q(material__isnull=False, material__qa_open=True)
+        ppt_q = Q(
+            ppt__isnull=False,
+            ppt__is_active=True,
+            ppt__catalog__is_published=True,
+        )
         if classroom_id:
-            chunks = chunks.filter(
-                Q(material__classroom__isnull=True)
-                | Q(material__classroom_id=classroom_id)
-            )
+            material_q &= Q(material__classroom__isnull=True) | Q(material__classroom_id=classroom_id)
         else:
-            chunks = chunks.filter(material__classroom__isnull=True)
+            material_q &= Q(material__classroom__isnull=True)
+        chunks = chunks.filter(material_q | ppt_q)
     scored = [(c, cosine(query_vec, c.embedding)) for c in chunks]
     scored.sort(key=lambda x: x[1], reverse=True)
     return scored[:top_k]

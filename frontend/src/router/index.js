@@ -17,6 +17,7 @@ const courseWorkspaceRoute = {
     { path: 'questions', name: 'course-questions', component: () => import('@/views/teacher/QuestionManage.vue'), meta: { title: '题库', role: 'teacher' } },
     { path: 'homework', name: 'course-homework', component: () => import('@/views/teacher/HomeworkManage.vue'), meta: { title: '作业', role: 'teacher' } },
     { path: 'exams', name: 'course-exams', component: () => import('@/views/teacher/ExamManage.vue'), meta: { title: '考试', role: 'teacher' } },
+    { path: 'exams/:examId/stats', name: 'course-exam-stats', component: () => import('@/views/teacher/ExamStats.vue'), meta: { title: '考试统计', role: 'teacher' } },
     { path: 'labs', name: 'course-labs', component: () => import('@/views/teacher/LabManage.vue'), meta: { title: '虚拟实验', role: 'teacher' } },
     { path: 'resources', name: 'course-resources', component: () => import('@/views/teacher/ResourceManage.vue'), meta: { title: '教学资源', role: 'teacher' } },
     { path: 'resources/viewer', name: 'course-resource-viewer', component: () => import('@/views/common/ResourceViewer.vue'), meta: { title: '资源查看', role: 'teacher' } },
@@ -35,6 +36,7 @@ const studentCourseWorkspaceRoute = {
     { path: 'materials', name: 'student-course-materials', component: () => import('@/views/student/CourseMaterials.vue'), meta: { title: '课程资料', role: 'student' } },
     { path: 'homework', name: 'student-course-homework', component: () => import('@/views/student/MyHomework.vue'), meta: { title: '我的作业', role: 'student' } },
     { path: 'exams', name: 'student-course-exams', component: () => import('@/views/student/ExamList.vue'), meta: { title: '我的考试', role: 'student' } },
+    { path: 'exams/:examId/review', name: 'student-course-exam-review', component: () => import('@/views/student/ExamReview.vue'), meta: { title: '答题情况', role: 'student' } },
     { path: 'labs', name: 'student-course-labs', component: () => import('@/views/student/LabList.vue'), meta: { title: '虚拟实验', role: 'student' } },
     { path: 'resources', name: 'student-course-resources', component: () => import('@/views/student/CourseResources.vue'), meta: { title: '课程资源', role: 'student' } },
     { path: 'resources/viewer', name: 'student-course-resource-viewer', component: () => import('@/views/common/ResourceViewer.vue'), meta: { title: '资源查看', role: 'student' } },
@@ -67,6 +69,7 @@ const routes = [
       { path: 'teacher/questions', name: 'questions', component: () => import('@/views/teacher/QuestionManage.vue'), meta: { title: '题库', role: 'teacher' } },
       { path: 'teacher/homework', name: 'homework', component: () => import('@/views/teacher/HomeworkManage.vue'), meta: { title: '作业管理', role: 'teacher' } },
       { path: 'teacher/exams', name: 'exams', component: () => import('@/views/teacher/ExamManage.vue'), meta: { title: '考试', role: 'teacher' } },
+      { path: 'teacher/exams/:id/stats', name: 'exam-stats', component: () => import('@/views/teacher/ExamStats.vue'), meta: { title: '考试统计', role: 'teacher', activeMenu: '/teacher/exams' } },
       { path: 'teacher/analytics', name: 'analytics', component: () => import('@/views/teacher/Analytics.vue'), meta: { title: '学习统计', role: 'teacher' } },
 
       { path: 'student/my-classes', name: 'my-classes', component: () => import('@/views/student/MyClasses.vue'), meta: { title: '我的班级', role: 'student' } },
@@ -75,7 +78,8 @@ const routes = [
       { path: 'student/homework', name: 'student-homework', component: () => import('@/views/student/MyHomework.vue'), meta: { title: '我的作业', role: 'student' } },
       { path: 'student/exams', name: 'student-exams', component: () => import('@/views/student/ExamList.vue'), meta: { title: '我的考试', role: 'student' } },
       { path: 'student/wrong', name: 'wrong-book', component: () => import('@/views/student/WrongBook.vue'), meta: { title: '错题本', role: 'student' } },
-      { path: 'student/exams/:id/take', name: 'exam-taking', component: () => import('@/views/student/ExamTaking.vue'), meta: { title: '在线考试', role: 'student', activeMenu: '/student/my-classes' } },
+      { path: 'student/exams/:id/take', name: 'exam-taking', component: () => import('@/views/student/ExamTaking.vue'), meta: { title: '在线考试', role: 'student', activeMenu: '/student/my-classes', hideSidebar: true } },
+      { path: 'student/exams/:id/review', name: 'exam-review', component: () => import('@/views/student/ExamReview.vue'), meta: { title: '答题情况', role: 'student', activeMenu: '/student/my-classes' } },
     ],
   },
   // 未知路径兜底：守卫统一提示并回工作台（不直接 redirect，以便弹出“页面不存在”提示）

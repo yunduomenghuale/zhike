@@ -23,8 +23,12 @@ class AIProviderInfoView(APIView):
     serializer_class = AIProviderInfoSerializer
 
     def get(self, request):
-        provider = get_provider()
-        return api_response({"provider": provider.name})
+        from apps.ai.models import AICapabilityConfig
+
+        providers = {}
+        for capability, _label in AICapabilityConfig.Capability.choices:
+            providers[capability] = get_provider(capability).name
+        return api_response({"providers": providers})
 
 
 class TTSPreviewView(APIView):
@@ -38,7 +42,7 @@ class TTSPreviewView(APIView):
         voice = request.data.get("voice", "default")
         speed = float(request.data.get("speed", 1.0))
         try:
-            url = get_provider().tts(text, voice=voice, speed=speed)
+            url = get_provider("tts").tts(text, voice=voice, speed=speed)
         except NotImplementedError as exc:
             return api_response(message=str(exc), code=501, status=501)
         return api_response({"audio_url": url})

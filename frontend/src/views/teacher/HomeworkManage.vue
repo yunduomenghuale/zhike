@@ -96,7 +96,11 @@
         </div>
         <div class="hw-editor-actions">
           <el-button v-if="isFrozen" type="warning" plain :loading="saving" @click="withdrawCurrent">撤回修改</el-button>
-          <el-button type="primary" :loading="saving" @click="save">{{ form.id ? '保存修改' : '保存作业' }}</el-button>
+          <!-- 已发布作业也可保存：标题/说明/时间/附件均不在冻结集，保存按钮始终可用 -->
+          <el-button type="primary" :loading="saving" :disabled="uploading" @click="save(false)">{{ form.id ? '保存修改' : '保存作业' }}</el-button>
+          <el-button v-if="!isFrozen" class="hw-publish-btn" type="success" plain :loading="saving" :disabled="uploading" @click="save(true)">
+            <el-icon><Promotion /></el-icon>{{ form.id ? '保存并发布' : '发布作业' }}
+          </el-button>
           <el-button @click="editVisible = false">退出编辑</el-button>
         </div>
       </div>
@@ -121,7 +125,7 @@
               <el-date-picker
                 v-model="form.start_time"
                 type="datetime"
-                placeholder="选择开始时间"
+                placeholder="不选择则立即开始"
                 format="YYYY年MM月DD日 HH:mm"
                 value-format="YYYY-MM-DDTHH:mm:ss"
                 popper-class="platform-datetime-popper"
@@ -132,12 +136,13 @@
                 @change="validateTimeRange"
                 style="width: 100%"
               />
+              <div class="time-field-tip">开始时间留空时，作业发布后学生可立即开始作答</div>
             </el-form-item>
             <el-form-item label="截止时间">
               <el-date-picker
                 v-model="form.deadline"
                 type="datetime"
-                placeholder="选择截止时间"
+                placeholder="不选择则截止不限"
                 format="YYYY年MM月DD日 HH:mm"
                 value-format="YYYY-MM-DDTHH:mm:ss"
                 popper-class="platform-datetime-popper"
@@ -148,6 +153,7 @@
                 @change="validateTimeRange"
                 style="width: 100%"
               />
+              <div class="time-field-tip">截止时间留空时，作业长期开放，不限制提交时间</div>
             </el-form-item>
             <el-form-item v-if="form.mode === 'attachment'" label="满分"><el-input-number v-model="form.total_score" :min="1" :max="200" /></el-form-item>
             </div>
@@ -163,27 +169,79 @@
                   class="attachment-uploader"
                   drag
                   :auto-upload="false"
-                  :limit="1"
                   accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.zip,.rar"
                   :on-change="onHomeworkFile"
-                  :on-remove="() => { homeworkFile = null }"
                 >
                   <el-icon class="attachment-upload-icon"><Document /></el-icon>
                   <div class="attachment-upload-title">拖拽文件到此处，或点击选择</div>
-                  <div class="attachment-upload-tip">支持 PDF、Word、PPT、Excel、TXT 与压缩包，最大 20MB</div>
+                  <div class="attachment-upload-tip">支持 PDF、Word、PPT、Excel、TXT 与压缩包，最大 20MB；可多选，追加不替换，最多 9 个</div>
                 </el-upload>
-                <a
-                  v-if="currentAttachment && !homeworkFile"
-                  class="existing-attachment"
-                  :href="currentAttachment"
-                  target="_blank"
-                  rel="noopener"
-                >
-                  <el-icon><Document /></el-icon>
-                  <span>查看已上传附件</span>
-                </a>
+
+                <!-- 上传中的任务：文件信息 + 上传进度 + 状态 + 失败重试（选择后立即上传） -->
+                <div v-for="task in uploadTasks" :key="task.key" class="upload-file-card" :class="`is-${task.status}`">
+                  <div class="upload-file-main">
+                    <span class="upload-file-icon"><el-icon><Document /></el-icon></span>
+                    <div class="upload-file-info">
+                      <div class="upload-file-name" :title="task.name">{{ task.name }}</div>
+                      <div class="upload-file-meta">
+                        <span>{{ formatFileSize(task.size) }}</span>
+                        <span class="upload-file-ext">{{ fileExtOf(task.name) }}</span>
+                      </div>
+                    </div>
+                    <div class="upload-file-status">
+                      <span v-if="task.status === 'uploading'" class="upload-status-text is-uploading">上传中 {{ task.progress }}%</span>
+                      <template v-else-if="task.status === 'error'">
+                        <el-button link type="primary" @click="retryTask(task)">重新上传</el-button>
+                        <el-button link type="danger" @click="removeTask(task)">移除</el-button>
+                      </template>
+                      <el-button v-else link type="danger" @click="removeTask(task)">移除</el-button>
+                    </div>
+                  </div>
+                  <div v-if="task.status === 'uploading'" class="upload-progress-track">
+                    <div class="upload-progress-bar" :style="{ width: task.progress + '%' }"></div>
+                  </div>
+                  <div v-if="task.status === 'error'" class="upload-error-row">
+                    <span class="upload-error-text">{{ task.error || '上传失败，请重试' }}</span>
+                  </div>
+                </div>
+
+                <!-- 已上传附件列表：编辑页直接展示，支持预览 / 移除单个附件 -->
+                <div v-if="attachmentList.length" class="uploaded-attachments">
+                  <div class="uploaded-attachments-head">
+                    <span class="uploaded-attachments-title">已上传附件（{{ attachmentList.length }}）</span>
+                    <span class="uploaded-attachments-hint">再次上传为追加，不会替换已有附件</span>
+                  </div>
+                  <div v-for="(item, index) in attachmentList" :key="item.url" class="uploaded-attachment-item">
+                    <span class="upload-file-icon"><el-icon><Document /></el-icon></span>
+                    <div class="upload-file-info">
+                      <div class="upload-file-name" :title="item.name">{{ item.name || '作业附件' }}</div>
+                      <div class="upload-file-meta">
+                        <span class="upload-file-ext">{{ fileExtOf(item.name) }}</span>
+                        <span v-if="item.size">{{ formatFileSize(item.size) }}</span>
+                      </div>
+                    </div>
+                    <div class="upload-file-status">
+                      <el-button v-if="isPdfName(item.name)" link type="primary" @click="togglePreview(item)">
+                        <el-icon><View /></el-icon>{{ previewTarget === item.url ? '收起预览' : '预览' }}
+                      </el-button>
+                      <a class="attachment-view-link" :href="item.url" target="_blank" rel="noopener noreferrer">
+                        <el-icon><Download /></el-icon>下载
+                      </a>
+                      <el-button link type="danger" @click="removeAttachment(index)">移除</el-button>
+                    </div>
+                  </div>
+                  <div class="upload-file-footer">
+                    <span>共 {{ attachmentList.length }} 个附件，合计 {{ formatFileSize(attachmentTotalSize) }}（单个上限 20MB，最多 9 个）</span>
+                  </div>
+                  <!-- PDF 无工具栏连续滚动预览（师生端一致） -->
+                  <div v-if="previewTarget" class="attachment-preview-box">
+                    <PdfScrollPreview :homework-id="form.id" :url="previewTarget" max-height="480px" />
+                  </div>
+                </div>
+                <el-empty v-if="!attachmentList.length && !uploadTasks.length" :image-size="64" description="尚未上传附件" />
               </div>
-              <div v-else class="question-builder">
+              <!-- 左右结构：左列题库筛选选题（已添加行高亮），右列已选题目独立全高列 -->
+              <div v-else class="question-builder" :class="{ 'selected-only': isFrozen }">
                 <el-alert
                   v-if="isFrozen"
                   type="success"
@@ -191,7 +249,8 @@
                   show-icon
                   title="该作业已经发布，以下题目与答案均使用已冻结快照。"
                 />
-                <div v-if="!isFrozen" class="question-pool-panel">
+                <div class="question-builder-row">
+                  <div v-if="!isFrozen" class="question-pool-panel">
                   <div class="question-filters">
                     <el-select v-model="questionFilters.catalog" clearable placeholder="章节" popper-class="homework-filter-popper">
                       <el-option v-for="item in catalogOptions" :key="item.id" :label="item.label" :value="item.id" />
@@ -204,24 +263,41 @@
                     <el-select v-model="questionFilters.difficulty" clearable placeholder="难度" popper-class="homework-filter-popper">
                       <el-option label="简单" value="easy" /><el-option label="中等" value="medium" /><el-option label="困难" value="hard" />
                     </el-select>
+                    <button
+                      class="pool-select-all"
+                      :class="{ active: allFilteredSelected }"
+                      type="button"
+                      :disabled="!filteredQuestionOptions.length"
+                      @click="toggleSelectAllFiltered"
+                    >
+                      {{ allFilteredSelected ? '取消全选' : `全选 ${filteredQuestionOptions.length} 题` }}
+                    </button>
                   </div>
-                  <el-table :data="filteredQuestionOptions" height="300" v-loading="questionLoading" class="question-pool-table">
-                    <el-table-column prop="stem" label="题干" min-width="240">
+                  <el-table
+                    :data="filteredQuestionOptions"
+                    height="100%"
+                    v-loading="questionLoading"
+                    class="question-pool-table"
+                    :row-class-name="poolRowClass"
+                  >
+                    <el-table-column prop="stem" label="题干" min-width="150">
                       <template #default="{ row }">
-                        <span class="pool-stem">{{ row.stem }}</span>
+                        <QuestionDetailPopover v-bind="questionDetailOf(row)">
+                          <span class="pool-stem">{{ row.stem }}</span>
+                        </QuestionDetailPopover>
                       </template>
                     </el-table-column>
-                    <el-table-column label="题型" width="94">
+                    <el-table-column label="题型" width="64" align="center">
                       <template #default="{ row }">
-                        <span class="pool-tag type">{{ row.qtype_display }}</span>
+                        <span class="pool-tag type">{{ abbrQtype(row) }}</span>
                       </template>
                     </el-table-column>
-                    <el-table-column label="难度" width="82">
+                    <el-table-column label="难度" width="56" align="center">
                       <template #default="{ row }">
-                        <span class="pool-tag difficulty" :class="`difficulty-${row.difficulty}`">{{ row.difficulty_display }}</span>
+                        <span class="pool-tag difficulty" :class="`difficulty-${row.difficulty}`">{{ abbrDifficulty(row) }}</span>
                       </template>
                     </el-table-column>
-                    <el-table-column label="操作" width="82" align="center">
+                    <el-table-column label="操作" width="72" align="center">
                       <template #default="{ row }">
                         <button class="pool-action" :class="{ selected: isSelected(row.id) }" type="button" @click="toggleQuestion(row)">
                           {{ isSelected(row.id) ? '移除' : '添加' }}
@@ -234,35 +310,42 @@
                 <div class="selected-panel">
                   <div class="selected-header">
                     <strong>已选 {{ selectedQuestions.length }} 题</strong>
-                    <span>总分 {{ selectedTotal }} 分（自动计算）</span>
+                    <span>总分 {{ selectedTotal }} 分</span>
                   </div>
                   <div v-if="!selectedQuestions.length" class="selected-empty">
                     <el-icon><Plus /></el-icon>
-                    <span>点击上方题目的「添加」，已选题目会显示在这里</span>
+                    <span>点击左侧题目的「添加」或「全选」，已选题目会显示在这里</span>
                   </div>
                   <el-scrollbar v-else class="selected-list-scroll">
                     <div class="selected-list">
                       <div v-for="(item, index) in selectedQuestions" :key="item.question" class="selected-item">
-                        <span class="question-order">{{ index + 1 }}</span>
-                        <span class="selected-stem">{{ item.stem }}</span>
-                        <el-tag size="small" effect="plain">{{ item.qtype_display }}</el-tag>
-                        <el-input
-                          v-model.number="item.score"
-                          class="score-input"
-                          type="number"
-                          min="0.5"
-                          max="100"
-                          step="0.5"
-                        />
-                        <span class="score-unit">分</span>
-                        <div v-if="!isFrozen" class="selected-actions">
-                          <el-button link circle :icon="ArrowUp" :disabled="index === 0" title="上移" @click="moveQuestion(index, -1)" />
-                          <el-button link circle :icon="ArrowDown" :disabled="index === selectedQuestions.length - 1" title="下移" @click="moveQuestion(index, 1)" />
-                          <el-button link type="danger" @click="selectedQuestions.splice(index, 1)">删除</el-button>
+                        <div class="selected-item-main">
+                          <span class="question-order">{{ index + 1 }}</span>
+                          <QuestionDetailPopover v-bind="questionDetailOf(item)">
+                            <span class="selected-stem">{{ item.stem }}</span>
+                          </QuestionDetailPopover>
+                        </div>
+                        <div class="selected-item-sub">
+                          <span class="pool-tag type selected-qtype">{{ abbrQtype(item) }}</span>
+                          <el-input
+                            v-model.number="item.score"
+                            class="score-input"
+                            type="number"
+                            min="0.5"
+                            max="100"
+                            step="0.5"
+                          />
+                          <span class="score-unit">分</span>
+                          <div v-if="!isFrozen" class="selected-actions">
+                            <el-button link circle :icon="ArrowUp" :disabled="index === 0" title="上移" @click="moveQuestion(index, -1)" />
+                            <el-button link circle :icon="ArrowDown" :disabled="index === selectedQuestions.length - 1" title="下移" @click="moveQuestion(index, 1)" />
+                            <el-button link type="danger" @click="selectedQuestions.splice(index, 1)">删除</el-button>
+                          </div>
                         </div>
                       </div>
                     </div>
                   </el-scrollbar>
+                </div>
                 </div>
               </div>
             </div>
@@ -283,7 +366,7 @@
     />
 
     <!-- 提交与批改 -->
-    <el-drawer v-model="subVisible" class="grading-drawer" modal-class="grading-drawer-mask" size="48%" :with-header="false">
+    <el-drawer v-model="subVisible" class="grading-drawer" modal-class="grading-drawer-mask" size="64%" :with-header="false">
       <div class="grading-panel">
         <div class="grading-panel-head">
           <div class="grading-heading">
@@ -312,46 +395,41 @@
             <span>平均分</span>
             <strong>{{ averageSubmissionScore }}</strong>
           </div>
-          <el-button
-            class="grading-release-all"
-            type="primary"
-            plain
-            :loading="releasingAll"
-            :disabled="!submissions.some((row) => row.correct_status === 'graded')"
-            @click="doReleaseAll"
-          >发布全部成绩</el-button>
         </div>
 
-        <div class="grading-table-card">
+        <div ref="gradingCardRef" class="grading-table-card">
+          <!-- 列宽由 JS 按卡片实际宽度统一分配（见 computeGradingColLayout）：
+               早期「学生列弹性(min-width) + 其余固定」在宽屏下学生列 balloon 到 600px+，
+               全固定列宽又在窄卡片下横向溢出；现每列均有 [min,max] 区间，总和恒等于卡片宽度 -->
           <el-table :data="submissions" v-loading="subLoading" class="grading-table" height="100%">
-            <el-table-column prop="student_name" label="学生" width="116" />
-            <el-table-column label="提交内容" min-width="210" show-overflow-tooltip>
+            <el-table-column prop="student_name" label="学生" :width="gradingCols.student" show-overflow-tooltip />
+            <el-table-column label="提交时间" :width="gradingCols.time" align="center">
               <template #default="{ row }">
-                {{ currentHw?.mode === 'questions' ? `客观题 ${row.objective_score ?? 0} 分` : (row.content || '附件提交') }}
+                <span class="grading-muted">{{ formatTime(row.submitted_at) }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="逾期" width="78" align="center">
+            <el-table-column label="逾期" :width="gradingCols.late" align="center">
               <template #default="{ row }">
                 <el-tag v-if="row.is_late" type="danger" size="small" effect="light" round>逾期</el-tag>
                 <span v-else class="grading-muted">正常</span>
               </template>
             </el-table-column>
-            <el-table-column prop="score" label="得分" width="86" align="center">
+            <el-table-column prop="score" label="得分" :width="gradingCols.score" align="center">
               <template #default="{ row }">
-                <span :class="row.score == null ? 'grading-muted' : 'grading-score'">{{ row.score ?? '未批' }}</span>
+                <span :class="row.score == null ? 'grading-muted' : 'grading-score'">{{ submissionScoreLabel(row) }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="成绩" width="96" align="center">
+            <!-- 批改即发布：不再有「已批改未发布」中间状态，成绩列仅展示状态 -->
+            <el-table-column label="成绩" :width="gradingCols.grade" align="center">
               <template #default="{ row }">
                 <el-tag v-if="row.correct_status === 'returned'" type="success" size="small" effect="light" round>已发布</el-tag>
-                <el-button v-else-if="row.correct_status === 'graded'" link type="success" @click="doReleaseOne(row)">发布</el-button>
-                <span v-else class="grading-muted">-</span>
+                <span v-else class="grading-muted">待批改</span>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="92" align="center">
+            <el-table-column label="操作" :width="gradingCols.op" align="center">
               <template #default="{ row }">
                 <button class="grading-action" type="button" @click="openGrade(row)">
-                  {{ row.score == null ? '批改' : '查看' }}
+                  查看/批改
                 </button>
               </template>
             </el-table-column>
@@ -367,25 +445,67 @@
 
     <!-- 批改弹窗 -->
     <el-dialog v-model="gradeVisible" class="grade-dialog" title="批改作业" width="720px" align-center>
+      <div v-if="currentHw?.mode === 'questions'" class="grade-mode-brief">
+        <span>共 {{ gradeForm.answerItems.length }} 题</span>
+        <span class="grade-brief-split" />
+        <span>客观题已自动批改</span>
+        <template v-if="pendingManualCount > 0">
+          <span class="grade-brief-split" />
+          <span class="grade-brief-pending">{{ pendingManualCount }} 道主观题待评分，已自动定位</span>
+        </template>
+        <span v-else class="grade-brief-done">主观题已全部评分</span>
+      </div>
       <div v-if="currentHw?.mode === 'questions'" class="answer-review-list">
-        <div v-for="(item, index) in gradeForm.answerItems" :key="item.id" class="answer-review-item">
+        <div
+          v-for="(item, index) in gradeForm.answerItems"
+          :key="item.id"
+          class="answer-review-item"
+          :class="{ 'is-pending': item.needs_manual_grading && item.score == null }"
+        >
           <div class="answer-review-head">
             <strong>{{ index + 1 }}. {{ item.snapshot.stem }}</strong>
             <span>{{ item.score ?? '待批' }} / {{ item.fullScore }} 分</span>
           </div>
-          <div class="student-answer">学生答案：{{ formatAnswer(item.student_answer) || '未作答' }}</div>
+          <div class="student-answer">学生答案：{{ formatAnswer(item.student_answer, item.snapshot) || '未作答' }}</div>
+          <div class="correct-answer">{{ item.snapshot.qtype === 'short' ? '参考答案' : '正确答案' }}：{{ correctAnswerLabel(item.snapshot) || '（未设置）' }}</div>
+          <div v-if="item.snapshot.analysis" class="answer-analysis">解析：{{ item.snapshot.analysis }}</div>
           <div v-if="item.needs_manual_grading" class="manual-grade-row">
+            <span class="manual-grade-label">评分</span>
             <el-input-number v-model="item.manualScore" :min="0" :max="item.fullScore" :step="0.5" />
             <el-input v-model="item.comment" placeholder="本题评语（选填）" />
           </div>
-          <el-tag v-else :type="item.is_correct ? 'success' : 'danger'" size="small">
-            {{ item.is_correct ? '自动判定正确' : '自动判定错误' }}
+          <el-tag v-else :type="item.is_correct ? 'success' : (Number(item.score) > 0 ? 'warning' : 'danger')" size="small">
+            {{ item.is_correct ? '自动判定正确' : (Number(item.score) > 0 ? '自动判定：部分正确' : '自动判定错误') }}
           </el-tag>
         </div>
       </div>
       <div v-else class="grade-content">
         <div class="grade-label">学生提交</div>
         <div class="grade-text">{{ gradeForm.content || '（无文本内容）' }}</div>
+        <div v-if="gradeForm.attachments.length" class="student-attachments">
+          <div class="grade-label">提交的附件（{{ gradeForm.attachments.length }}）</div>
+          <div class="student-attachment-list">
+            <a
+              v-for="(file, fileIndex) in gradeForm.attachments"
+              :key="fileIndex"
+              class="student-attachment-item"
+              :href="file.url"
+              target="_blank"
+              rel="noopener"
+            >
+              <el-image
+                v-if="isImageFile(file.name)"
+                :src="file.url"
+                fit="cover"
+                class="student-attachment-thumb"
+                :preview-src-list="gradeForm.attachments.filter((f) => isImageFile(f.name)).map((f) => f.url)"
+              />
+              <span v-else class="student-attachment-icon"><el-icon><Document /></el-icon></span>
+              <span class="student-attachment-name" :title="file.name">{{ file.name }}</span>
+              <span class="student-attachment-size">{{ file.size ? formatFileSize(file.size) : '' }}</span>
+            </a>
+          </div>
+        </div>
       </div>
       <el-form :model="gradeForm" label-width="70px">
         <el-form-item v-if="currentHw?.mode !== 'questions'" label="得分">
@@ -397,7 +517,7 @@
       <template #footer>
         <div class="dialog-footer">
           <el-button @click="gradeVisible = false">取消</el-button>
-          <el-button type="primary" :loading="grading" @click="doGrade">提交批改</el-button>
+          <el-button type="primary" :loading="grading" @click="doGrade()">提交批改</el-button>
         </div>
       </template>
     </el-dialog>
@@ -405,17 +525,23 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { Plus, Delete, EditPen, View, Document, Close, Promotion, Clock, ArrowUp, ArrowDown, Tickets, RefreshLeft } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
+import PdfScrollPreview from '@/components/PdfScrollPreview.vue'
+import QuestionDetailPopover from '@/components/QuestionDetailPopover.vue'
+import { uploadWithProgress } from '@/utils/upload'
+import { abbrQtype, abbrDifficulty } from '@/utils/question-abbr'
+import { blankAnswerText } from '@/utils/blank-answer'
 import { listClasses } from '@/api/classroom'
 import { listCatalogs } from '@/api/course'
 import { listQuestions } from '@/api/question'
 import {
   listHomeworks, createHomework, updateHomework, deleteHomework,
-  listSubmissions, gradeSubmission, releaseSubmission, releaseAllSubmissions,
+  removeHomeworkAttachment,
+  listSubmissions, gradeSubmission,
 } from '@/api/homework'
 
 const classes = ref([])
@@ -473,9 +599,49 @@ const originalSchedule = reactive({ start_time: '', deadline: '' })
 const isFrozen = computed(() => Boolean(form.id) && form.status !== 'draft')
 const selectedQuestions = ref([])
 const selectedTotal = computed(() => selectedQuestions.value.reduce((sum, item) => sum + Number(item.score || 0), 0))
-const homeworkFile = ref(null)
+// 已上传附件列表：[{name, size, type, url}]（支持多个，再次上传为追加不替换）
+const attachmentList = ref([])
+// 上传中的任务队列：[{key, raw, name, size, progress, status, error}]（选择文件后立即上传）
+const uploadTasks = ref([])
+// PDF 滚动预览目标（点击附件行「预览」后展示，师生端同一组件）
+const previewTarget = ref('')
 const homeworkUploadRef = ref(null)
-const currentAttachment = ref('')
+const uploading = computed(() => uploadTasks.value.some((task) => task.status === 'uploading'))
+const attachmentTotalSize = computed(() => attachmentList.value.reduce((sum, item) => sum + Number(item.size || 0), 0))
+const HOMEWORK_ATTACHMENT_MAX_COUNT = 9
+const HOMEWORK_ATTACHMENT_EXT = ['.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx', '.txt', '.zip', '.rar']
+
+function formatFileSize(bytes) {
+  const size = Number(bytes || 0)
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / 1024 / 1024).toFixed(2)} MB`
+}
+
+// 提交时间：精确到秒（如 2026/10/13 12:23:08）；空值回退占位
+function formatTime(iso) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+function fileExtOf(name) {
+  const parts = String(name || '').split('.')
+  return parts.length > 1 ? String(parts.pop()).toUpperCase() : 'FILE'
+}
+function isImageFile(name) {
+  return /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(String(name || ''))
+}
+function fileNameFromUrl(url) {
+  const raw = String(url || '').split('/').pop()?.split('?')[0] || '附件'
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return raw
+  }
+}
+// 上传进度走共享工具 utils/upload.js 的 uploadWithProgress（XHR 原生进度）
 const catalogOptions = ref([])
 const questionOptions = ref([])
 const questionLoading = ref(false)
@@ -486,6 +652,62 @@ const filteredQuestionOptions = computed(() => questionOptions.value.filter((ite
   if (questionFilters.difficulty && item.difficulty !== questionFilters.difficulty) return false
   return true
 }))
+// 已添加的题目在题库列表中整行高亮
+function poolRowClass({ row }) {
+  return isSelected(row.id) ? 'is-added' : ''
+}
+// 题干详情浮层的入参（题库行 / 已选项快照通用）
+function questionDetailOf(q) {
+  return {
+    stem: q?.stem || '',
+    qtype: q?.qtype || '',
+    difficulty: q?.difficulty || '',
+    qtypeDisplay: q?.qtype_display || '',
+    difficultyDisplay: q?.difficulty_display || '',
+    score: q?.score ?? '',
+    options: Array.isArray(q?.options) ? q.options : [],
+    answer: q?.answer ?? '',
+    analysis: q?.analysis || '',
+  }
+}
+// 当前筛选范围是否已全部选中（按钮在「全选 N 题」/「取消全选」间切换）
+const allFilteredSelected = computed(() => {
+  const list = filteredQuestionOptions.value
+  if (!list.length) return false
+  return list.every((item) => isSelected(item.id))
+})
+function toggleSelectAllFiltered() {
+  const list = filteredQuestionOptions.value
+  if (!list.length) {
+    ElMessage.warning('当前筛选范围内没有题目')
+    return
+  }
+  if (allFilteredSelected.value) {
+    // 取消全选：仅移除当前筛选范围内的题目，不影响范围外已选
+    const ids = new Set(list.map((item) => Number(item.id)))
+    const before = selectedQuestions.value.length
+    selectedQuestions.value = selectedQuestions.value.filter((item) => !ids.has(Number(item.question)))
+    const removed = before - selectedQuestions.value.length
+    if (removed) ElMessage.success(`已取消 ${removed} 题`)
+    return
+  }
+  let added = 0
+  list.forEach((item) => {
+    if (isSelected(item.id)) return
+    selectedQuestions.value.push({
+      question: item.id,
+      stem: item.stem,
+      qtype: item.qtype,
+      difficulty: item.difficulty,
+      qtype_display: item.qtype_display,
+      difficulty_display: item.difficulty_display,
+      score: Number(item.score) || 5,
+    })
+    added += 1
+  })
+  if (added) ElMessage.success(`已添加 ${added} 题`)
+  else ElMessage.info('当前筛选范围的题目均已添加')
+}
 
 function flattenCatalogs(items, depth = 0) {
   return (items || []).flatMap((item) => [
@@ -624,6 +846,10 @@ function validateTimeRange() {
 
 function onModeChange(mode) {
   if (mode === 'questions') {
+    // 切到题库模式：清理待上传任务与预览（已上传附件仍留在作业记录上）
+    uploadTasks.value = []
+    previewTarget.value = ''
+    homeworkUploadRef.value?.clearFiles()
     loadCatalogOptions()
     loadQuestionOptions()
   }
@@ -639,8 +865,13 @@ function toggleQuestion(question) {
   else selectedQuestions.value.push({
     question: question.id,
     stem: question.stem,
+    qtype: question.qtype,
+    difficulty: question.difficulty,
     qtype_display: question.qtype_display,
     difficulty_display: question.difficulty_display,
+    options: Array.isArray(question.options) ? question.options : [],
+    answer: question.answer ?? '',
+    analysis: question.analysis || '',
     score: Number(question.score) || 5,
   })
 }
@@ -652,23 +883,158 @@ function moveQuestion(index, offset) {
   selectedQuestions.value.splice(target, 0, item)
 }
 
+function isPdfName(name) {
+  return String(name || '').toLowerCase().endsWith('.pdf')
+}
+
 function onHomeworkFile(file) {
-  const name = String(file.name || '').toLowerCase()
-  const allowed = ['.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx', '.txt', '.zip', '.rar']
-  if (!allowed.some((ext) => name.endsWith(ext))) {
-    homeworkFile.value = null
+  const raw = file?.raw
+  if (!raw) return
+  const name = String(raw.name || '')
+  if (!HOMEWORK_ATTACHMENT_EXT.some((ext) => name.toLowerCase().endsWith(ext))) {
     homeworkUploadRef.value?.clearFiles()
     ElMessage.warning('不支持该文件格式，请上传 PDF、Office 文档、TXT 或压缩包')
     return
   }
-  if (Number(file.size || 0) > 20 * 1024 * 1024) {
-    homeworkFile.value = null
+  if (Number(raw.size || 0) > 20 * 1024 * 1024) {
     homeworkUploadRef.value?.clearFiles()
     ElMessage.warning('附件大小不能超过 20MB')
     return
   }
-  homeworkFile.value = file.raw
-  currentAttachment.value = ''
+  if (attachmentList.value.length + uploadTasks.value.length >= HOMEWORK_ATTACHMENT_MAX_COUNT) {
+    homeworkUploadRef.value?.clearFiles()
+    ElMessage.warning(`作业附件最多 ${HOMEWORK_ATTACHMENT_MAX_COUNT} 个`)
+    return
+  }
+  // 重置上传组件内部列表（不使用 :limit，否则再次选择会被 on-exceed 拦截）
+  homeworkUploadRef.value?.clearFiles()
+  // reactive 任务：status/progress 变更才能触发重渲染；raw 文件对象 markRaw 防代理破坏 FormData
+  const task = reactive({
+    key: `t${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    raw: markRaw(raw),
+    name,
+    size: Number(raw.size || 0),
+    progress: 0,
+    status: 'pending',
+    error: '',
+  })
+  uploadTasks.value.push(task)
+  // 选择即上传：不再等待点击保存/发布；多文件各自入队并行上传
+  uploadTask(task)
+}
+
+// 立即上传任务队列中的附件；新作业先自动创建草稿作为上传目标
+async function uploadTask(task) {
+  if (!task || task.status === 'uploading') return
+  if (!form.id) {
+    if (!form.title?.trim()) {
+      task.status = 'error'
+      task.error = '请先填写作业标题，再上传附件'
+      return
+    }
+    if (!validateTimeRange()) {
+      task.status = 'error'
+      task.error = '请先校正作业时间，再上传附件'
+      return
+    }
+    try {
+      await createDraftForAttachment()
+    } catch (error) {
+      task.status = 'error'
+      task.error = error?.message || '作业草稿创建失败，请稍后重试'
+      return
+    }
+  }
+  task.status = 'uploading'
+  task.progress = 0
+  task.error = ''
+  try {
+    const body = new FormData()
+    body.append('attachments', task.raw)
+    const payload = await uploadWithProgress(
+      'POST',
+      `/api/homeworks/${form.id}/attachments/`,
+      body,
+      (percent) => { task.progress = percent },
+    )
+    const added = payload?.data?.added || []
+    // 上传成功：附件进入「已上传附件」列表（追加不替换），同时移除任务卡片
+    added.forEach((item) => attachmentList.value.push(item))
+    uploadTasks.value = uploadTasks.value.filter((item) => item.key !== task.key)
+    if (previewTarget.value && !attachmentList.value.some((item) => item.url === previewTarget.value)) {
+      previewTarget.value = ''
+    }
+    ElMessage.success(`附件「${task.name}」上传成功`)
+  } catch (error) {
+    // 上传失败：保留任务卡片，展示失败状态并提供重试
+    task.status = 'error'
+    task.error = error?.message || '上传失败，请重试'
+  }
+}
+
+let draftCreating = null
+// 新作业上传附件前，先以当前表单信息创建草稿作业（附件必须挂到已存在的作业上）
+function createDraftForAttachment() {
+  if (form.id) return Promise.resolve()
+  if (!draftCreating) {
+    const courseId = activeCourseId()
+    if (!courseId) return Promise.reject(new Error('该班级尚未关联课程'))
+    // 多附件并行上传时共享同一次草稿创建，避免重复建单
+    draftCreating = createHomework({
+      title: form.title.trim(),
+      description: form.description || '',
+      start_time: form.start_time || null,
+      deadline: form.deadline || null,
+      course: courseId,
+      classroom: classId.value,
+      mode: 'attachment',
+      total_score: form.total_score || 100,
+      status: 'draft',
+    }).then((created) => {
+      if (!created?.id) throw new Error('作业草稿创建失败')
+      form.id = created.id
+      form.status = created.status || 'draft'
+    }).finally(() => { draftCreating = null })
+  }
+  return draftCreating
+}
+
+function removeTask(task) {
+  uploadTasks.value = uploadTasks.value.filter((item) => item.key !== task.key)
+  homeworkUploadRef.value?.clearFiles()
+}
+
+function retryTask(task) {
+  task.status = 'pending'
+  task.progress = 0
+  task.error = ''
+  uploadTask(task)
+}
+
+function togglePreview(item) {
+  previewTarget.value = previewTarget.value === item.url ? '' : item.url
+}
+
+async function removeAttachment(index) {
+  const item = attachmentList.value[index]
+  if (!item) return
+  try {
+    await ElMessageBox.confirm('移除后需重新上传，确定移除该附件吗？', '移除附件', {
+      type: 'warning',
+      confirmButtonText: '移除',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return // 用户取消
+  }
+  try {
+    await removeHomeworkAttachment(form.id, item.url)
+    attachmentList.value.splice(index, 1)
+    if (previewTarget.value === item.url) previewTarget.value = ''
+    ElMessage.success('附件已移除')
+  } catch {
+    // 错误信息由请求拦截器统一提示
+  }
 }
 
 function openEdit(row) {
@@ -684,13 +1050,21 @@ function openEdit(row) {
     mode: row?.mode || 'questions',
     status: row?.status || 'draft',
   })
-  homeworkFile.value = null
-  currentAttachment.value = row?.attachment || ''
+  // 已上传附件：后端序列化直接返回原文件名（存储文件名为 uuid，不再回填导致显示异常）
+  attachmentList.value = (row?.attachments || []).map((item) => ({ ...item }))
+  uploadTasks.value = []
+  previewTarget.value = ''
+  homeworkUploadRef.value?.clearFiles()
   selectedQuestions.value = (row?.questions || []).map((item) => ({
     question: item.question,
     stem: item.snapshot?.stem || '题目快照',
+    qtype: item.snapshot?.qtype || '',
+    difficulty: item.snapshot?.difficulty || '',
     qtype_display: item.snapshot?.qtype_display || item.snapshot?.qtype || '',
     difficulty_display: item.snapshot?.difficulty_display || '',
+    options: Array.isArray(item.snapshot?.options) ? item.snapshot.options : [],
+    answer: item.snapshot?.answer ?? '',
+    analysis: item.snapshot?.analysis || '',
     score: Number(item.score),
   }))
   questionFilters.catalog = null
@@ -702,16 +1076,21 @@ function openEdit(row) {
     loadQuestionOptions()
   }
 }
-async function save() {
+async function save(publish = false) {
   if (!form.title?.trim()) return ElMessage.warning('请填写标题')
   const courseId = activeCourseId()
   if (!courseId) return ElMessage.warning('该班级尚未关联课程')
   if (!validateTimeRange()) return
-  if (form.mode === 'questions' && form.status === 'published' && !selectedQuestions.value.length) {
+  // 附件为即时上传：保存前不能有上传中/待上传的任务，避免静默丢弃附件
+  if (uploading.value) return ElMessage.warning('附件正在上传中，请稍候再保存')
+  if (uploadTasks.value.length) return ElMessage.warning('还有附件未上传完成，请等待上传成功或先移除该文件')
+  const willPublish = publish || form.status === 'published'
+  if (form.mode === 'questions' && willPublish && !selectedQuestions.value.length) {
     return ElMessage.warning('发布题库作业前请至少选择一道题')
   }
   let payload = {
-    title: form.title.trim(), description: form.description, start_time: form.start_time || null, deadline: form.deadline || null, status: form.status,
+    title: form.title.trim(), description: form.description, start_time: form.start_time || null, deadline: form.deadline || null,
+    status: publish ? 'published' : form.status,
   }
   if (!isFrozen.value) {
     payload = { ...payload, course: courseId, classroom: classId.value, mode: form.mode }
@@ -721,20 +1100,18 @@ async function save() {
       payload.total_score = form.total_score
     }
   }
-  if (form.mode === 'attachment' && homeworkFile.value) {
-    const body = new FormData()
-    Object.entries(payload).forEach(([key, value]) => {
-      if (value !== null && value !== undefined) body.append(key, value)
-    })
-    body.append('attachment', homeworkFile.value)
-    payload = body
-  }
   saving.value = true
   try {
-    if (form.id) { await updateHomework(form.id, payload); ElMessage.success('已更新') }
-    else { await createHomework(payload); ElMessage.success('已保存') }
+    if (form.id) {
+      await updateHomework(form.id, payload)
+    } else {
+      await createHomework(payload)
+    }
+    ElMessage.success(publish ? '已发布' : (form.id ? '已更新' : '已保存'))
     editVisible.value = false
     load()
+  } catch {
+    // 错误信息由请求拦截器统一提示
   } finally {
     saving.value = false
   }
@@ -806,17 +1183,111 @@ async function openSubmissions(row) {
   } finally {
     subLoading.value = false
   }
+  await nextTick()
+  syncGradingCardWidth()
 }
+
+// ---- 批改抽屉表格列宽：按卡片实际宽度分配，保证占满且各列均衡 ----
+// el-table 只认两种列宽：数字 width（固定）或无 width（弹性列按 min-width 比例吸收全部剩余宽度）。
+// 「单弹性列」在宽屏抽屉下会 balloon（学生列曾到 600px+，用户反馈某列过宽）；
+// 「全固定列宽」总和超出卡片即横向溢出、不足则右侧留白。故量出卡片宽度后统一分配：
+// 每列有 [min, max] 区间与目标占比，先按占比取整并钳制，余量/亏量按列轮流 ±1px 微调，总和恒等于卡片宽度。
+// 注意：el-drawer 内容懒渲染，onMounted 时模板 ref 为 null，必须在抽屉打开/数据到位后主动量
+// （syncGradingCardWidth）；ResizeObserver 在 ref 就绪后懒加载建立，仅负责视口缩放时的重算。
+// 列宽实测基准（headless Chrome，正文 14px/600，cell padding 8px）：
+//   学生姓名 2-4 字 ≈ 28-56px（该列 show-overflow-tooltip，EP 注入 white-space:nowrap，超长省略号不换行）；
+//   时间「2026/10/13 14:30:22」≈ 146px；得分「客观 5 分」≈ 59px；
+//   逾期/成绩标签 ≈ 40-55px；操作按钮「查看/批改」≈ 82px（含 padding/border）。
+// 各列下限 = 内容实测宽 + 16px 内边距 + 安全余量；上限抑制宽屏膨胀（学生列上限 150——
+//   用户反馈「学生列空了这么多」，宽屏下剩余宽度应优先给时间/操作列）。
+// 实测：1440（卡片 624）→ [94,176,70,84,81,119]；1920（卡片 764）→ 时间列到 212 上限，全部单行。
+const GRADING_COL_LAYOUT = [
+  { key: 'student', min: 84, max: 150, share: 0.16 }, // 学生（姓名，超长省略 + tooltip，不会换行）
+  { key: 'time', min: 176, max: 212, share: 0.27 },   // 提交时间（YYYY/M/D H:mm:ss 单行不换行）
+  { key: 'late', min: 70, max: 92, share: 0.10 },     // 逾期（标签/正常）
+  { key: 'score', min: 84, max: 100, share: 0.13 },   // 得分（客观 N 分/未批/数字）
+  { key: 'grade', min: 78, max: 112, share: 0.14 },   // 成绩（待批改/已发布标签）
+  { key: 'op', min: 104, max: 128, share: 0.20 },     // 操作（查看/批改按钮，white-space: nowrap）
+]
+const GRADING_COL_FALLBACK_W = 700
+function computeGradingColLayout(total) {
+  const width = total > 200 ? total : GRADING_COL_FALLBACK_W
+  const cols = GRADING_COL_LAYOUT.map((col) => ({
+    ...col,
+    w: Math.min(col.max, Math.max(col.min, Math.round(width * col.share))),
+  }))
+  // 余量（width > Σw）按未达上限的列轮流 +1；亏量按未触下限的列轮流 -1，直至严格等于 width
+  let diff = width - cols.reduce((sum, col) => sum + col.w, 0)
+  let guard = 0
+  while (diff !== 0 && guard < 4000) {
+    const grow = diff > 0
+    const pool = cols.filter((col) => (grow ? col.w < col.max : col.w > col.min))
+    if (!pool.length) break
+    const col = pool[guard % pool.length]
+    col.w += grow ? 1 : -1
+    diff += grow ? -1 : 1
+    guard += 1
+  }
+  return cols
+}
+const gradingCardRef = ref(null)
+const gradingCardW = ref(0)
+const gradingCols = computed(() => {
+  const cols = computeGradingColLayout(gradingCardW.value)
+  return { student: cols[0].w, time: cols[1].w, late: cols[2].w, score: cols[3].w, grade: cols[4].w, op: cols[5].w }
+})
+// 主动量一次卡片宽度：抽屉打开/数据渲染完成/视口变化时调用。
+// 不能只依赖 onMounted 里的 ResizeObserver——抽屉内容在部分场景下 ref 挂载时机不可靠。
+function syncGradingCardWidth() {
+  const el = gradingCardRef.value
+  if (!el) return
+  const w = Math.round(el.clientWidth)
+  if (w > 0 && w !== gradingCardW.value) gradingCardW.value = w
+  ensureGradingRO()
+}
+let gradingCardRO = null
+function ensureGradingRO() {
+  if (gradingCardRO || typeof ResizeObserver === 'undefined' || !gradingCardRef.value) return
+  gradingCardRO = new ResizeObserver((entries) => {
+    const w = Math.round(entries[0].contentRect.width)
+    if (w > 0 && w !== gradingCardW.value) gradingCardW.value = w
+  })
+  gradingCardRO.observe(gradingCardRef.value)
+}
+onMounted(() => {
+  syncGradingCardWidth()
+})
+onBeforeUnmount(() => {
+  if (gradingCardRO) {
+    gradingCardRO.disconnect()
+    gradingCardRO = null
+  }
+})
+watch(subVisible, (visible) => {
+  if (visible) nextTick(syncGradingCardWidth)
+})
 
 const gradeVisible = ref(false)
 const grading = ref(false)
-const gradeForm = reactive({ id: null, content: '', score: 0, comment: '' })
+const gradeForm = reactive({ id: null, content: '', score: 0, comment: '', attachments: [], answerItems: [] })
+// 待评分主观题数量：批改弹窗摘要与「定位」提示共用
+const pendingManualCount = computed(() => gradeForm.answerItems.filter((item) => item.needs_manual_grading && item.score == null).length)
+// 得分列：未批改的混合作业只出了客观题分，标注「客观 X 分」避免误读为最终成绩
+function submissionScoreLabel(row) {
+  if (row.score == null) return '未批'
+  if (row.correct_status === 'submitted') return `客观 ${row.score} 分`
+  return String(row.score)
+}
 function openGrade(row) {
   Object.assign(gradeForm, {
     id: row.id,
     content: row.content,
     score: Number(row.score) || 0,
     comment: row.comment || '',
+    attachments: [
+      ...(row.attachment ? [{ name: fileNameFromUrl(row.attachment), url: row.attachment, size: 0 }] : []),
+      ...(row.attachments || []),
+    ],
     answerItems: (row.answer_items || []).map((item) => ({
       ...item,
       fullScore: Number(currentHw.value?.questions?.find((q) => q.id === item.homework_question)?.score || 0),
@@ -825,16 +1296,65 @@ function openGrade(row) {
     })),
   })
   gradeVisible.value = true
+  // 题目回顾列表较长时可滚动：打开后自动定位到第一道待评分主观题，
+  // 避免评分行藏在折叠线下方被漏看（历史反馈：看不到简答题批改选项）
+  nextTick(() => {
+    setTimeout(() => {
+      const first = document.querySelector('.grade-dialog .answer-review-item.is-pending .manual-grade-row')
+      if (first) first.scrollIntoView({ block: 'center' })
+    }, 60)
+  })
 }
-function formatAnswer(answer) {
+function formatAnswer(answer, snapshot) {
   if (!answer) return ''
-  if (answer.key != null) return String(answer.key)
-  if (answer.keys) return answer.keys.join('、')
-  if (answer.blanks) return answer.blanks.join(' / ')
-  if (answer.text != null) return String(answer.text)
-  return JSON.stringify(answer)
+  const options = snapshot?.options || []
+  // 选择题：选项字母附带选项内容，避免只显示 A/B/C/D 造成困惑（与正确答案展示一致）
+  const label = (key) => {
+    const opt = options.find((o) => o.key === key)
+    return opt ? `${key}. ${opt.text}` : String(key)
+  }
+  if (answer.key != null && String(answer.key) !== '') return label(answer.key)
+  if (Array.isArray(answer.keys)) return answer.keys.length ? answer.keys.map(label).join('、') : ''
+  if (Array.isArray(answer.blanks)) {
+    const filled = answer.blanks.map((b) => String(b ?? '').trim()).filter((b) => b !== '')
+    return filled.length ? filled.join('；') : ''
+  }
+  if (answer.text != null && String(answer.text).trim() !== '') return String(answer.text)
+  return ''
+}
+// 正确答案展示：附带选项内容，避免只显示 A/B/C/D 字母
+function correctAnswerLabel(snapshot) {
+  const answer = snapshot?.answer || {}
+  const options = snapshot?.options || []
+  const label = (key) => {
+    const opt = options.find((o) => o.key === key)
+    return opt ? `${key}. ${opt.text}` : String(key)
+  }
+  if (answer.key != null && String(answer.key) !== '') return label(answer.key)
+  if (answer.keys?.length) return answer.keys.map(label).join('、')
+  if (answer.blanks?.length) return blankAnswerText(answer)
+  if (answer.text != null && String(answer.text).trim()) return String(answer.text)
+  return ''
 }
 async function doGrade() {
+  // 主观题评分前端校验：空值/非数字/越界直接拦截并提示题号，
+  // 避免把脏数据发给后端换回一句难懂的 400（分数框被清空是常见操作）
+  if (currentHw.value?.mode === 'questions') {
+    for (let index = 0; index < gradeForm.answerItems.length; index++) {
+      const item = gradeForm.answerItems[index]
+      if (!item.needs_manual_grading) continue
+      const raw = item.manualScore
+      const num = raw === null || raw === undefined || String(raw).trim() === '' ? NaN : Number(raw)
+      if (!Number.isFinite(num)) {
+        ElMessage.warning(`第 ${index + 1} 题（${abbrQtype(item.snapshot)}）请填写 0 ~ ${item.fullScore} 的有效分数`)
+        return
+      }
+      if (num < 0 || num > Number(item.fullScore || 0)) {
+        ElMessage.warning(`第 ${index + 1} 题评分必须在 0 ~ ${item.fullScore} 分之间`)
+        return
+      }
+    }
+  }
   grading.value = true
   try {
     const payload = { score: gradeForm.score, comment: gradeForm.comment }
@@ -845,35 +1365,13 @@ async function doGrade() {
           .map((item) => [item.id, { score: item.manualScore, comment: item.comment }]),
       )
     }
+    // 批改即发布：后端 grade() 直接置 RETURNED，无「已批改未发布」中间状态
     await gradeSubmission(gradeForm.id, payload)
-    ElMessage.success('批改完成')
+    ElMessage.success('批改完成，成绩已发布')
     gradeVisible.value = false
     openSubmissions(currentHw.value)
   } finally {
     grading.value = false
-  }
-}
-
-// ---- 成绩发布 ----
-const releasingAll = ref(false)
-async function doReleaseOne(row) {
-  try {
-    await releaseSubmission(row.id)
-    ElMessage.success('成绩已发布')
-    openSubmissions(currentHw.value)
-  } catch {
-    // 错误信息由拦截器提示
-  }
-}
-async function doReleaseAll() {
-  if (!currentHw.value) return
-  releasingAll.value = true
-  try {
-    const res = await releaseAllSubmissions(currentHw.value.id)
-    ElMessage.success(`已发布 ${res.released} 份成绩`)
-    openSubmissions(currentHw.value)
-  } finally {
-    releasingAll.value = false
   }
 }
 
@@ -1092,7 +1590,7 @@ onMounted(loadClasses)
 .creation-form-grid {
   display: grid;
   grid-template-columns: clamp(340px, 25vw, 430px) minmax(0, 1fr);
-  gap: 24px;
+  gap: 12px;
   align-items: stretch;
   height: 100%;
   min-height: 0;
@@ -1106,9 +1604,9 @@ onMounted(loadClasses)
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  padding: 26px 28px 28px;
+  padding: 14px 14px 16px;
   border: 1px solid rgba(191, 219, 254, 0.58);
-  border-radius: 28px;
+  border-radius: 22px;
   background: rgba(255, 255, 255, 0.92);
   box-shadow:
     0 24px 64px rgba(37, 99, 235, 0.1),
@@ -1119,6 +1617,10 @@ onMounted(loadClasses)
 .hw-info-card {
   overflow: auto;
 }
+/* 左卡（基础信息）表单项间距收紧 */
+.hw-info-card :deep(.el-form-item) {
+  margin-bottom: 12px;
+}
 .hw-content-card {
   overflow: hidden;
 }
@@ -1126,16 +1628,16 @@ onMounted(loadClasses)
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 18px;
-  padding-bottom: 16px;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
   border-bottom: 1px solid rgba(226, 232, 240, 0.9);
   color: #0f172a;
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 800;
 }
 .hw-card-head :deep(.el-icon) {
   color: #2563eb;
-  font-size: 17px;
+  font-size: 15px;
 }
 .hw-card :deep(.el-form-item:last-child) {
   margin-bottom: 0;
@@ -1170,7 +1672,7 @@ onMounted(loadClasses)
   justify-content: space-between;
   gap: 14px;
   min-width: 0;
-  padding: 14px 30px;
+  padding: 10px 16px;
   border-bottom: 1px solid rgba(37, 99, 235, 0.08);
   background: rgba(255, 255, 255, 0.9);
   box-shadow: 0 8px 22px rgba(37, 99, 235, 0.06);
@@ -1271,7 +1773,7 @@ onMounted(loadClasses)
 .homework-editor-body {
   min-width: 0;
   min-height: 0;
-  padding: 24px 34px 30px;
+  padding: 12px 14px 14px;
   overflow: hidden;
 }
 .hw-editor-stats {
@@ -1677,31 +2179,92 @@ onMounted(loadClasses)
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
   min-height: 0;
+  min-width: 0;
   margin: 0;
   padding: 0;
   border: 0;
   background: transparent;
 }
-.question-pool-panel {
-  flex: 0 0 auto;
-  display: grid;
-  gap: 12px;
+/* 冻结提示独占一行，不参与左右分行 */
+.question-builder :deep(.el-alert) {
+  flex: none;
+  margin: 0;
+}
+/* 左右分行容器：左题库 + 右已选 */
+.question-builder-row {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  gap: 10px;
+  min-height: 0;
   min-width: 0;
 }
-.question-filters {
+/* 已发布（冻结）态仅剩已选列：占满宽度，避免右侧大片空白 */
+.question-builder.selected-only .selected-panel {
+  flex: 1 1 auto;
+  max-width: 860px;
+}
+.question-pool-panel {
+  flex: 1 1 0;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+}
+.question-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+.question-filters :deep(.el-select) {
+  flex: 1 1 128px;
+  min-width: 0;
 }
 .question-filters :deep(.el-select__wrapper) {
-  min-height: 44px;
-  padding: 0 12px;
-  border-radius: 13px;
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: 11px;
   background: rgba(248, 251, 255, 0.94);
   box-shadow: inset 0 0 0 1px #dbe5ef, 0 4px 12px rgba(37, 99, 235, 0.035);
   transition: background-color 0.18s ease, box-shadow 0.18s ease;
+}
+/* 全选当前筛选范围（范围已全选时变为「取消全选」） */
+.pool-select-all {
+  flex: 0 0 auto;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid #bfdbfe;
+  border-radius: 11px;
+  color: #2563eb;
+  background: rgba(239, 246, 255, 0.78);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+.pool-select-all:hover:not(:disabled) {
+  border-color: #60a5fa;
+  color: #fff;
+  background: #3b82f6;
+}
+.pool-select-all:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.pool-select-all.active {
+  border-color: #fecaca;
+  color: #ef4444;
+  background: #fef2f2;
+}
+.pool-select-all.active:hover:not(:disabled) {
+  border-color: #ef4444;
+  color: #fff;
+  background: #ef4444;
 }
 .question-filters :deep(.el-select__wrapper:hover),
 .question-filters :deep(.el-select__wrapper.is-focused) {
@@ -1720,39 +2283,60 @@ onMounted(loadClasses)
   transition: background-color 0.18s ease;
 }
 .question-pool-table :deep(th.el-table__cell) {
-  height: 44px;
+  height: 36px;
   border-bottom: 1px solid #e2ebf7;
   color: #64748b;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 800;
   background: linear-gradient(180deg, #f8fbff 0%, #f3f7fc 100%);
 }
 .question-pool-table :deep(td.el-table__cell) {
-  height: 52px;
+  height: 44px;
+  padding: 0 6px;
   border-bottom-color: #edf2f8;
   color: #334155;
 }
+/* EP 默认 .cell 有 padding: 0 12px 且 overflow: hidden：窄列里会把标签右侧裁掉（表现为标签被截断/带小点）。
+   题库列表列宽很紧，必须把 .cell 内边距清零，空间全部留给标签与按钮 */
+.question-pool-table :deep(.el-table__cell .cell) {
+  padding: 0;
+}
 .question-pool-table :deep(.el-table__row:hover > td.el-table__cell) {
   background: #f8fbff;
+}
+/* 已添加题目：整行浅蓝高亮 + 首列左侧蓝色竖条 + 题干加粗变色 */
+.question-pool-table :deep(.el-table__row.is-added > td.el-table__cell) {
+  background: #e8f1fe;
+}
+.question-pool-table :deep(.el-table__row.is-added:hover > td.el-table__cell) {
+  background: #d9e8fd;
+}
+.question-pool-table :deep(.el-table__row.is-added > td.el-table__cell:first-child) {
+  box-shadow: inset 3px 0 0 #3b82f6;
+}
+.question-pool-table :deep(.el-table__row.is-added .pool-stem) {
+  color: #1d4ed8;
+  font-weight: 700;
 }
 .pool-stem {
   display: block;
   overflow: hidden;
   color: #334155;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 560;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: help;
 }
 .pool-tag {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 48px;
-  height: 24px;
-  padding: 0 8px;
-  border-radius: 8px;
-  font-size: 12px;
+  min-width: 32px;
+  height: 20px;
+  padding: 0 4px;
+  border-radius: 6px;
+  font-size: 11.5px;
   font-weight: 750;
   white-space: nowrap;
 }
@@ -1782,14 +2366,14 @@ onMounted(loadClasses)
   background: rgba(254, 242, 242, 0.78);
 }
 .pool-action {
-  height: 28px;
-  min-width: 50px;
-  padding: 0 10px;
+  height: 24px;
+  min-width: 44px;
+  padding: 0 6px;
   border: 1px solid #bfdbfe;
-  border-radius: 9px;
+  border-radius: 7px;
   color: #2563eb;
   background: rgba(239, 246, 255, 0.78);
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 800;
   cursor: pointer;
   transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
@@ -1814,12 +2398,12 @@ onMounted(loadClasses)
   display: none !important;
 }
 .selected-panel {
-  flex: 1 1 0;
+  flex: 0 0 384px;
   display: flex;
   flex-direction: column;
   min-height: 0;
-  margin-top: 2px;
-  padding: 14px;
+  min-width: 0;
+  padding: 12px 12px 10px;
   border: 1px solid #e5edf7;
   border-radius: 18px;
   background: rgba(248, 251, 255, 0.68);
@@ -1828,33 +2412,39 @@ onMounted(loadClasses)
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
+  gap: 10px;
+  padding: 0 2px 10px;
+  border-bottom: 1px solid #e8eef7;
   color: #334155;
-  font-size: 15px;
+  font-size: 14px;
 }
 .selected-header strong {
   font-weight: 800;
+  white-space: nowrap;
 }
-.selected-header span { color: #2563eb; font-weight: 700; }
+.selected-header span { color: #2563eb; font-weight: 700; white-space: nowrap; }
 .selected-empty {
   display: flex;
+  flex: 1;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  flex: 1;
-  min-height: 120px;
-  margin-top: 12px;
-  padding: 15px 12px;
+  gap: 8px;
+  min-height: 140px;
+  margin-top: 10px;
+  padding: 15px 14px;
   border: 1px dashed #cbd5e1;
-  border-radius: 10px;
+  border-radius: 12px;
   color: #94a3b8;
   font-size: 13px;
+  text-align: center;
   background: rgba(255, 255, 255, 0.5);
 }
+.selected-empty :deep(.el-icon) { font-size: 22px; }
 .selected-list-scroll {
   flex: 1;
   min-height: 0;
-  margin-top: 12px;
+  margin-top: 10px;
 }
 .selected-list-scroll :deep(.el-scrollbar__wrap) {
   overflow-x: hidden;
@@ -1869,38 +2459,64 @@ onMounted(loadClasses)
   min-height: 0;
   padding: 0 2px 2px 0;
 }
+/* 紧凑双行卡片：上行序号+题干（两行截断），下行简写题型+分值+操作 */
 .selected-item {
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) auto 72px 18px minmax(128px, auto);
-  align-items: center;
-  gap: 10px;
-  min-height: 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   min-width: 0;
-  padding: 9px 12px;
+  padding: 8px 10px;
   border: 1px solid #e8eef7;
-  border-radius: 13px;
+  border-radius: 12px;
   background: #fff;
   box-shadow: 0 5px 14px rgba(37, 99, 235, 0.035);
+}
+.selected-item-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+.selected-item-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 34px;
 }
 .question-order {
   display: grid;
   width: 26px;
   height: 26px;
+  flex: none;
   place-items: center;
   border-radius: 8px;
   color: #2563eb;
   background: #eff6ff;
+  font-size: 13px;
   font-weight: 800;
   box-shadow: inset 0 0 0 1px rgba(191, 219, 254, 0.72);
 }
-.selected-stem { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.selected-stem {
+  display: -webkit-box;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+  cursor: help;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.selected-qtype { min-width: 36px; height: 22px; padding: 0 6px; font-size: 12px; }
 .score-input {
-  width: 72px;
+  width: 64px;
   flex: none;
 }
 .score-input :deep(.el-input__wrapper) {
-  min-height: 34px;
-  border-radius: 10px;
+  min-height: 30px;
+  border-radius: 9px;
   background: #f8fbff;
   box-shadow: inset 0 0 0 1px #dbeafe;
 }
@@ -1925,8 +2541,8 @@ onMounted(loadClasses)
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 4px;
-  min-width: 128px;
+  gap: 2px;
+  margin-left: auto;
   white-space: nowrap;
 }
 :global(.grading-drawer-mask) {
@@ -1936,6 +2552,9 @@ onMounted(loadClasses)
 :global(.grading-drawer.el-drawer) {
   margin: 18px 22px 18px 0;
   height: calc(100% - 36px) !important;
+  /* 抽屉只放提交列表（批改表单是独立弹窗）：62% 在宽屏下过宽（1920 时约 1190px），
+     会把表格剩余宽度全灌进学生列。封顶 820px 后卡片约 766px，六列可均衡分配 */
+  max-width: 820px;
   border: 1px solid rgba(191, 219, 254, 0.72);
   border-radius: 22px;
   overflow: hidden;
@@ -1951,7 +2570,8 @@ onMounted(loadClasses)
   grid-template-rows: auto auto minmax(0, 1fr);
   gap: 16px;
   height: 100%;
-  padding: 24px 26px 26px;
+  /* 左右 26→18：1440 视口下卡片宽 +16px，配合列宽分配保证时间列不换行 */
+  padding: 24px 18px 26px;
   color: #0f172a;
 }
 .grading-panel-head {
@@ -2073,14 +2693,21 @@ onMounted(loadClasses)
 .grading-table :deep(td.el-table__cell) {
   height: 58px;
   color: #334155;
+  /* 字体统一：表格正文一律 14px/600。学生列无 class 曾走默认 400，
+     而其他列 700/850 混杂，用户反馈「学生姓名字体跟别的列不一样」 */
+  font-size: 14px;
+  font-weight: 600;
+}
+/* 收紧单元格左右内边距（EP 默认 12px → 8px），把宽度让给内容，
+   配合 JS 列宽分配保证时间列/操作按钮在窄卡片下也不换行 */
+.grading-table :deep(.cell) {
+  padding: 0 8px;
 }
 .grading-score {
   color: #2563eb;
-  font-weight: 850;
 }
 .grading-muted {
   color: #94a3b8;
-  font-weight: 700;
 }
 .grading-action {
   height: 30px;
@@ -2090,7 +2717,9 @@ onMounted(loadClasses)
   color: #2563eb;
   background: #eff6ff;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 700;
+  /* 按钮文字不换行：列宽按按钮实测宽 + 安全余量分配（见 GRADING_COL_LAYOUT op 项） */
+  white-space: nowrap;
   cursor: pointer;
   transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease;
 }
@@ -2109,6 +2738,23 @@ onMounted(loadClasses)
   font-size: 14px;
 }
 .answer-review-list { display: grid; gap: 12px; max-height: 55vh; overflow: auto; margin-bottom: 18px; }
+/* 批改弹窗摘要栏：一眼看清共几题、几题待评分（主观题评分行在列表下方，摘要+定位双保险） */
+.grade-mode-brief {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border: 1px solid #dbe5ef;
+  border-radius: 10px;
+  background: #f6f9fd;
+  color: #475569;
+  font-size: 13px;
+}
+.grade-brief-split { width: 1px; height: 12px; background: #cbd5e1; }
+.grade-brief-pending { color: #b45309; font-weight: 700; }
+.grade-brief-done { color: #16a34a; font-weight: 600; }
 .answer-review-item {
   display: grid;
   gap: 10px;
@@ -2117,10 +2763,18 @@ onMounted(loadClasses)
   border-radius: 12px;
   background: #f8fafc;
 }
+/* 待评分主观题高亮：蓝色边 + 左侧色条，滚动定位后不至于再错过 */
+.answer-review-item.is-pending {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  box-shadow: inset 3px 0 0 #2563eb;
+}
 .answer-review-head { display: flex; justify-content: space-between; gap: 16px; line-height: 1.55; }
 .answer-review-head span { flex: none; color: #2563eb; }
 .student-answer { color: #475569; white-space: pre-wrap; }
-.manual-grade-row { display: grid; grid-template-columns: 140px 1fr; gap: 10px; }
+/* 三列网格：标签 / 分数输入 / 评语输入（原两列模板会把评语挤到第二行） */
+.manual-grade-row { display: grid; grid-template-columns: 48px 160px 1fr; gap: 10px; align-items: center; }
+.manual-grade-label { color: #0f172a; font-weight: 700; }
 .attachment-panel {
   display: grid;
   flex: 1;
@@ -2145,33 +2799,54 @@ onMounted(loadClasses)
 .attachment-upload-icon { color: #3b82f6; font-size: 42px; }
 .attachment-upload-title { margin-top: 15px; color: #334155; font-size: 15px; font-weight: 750; }
 .attachment-upload-tip { margin-top: 7px; color: #94a3b8; font-size: 13px; }
-.existing-attachment {
+/* ---- 已上传附件列表（编辑页直接展示，支持查看 / 移除） ---- */
+.uploaded-attachments {
   width: min(520px, 86%);
-  margin-top: 12px;
-  padding: 12px 16px;
+  margin-top: 14px;
+  padding: 14px 16px;
   border: 1px solid #dbeafe;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  color: #2563eb;
+  border-radius: 14px;
   background: #f8fbff;
+  display: grid;
+  gap: 10px;
+}
+.uploaded-attachments-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.uploaded-attachments-title {
+  color: #1e293b;
+  font-size: 13px;
+  font-weight: 800;
+}
+.uploaded-attachments-title::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 7px;
+  border-radius: 50%;
+  background: #16a34a;
+  vertical-align: 1px;
+}
+.uploaded-attachments-hint { color: #94a3b8; font-size: 12px; }
+.uploaded-attachment-item { display: flex; align-items: center; gap: 12px; }
+.attachment-view-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #2563eb;
   font-size: 13px;
   font-weight: 700;
   text-decoration: none;
 }
-.existing-attachment:hover { border-color: #93c5fd; background: #eff6ff; }
+.attachment-view-link:hover { color: #1d4ed8; text-decoration: underline; }
 @media (max-width: 1180px) {
-  .creation-form-grid { grid-template-columns: 320px minmax(0, 1fr); gap: 16px; }
-  .hw-card { padding: 20px; }
-  .selected-item {
-    grid-template-columns: 28px minmax(0, 1fr) auto 72px 18px;
-  }
-  .selected-actions {
-    grid-column: 2 / -1;
-    justify-content: flex-start;
-  }
+  .creation-form-grid { grid-template-columns: 320px minmax(0, 1fr); gap: 10px; }
+  .hw-card { padding: 12px 12px 14px; }
+  .selected-panel { flex-basis: 320px; }
 }
 @media (max-width: 920px) {
   .creation-form-grid { grid-template-columns: 1fr; }
@@ -2182,22 +2857,148 @@ onMounted(loadClasses)
   .creation-form-grid { height: auto; }
   .form-col { min-height: auto; }
   .hw-content-card { min-height: 720px; }
+  /* 窄屏：题目选择区回退上下结构（题库固定高度，已选列自适应） */
+  .question-builder-row { flex-direction: column; }
+  .question-pool-panel { flex: none; height: 400px; }
+  .selected-panel { flex: 1 1 auto; min-height: 300px; }
 }
 @media (max-width: 720px) {
-  .question-filters { grid-template-columns: 1fr; }
-  .selected-header { align-items: flex-start; flex-direction: column; gap: 5px; }
-  .selected-item {
-    grid-template-columns: 28px minmax(0, 1fr) auto;
-  }
-  .score-input {
-    grid-column: 2;
-    width: 90px;
-  }
-  .score-unit {
-    grid-column: 3;
-  }
-  .selected-actions {
-    grid-column: 2 / -1;
-  }
+  .selected-header { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .question-pool-panel { height: 360px; }
 }
+
+/* ---- 时间选择提示 ---- */
+.time-field-tip {
+  padding: 0 2px 2px;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* ---- 附件上传：文件信息 / 进度 / 状态 / 大小统计 ---- */
+.upload-file-card {
+  width: min(520px, 86%);
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: #f8fbff;
+  display: grid;
+  gap: 10px;
+}
+.upload-file-card.is-success { border-color: #bbf7d0; background: #f0fdf4; }
+.upload-file-card.is-error { border-color: #fecaca; background: #fef2f2; }
+.upload-file-main { display: flex; align-items: center; gap: 12px; }
+.upload-file-icon {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: #2563eb;
+  background: #eff6ff;
+  font-size: 20px;
+}
+.upload-file-card.is-success .upload-file-icon { color: #16a34a; background: #dcfce7; }
+.upload-file-card.is-error .upload-file-icon { color: #dc2626; background: #fee2e2; }
+.upload-file-info { flex: 1; min-width: 0; }
+.upload-file-name {
+  color: #1e293b;
+  font-size: 13px;
+  font-weight: 750;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.upload-file-meta {
+  margin-top: 3px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #64748b;
+  font-size: 12px;
+}
+.upload-file-ext {
+  padding: 0 6px;
+  border-radius: 5px;
+  color: #2563eb;
+  background: #dbeafe;
+  font-size: 11px;
+  font-weight: 800;
+}
+.upload-file-status { flex: none; display: flex; align-items: center; gap: 8px; }
+.upload-status-text { font-size: 12px; font-weight: 800; }
+.upload-status-text.is-uploading { color: #2563eb; }
+.upload-progress-track {
+  height: 6px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+.upload-progress-bar {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #60a5fa, #2563eb);
+  transition: width 0.2s ease;
+}
+.upload-error-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.upload-error-text { color: #dc2626; font-size: 12px; }
+.upload-file-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+.upload-replace-tip { color: #f59e0b; }
+
+/* 附件 PDF 滚动预览（无工具栏，师生端同一组件） */
+.attachment-preview-box {
+  margin-top: 12px;
+}
+
+/* ---- 批改弹窗：正确答案/解析与学生附件预览 ---- */
+.correct-answer { color: #059669; font-weight: 700; }
+.correct-answer::before { content: ''; }
+.answer-analysis { color: #64748b; font-size: 13px; line-height: 1.6; }
+.manual-grade-label { align-self: center; color: #64748b; font-size: 13px; font-weight: 700; }
+.student-attachments { margin-top: 14px; }
+.student-attachment-list {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.student-attachment-item {
+  width: 108px;
+  padding: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  background: #fff;
+  text-decoration: none;
+  transition: border-color 0.18s ease, transform 0.18s ease;
+}
+.student-attachment-item:hover { border-color: #93c5fd; transform: translateY(-2px); }
+.student-attachment-thumb {
+  width: 88px;
+  height: 64px;
+  border-radius: 7px;
+  background: #f1f5f9;
+  cursor: zoom-in;
+}
+.student-attachment-icon { color: #64748b; font-size: 30px; line-height: 64px; }
+.student-attachment-name {
+  max-width: 100%;
+  color: #334155;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.student-attachment-size { color: #94a3b8; font-size: 11px; }
 </style>

@@ -1,8 +1,19 @@
+from decimal import Decimal, InvalidOperation
+
 from django.conf import settings
 from django.db import models
 
 from apps.common.models import BaseModel
 from apps.courses.models import Catalog, Course
+
+
+def _split_score(total, n: int) -> list:
+    """把总分尽量均分到 n 份（余数依次补给前几份，保证 Σ=total，保留 1 位小数）。"""
+    if n <= 0:
+        return []
+    tenths = int(Decimal(str(total or 0)).quantize(Decimal("0.1")) * 10)
+    base, rem = divmod(tenths, n)
+    return [Decimal(base + (1 if i < rem else 0)) / 10 for i in range(n)]
 
 
 class Question(BaseModel):
@@ -41,7 +52,7 @@ class Question(BaseModel):
     qtype = models.CharField("题型", max_length=16, choices=QType.choices)
     stem = models.TextField("题干")
     options = models.JSONField("选项", default=list, blank=True)  # [{key, text}, ...]
-    answer = models.JSONField("答案", default=dict, blank=True)   # 结构随题型而定
+    answer = models.JSONField("答案", default=dict, blank=True)   # 结构随题型而定；填空={"blanks":[{"text","score"}]}（按空赋分，score=Σ空分）
     analysis = models.TextField("解析", blank=True)
     score = models.DecimalField("分值", max_digits=5, decimal_places=1, default=5)
     difficulty = models.CharField(
@@ -60,6 +71,54 @@ class Question(BaseModel):
 
     def __str__(self):
         return self.stem[:30]
+
+    def save(self, *args, **kwargs):
+        # 判断题选项兜底：手动/AI/导入等路径漏带 options 时补默认对错项，
+        # 避免学生端渲染不出选项（答案 key 为 T/F 的历史数据用 T/F 选项保持一致）
+        if self.qtype == self.QType.JUDGE and not self.options:
+            key = str((self.answer or {}).get("key", "")).upper()
+            if key in ("T", "F"):
+                self.options = [{"key": "T", "text": "正确"}, {"key": "F", "text": "错误"}]
+            else:
+                self.options = [{"key": "A", "text": "正确"}, {"key": "B", "text": "错误"}]
+        if self.qtype == self.QType.BLANK:
+            self._normalize_blank_answer()
+        super().save(*args, **kwargs)
+
+    def _normalize_blank_answer(self):
+        """填空题答案规范化：blanks 统一为 [{"text","score"}]，并重算 score=Σ空分。
+
+        - 旧版纯字符串数组：按原 score 均分补分（Σ 不变，判分自动切换为按空给分）
+        - 对象数组：仅清洗（text 去空白、score 规整），总分以 Σ空分为准
+        """
+        answer = self.answer if isinstance(self.answer, dict) else {}
+        blanks = answer.get("blanks") or []
+        if not blanks:
+            return
+        items = []
+        for b in blanks:
+            if isinstance(b, dict):
+                text = str(b.get("text", "")).strip()
+                if not text:
+                    continue
+                try:
+                    score = Decimal(str(b.get("score", 0))).quantize(Decimal("0.1"))
+                except (InvalidOperation, TypeError, ValueError):
+                    score = Decimal("0")
+                items.append({"text": text, "score": score})
+            else:
+                text = str(b).strip()
+                if text:
+                    items.append({"text": text, "score": None})  # None=待均分
+        if not items:
+            return
+        # 旧版字符串答案：按原总分均分补分
+        if any(it["score"] is None for it in items):
+            per = _split_score(self.score, len(items))
+            items = [{"text": it["text"], "score": per[i]} for i, it in enumerate(items)]
+        answer["blanks"] = [{"text": it["text"], "score": float(it["score"])} for it in items]
+        self.answer = answer
+        self.score = sum((it["score"] for it in items), Decimal("0"))
 
     @property
     def is_objective(self) -> bool:

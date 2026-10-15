@@ -74,7 +74,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowRight, Collection } from '@element-plus/icons-vue'
 import { listCourseResources, listCourseVideos } from '@/api/course'
@@ -172,6 +172,9 @@ function fmtSize(bytes) {
   }
   return `${n.toFixed(1)} ${units[i]}`
 }
+
+// 课程空间内切换课程时重新加载
+watch(courseId, () => load())
 
 onMounted(load)
 </script>

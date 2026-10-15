@@ -31,6 +31,15 @@ class Material(BaseModel):
         related_name="materials",
         verbose_name="班级",
     )
+    # 归属章节（可选）：设置后 AI 助教参考来源展示「章节标题资料」而非原文件名
+    catalog = models.ForeignKey(
+        "courses.Catalog",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="materials",
+        verbose_name="归属章节",
+    )
     file_name = models.CharField("文件名称", max_length=255)
     file_type = models.CharField("文件类型", max_length=20, blank=True)  # pdf/word/ppt/txt
     file = models.FileField("文件", upload_to=_material_file_path, null=True, blank=True)
@@ -51,11 +60,25 @@ class Material(BaseModel):
 class KnowledgeChunk(BaseModel):
     """知识库片段（需求第 9 节·知识库片段 / 第 7.2 节 RAG）。
 
+    来源二选一：教辅资料（material）或课件 PPT（ppt，每页一个片段）。
     向量以 JSON 存储，起步用暴力余弦检索；后续可迁移 pgvector / Milvus。
     """
 
     material = models.ForeignKey(
-        Material, on_delete=models.CASCADE, related_name="chunks", verbose_name="来源资料"
+        Material,
+        on_delete=models.CASCADE,
+        related_name="chunks",
+        verbose_name="来源资料",
+        null=True,
+        blank=True,
+    )
+    ppt = models.ForeignKey(
+        "courses.PPTResource",
+        on_delete=models.CASCADE,
+        related_name="chunks",
+        verbose_name="来源课件",
+        null=True,
+        blank=True,
     )
     course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="chunks", verbose_name="课程")
     content = models.TextField("片段内容")

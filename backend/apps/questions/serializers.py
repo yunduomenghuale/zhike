@@ -1,3 +1,8 @@
+from __future__ import annotations
+
+import re
+from decimal import Decimal, InvalidOperation
+
 from rest_framework import serializers
 
 from apps.courses.models import Catalog
@@ -33,17 +38,56 @@ class QuestionSerializer(serializers.ModelSerializer):
         if user and user.is_authenticated and user.is_teacher:
             if not course or course.teacher_id != user.id:
                 raise serializers.ValidationError("只能维护自己负责课程的题目")
+        self._validate_blank_answer(attrs)
         return attrs
+
+    def _validate_blank_answer(self, attrs):
+        """填空题按空赋分校验：answer 显式传入时逐空检查 text 非空、分值 > 0。
+
+        仅在 answer 参与本次校验时触发，避免破坏只改 status/难度等字段的旧题 PATCH；
+        题目总分由模型 save() 按 Σ空分重算，不接受直填。
+        """
+        qtype = attrs.get("qtype") or getattr(self.instance, "qtype", None)
+        if qtype != Question.QType.BLANK or "answer" not in attrs:
+            return
+        blanks = (attrs.get("answer") or {}).get("blanks") or []
+        if not blanks:
+            raise serializers.ValidationError({"answer": "填空题至少需要设置一个空"})
+        for i, b in enumerate(blanks, 1):
+            if not isinstance(b, dict):
+                raise serializers.ValidationError({"answer": f"第{i}空的答案格式不正确"})
+            if not str(b.get("text", "")).strip():
+                raise serializers.ValidationError({"answer": f"第{i}空的答案不能为空"})
+            raw = b.get("score")
+            if raw is None or str(raw).strip() == "":
+                raise serializers.ValidationError({"answer": f"第{i}空的分值不能为空"})
+            try:
+                score = Decimal(str(raw))
+            except (InvalidOperation, TypeError, ValueError):
+                raise serializers.ValidationError({"answer": f"第{i}空的分值必须是数字"})
+            if score <= 0:
+                raise serializers.ValidationError({"answer": f"第{i}空的分值必须大于 0"})
 
 
 class StudentQuestionSerializer(serializers.ModelSerializer):
-    """给学生答题用：隐藏答案与解析。"""
+    """给学生答题用：隐藏答案与解析；填空题只给空数量（多空题按数渲染输入框）。"""
 
     qtype_display = serializers.CharField(source="get_qtype_display", read_only=True)
+    blank_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Question
-        fields = ["id", "qtype", "qtype_display", "stem", "options", "score"]
+        fields = ["id", "qtype", "qtype_display", "stem", "options", "score", "blank_count"]
+
+    def get_blank_count(self, obj):
+        if obj.qtype != Question.QType.BLANK:
+            return None
+        blanks = (obj.answer or {}).get("blanks") or []
+        if blanks:
+            return max(1, len(blanks))
+        # 无答案数据时按题干占位符计数（连续下划线/全角或半角括号）
+        markers = re.findall(r"_{2,}|（\s*）|\(\s*\)", obj.stem or "")
+        return max(1, len(markers))
 
 
 class AnswerRecordSerializer(serializers.ModelSerializer):

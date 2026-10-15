@@ -4,9 +4,12 @@
     <template v-else-if="data">
       <!-- 成绩卡 -->
       <view class="score-card">
-        <view class="score-num">{{ data.submission?.total_score ?? '-' }}</view>
+        <view class="score-num">{{ data.submission?.total_score ?? '待批阅' }}</view>
         <view class="score-label">总分（客观题 {{ data.submission?.objective_score ?? '-' }} 分）</view>
         <view class="score-time">交卷：{{ fmtTime(data.submission?.submitted_at) }}</view>
+        <view v-if="data.options_shuffled" class="shuffle-tip">
+          本场考试开启了选项乱序，回看按原题顺序展示，与考试时所见顺序可能不同
+        </view>
       </view>
 
       <view v-for="(q, i) in data.questions" :key="q.question_id" class="q-card">
@@ -30,14 +33,14 @@
 
         <view class="ans wrong">我的答案：{{ fmt(q.student_answer) }}</view>
         <view class="ans right">正确答案：{{ fmt(q.correct_answer) }}</view>
-        <view v-if="!q.is_objective" class="ans">
-          本题得分：{{ data.submission?.subjective_scores?.[q.question_id] ?? '待批' }} 分
+        <view class="ans">
+          本题得分：{{ q.pending ? '待教师批阅' : `${q.my_score ?? '-'} / ${q.score} 分` }}
         </view>
         <view v-if="q.analysis" class="analysis">解析：{{ q.analysis }}</view>
       </view>
     </template>
     <view v-else class="tip">
-      <view>成绩尚未发布或考试未结束</view>
+      <view>暂无答卷记录</view>
       <button class="back-btn" @click="goBack">返回</button>
     </view>
   </view>
@@ -47,6 +50,7 @@
 import { ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { reviewExam } from '@/api/exam.js'
+import { blankAnswerText } from '@/utils/blank-answer.js'
 
 const data = ref(null)
 const loading = ref(true)
@@ -70,7 +74,7 @@ function fmt(a) {
   if (!a) return '（未作答）'
   if (a.key != null) return String(a.key)
   if (a.keys) return a.keys.join('、')
-  if (a.blanks) return a.blanks.join(' / ')
+  if (a.blanks) return blankAnswerText(a)
   if (a.text != null) return String(a.text)
   return JSON.stringify(a)
 }
@@ -108,6 +112,7 @@ function fmtTime(t) {
 .score-num { font-size: 56rpx; font-weight: 800; color: #10b981; }
 .score-label { margin-top: 8rpx; font-size: 24rpx; color: #475569; }
 .score-time { margin-top: 8rpx; font-size: 22rpx; color: #94a3b8; }
+.shuffle-tip { margin-top: 10rpx; padding-top: 10rpx; border-top: 1rpx dashed #d1fae5; font-size: 21rpx; line-height: 1.6; color: #64748b; font-style: italic; }
 .q-card { margin-bottom: 18rpx; padding: 26rpx 28rpx; border-radius: 20rpx; background: #fff; border: 1rpx solid #f1f5f9; box-shadow: 0 2rpx 6rpx rgba(15,23,42,0.04); }
 .q-stem { font-size: 27rpx; line-height: 1.8; color: #0f172a; }
 .q-idx { margin-right: 8rpx; font-weight: 700; }

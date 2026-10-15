@@ -16,14 +16,33 @@ from .models import (
     question_snapshot,
 )
 
+# 学生提交附件白名单：在教师作业附件格式基础上增加图片（需求：学生可提交图片作业）
+SUBMISSION_ALLOWED_EXTENSIONS = {
+    ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".txt", ".zip", ".rar",
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp",
+}
+MAX_SUBMISSION_FILE_SIZE = 20 * 1024 * 1024
+MAX_SUBMISSION_FILE_COUNT = 9
 
-def _snapshot_for_user(snapshot, user):
+# 教师作业附件：格式与大小上限（validate_attachment 与附件即传动作共用）
+HOMEWORK_ATTACHMENT_ALLOWED_EXTENSIONS = {
+    ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".txt", ".zip", ".rar",
+}
+MAX_HOMEWORK_ATTACHMENT_SIZE = 20 * 1024 * 1024
+MAX_HOMEWORK_ATTACHMENT_COUNT = 9
+# PDF 在线预览最多渲染页数（超出请下载查看，防止超大文件拖垮渲染）
+MAX_PREVIEW_PAGES = 50
+
+
+def _snapshot_for_user(snapshot, user, released=False):
+    """学生视角隐藏答案/解析；成绩发布（returned）后随结果一并返回答案与解析。"""
     data = dict(snapshot or {})
     if user and getattr(user, "is_student", False):
         if data.get("qtype") == Question.QType.BLANK:
             data["answer_blank_count"] = max(1, len((data.get("answer") or {}).get("blanks", [])))
-        data.pop("answer", None)
-        data.pop("analysis", None)
+        if not released:
+            data.pop("answer", None)
+            data.pop("analysis", None)
     return data
 
 
@@ -50,22 +69,17 @@ class HomeworkSerializer(serializers.ModelSerializer):
     )
     question_count = serializers.IntegerField(source="questions.count", read_only=True)
     total_score = serializers.DecimalField(max_digits=6, decimal_places=1, required=False)
+    # 附件列表只读：上传/移除走 /homeworks/{id}/attachments/ 即传接口，
+    # 防止客户端直接写入任意文件路径
+    attachments = serializers.JSONField(read_only=True)
 
     class Meta:
         model = Homework
         fields = [
-            "id", "course", "classroom", "title", "description", "attachment",
+            "id", "course", "classroom", "title", "description", "attachments",
             "mode", "mode_display", "start_time", "deadline", "total_score", "status", "status_display",
             "questions", "question_items", "question_count", "submission_count", "created_at",
         ]
-
-    def validate_attachment(self, value):
-        allowed = {".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".txt", ".zip", ".rar"}
-        if Path(value.name).suffix.lower() not in allowed:
-            raise serializers.ValidationError("仅支持 PDF、Office 文档、TXT 或压缩包")
-        if value.size > 20 * 1024 * 1024:
-            raise serializers.ValidationError("附件大小不能超过 20MB")
-        return value
 
     def validate(self, attrs):
         classroom = attrs.get("classroom", getattr(self.instance, "classroom", None))
@@ -230,13 +244,15 @@ class HomeworkAnswerSerializer(serializers.ModelSerializer):
 
     def get_snapshot(self, obj) -> dict:
         request = self.context.get("request")
-        return _snapshot_for_user(obj.homework_question.snapshot, getattr(request, "user", None))
+        # 学生提交后即可学习：answer_items 只存在于学生自己的提交上，
+        # 客观题（含答案/解析）提交即放行；主观题得分仍等教师批改发布（见 get_score）
+        return _snapshot_for_user(obj.homework_question.snapshot, getattr(request, "user", None), released=True)
 
     def get_needs_manual_grading(self, obj) -> bool:
         return (obj.homework_question.snapshot or {}).get("qtype") == Question.QType.SHORT
 
     def _score_visible(self, obj):
-        """学生视角下成绩发布后（returned）才可见批改结果（需求 T-H-05）。"""
+        """学生视角下主观题成绩发布后（returned）才可见（需求 T-H-05）。"""
         request = self.context.get("request")
         user = getattr(request, "user", None)
         if user and user.is_authenticated and user.is_student:
@@ -244,7 +260,11 @@ class HomeworkAnswerSerializer(serializers.ModelSerializer):
         return True
 
     def get_score(self, obj):
-        return obj.score if self._score_visible(obj) else None
+        # 客观题提交即自动批改出分，学生即时可见；主观题等教师批改发布后可见
+        qtype = (obj.homework_question.snapshot or {}).get("qtype")
+        if qtype == Question.QType.SHORT:
+            return obj.score if self._score_visible(obj) else None
+        return obj.score
 
     def get_comment(self, obj):
         return obj.comment if self._score_visible(obj) else ""
@@ -254,7 +274,11 @@ class HomeworkSubmissionSerializer(serializers.ModelSerializer):
     student_name = serializers.CharField(source="student.real_name", read_only=True)
     correct_status_display = serializers.CharField(source="get_correct_status_display", read_only=True)
     answers = serializers.JSONField(write_only=True, required=False)
+    # 学生端即时上传到暂存目录的附件引用（提交时采纳，不再随表单重复传文件）；
+    # JSONField 以兼容 FormData 下以 JSON 字符串提交（与 answers 一致）
+    uploaded = serializers.JSONField(write_only=True, required=False)
     answer_items = HomeworkAnswerSerializer(many=True, read_only=True)
+    attachments = serializers.JSONField(read_only=True)
     score = serializers.SerializerMethodField()
     comment = serializers.SerializerMethodField()
     objective_score = serializers.SerializerMethodField()
@@ -262,9 +286,10 @@ class HomeworkSubmissionSerializer(serializers.ModelSerializer):
     class Meta:
         model = HomeworkSubmission
         fields = [
-            "id", "homework", "student", "student_name", "content", "attachment", "answers",
-            "answer_items", "submitted_at", "is_late", "objective_score", "score", "comment",
-            "correct_status", "correct_status_display", "auto_score", "auto_comment",
+            "id", "homework", "student", "student_name", "content", "attachment", "attachments",
+            "answers", "answer_items", "submitted_at", "is_late", "objective_score", "score",
+            "comment", "correct_status", "correct_status_display", "auto_score", "auto_comment",
+            "uploaded",
         ]
         read_only_fields = [
             "student", "submitted_at", "is_late", "objective_score", "score", "comment",
@@ -272,12 +297,11 @@ class HomeworkSubmissionSerializer(serializers.ModelSerializer):
         ]
 
     def validate_attachment(self, value):
-        # 与教师侧作业附件（HomeworkSerializer.validate_attachment）同款限制，
+        # 与教师侧作业附件同款限制 + 图片格式（学生可提交图片作业），
         # 防止上传 HTML/SVG 等在 media 同域下造成存储型 XSS
-        allowed = {".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".txt", ".zip", ".rar"}
-        if Path(value.name).suffix.lower() not in allowed:
-            raise serializers.ValidationError("仅支持 PDF、Office 文档、TXT 或压缩包")
-        if value.size > 20 * 1024 * 1024:
+        if Path(value.name).suffix.lower() not in SUBMISSION_ALLOWED_EXTENSIONS:
+            raise serializers.ValidationError("仅支持图片、PDF、Office 文档、TXT 或压缩包")
+        if value.size > MAX_SUBMISSION_FILE_SIZE:
             raise serializers.ValidationError("附件大小不能超过 20MB")
         return value
 

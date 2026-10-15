@@ -74,12 +74,12 @@ class Command(BaseCommand):
             return questions
 
         # 从知识库片段自动生成
-        from apps.ai.services import get_provider
+        from apps.ai.providers.factory import get_provider
 
         chunks = list(KnowledgeChunk.objects.filter(course_id=course_id).order_by("?")[:n])
         if not chunks:
             raise CommandError("该课程知识库为空，请先上传教辅资料并入库")
-        provider = get_provider()
+        provider = get_provider("chat")
         questions = []
         for chunk in chunks:
             prompt = (
@@ -100,10 +100,11 @@ class Command(BaseCommand):
 
     # ------------------------------------------------------------------ 跑问答，收集样本
     def _collect_samples(self, course_id: int, questions: list[str], top_k: int):
-        from apps.ai.services import get_provider, knowledge_qa
+        from apps.ai.providers.factory import get_provider
+        from apps.ai.services import knowledge_qa
         from apps.ai.vectorstore import search_chunks
 
-        provider = get_provider()
+        provider = get_provider("embed")
         samples = []
         for i, question in enumerate(questions, 1):
             self.stdout.write(f"[{i}/{len(questions)}] {question[:40]}")
@@ -187,13 +188,13 @@ class Command(BaseCommand):
 
     # ------------------------------------------------------------------
     def handle(self, *args, **options):
-        from apps.ai.services import get_provider
+        from apps.ai.providers.factory import get_provider
         from apps.knowledge.models import KnowledgeChunk
 
         course_id = options["course"]
         if not KnowledgeChunk.objects.filter(course_id=course_id).exists():
             raise CommandError(f"课程 {course_id} 知识库为空，无法评估")
-        provider_name = type(get_provider()).__name__
+        provider_name = type(get_provider("chat")).__name__
         if "mock" in provider_name.lower():
             self.stdout.write(self.style.WARNING("当前 AI_PROVIDER=mock，检索与回答均为假数据，评估结果无意义！"))
 

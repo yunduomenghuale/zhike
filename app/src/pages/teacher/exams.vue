@@ -38,10 +38,12 @@
           <text class="chip">{{ e.class_name }}</text>
           <text class="chip">{{ e.duration }} 分钟</text>
           <text class="chip">{{ e.total_score }} 分</text>
+          <text v-if="!e.has_paper" class="chip warn">未组卷</text>
+          <text v-else class="chip">{{ e.question_count }} 题</text>
         </view>
         <view class="e-time">{{ fmtTime(e.start_at) }} ~ {{ fmtTime(e.end_at) }}</view>
 
-        <!-- 组卷面板 -->
+        <!-- 组卷面板（仅草稿：组卷后可反复编辑；发布后只能查看不能再组卷） -->
         <view v-if="composeId === e.id" class="compose">
           <view v-for="(r, i) in rules" :key="i" class="rule-row">
             <picker :range="qtypes" range-key="label" @change="r.qtype = qtypes[Number($event.detail.value)].value">
@@ -59,7 +61,7 @@
 
         <view class="ops">
           <template v-if="e.status === 'draft'">
-            <button class="op-btn" @click="toggleCompose(e)">{{ composeId === e.id ? '收起组卷' : '组卷' }}</button>
+            <button class="op-btn" @click="toggleCompose(e)">{{ composeId === e.id ? '收起组卷' : (e.has_paper ? '编辑试卷' : '组卷') }}</button>
             <button class="op-btn primary" @click="publish(e)">发布考试</button>
           </template>
           <button v-else class="op-btn primary" @click="openMonitor(e)">监控 / 批改</button>
@@ -181,14 +183,22 @@ async function doCompose(e) {
 }
 
 function publish(e) {
+  // 发布前必须组卷（后端同样会校验）
+  if (!e.has_paper) {
+    return uni.showToast({ title: '请先完成组卷再发布', icon: 'none' })
+  }
   uni.showModal({
     title: '发布考试',
     content: '发布后将通知班级学生，且不能再组卷。确定发布吗？',
     success: async (res) => {
       if (!res.confirm) return
-      await patch(`/exams/${e.id}/`, { status: 'published' })
-      uni.showToast({ title: '已发布', icon: 'success' })
-      load()
+      try {
+        await patch(`/exams/${e.id}/`, { status: 'published' })
+        uni.showToast({ title: '已发布', icon: 'success' })
+        load()
+      } catch {
+        // 错误信息由请求拦截器提示
+      }
     },
   })
 }

@@ -35,8 +35,8 @@
             <view class="msg-text">{{ m.content }}</view>
             <view v-if="m.cited?.length" class="sources">
               <view class="sources-label">参考来源</view>
-              <view v-for="(c, ci) in m.cited" :key="ci" class="source-item">
-                📄 {{ c.material_name || '课程资料' }}{{ c.page ? ` P${c.page}` : '' }}
+              <view v-for="(g, gi) in groupCitedSources(m.cited)" :key="gi" class="source-item">
+                📄 {{ citedSourceLabel(g) }}
               </view>
             </view>
           </view>
@@ -71,6 +71,7 @@ import { nextTick, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { listClasses } from '@/api/classroom.js'
 import { askQuestion, listQaRecords } from '@/api/knowledge.js'
+import { groupCitedSources, citedSourceLabel } from '@/utils/cited-sources.js'
 
 const courses = ref([])
 const currentCourse = ref(null)

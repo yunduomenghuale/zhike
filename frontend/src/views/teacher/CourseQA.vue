@@ -81,6 +81,23 @@
                 <div v-else class="answer-thinking">
                   <el-icon class="is-loading" :size="15"><Loading /></el-icon> 正在检索课程资料…
                 </div>
+                <div v-if="m.cited_chunks?.length" class="sources">
+                  <div class="sources-title">
+                    <el-icon><Collection /></el-icon> 参考来源
+                  </div>
+                  <div class="source-tags">
+                    <el-tag
+                      v-for="(g, gi) in groupCitedSources(m.cited_chunks)"
+                      :key="gi"
+                      size="small"
+                      effect="plain"
+                      type="info"
+                      round
+                    >
+                      {{ citedSourceLabel(g) }}
+                    </el-tag>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -132,13 +149,14 @@ import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { genUid } from '@/utils/uid'
 import {
-  Promotion, MagicStick, Loading, Search, Clock, Picture, Close, Plus,
+  Promotion, MagicStick, Loading, Search, Clock, Picture, Close, Plus, Collection,
 } from '@element-plus/icons-vue'
-import MarkdownIt from 'markdown-it'
+import { renderAiMarkdown } from '@/utils/markdown'
+import { groupCitedSources, citedSourceLabel } from '@/utils/cited-sources'
 import { listQaRecords } from '@/api/knowledge'
 import { useUserStore } from '@/store/user'
 
-const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
+const renderMd = renderAiMarkdown
 
 const route = useRoute()
 const userStore = useUserStore()
@@ -241,10 +259,6 @@ const suggestions = [
   '初学者应该先掌握哪些基础概念？',
 ]
 
-function renderMd(text) {
-  return md.render(text || '')
-}
-
 function fmtSideTime(t) {
   if (!t) return ''
   const d = new Date(t)
@@ -262,6 +276,13 @@ function scrollToBottom() {
   nextTick(() => {
     if (listRef.value) listRef.value.scrollTop = listRef.value.scrollHeight
   })
+}
+
+// 流式期间仅在用户本来就接近底部时跟随滚动，避免打断上翻阅读
+function scrollIfNearBottom() {
+  const el = listRef.value
+  if (!el) return
+  if (el.scrollHeight - el.scrollTop - el.clientHeight < 120) scrollToBottom()
 }
 
 async function loadHistory() {
@@ -305,6 +326,13 @@ async function ask(preset) {
   // 同步进 records，历史面板的会话分组实时更新
   records.value.push({ ...msg })
   scrollToBottom()
+  // 必须经响应式数组写入才触发渲染（改原始对象绕过代理 = 假流式）
+  const msgIndex = messages.value.length - 1
+  const patchMsg = (patch) => {
+    messages.value[msgIndex] = { ...messages.value[msgIndex], ...patch }
+  }
+  // 参考来源先存不显示：正文流式输出完后（finally）再一次性展示
+  let pendingCited = []
   try {
     const token = localStorage.getItem('access_token')
     const resp = await fetch('/api/qa-records/ask-stream/', {
@@ -325,6 +353,17 @@ async function ask(preset) {
     const reader = resp.body.getReader()
     const decoder = new TextDecoder('utf-8')
     let buffer = ''
+    // 渲染节流：delta 先进缓冲，60ms 批量落一次 DOM，避免逐 token 全量重渲染
+    let pendingText = ''
+    let flushTimer = null
+    const flushAnswer = () => {
+      flushTimer = null
+      if (!pendingText) return
+      const next = messages.value[msgIndex].answer + pendingText
+      pendingText = ''
+      patchMsg({ answer: next })
+      scrollIfNearBottom()
+    }
     for (;;) {
       const { value, done } = await reader.read()
       if (done) break
@@ -339,22 +378,27 @@ async function ask(preset) {
         let evt
         try { evt = JSON.parse(jsonStr) } catch { return }
         if (evt.type === 'meta') {
-          msg.cited_chunks = evt.cited || []
+          pendingCited = evt.cited || []
         } else if (evt.type === 'delta') {
-          msg.answer += evt.text || ''
-          scrollToBottom()
+          pendingText += evt.text || ''
+          if (!flushTimer) flushTimer = setTimeout(flushAnswer, 60)
         } else if (evt.type === 'error') {
-          msg.answer += `\n[出错] ${evt.message || '生成失败'}`
+          pendingText += `\n[出错] ${evt.message || '生成失败'}`
         }
       })
     }
-    if (!msg.answer) {
-      msg.answer = '抱歉，AI 助教暂时没有响应，请稍后再试。'
+    if (flushTimer) clearTimeout(flushTimer)
+    flushAnswer()
+    if (!messages.value[msgIndex].answer) {
+      patchMsg({ answer: '抱歉，AI 助教暂时没有响应，请稍后再试。' })
     }
   } catch {
-    msg.answer = '抱歉，AI 助教暂时没有响应，请稍后再试。'
+    if (!messages.value[msgIndex].answer) {
+      patchMsg({ answer: '抱歉，AI 助教暂时没有响应，请稍后再试。' })
+    }
   } finally {
-    msg.streaming = false
+    // 正文已输出完（或出错收尾），此时才展示参考来源并移除流式光标
+    patchMsg({ cited_chunks: pendingCited, streaming: false })
     asking.value = false
     scrollToBottom()
   }
@@ -764,6 +808,27 @@ onMounted(loadHistory)
   gap: 8px;
   color: var(--gray-400);
   font-size: 13px;
+}
+
+.sources {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--gray-200);
+}
+
+.sources-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 8px;
+  color: var(--gray-500);
+  font-size: 12px;
+}
+
+.source-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .input-dock {

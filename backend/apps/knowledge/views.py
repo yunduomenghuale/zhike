@@ -1,7 +1,9 @@
 import json
+from pathlib import Path
 
+from django.core.files.storage import default_storage
 from django.db.models import Q
-from django.http import StreamingHttpResponse
+from django.http import FileResponse, StreamingHttpResponse
 from rest_framework.decorators import action
 from rest_framework.exceptions import MethodNotAllowed, NotFound, ValidationError
 from rest_framework.permissions import IsAuthenticated
@@ -17,7 +19,17 @@ from apps.common.response import api_response
 from apps.common.viewsets import BaseModelViewSet
 
 from .models import KnowledgeChunk, Material, QARecord
+from .preview import (
+    MAX_PREVIEW_PAGES,
+    PREVIEWABLE_EXTENSIONS,
+    convert_office_to_pdf,
+    material_media_url,
+    material_preview_paths,
+    read_material_text,
+    render_material_pages,
+)
 from .serializers import MaterialSerializer, QARecordSerializer
+from .services import rebuild_vectors
 
 
 def _sse(payload: dict) -> str:
@@ -98,6 +110,52 @@ class MaterialViewSet(BaseModelViewSet):
         count = ingest_material(material)
         return api_response({"chunk_count": count}, message="资料已重新入库")
 
+    @action(detail=False, methods=["post"], url_path="rebuild-vectors")
+    def rebuild_vectors_action(self, request):
+        """用当前向量模型重建知识库向量（换向量模型/修复 mock 向量后必须执行）。
+
+        覆盖教辅资料与课件 PPT（课件是向量库的主要内容，每页一个片段）。
+        body: {"course": 课程ID（必填，除非传 material/ppt）,
+               "material": 资料ID（可选，只重建一份）,
+               "ppt": 课件ID（可选，只重建一部）}
+        出错处理：事前校验失败（模型不可用）返回 400 且不动数据；单项失败
+        不影响其他项，失败清单随响应返回，修复后可再次调用续跑。
+        """
+        from apps.courses.models import PPTResource
+
+        course_id = request.data.get("course")
+        material_id = request.data.get("material")
+        ppt_id = request.data.get("ppt")
+        qs = self.get_queryset()  # 行级过滤：只能重建自己课程的资料
+        ppt_qs = PPTResource.objects.filter(course__in=courses_for_user(request.user))
+        materials = qs.none()
+        ppts = ppt_qs.none()
+        if material_id:
+            materials = qs.filter(pk=material_id)
+            if not materials.exists():
+                raise NotFound("资料不存在或无权访问")
+        elif ppt_id:
+            ppts = ppt_qs.filter(pk=ppt_id)
+            if not ppts.exists():
+                raise NotFound("课件不存在或无权访问")
+        elif course_id:
+            materials = qs.filter(course_id=course_id)
+            ppts = ppt_qs.filter(course_id=course_id, is_active=True)
+        else:
+            raise ValidationError({"course": "请指定要重建向量的课程"})
+
+        report = rebuild_vectors(materials, ppts)
+        if report.get("error"):
+            return api_response(report, message=report["error"], code=400, status=400)
+        message = (
+            f"向量重建完成：资料 {report['materials']['success']}/{report['materials']['total']} 份，"
+            f"课件 {report['ppts']['success']}/{report['ppts']['total']} 部，"
+            f"共 {report['chunks']} 个片段"
+        )
+        if report["failed"]:
+            message += f"，失败 {len(report['failed'])} 项（详见返回清单，可修复后重试）"
+        return api_response(report, message=message)
+
     @action(detail=True, methods=["post"], url_path="toggle-qa")
     def toggle_qa(self, request, pk=None):
         """开启/关闭该资料对学生的自由提问（需求 T-K-04）。"""
@@ -105,6 +163,84 @@ class MaterialViewSet(BaseModelViewSet):
         material.qa_open = not material.qa_open
         material.save(update_fields=["qa_open", "updated_at"])
         return api_response({"qa_open": material.qa_open}, message="已更新开放状态")
+
+    @action(detail=True, methods=["get"], url_path="preview")
+    def preview(self, request, pk=None):
+        """资料在线预览：PDF 直接逐页出图；Word/PPT 经 LibreOffice 转 PDF 后出图；txt 回文本。
+
+        页图按存储文件名哈希缓存（uuid 文件名内容不可变，可安全复用）；
+        Word/PPT 首次预览需转换，耗时较长。权限继承 ViewSet：get_object()
+        走 get_queryset() 行级过滤，无权访问即 404。
+        """
+        material = self.get_object()
+        if not material.file:
+            raise ValidationError({"file": "资料文件缺失，请联系老师重新上传"})
+        name = material.file.name
+        ext = Path(name).suffix.lower()
+
+        if ext == ".txt":
+            if not default_storage.exists(name):
+                raise ValidationError({"file": "资料文件缺失，请联系老师重新上传"})
+            return api_response(
+                {"kind": "text", "text": read_material_text(name), "name": material.file_name},
+                message="预览已就绪",
+            )
+
+        if ext not in PREVIEWABLE_EXTENSIONS:
+            raise ValidationError({"file": "该类型暂不支持在线预览，请下载后查看"})
+        if not default_storage.exists(name):
+            raise ValidationError({"file": "资料文件缺失，请联系老师重新上传"})
+
+        rel_root, cache_root = material_preview_paths(name)
+        rel_pages = rel_root / "pages"
+        pages_dir = cache_root / "pages"
+        cached = sorted(pages_dir.glob("slide-*.png")) if pages_dir.exists() else []
+        if cached:
+            page_urls = [material_media_url(rel_pages / page.name) for page in cached]
+            return api_response(
+                {"kind": "pages", "pages": page_urls, "name": material.file_name},
+                message="预览已就绪",
+            )
+
+        try:
+            file_path = default_storage.path(name)
+        except NotImplementedError:
+            raise ValidationError({"file": "当前存储不支持在线预览"})
+
+        pdf_path = file_path if ext == ".pdf" else convert_office_to_pdf(file_path, cache_root)
+        if not pdf_path:
+            raise ValidationError({"file": "文档转换失败，请下载后查看"})
+
+        import pypdfium2 as pdfium
+
+        try:
+            pdf = pdfium.PdfDocument(str(pdf_path))
+            page_count = len(pdf)
+            pdf.close()
+        except Exception:
+            raise ValidationError({"file": "文档解析失败，请下载后查看"})
+        if page_count > MAX_PREVIEW_PAGES:
+            raise ValidationError({"file": f"文档超过 {MAX_PREVIEW_PAGES} 页，请下载后查看"})
+
+        page_urls = render_material_pages(pdf_path, rel_root, cache_root)
+        if not page_urls:
+            raise ValidationError({"file": "文档渲染失败，请下载后查看"})
+        return api_response(
+            {"kind": "pages", "pages": page_urls, "name": material.file_name},
+            message="预览已就绪",
+        )
+
+    @action(detail=True, methods=["get"], url_path="download")
+    def download(self, request, pk=None):
+        """资料下载：强制 attachment 并把文件名还原为原始文件名（存储名是 uuid）。
+
+        FileResponse 流式返回，不走统一响应包装；权限同样由 get_object() 行级过滤。
+        """
+        material = self.get_object()
+        if not material.file or not default_storage.exists(material.file.name):
+            raise NotFound("资料文件不存在或已被移除")
+        fh = default_storage.open(material.file.name, "rb")
+        return FileResponse(fh, as_attachment=True, filename=material.file_name)
 
 
 class QARecordViewSet(BaseModelViewSet):

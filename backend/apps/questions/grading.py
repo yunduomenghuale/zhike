@@ -3,13 +3,15 @@
 答案统一约定：
 - single / judge: answer = {"key": "A"}，学生答案同结构
 - multi:          answer = {"keys": ["A","C"]}
-- blank:          answer = {"blanks": ["xxx", "yyy"]}（按顺序，忽略首尾空白，大小写不敏感）
+- blank:          answer = {"blanks": [{"text": "xxx", "score": 2}, ...]}（按空赋分，
+                  逐空命中累计得分：全对满分、部分对给部分分）；
+                  旧版纯字符串数组 ["xxx","yyy"] 无按空分值，保持全对满分/否则 0 分
 主观题（short）：grade_objective 保持返回 (None, None)（作业/考试教师批改流依赖此契约）；
 labs 场景经 grade_lab_question → grade_subjective 做相似度预评分。
 """
 import re
 import unicodedata
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from difflib import SequenceMatcher
 
 # 中文停用词（整合自实验平台 quiz-api-router 的算法，内置精简集合）
@@ -66,8 +68,49 @@ WEIGHT_KW = 0.7    # 关键词命中权重
 WEIGHT_STR = 0.3   # 编辑距离权重
 
 
+def blank_items(correct: dict) -> list[dict]:
+    """填空题标准答案 → [{"text": str, "score": Decimal|None}]。
+
+    兼容两种结构：
+    - 按空赋分（2026-10 起）：blanks = [{"text": "答案", "score": 2}, ...]
+    - 旧版整题赋分：blanks = ["答案", ...]（score=None 表示无按空分值）
+    """
+    items = []
+    for b in (correct or {}).get("blanks") or []:
+        if isinstance(b, dict):
+            raw = b.get("score")
+            score = None
+            if raw is not None and str(raw) != "":
+                try:
+                    score = Decimal(str(raw))
+                except (InvalidOperation, TypeError, ValueError):
+                    score = None
+            items.append({"text": str(b.get("text", "")), "score": score})
+        else:
+            items.append({"text": str(b), "score": None})
+    return items
+
+
+def grade_blank(items: list[dict], student_answer: dict) -> tuple[bool, Decimal]:
+    """填空题按空判分：逐空命中累计，全对满分，部分对给部分分。
+
+    学生答案缺位（未答该空）按错处理，多余作答忽略；分值合计为空时返回 0 分。
+    """
+    stu = [str(x).strip().lower() for x in student_answer.get("blanks", [])]
+    earned = Decimal("0")
+    for i, it in enumerate(items):
+        if i < len(stu) and stu[i] == str(it["text"]).strip().lower():
+            earned += it["score"]
+    total = sum((it["score"] for it in items), Decimal("0"))
+    return earned == total, earned
+
+
 def grade_objective(question, student_answer: dict):
-    """返回 (is_correct, score)。主观题返回 (None, None)。"""
+    """返回 (is_correct, score)。主观题返回 (None, None)。
+
+    填空题按空判分：answer.blanks 每空带 score 时逐空累计（全对 (True, Σ)，
+    部分对 (False, 已得空分和)）；旧版纯字符串数组保持全对满分/否则 0 分。
+    """
     qtype = question.qtype
     correct = question.answer or {}
     full = Decimal(str(question.score))
@@ -77,8 +120,12 @@ def grade_objective(question, student_answer: dict):
     elif qtype == "multi":
         ok = sorted(map(str, student_answer.get("keys", []))) == sorted(map(str, correct.get("keys", [])))
     elif qtype == "blank":
+        items = blank_items(correct)
+        if items and all(it["score"] is not None for it in items):
+            return grade_blank(items, student_answer)
+        # 旧版数据（无按空分值）：全对满分，否则 0 分
         stu = [str(x).strip().lower() for x in student_answer.get("blanks", [])]
-        std = [str(x).strip().lower() for x in correct.get("blanks", [])]
+        std = [it["text"].strip().lower() for it in items]
         ok = stu == std
     else:
         return None, None  # 主观题不自动评分（契约不变，作业/考试教师批改流依赖）

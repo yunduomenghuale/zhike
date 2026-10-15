@@ -50,7 +50,7 @@
           <el-icon><Upload /></el-icon>
           {{ avatarLoading ? '正在上传...' : '更换头像' }}
         </button>
-        <p class="upload-tip">支持 JPG、PNG、WEBP，大小不超过 3MB</p>
+        <p class="upload-tip">支持 JPG、PNG、WEBP 静态图片（不支持动图），大小不超过 3MB</p>
 
         <div class="identity-meta">
           <div>
@@ -253,16 +253,44 @@ function openAvatarPicker() {
   if (!avatarLoading.value) avatarInput.value?.click()
 }
 
+// 检测动图（前端即时反馈，后端仍会复检）：APNG 含 acTL 块、动图 WebP 含 ANIM 块，
+// 两者都位于文件头部，读前 64KB 足够
+function containsMarker(buf, marker) {
+  const m = Array.from(marker, (c) => c.charCodeAt(0))
+  outer: for (let i = 0; i <= buf.length - m.length; i++) {
+    for (let j = 0; j < m.length; j++) {
+      if (buf[i + j] !== m[j]) continue outer
+    }
+    return true
+  }
+  return false
+}
+
+async function isAnimatedImage(file) {
+  try {
+    const buf = new Uint8Array(await file.slice(0, 65536).arrayBuffer())
+    if (file.type === 'image/png') return containsMarker(buf, 'acTL')
+    if (file.type === 'image/webp') return containsMarker(buf, 'ANIM')
+    return false
+  } catch {
+    return false
+  }
+}
+
 async function handleAvatarChange(event) {
   const file = event.target.files?.[0]
   event.target.value = ''
   if (!file) return
   if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-    ElMessage.warning('请选择 JPG、PNG 或 WEBP 图片')
+    ElMessage.warning('请选择 JPG、PNG 或 WEBP 静态图片')
     return
   }
   if (file.size > 3 * 1024 * 1024) {
     ElMessage.warning('头像大小不能超过 3MB')
+    return
+  }
+  if (await isAnimatedImage(file)) {
+    ElMessage.warning('不支持动图，请选择静态图片')
     return
   }
 

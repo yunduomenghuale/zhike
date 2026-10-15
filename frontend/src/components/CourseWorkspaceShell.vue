@@ -20,6 +20,31 @@
           <div class="cover-term">{{ courseSub }}</div>
         </div>
 
+        <!-- 多课程切换：学生加入多个班级时，在课程空间内直接切换课程（保持当前标签页） -->
+        <div v-if="courses.length > 1" class="course-switcher">
+          <el-dropdown trigger="click" placement="bottom-start" :teleported="false" @command="switchCourse">
+            <button type="button" class="course-switcher-btn" title="切换到其他课程">
+              <el-icon class="switcher-icon"><Switch /></el-icon>
+              <span class="switcher-text">切换课程</span>
+              <el-icon class="switcher-arrow"><ArrowDown /></el-icon>
+            </button>
+            <template #dropdown>
+              <el-dropdown-menu class="course-switcher-menu">
+                <el-dropdown-item
+                  v-for="c in courses"
+                  :key="c.id"
+                  :command="c.id"
+                  :class="{ 'is-active': Number(c.id) === courseId }"
+                >
+                  <span class="switcher-item-name">{{ c.name }}</span>
+                  <span v-if="c.className" class="switcher-item-meta">{{ c.className }}</span>
+                  <el-icon v-if="Number(c.id) === courseId" class="switcher-item-check"><Check /></el-icon>
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </div>
+
         <nav class="course-menu" aria-label="课程功能">
           <button
             v-for="item in tabs"
@@ -53,7 +78,7 @@
 <script setup>
 import { computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Reading } from '@element-plus/icons-vue'
+import { ArrowDown, Check, Reading, Switch } from '@element-plus/icons-vue'
 
 const props = defineProps({
   courseName: { type: String, default: '' },
@@ -62,6 +87,7 @@ const props = defineProps({
   backTo: { type: String, required: true },
   backText: { type: String, default: '返回' },
   homeTab: { type: String, required: true },
+  courses: { type: Array, default: () => [] }, // 可切换的课程列表 [{ id, name, className }]，多于 1 门时展示切换器
 })
 
 const route = useRoute()
@@ -71,6 +97,14 @@ const activeTab = computed(() => props.tabs.find((item) => item.name === route.n
 
 function goTab(name) {
   router.push({ name, params: { id: courseId.value } })
+}
+
+// 切换课程：保持当前标签页，仅替换课程 id；当前路由不在标签页内时回退到首页标签
+function switchCourse(id) {
+  const nextId = Number(id)
+  if (!nextId || nextId === courseId.value) return
+  const target = activeTab.value?.name || props.homeTab
+  router.push({ name: target, params: { id: nextId } })
 }
 
 function updatePageTitle() {
@@ -272,6 +306,82 @@ watch([activeTab, () => props.courseName], updatePageTitle, { immediate: true })
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 课程切换器（仅多课程时显示） */
+.course-switcher {
+  flex-shrink: 0;
+  padding: 0 18px 14px;
+}
+
+.course-switcher-btn {
+  width: 100%;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  border-radius: 12px;
+  background: rgba(239, 246, 255, 0.85);
+  color: #2563eb;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+}
+
+.course-switcher-btn:hover {
+  background: #dbeafe;
+  border-color: rgba(96, 165, 250, 0.5);
+  transform: translateY(-1px);
+}
+
+.switcher-icon {
+  font-size: 15px;
+}
+
+.switcher-arrow {
+  font-size: 12px;
+  color: #93c5fd;
+}
+
+.course-switcher-menu {
+  min-width: 220px;
+  max-width: 300px;
+}
+
+.course-switcher-menu .el-dropdown-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+}
+
+.course-switcher-menu .switcher-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 650;
+}
+
+.course-switcher-menu .switcher-item-meta {
+  flex-shrink: 0;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.course-switcher-menu .is-active {
+  color: #2563eb;
+  background: #eff6ff;
+}
+
+.switcher-item-check {
+  flex-shrink: 0;
+  color: #2563eb;
+  font-size: 14px;
 }
 
 .course-menu {

@@ -15,7 +15,7 @@
 | 前端 | **Vue 3 + Vite + Element Plus + Pinia + Vue Router** | 国内后台管理主流组合 |
 | 数据库 | **SQLite（起步）** | 模型层用 `BaseModel` 抽象，可平滑迁移 PostgreSQL |
 | 向量检索 | 起步用**表存 embedding + 暴力余弦**，抽象成 `VectorStore` 接口 | 后续可换 pgvector / Milvus / Qdrant |
-| 大模型 | **国内大模型**（通义 / 智谱 / 百度），封装为可切换 `AIProvider` | 支持 `mock` 模式先跑通业务流 |
+| 大模型 | **国内大模型**（通义千问 / DeepSeek）与本地模型服务（任意 OpenAI 兼容接口），封装为可切换 `AIProvider` | 支持 `mock` 模式先跑通业务流 |
 
 ## 目录结构
 
@@ -96,14 +96,22 @@ npm run build:app         # App 端产出，离线打包需配合 HBuilderX
 
 ## AI Provider 说明
 
-所有大模型能力通过 `apps/ai` 统一封装，三类能力：
+所有大模型能力通过 `apps/ai` 统一封装，三类能力（chat / embed / tts）：
 
 - `chat` — 文本生成（目录识别、讲解稿、出题、RAG 回答、批改）
 - `embed` — 文本向量化（知识库入库与检索）
 - `tts` — 文本转语音（AI 配音）
 
-通过环境变量 `AI_PROVIDER` 选择实现（`mock` / `zhipu` / `tongyi` / `baidu`）。
-默认 `mock`，不需要任何 Key 即可跑通业务流程；接入真实模型时切换 Provider 并填入对应 Key。
+三类能力**分别配置**，可混搭不同服务商（如对话用 DeepSeek、向量与语音用通义千问）：
+
+- **管理端配置（推荐）**：平台管理员在「大模型配置」页按能力填写服务商、接口、模型和 API Key；
+  页面同时展示当前生效配置（含 Key 首尾各 4 位、中间 6 个 * 的脱敏显示、实际运行时与来源），并支持按能力逐一测试连接（弹窗展示完整测试信息）。
+- **环境变量**：未配置管理端时按环境变量派生——`AI_PROVIDER` + `AI_SETTINGS` 指定一套全局凭证，
+  也可用 `AI_CHAT_*` / `AI_EMBED_*` / `AI_TTS_*`（PROVIDER / API_KEY / BASE_URL / MODEL）按能力覆盖。
+
+可选服务商：`deepseek` / `tongyi` / `openai`（本地模型服务，任意 OpenAI 兼容接口，如本地 vLLM）/ `mock`（模拟模式，默认）。
+不需要任何 Key 即可跑通业务流程；未配置 Key 或调用不可用时自动回退 Mock（页面会标出实际运行时）。
+注意：通义千问 TTS 旧模型 `qwen-tts` 已被 DashScope 下线（404 Model not exist），请使用 `qwen3-tts-flash`。
 
 ## 开发阶段（对齐需求文档）
 

@@ -1,9 +1,10 @@
 """AI Provider 抽象接口。
 
-统一三类能力，业务层只依赖此接口，不感知具体厂商：
-- chat  文本生成（目录识别 / 讲解稿 / 出题 / RAG 回答 / 批改）
-- embed 文本向量化（知识库入库与检索）
-- tts   文本转语音（AI 配音）
+统一四类能力，业务层只依赖此接口，不感知具体厂商：
+- chat    文本生成（目录识别 / 讲解稿 / 出题 / RAG 回答 / 批改）
+- embed   文本向量化（知识库入库与检索）
+- rerank  重排序（检索候选按问题相关性精排，过滤关键词命中的噪声片段）
+- tts     文本转语音（AI 配音）
 
 新增厂商只需实现 BaseAIProvider 并在 factory 注册。
 """
@@ -57,6 +58,15 @@ class BaseAIProvider(ABC):
     @abstractmethod
     def embed(self, texts: list[str]) -> list[list[float]]:
         """返回与 texts 等长的向量列表。"""
+
+    def rerank(self, query: str, documents: list[str], top_n: int | None = None) -> list[dict]:
+        """重排序：按 query 与 documents 的相关性打分，结果按分数降序返回。
+
+        返回 [{"index": <documents 中的原始下标>, "score": <相关性分>}]；
+        top_n 限定返回条数（None 表示全部）。默认未实现——Mock 等服务
+        无法对真实向量候选打分，调用方（检索编排）据此回退纯向量检索。
+        """
+        raise NotImplementedError(f"{self.name} 暂不支持重排序")
 
     def tts(self, text: str, voice: str = "default", speed: float = 1.0) -> str:
         """文本转语音，返回音频可访问地址（或本地路径）。默认未实现。"""

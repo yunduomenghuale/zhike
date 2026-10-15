@@ -20,20 +20,43 @@
                 <span v-if="formatWindow(row)"><el-icon><Clock /></el-icon>{{ formatWindow(row) }}</span>
                 <span>{{ row.duration }} 分钟</span>
                 <strong>{{ row.total_score || 0 }} 分</strong>
+                <span v-if="scoreText(row)" class="exam-my-score">{{ scoreText(row) }}</span>
               </div>
             </div>
           </div>
           <div class="exam-actions course-standard-actions">
             <button
-              v-if="examState(row) === 'open'"
+              v-if="rowState(row) === 'open'"
               class="exam-action course-standard-action-btn primary"
               type="button"
               @click="enter(row)"
             >
               <el-icon><EditPen /></el-icon>进入考试
             </button>
+            <button
+              v-else-if="rowState(row) === 'continue'"
+              class="exam-action course-standard-action-btn primary"
+              type="button"
+              @click="enter(row)"
+            >
+              <el-icon><EditPen /></el-icon>继续考试
+            </button>
+            <template v-else-if="rowState(row) === 'retake'">
+              <button class="exam-action course-standard-action-btn primary" type="button" @click="enter(row)">
+                <el-icon><Refresh /></el-icon>重考
+              </button>
+              <button class="exam-action course-standard-action-btn" type="button" @click="viewResult(row)">
+                <el-icon><View /></el-icon>查看成绩
+              </button>
+            </template>
+            <template v-else-if="rowState(row) === 'done'">
+              <span class="exam-action-disabled"><el-icon><CircleCheck /></el-icon>已完成</span>
+              <button class="exam-action course-standard-action-btn" type="button" @click="viewResult(row)">
+                <el-icon><View /></el-icon>查看成绩
+              </button>
+            </template>
             <span v-else class="exam-action-disabled">
-              {{ examState(row) === 'not_started' ? '未开始' : '已结束' }}
+              {{ rowState(row) === 'not_started' ? '未开始' : '已结束' }}
             </span>
           </div>
         </article>
@@ -52,7 +75,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useRoute } from 'vue-router'
-import { Clock, EditPen } from '@element-plus/icons-vue'
+import { Clock, EditPen, View, Refresh, CircleCheck } from '@element-plus/icons-vue'
 import { listExams } from '@/api/exam'
 
 const router = useRouter()
@@ -81,15 +104,47 @@ async function load() {
 }
 
 function enter(row) {
-  router.push(`/student/exams/${row.id}/take`)
+  // 课程空间内进入考试时带 course 查询参数，交卷后返回/回看仍停留课程空间
+  const query = fixedCourseId.value ? { course: fixedCourseId.value } : undefined
+  router.push({ path: `/student/exams/${row.id}/take`, query })
 }
 
-// 考试可进入状态：未开始 / 已结束 / 进行中
-function examState(row) {
+function viewResult(row) {
+  // 课程空间内走课程内嵌回看路由（保留课程导航栏）；全局列表走默认路由
+  if (fixedCourseId.value) {
+    router.push(`/student/courses/${fixedCourseId.value}/exams/${row.id}/review`)
+  } else {
+    router.push(`/student/exams/${row.id}/review`)
+  }
+}
+
+// 考试状态：未开始 / 已结束 / 进行中（可进入）/ 已交卷（重考或已完成）
+function rowState(row) {
+  const sub = row.my_submission
   const now = Date.now()
-  if (row.start_at && now < new Date(row.start_at).getTime()) return 'not_started'
-  if (row.end_at && now > new Date(row.end_at).getTime()) return 'ended'
+  const notStarted = row.start_at && now < new Date(row.start_at).getTime()
+  const ended = row.status === 'finished' || (row.end_at && now > new Date(row.end_at).getTime())
+  if (sub) {
+    if (sub.status === 'in_progress') return 'continue'
+    if (sub.status === 'submitted' || sub.status === 'timeout') {
+      // 允许重交且考试仍未结束 → 可重考；否则展示已完成
+      if (row.allow_resubmit && !ended) return 'retake'
+      return 'done'
+    }
+    return 'done'
+  }
+  if (notStarted) return 'not_started'
+  if (ended) return 'ended'
   return 'open'
+}
+
+// 列表中的成绩摘要：总分出分后展示总分，否则展示客观题得分
+function scoreText(row) {
+  const sub = row.my_submission
+  if (!sub) return ''
+  if (sub.total_score != null) return `总分 ${sub.total_score} 分`
+  if (sub.objective_score != null) return `客观题 ${sub.objective_score} 分`
+  return ''
 }
 
 function formatDateTime(value) {
@@ -173,6 +228,16 @@ onMounted(load)
   align-items: center;
   gap: 4px;
 }
+.exam-my-score {
+  color: #059669;
+  font-weight: 700;
+}
+.exam-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
 .exam-action {
   display: inline-flex;
   align-items: center;
@@ -189,6 +254,9 @@ onMounted(load)
 }
 
 .exam-action-disabled {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   padding: 0 12px;
   color: #94a3b8;
   font-size: 13px;

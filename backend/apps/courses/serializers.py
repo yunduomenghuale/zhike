@@ -60,6 +60,8 @@ class CatalogSerializer(serializers.ModelSerializer):
 
 class PPTResourceSerializer(serializers.ModelSerializer):
     parse_status_display = serializers.CharField(source="get_parse_status_display", read_only=True)
+    # 向量片段数：0 表示未入库（向量模型不可用或从未重建），QA 时走原文拼接兜底
+    chunk_count = serializers.IntegerField(source="chunks.count", read_only=True)
     allowed_extensions = {".ppt", ".pptx", ".pdf"}
 
     class Meta:
@@ -67,7 +69,7 @@ class PPTResourceSerializer(serializers.ModelSerializer):
         fields = [
             "id", "course", "catalog", "file_name", "file",
             "parse_status", "parse_status_display", "version",
-            "is_active", "parsed_pages", "created_at",
+            "is_active", "parsed_pages", "chunk_count", "created_at",
         ]
         read_only_fields = ["parse_status", "parsed_pages", "version"]
 

@@ -1,7 +1,7 @@
 <template>
   <main class="layout app-page">
     <header class="header app-topbar">
-      <button type="button" class="app-brand" @click="router.push('/dashboard')">
+      <button type="button" class="app-brand" :class="{ 'is-locked': hideSidebar }" @click="onBrand">
         <img class="brand-mark" src="/smart-course-logo.svg" alt="" aria-hidden="true" />
         <span>智课平台</span>
       </button>
@@ -79,8 +79,8 @@
       </div>
     </header>
 
-    <div class="app-stage">
-      <aside class="aside app-rail">
+    <div class="app-stage" :class="{ 'stage-full': hideSidebar }">
+      <aside v-if="!hideSidebar" class="aside app-rail">
         <button type="button" class="space-cover" @click="router.push('/profile')">
           <span class="space-visual">
             <el-icon><HomeFilled /></el-icon>
@@ -160,6 +160,13 @@ const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const { profile, isProfileComplete } = storeToRefs(userStore)
+// 考试进行页：隐藏左侧导航，防止学生通过导航栏逃出考试
+const hideSidebar = computed(() => Boolean(route.meta.hideSidebar))
+// 考试进行中品牌区不可点（同样避免跳出考试）
+function onBrand() {
+  if (hideSidebar.value) return
+  router.push('/dashboard')
+}
 const searchKeyword = ref('')
 let searchTimer = null
 const searchableRoutes = new Set([
@@ -325,6 +332,7 @@ onMounted(() => {
   if (!profile.value) userStore.fetchProfile()
   loadNotifications()
   notifyTimer = setInterval(loadNotifications, 30000)
+  // 生成任务恢复统一在根组件 App.vue 进行（课程空间等独立布局不经过本组件）
 })
 
 onUnmounted(() => {
@@ -915,6 +923,15 @@ function onCommand(cmd) {
   gap: 24px;
   padding: 26px 38px 30px;
   box-sizing: border-box;
+}
+
+/* 考试进行页：隐藏左侧导航后主区占满，避免留空列 */
+.app-stage.stage-full {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.app-brand.is-locked {
+  cursor: default;
 }
 
 .app-rail {

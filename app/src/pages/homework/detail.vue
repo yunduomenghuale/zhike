@@ -157,6 +157,7 @@ import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { get } from '@/utils/request.js'
 import { listSubmissions, submitHomework, submitHomeworkWithFile } from '@/api/homework.js'
+import { blankAnswerText } from '@/utils/blank-answer.js'
 import { mediaURL } from '@/config.js'
 
 const hwId = ref(null)
@@ -243,7 +244,7 @@ function fmtAnswer(answer) {
   if (!answer) return '（未作答）'
   if (answer.key != null) return String(answer.key)
   if (answer.keys) return answer.keys.join('、')
-  if (answer.blanks) return answer.blanks.join(' / ')
+  if (answer.blanks) return blankAnswerText(answer)
   if (answer.text != null) return String(answer.text)
   return JSON.stringify(answer)
 }

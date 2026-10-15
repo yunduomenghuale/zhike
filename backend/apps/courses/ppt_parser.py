@@ -95,6 +95,14 @@ def _render_pdf_pages(file_path: str, out_dir: Path, rel_dir: Path) -> dict[int,
     return _pdf_to_images(file_path, out_dir, rel_dir)
 
 
+def render_pdf_to_images(file_path: str, out_dir: Path, rel_dir: Path) -> dict[int, str]:
+    """PDF 逐页渲染为 PNG 的公开入口（课程课件预览与作业附件预览复用）。
+
+    调用方自行决定输出目录；文件名为 uuid/哈希派生时可安全缓存复用。
+    """
+    return _pdf_to_images(file_path, out_dir, rel_dir)
+
+
 def _pdf_to_images(pdf_path: str | Path, out_dir: Path, rel_dir: Path) -> dict[int, str]:
     """用 pypdfium2（Chrome PDFium 引擎）把 PDF 逐页渲染为 PNG。
 
@@ -278,7 +286,7 @@ def _ai_extract_catalog_tree(pages: list[dict]) -> list[dict]:
     try:
         from apps.ai.providers.factory import get_provider
 
-        provider = get_provider()
+        provider = get_provider("chat")
         # 纯 Mock（未配置真实大模型）无法真正读取文件内容，返回的是与上传文件无关的
         # 示例目录。此时直接放弃 AI 抽取，改由下游规则解析真实文本。
         if getattr(provider, "name", "") == "mock":
