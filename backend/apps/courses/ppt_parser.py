@@ -13,6 +13,10 @@ import json
 import os
 import re
 import shutil
+import sqlite3
+import tempfile
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 
@@ -58,11 +62,72 @@ def ppt_pages_dirname(resource_id: int | str) -> str:
     return digest
 
 
-def render_presentation_slide_images(file_path: str, resource_id: int | str | None = None) -> dict[int, str]:
+def _notify(callback, *args) -> None:
+    """触发进度回调（失败静默）：进度展示是尽力而为，不能拖垮解析主流程。"""
+    if not callback:
+        return
+    try:
+        callback(*args)
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# 渲染全局锁（跨进程 + 跨线程）
+# ---------------------------------------------------------------------------
+# PowerPoint COM 是单实例应用（Dispatch 拿到的是同一个 Application），
+# LibreOffice headless 无独立 profile 时也无法并发转换：两个上传同时渲染会
+# 互相干扰（页面图片缺失/导出失败）。PDF 的 pypdfium2 本身可并发，但并发渲染
+# 峰值内存高，统一排队更稳（docker-compose 有内存额度注释）。
+#
+# 为什么用独立 SQLite 锁库而不是业务库：BEGIN IMMEDIATE 持锁期间会阻塞其他
+# 写入——若用业务库，并发上传方的 parse_progress 进度写库会被挡住，进度条反而
+# 不实时。独立锁库与业务库零干扰；SQLite 锁在进程退出时由 OS 自动释放，无死锁、
+# 无残留锁文件。覆盖 gunicorn 多 worker（生产 2×2）与本地 runserver 多线程。
+_RENDER_LOCK_DB_NAME = "zhike-render-guard.sqlite"
+_RENDER_LOCK_TIMEOUT = 600  # 排队上限（秒）：单次渲染最多几十秒，600 足够
+_RENDER_THREAD_LOCK = threading.Lock()
+
+
+@contextmanager
+def _render_guard():
+    """渲染阶段全局互斥（见上方注释）。
+
+    进程内 threading.Lock 先排队（避免同进程多线程同时抢进程间锁）；进程间用
+    独立 SQLite 文件的 BEGIN IMMEDIATE。抢锁超时/异常时退化为不排队直接渲染
+    （好过让上传失败）。
+    """
+    with _RENDER_THREAD_LOCK:
+        conn = None
+        try:
+            db_path = Path(tempfile.gettempdir()) / _RENDER_LOCK_DB_NAME
+            conn = sqlite3.connect(str(db_path), timeout=_RENDER_LOCK_TIMEOUT)
+            conn.execute("BEGIN IMMEDIATE")
+        except Exception:
+            if conn is not None:
+                conn.close()
+                conn = None
+        try:
+            yield
+        finally:
+            if conn is not None:
+                try:
+                    conn.rollback()  # 结束事务即释放 RESERVED 锁
+                except Exception:
+                    pass
+                conn.close()
+
+
+def render_presentation_slide_images(
+    file_path: str,
+    resource_id: int | str | None = None,
+    on_progress=None,
+) -> dict[int, str]:
     """Render PPT/PPTX/PDF pages to PNG images and return {page: media_url}.
 
     PDF：版式已固化，pypdfium2 直接逐页出图，零偏移（推荐的高保真路径）。
     PPT/PPTX：Windows 用 PowerPoint COM；Linux 用 LibreOffice 转 PDF 后出图（复杂排版可能有偏差）。
+    on_progress(done, total)：每渲染完一页回调一次，供上传链路实时展示进度。
     If rendering is unavailable, callers still keep text extraction working.
     """
     if not file_path or not os.path.exists(file_path):
@@ -82,28 +147,34 @@ def render_presentation_slide_images(file_path: str, resource_id: int | str | No
         shutil.rmtree(out_dir, ignore_errors=True)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    if ext == ".pdf":
-        return _render_pdf_pages(file_path, out_dir, rel_dir)
-    rendered = _render_with_powerpoint(file_path, out_dir, rel_dir)
-    if not rendered:
-        rendered = _render_with_libreoffice(file_path, out_dir, rel_dir)
-    return rendered
+    # 渲染全局排队：PowerPoint COM / LibreOffice 非并发安全（见 _render_guard）
+    with _render_guard():
+        if ext == ".pdf":
+            return _render_pdf_pages(file_path, out_dir, rel_dir, on_progress=on_progress)
+        rendered = _render_with_powerpoint(file_path, out_dir, rel_dir, on_progress=on_progress)
+        if not rendered:
+            rendered = _render_with_libreoffice(file_path, out_dir, rel_dir, on_progress=on_progress)
+        return rendered
 
 
-def _render_pdf_pages(file_path: str, out_dir: Path, rel_dir: Path) -> dict[int, str]:
+def _render_pdf_pages(file_path: str, out_dir: Path, rel_dir: Path, on_progress=None) -> dict[int, str]:
     """PDF 逐页转 PNG：版式已固化，渲染结果与原文件完全一致。"""
-    return _pdf_to_images(file_path, out_dir, rel_dir)
+    return _pdf_to_images(file_path, out_dir, rel_dir, on_progress=on_progress)
 
 
-def render_pdf_to_images(file_path: str, out_dir: Path, rel_dir: Path) -> dict[int, str]:
+def render_pdf_to_images(
+    file_path: str | Path, out_dir: Path, rel_dir: Path, on_progress=None
+) -> dict[int, str]:
     """PDF 逐页渲染为 PNG 的公开入口（课程课件预览与作业附件预览复用）。
 
     调用方自行决定输出目录；文件名为 uuid/哈希派生时可安全缓存复用。
     """
-    return _pdf_to_images(file_path, out_dir, rel_dir)
+    return _pdf_to_images(file_path, out_dir, rel_dir, on_progress=on_progress)
 
 
-def _pdf_to_images(pdf_path: str | Path, out_dir: Path, rel_dir: Path) -> dict[int, str]:
+def _pdf_to_images(
+    pdf_path: str | Path, out_dir: Path, rel_dir: Path, on_progress=None
+) -> dict[int, str]:
     """用 pypdfium2（Chrome PDFium 引擎）把 PDF 逐页渲染为 PNG。
 
     纯 pip 依赖、无系统命令，Windows/Linux 行为一致，替代原 pdftoppm 子进程方案。
@@ -117,7 +188,8 @@ def _pdf_to_images(pdf_path: str | Path, out_dir: Path, rel_dir: Path) -> dict[i
         return rendered
     try:
         scale = RENDER_DPI / 72
-        for index in range(len(pdf)):
+        total = len(pdf)
+        for index in range(total):
             page = pdf[index]
             try:
                 image = page.render(scale=scale).to_pil()
@@ -126,6 +198,7 @@ def _pdf_to_images(pdf_path: str | Path, out_dir: Path, rel_dir: Path) -> dict[i
             image_name = f"slide-{index + 1:03d}.png"
             image.save(out_dir / image_name)
             rendered[index + 1] = _media_url(str(rel_dir / image_name))
+            _notify(on_progress, index + 1, total)
     except Exception:
         return rendered
     finally:
@@ -133,7 +206,9 @@ def _pdf_to_images(pdf_path: str | Path, out_dir: Path, rel_dir: Path) -> dict[i
     return rendered
 
 
-def _render_with_powerpoint(file_path: str, out_dir: Path, rel_dir: Path) -> dict[int, str]:
+def _render_with_powerpoint(
+    file_path: str, out_dir: Path, rel_dir: Path, on_progress=None
+) -> dict[int, str]:
     """Windows Microsoft PowerPoint COM 渲染（保留原行为）。"""
     try:
         import pythoncom
@@ -154,12 +229,14 @@ def _render_with_powerpoint(file_path: str, out_dir: Path, rel_dir: Path) -> dic
         presentation = app.Presentations.Open(os.path.abspath(file_path), True, False, False)
         width = int(getattr(presentation.PageSetup, "SlideWidth", 1280) * 2)
         height = int(getattr(presentation.PageSetup, "SlideHeight", 720) * 2)
+        total = len(presentation.Slides)
         for index, slide in enumerate(presentation.Slides, start=1):
             image_name = f"slide_{index:03d}.png"
             image_path = out_dir / image_name
             slide.Export(str(image_path), "PNG", width, height)
             if image_path.exists():
                 rendered[index] = _media_url(str(rel_dir / image_name))
+            _notify(on_progress, index, total)
     except Exception:
         return rendered
     finally:
@@ -177,11 +254,14 @@ def _render_with_powerpoint(file_path: str, out_dir: Path, rel_dir: Path) -> dic
     return rendered
 
 
-def _render_with_libreoffice(file_path: str, out_dir: Path, rel_dir: Path) -> dict[int, str]:
+def _render_with_libreoffice(
+    file_path: str, out_dir: Path, rel_dir: Path, on_progress=None
+) -> dict[int, str]:
     """Linux：LibreOffice headless 转 PDF，再用 pypdfium2 逐页出 PNG。
 
     老格式 .ppt 先预转 .pptx 再转 PDF——LibreOffice 对 OOXML 的排版保真度
     明显好于二进制 .ppt，可减少文字错位/图形变形。
+    转换阶段无页粒度（soffice 整文件转换），出 PDF 后由 _pdf_to_images 逐页回调。
     """
     import subprocess
     import tempfile
@@ -211,7 +291,7 @@ def _render_with_libreoffice(file_path: str, out_dir: Path, rel_dir: Path) -> di
             pdf_path = Path(tmp) / f"{Path(source).stem}.pdf"
             if not pdf_path.exists():
                 return {}
-            return _pdf_to_images(pdf_path, out_dir, rel_dir)
+            return _pdf_to_images(pdf_path, out_dir, rel_dir, on_progress=on_progress)
     except Exception:
         return {}
 
@@ -233,7 +313,7 @@ def _media_url(relative_path: str) -> str:
     return f"{base.rstrip('/')}/{relative_path.replace(os.sep, '/')}"
 
 
-def parse_teaching_file_pages(file_path: str) -> list[dict]:
+def parse_teaching_file_pages(file_path: str, on_page=None) -> list[dict]:
     if not file_path or not os.path.exists(file_path):
         return []
 
@@ -241,9 +321,9 @@ def parse_teaching_file_pages(file_path: str) -> list[dict]:
     if ext not in SUPPORTED_EXTENSIONS:
         return []
     if ext in (".ppt", ".pptx"):
-        return _read_presentation(file_path)
+        return _read_presentation(file_path, on_page=on_page)
     if ext == ".pdf":
-        return _read_pdf(file_path)
+        return _read_pdf(file_path, on_page=on_page)
     if ext in (".doc", ".docx"):
         return _read_docx(file_path)
     if ext in (".txt", ".md"):
@@ -397,7 +477,7 @@ def _fallback_catalog_tree(pages: list[dict]) -> list[dict]:
     return tree
 
 
-def _read_presentation(file_path: str) -> list[dict]:
+def _read_presentation(file_path: str, on_page=None) -> list[dict]:
     try:
         from pptx import Presentation
 
@@ -406,6 +486,7 @@ def _read_presentation(file_path: str) -> list[dict]:
         return []
 
     pages = []
+    total = len(prs.slides)
     for idx, slide in enumerate(prs.slides, start=1):
         title = ""
         bodies = []
@@ -435,20 +516,23 @@ def _read_presentation(file_path: str) -> list[dict]:
         if not title and bodies:
             title = bodies[0][:80]
         pages.append({"page": idx, "title": title, "body": "\n".join(bodies), "source": "slide"})
+        _notify(on_page, idx, total)
     return pages
 
 
-def _read_pdf(file_path: str) -> list[dict]:
+def _read_pdf(file_path: str, on_page=None) -> list[dict]:
     try:
         from pypdf import PdfReader
 
         reader = PdfReader(file_path)
         pages = []
+        total = len(reader.pages)
         for idx, page in enumerate(reader.pages, start=1):
             text = (page.extract_text() or "").strip()
             # 保留无文本页（纯图片/过渡页）：页码必须与 PDF 物理页一致，
             # 否则逐页渲染的图片会挂错页
             pages.append({"page": idx, "title": _first_line(text)[:80], "body": text, "source": "pdf"})
+            _notify(on_page, idx, total)
         return pages
     except Exception:
         return []

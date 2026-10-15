@@ -91,6 +91,9 @@ class PPTResource(BaseModel):
     is_active = models.BooleanField("当前启用版本", default=True)
     # PPT 解析后的逐页结构化数据：[{page, title, body, image}, ...]
     parsed_pages = models.JSONField("解析页数据", default=list, blank=True)
+    # 解析进度（上传解析过程的实时可视化）：
+    # {"stage": "text|render|embed|done|failed", "done": int, "total": int, "error": str}
+    parse_progress = models.JSONField("解析进度", default=dict, blank=True)
 
     class Meta:
         verbose_name = "PPT 资源"

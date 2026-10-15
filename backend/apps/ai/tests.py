@@ -85,23 +85,36 @@ class _FakeVideo:
         self.is_published = False
         self.published_at = None
         self.save_calls = []
+        # 每次 save 时的进度快照（有讲稿页数, 有配音页数）：验证增量落库行为
+        self.save_snapshots = []
 
     def save(self, update_fields=None):
         self.save_calls.append(update_fields)
+        scripts = self.scripts or []
+        self.save_snapshots.append(
+            (
+                sum(1 for s in scripts if str(s.get("script") or "").strip()),
+                sum(1 for s in scripts if s.get("audio_url")),
+            )
+        )
 
 
 class _FakeChat:
-    """假 chat provider：记录调用参数，按请求内嵌的页面列表返回 JSON。"""
+    """假 chat provider：记录调用参数，按请求内嵌的页面列表返回 JSON。
+
+    delays 非空时按调用顺序错峰睡眠（让各小块完成顺序确定，便于断言增量落库）。
+    """
 
     name = "fake-chat"
 
-    def __init__(self, delay=0.4):
+    def __init__(self, delay=0.4, delays=None):
         self.delay = delay
+        self.delays = list(delays) if delays else None
         self.calls = []
 
     def chat(self, messages, **kwargs):
         self.calls.append(kwargs)
-        time.sleep(self.delay)
+        time.sleep(self.delays.pop(0) if self.delays else self.delay)
         payload = messages[1]["content"].split("PPT 页面：\n", 1)[1]
         pages = json.loads(payload)
         return json.dumps(
@@ -111,16 +124,17 @@ class _FakeChat:
 
 
 class _FakeTTS:
-    """假 tts provider：可配置延迟与失败标记。"""
+    """假 tts provider：可配置延迟与失败标记（delays 错峰语义同 _FakeChat）。"""
 
     name = "fake-tts"
 
-    def __init__(self, delay=0.3, fail_marker=None):
+    def __init__(self, delay=0.3, fail_marker=None, delays=None):
         self.delay = delay
         self.fail_marker = fail_marker
+        self.delays = list(delays) if delays else None
 
     def tts(self, text, voice="Cherry"):
-        time.sleep(self.delay)
+        time.sleep(self.delays.pop(0) if self.delays else self.delay)
         if self.fail_marker and self.fail_marker in text:
             raise RuntimeError("synthetic tts failure")
         return f"/media/tts/fake-{abs(hash(text)) % 10**8}.wav"
@@ -129,29 +143,33 @@ class _FakeTTS:
 class GenerationConcurrencyTests(SimpleTestCase):
     """讲稿/配音并发改造的行为与性能回归测试。"""
 
-    # ---------- 讲稿：单请求双批并发 ----------
+    # ---------- 讲稿：小块并发 + 增量落库 ----------
 
-    def test_script_two_chunks_run_concurrently_and_merge_by_page(self):
+    def test_script_chunks_run_concurrently_and_persist_incrementally(self):
         pages = [{"page": i, "title": f"标题{i}", "body": f"第{i}页正文内容。"} for i in range(1, 13)]
         video = _FakeVideo([])
-        chat = _FakeChat(delay=0.4)
+        # 错峰延迟：小块按提交顺序依次完成，落库进度确定性地 3→6→9→12
+        chat = _FakeChat(delays=[0.1, 0.2, 0.3, 0.4])
         with patch("apps.ai.services.get_provider", return_value=chat):
             started = time.monotonic()
             result = generate_script_pages_batched(video, pages, batch_size=6)
             elapsed = time.monotonic() - started
 
-        # 12 页 = 2 个 6 页块并发：耗时应接近单块（0.4s），而非串行的 0.8s
-        self.assertLess(elapsed, 0.72)
-        self.assertEqual(len(chat.calls), 2)
-        self.assertEqual([call.get("timeout") for call in chat.calls], [45, 45])
-        self.assertEqual([call.get("retries") for call in chat.calls], [2, 2])
+        # 12 页 = 4 个 3 页小块并发：耗时应接近最慢的小块（0.4s），而非串行的 1.0s
+        self.assertLess(elapsed, 0.8)
+        self.assertEqual(len(chat.calls), 4)
+        self.assertEqual([call.get("timeout") for call in chat.calls], [45, 45, 45, 45])
+        self.assertEqual([call.get("retries") for call in chat.calls], [2, 2, 2, 2])
         # 全部 12 页按页码归位、无遗漏无串台
         self.assertEqual(len(video.scripts), 12)
         self.assertTrue(all(item.get("script") for item in video.scripts))
         self.assertEqual([item["page"] for item in video.scripts], list(range(1, 13)))
         self.assertTrue(result["done"])
-        # 初次落库 + 全部完成后的发布状态落库，共两次保存
-        self.assertEqual(len(video.save_calls), 2)
+        # 增量落库：每个小块完成即保存一次（4 次）+ 全部完成后的发布状态落库（1 次）
+        self.assertEqual(len(video.save_calls), 5)
+        # 关键回归：第一次落库时请求仍在进行（只完成了 3 页），进度对轮询实时可见，
+        # 不再「整批结束才落库、前端跳一大截」
+        self.assertEqual([snap[0] for snap in video.save_snapshots], [3, 6, 9, 12, 12])
         self.assertEqual(video.gen_status, _FakeGenStatus.SCRIPT_READY)
         self.assertTrue(video.is_published)
 
@@ -190,24 +208,45 @@ class GenerationConcurrencyTests(SimpleTestCase):
         self.assertEqual(result["script_pages"], 4)
         self.assertTrue(result["done"])
 
+    def test_script_chunk_pages_configurable(self):
+        """批内小块页数可配（AI_SCRIPT_CHUNK_PAGES）：默认 3 页/块，调大则调用变少。"""
+        pages = [{"page": i, "title": f"标题{i}", "body": f"第{i}页正文。"} for i in range(1, 7)]
+        video = _FakeVideo([])
+        chat = _FakeChat(delay=0.01)
+        with patch("apps.ai.services.get_provider", return_value=chat):
+            generate_script_pages_batched(video, pages, batch_size=6)
+        self.assertEqual(len(chat.calls), 2)  # 6 页 / 默认 3 页每块
+
+        video2 = _FakeVideo([])
+        chat2 = _FakeChat(delay=0.01)
+        with patch("apps.ai.services.get_provider", return_value=chat2), override_settings(
+            AI_SCRIPT_CHUNK_PAGES=6
+        ):
+            generate_script_pages_batched(video2, pages, batch_size=6)
+        self.assertEqual(len(chat2.calls), 1)  # 调大后 6 页一个块
+        self.assertTrue(all(item.get("script") for item in video2.scripts))
+
     # ---------- 配音：批内并发 ----------
 
-    def test_synthesize_runs_concurrently_and_saves_once(self):
+    def test_synthesize_runs_concurrently_and_persists_per_page(self):
         scripts = [{"page": i, "script": f"第{i}页的讲解稿文本。"} for i in range(1, 5)]
         video = _FakeVideo(scripts)
-        tts = _FakeTTS(delay=0.3)
+        # 错峰延迟：第 3 页最先完成，落库进度确定性地 1→2→3
+        tts = _FakeTTS(delays=[0.3, 0.2, 0.1])
         with patch("apps.ai.services.get_provider", return_value=tts):
             started = time.monotonic()
             ok = synthesize_audio_for_video(video, limit=3)
             elapsed = time.monotonic() - started
 
         self.assertEqual(ok, 3)
-        # 3 页并发：耗时接近单页（0.3s），而非串行 0.9s
-        self.assertLess(elapsed, 0.7)
+        # 3 页并发：耗时接近最慢页（0.3s），而非串行 0.6s
+        self.assertLess(elapsed, 0.5)
         self.assertTrue(all(scripts[i].get("audio_url") for i in range(3)))
         self.assertFalse(scripts[3].get("audio_url"))
-        # 仅批末一次写库（原为每页一次）
-        self.assertEqual(len(video.save_calls), 1)
+        # 每页合成成功即落库（3 次，进度 1/2/3 递增）+ 批末状态落库（1 次）：
+        # 轮询可实时看到配音页数推进，中断不丢已合成页
+        self.assertEqual(len(video.save_calls), 4)
+        self.assertEqual([snap[1] for snap in video.save_snapshots], [1, 2, 3, 3])
         # 未完成全部配音：gen_status 仍为 SCRIPT_READY、不发布
         self.assertEqual(video.gen_status, _FakeGenStatus.SCRIPT_READY)
         self.assertFalse(video.is_published)
@@ -687,6 +726,37 @@ class IngestPptPagesTests(TestCase):
         self.assertEqual(self.ppt.chunks.count(), 2)
         self.assertEqual(self.ppt.chunks.first().content, "旧片段0")
 
+    def test_ingest_batches_and_reports_progress(self):
+        """分批入库：单批最多 10 条（向量接口上限），逐批回调 on_progress(done, total)。"""
+        self.ppt.parsed_pages = [
+            {"page": i + 1, "title": f"第{i + 1}页", "body": f"内容{i}"} for i in range(25)
+        ]
+        self.ppt.save(update_fields=["parsed_pages", "updated_at"])
+        provider = _FakeIngestEmbedProvider(dimension=4)
+        seen = []
+        with patch("apps.ai.services.get_provider", return_value=provider):
+            count = ingest_ppt_pages(
+                self.ppt, on_progress=lambda done, total: seen.append((done, total))
+            )
+
+        self.assertEqual(count, 25)
+        # 25 条 -> 10 + 10 + 5 三批；进度按批推进到总数
+        self.assertEqual(provider.batch_sizes, [10, 10, 5])
+        self.assertEqual(seen, [(10, 25), (20, 25), (25, 25)])
+
+    def test_ingest_mid_batch_failure_keeps_old_chunks(self):
+        """第二批失败：整体返回 0、不删旧片段（与改造前一次性 embed 失败语义一致）。"""
+        self.ppt.parsed_pages = [
+            {"page": i + 1, "title": f"第{i + 1}页", "body": f"内容{i}"} for i in range(15)
+        ]
+        self.ppt.save(update_fields=["parsed_pages", "updated_at"])
+        self._seed_old_chunks()
+        provider = _FakeIngestEmbedProvider(dimension=4, fail_on_batch=2)
+        with patch("apps.ai.services.get_provider", return_value=provider):
+            self.assertEqual(ingest_ppt_pages(self.ppt), 0)
+        self.assertEqual(self.ppt.chunks.count(), 2)
+        self.assertEqual(self.ppt.chunks.first().content, "旧片段0")
+
 
 class _FakeIngestEmbedProvider:
     """ingest_ppt_pages 用的真实向量服务替身。"""
@@ -694,14 +764,19 @@ class _FakeIngestEmbedProvider:
     name = "tongyi"
     embed_model = "text-embedding-v3"
 
-    def __init__(self, dimension=4, raise_error=None, drop_last=False):
+    def __init__(self, dimension=4, raise_error=None, drop_last=False, fail_on_batch=None):
         self.dimension = dimension
         self.raise_error = raise_error
         self.drop_last = drop_last
+        self.fail_on_batch = fail_on_batch
         self.allow_fallback_seen = []
+        self.batch_sizes = []
 
     def embed(self, texts, *, allow_fallback=True):
         self.allow_fallback_seen.append(allow_fallback)
+        self.batch_sizes.append(len(texts))
+        if self.fail_on_batch is not None and len(self.batch_sizes) == self.fail_on_batch:
+            raise RuntimeError("503")
         if self.raise_error is not None:
             raise self.raise_error
         vectors = [[0.25] * self.dimension for _ in texts]

@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import override_settings
+from django.test import SimpleTestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
@@ -579,3 +579,33 @@ class PptVectorIngestTests(APITestCase):
         chunks = list(self.old_ppt.chunks.order_by("page"))
         self.assertEqual([c.page for c in chunks], [1, 2])
         self.assertEqual(chunks[1].content, "重解析二\n内容二")
+
+
+class RenderGuardTests(SimpleTestCase):
+    """渲染全局锁（_render_guard）：可重复获取/释放，持锁期间阻塞其他连接的写事务。"""
+
+    def test_guard_reacquire_after_release(self):
+        from apps.courses.ppt_parser import _render_guard
+
+        with _render_guard():
+            pass
+        # 释放后可再次获取（无残留、无死锁）
+        with _render_guard():
+            pass
+
+    def test_guard_blocks_other_connection_while_held(self):
+        import sqlite3
+        import tempfile
+        from pathlib import Path
+
+        from apps.courses.ppt_parser import _RENDER_LOCK_DB_NAME, _render_guard
+
+        with _render_guard():
+            other = sqlite3.connect(
+                str(Path(tempfile.gettempdir()) / _RENDER_LOCK_DB_NAME), timeout=0.2
+            )
+            try:
+                with self.assertRaises(sqlite3.OperationalError):
+                    other.execute("BEGIN IMMEDIATE")
+            finally:
+                other.close()

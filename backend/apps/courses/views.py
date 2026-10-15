@@ -1,5 +1,6 @@
 import os
 import tempfile
+import time
 
 from rest_framework.decorators import action
 from django.conf import settings
@@ -251,6 +252,34 @@ class CatalogViewSet(BaseModelViewSet):
         )
 
 
+def _parse_progress_payload(stage: str, done: int = 0, total: int = 0, error: str = "") -> dict:
+    """解析进度统一结构：stage ∈ text/render/embed/done/failed。"""
+    return {"stage": stage, "done": int(done or 0), "total": int(total or 0), "error": error or ""}
+
+
+def _make_parse_progress_writer(ppt):
+    """构造带节流的解析进度写入器。
+
+    逐页回调频率很高（文本解析/图片渲染每页各一次），统一限速约 0.5s 落库一次；
+    done>=total 或 force=True 时立即写，保证阶段切换与终态不丢。
+    进度是尽力而为的展示数据，写库失败不影响解析主流程。
+    """
+    state = {"last": 0.0}
+
+    def write(stage: str, done: int = 0, total: int = 0, error: str = "", force: bool = False):
+        now = time.monotonic()
+        if not force and done < total and now - state["last"] < 0.5:
+            return
+        state["last"] = now
+        try:
+            ppt.parse_progress = _parse_progress_payload(stage, done, total, error)
+            ppt.save(update_fields=["parse_progress", "updated_at"])
+        except Exception:
+            pass
+
+    return write
+
+
 class PPTResourceViewSet(BaseModelViewSet):
     serializer_class = PPTResourceSerializer
     permission_classes = [IsTeacherOrReadOnly]
@@ -263,7 +292,12 @@ class PPTResourceViewSet(BaseModelViewSet):
         return qs.order_by("-version", "-id")
 
     def perform_create(self, serializer):
-        """上传 PPT 后自动逐页解析文本（需求 T-P-02）。"""
+        """上传 PPT 后自动逐页解析文本（需求 T-P-02）。
+
+        解析仍在请求内同步完成（响应契约不变），但各阶段进度实时写入
+        ppt.parse_progress，前端轮询列表即可展示「上传 → 解析文本 x/y 页 →
+        渲染图片 x/y 页 → 建立索引」的细粒度进度。
+        """
         from .ppt_parser import attach_slide_images, parse_teaching_file_pages, render_presentation_slide_images
 
         course = serializer.validated_data["course"]
@@ -276,17 +310,37 @@ class PPTResourceViewSet(BaseModelViewSet):
             is_active=False,
             parse_status=PPTResource.ParseStatus.PARSING,
         )
+        write_progress = _make_parse_progress_writer(ppt)
         pages = []
+        parse_error = ""
         if ppt.file:
-            pages = parse_teaching_file_pages(ppt.file.path)
-            images = render_presentation_slide_images(ppt.file.path, resource_id=ppt.id)
-            pages = attach_slide_images(pages, images)
+            try:
+                write_progress("text", force=True)
+                pages = parse_teaching_file_pages(
+                    ppt.file.path,
+                    on_page=lambda done, total: write_progress("text", done, total),
+                )
+                # 页数在文本解析后已知：渲染阶段直接带总数，全局锁排队期间也显示 0/N
+                write_progress("render", 0, len(pages), force=True)
+                images = render_presentation_slide_images(
+                    ppt.file.path,
+                    resource_id=ppt.id,
+                    on_progress=lambda done, total: write_progress("render", done, total),
+                )
+                pages = attach_slide_images(pages, images)
+            except Exception as exc:
+                # 解析异常不再让请求 500：落失败状态与原因，前端轮询能看到
+                parse_error = str(exc)[:200]
+                pages = []
 
         with transaction.atomic():
             ppt.parsed_pages = pages
             ppt.parse_status = ppt.ParseStatus.DONE if pages else ppt.ParseStatus.FAILED
             ppt.is_active = bool(pages)
-            ppt.save(update_fields=["parsed_pages", "parse_status", "is_active", "updated_at"])
+            ppt.parse_progress = _parse_progress_payload(
+                "done" if pages else "failed", len(pages), len(pages), parse_error
+            )
+            ppt.save(update_fields=["parsed_pages", "parse_status", "is_active", "parse_progress", "updated_at"])
             if pages:
                 existing.exclude(pk=ppt.pk).update(is_active=False)
                 _invalidate_teaching_video_for_new_ppt(catalog, ppt)
@@ -297,25 +351,51 @@ class PPTResourceViewSet(BaseModelViewSet):
         if pages:
             from apps.ai.services import ingest_ppt_pages
 
-            ingest_ppt_pages(ppt)
+            write_progress("embed", 0, len(pages), force=True)
+            ingest_ppt_pages(ppt, on_progress=lambda d, t: write_progress("embed", d, t))
+            write_progress("done", len(pages), len(pages), force=True)
 
     @action(detail=True, methods=["post"], url_path="reparse")
     def reparse(self, request, pk=None):
         from .ppt_parser import attach_slide_images, parse_teaching_file_pages, render_presentation_slide_images
 
         ppt = self.get_object()
-        pages = parse_teaching_file_pages(ppt.file.path) if ppt.file else []
+        write_progress = _make_parse_progress_writer(ppt)
+        pages = []
+        parse_error = ""
+        ppt.parse_status = ppt.ParseStatus.PARSING
+        ppt.save(update_fields=["parse_status", "updated_at"])
         if ppt.file:
-            images = render_presentation_slide_images(ppt.file.path, resource_id=ppt.id)
-            pages = attach_slide_images(pages, images)
+            try:
+                write_progress("text", force=True)
+                pages = parse_teaching_file_pages(
+                    ppt.file.path,
+                    on_page=lambda done, total: write_progress("text", done, total),
+                )
+                # 页数在文本解析后已知：渲染阶段直接带总数，全局锁排队期间也显示 0/N
+                write_progress("render", 0, len(pages), force=True)
+                images = render_presentation_slide_images(
+                    ppt.file.path,
+                    resource_id=ppt.id,
+                    on_progress=lambda done, total: write_progress("render", done, total),
+                )
+                pages = attach_slide_images(pages, images)
+            except Exception as exc:
+                parse_error = str(exc)[:200]
+                pages = []
         ppt.parsed_pages = pages
         ppt.parse_status = ppt.ParseStatus.DONE if pages else ppt.ParseStatus.FAILED
-        ppt.save(update_fields=["parsed_pages", "parse_status", "updated_at"])
+        ppt.parse_progress = _parse_progress_payload(
+            "done" if pages else "failed", len(pages), len(pages), parse_error
+        )
+        ppt.save(update_fields=["parsed_pages", "parse_status", "parse_progress", "updated_at"])
         chunk_count = 0
         if pages:
             from apps.ai.services import ingest_ppt_pages
 
-            chunk_count = ingest_ppt_pages(ppt)
+            write_progress("embed", 0, len(pages), force=True)
+            chunk_count = ingest_ppt_pages(ppt, on_progress=lambda d, t: write_progress("embed", d, t))
+            write_progress("done", len(pages), len(pages), force=True)
         return api_response(
             {"page_count": len(pages), "chunk_count": chunk_count}, message="重新解析完成"
         )

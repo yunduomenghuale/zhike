@@ -1,10 +1,38 @@
 import { defineStore } from 'pinia'
 import { reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { generateScript, generateAudio } from '@/api/course'
+import { generateScript, generateAudio, listVideos } from '@/api/course'
 
 const SCRIPT_BATCH_SIZE = 6
 const AUDIO_BATCH_SIZE = 3
+// 批内轮询间隔：后端每个小块/每页完成即落库，轮询让按钮进度在请求进行中也实时推进
+const PROGRESS_POLL_MS = 2500
+
+// 从服务端拉取某个章节的真实生成进度（讲稿/配音）。
+// 用途：1) 刷新恢复时用真实进度纠正 localStorage 旧种子（批次响应可能在刷新途中
+// 丢失，旧记录会落后于数据库，表现为按钮页数比左侧标签少一截）；
+// 2) 循环期间轮询，进度只增不减地追赶数据库。
+async function fetchServerProgress(kind, catalogId) {
+  try {
+    const data = await listVideos({ catalog: catalogId })
+    const list = Array.isArray(data?.results) ? data : Array.isArray(data) ? data : []
+    const video = list[0]
+    if (!video) return null
+    const scripts = Array.isArray(video.scripts) ? video.scripts : []
+    if (kind === 'audio') {
+      return {
+        done: scripts.filter((s) => s.audio_url).length,
+        total: scripts.filter((s) => String(s.script || '').trim()).length,
+      }
+    }
+    return {
+      done: scripts.filter((s) => String(s.script || '').trim()).length,
+      total: scripts.length,
+    }
+  } catch {
+    return null // 轮询/种子拉取失败静默：批次响应与旧记录仍是有效兜底
+  }
+}
 
 // 生成任务持久化：刷新/关闭页面不丢任务，重新打开自动续跑。
 // 记录含 runnerId（标签页认领）与 updatedAt（心跳），防止多标签页同时恢复导致重复生成：
@@ -78,6 +106,8 @@ function hookUnloadRelease() {
  * 每批结果由后端落库，即使浏览器关闭也不丢已生成进度（增量续传）。
  * 任务记录持久化在 localStorage：刷新/关闭页面后重新打开会自动从断点续跑，
  * 按钮上的进度用记录中的最近值立即占位，再由真实响应刷新。
+ * 实时性：后端批内按小块/逐页增量落库，前端循环期间每 2.5s 轮询服务端进度
+ * （只增不减），请求进行中按钮页数也持续推进，不再「卡一批、跳一大截」。
  */
 export const useGenerationStore = defineStore('generation', () => {
   // catalogId -> { done, total }；键存在即任务进行中
@@ -97,7 +127,28 @@ export const useGenerationStore = defineStore('generation', () => {
     if (runningScript.has(id)) return
     runningScript.add(id)
     if (!scriptTasks[id]) scriptTasks[id] = { done: 0, total: 0 }
+    // 恢复/首启都以服务端真实进度为种子：刷新页面后 localStorage 记录可能落后于
+    // 数据库（批次响应在刷新途中丢失），先用真实值纠正，避免按钮显示过期页数
+    const seed = await fetchServerProgress('script', id)
+    if (scriptTasks[id]) {
+      scriptTasks[id] = {
+        done: Math.max(scriptTasks[id].done, seed?.done || 0),
+        total: scriptTasks[id].total || seed?.total || 0,
+      }
+    }
     saveRecord('script', id, scriptTasks[id])
+    // 批内轮询：请求进行中后端也在增量落库，轮询把最新页数同步进按钮（只增不减）
+    const poll = setInterval(async () => {
+      const p = await fetchServerProgress('script', id)
+      if (!p || !scriptTasks[id]) return
+      if (p.done > scriptTasks[id].done || (p.total && !scriptTasks[id].total)) {
+        scriptTasks[id] = {
+          done: Math.max(scriptTasks[id].done, p.done),
+          total: scriptTasks[id].total || p.total,
+        }
+        saveRecord('script', id, scriptTasks[id])
+      }
+    }, PROGRESS_POLL_MS)
     try {
       for (;;) {
         if (!stillMine('script', id)) return // 已被其他标签页接管，静默让位
@@ -117,6 +168,7 @@ export const useGenerationStore = defineStore('generation', () => {
       const p = scriptTasks[id] || { done: 0, total: 0 }
       ElMessage.warning(`讲解稿生成中断：已完成 ${p.done}/${p.total} 页，可再次点击继续`)
     } finally {
+      clearInterval(poll)
       runningScript.delete(id)
       delete scriptTasks[id]
     }
@@ -127,7 +179,26 @@ export const useGenerationStore = defineStore('generation', () => {
     if (runningAudio.has(id)) return
     runningAudio.add(id)
     if (!audioTasks[id]) audioTasks[id] = { done: 0, total: 0 }
+    // 同讲稿：恢复时先以服务端真实进度纠正种子，再进循环
+    const seed = await fetchServerProgress('audio', id)
+    if (audioTasks[id]) {
+      audioTasks[id] = {
+        done: Math.max(audioTasks[id].done, seed?.done || 0),
+        total: audioTasks[id].total || seed?.total || 0,
+      }
+    }
     saveRecord('audio', id, audioTasks[id])
+    const poll = setInterval(async () => {
+      const p = await fetchServerProgress('audio', id)
+      if (!p || !audioTasks[id]) return
+      if (p.done > audioTasks[id].done || (p.total && !audioTasks[id].total)) {
+        audioTasks[id] = {
+          done: Math.max(audioTasks[id].done, p.done),
+          total: audioTasks[id].total || p.total,
+        }
+        saveRecord('audio', id, audioTasks[id])
+      }
+    }, PROGRESS_POLL_MS)
     try {
       for (;;) {
         if (!stillMine('audio', id)) return
@@ -145,6 +216,7 @@ export const useGenerationStore = defineStore('generation', () => {
       const p = audioTasks[id] || { done: 0, total: 0 }
       ElMessage.warning(`配音中断：已完成 ${p.done}/${p.total} 页，可再次点击「配音」继续补齐`)
     } finally {
+      clearInterval(poll)
       runningAudio.delete(id)
       delete audioTasks[id]
     }

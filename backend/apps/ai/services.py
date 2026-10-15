@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import re
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from django.conf import settings
 
@@ -100,19 +100,20 @@ def generate_scripts_for_video(pages: list[dict]) -> list[dict]:
 def generate_script_pages_batched(video, pages: list[dict], batch_size: int = 6) -> dict:
     """分批为教学视频生成讲解稿（避免一次生成几十页超过网关 180s 超时）。
 
-    对 video.scripts 中尚无讲解稿的页，每批 batch_size 页调用一次 AI，
-    每批完成立即落库（请求中断不丢进度）；AI 失败的页用本地兜底文本。
+    对 video.scripts 中尚无讲解稿的页，每批最多 batch_size*2 页；批内按
+    AI_SCRIPT_CHUNK_PAGES（默认 3 页）切成小块并发调用，**每个小块一完成即
+    合并落库**（as_completed 增量保存）——前端轮询因此能在请求进行中就看到
+    页数推进，不再「一批卡几分钟、响应后跳一大截」；请求中断不丢已完成页。
+    AI 失败的页用本地兜底文本。
     返回 {generated, pages, script_pages, remaining, done}。
 
-    性能：单次请求内把待生成页拆成两半并发调用（各 batch_size 页，实测每半批约 13s）——
-    两批无顺序依赖，生成吞吐被并行化，30 页课件从约 65s 降到约 40s。
-
-    超时：每半批的请求超时取管理端该能力配置的 timeout，未配则
+    超时：每小块的请求超时取管理端该能力配置的 timeout，未配则
     settings.AI_SCRIPT_TIMEOUT（默认 45s，可用 AI_SCRIPT_TIMEOUT 环境变量调大）——
     本地模型推理慢，不调大易整批超时落兜底。
     """
     provider = get_provider("chat")
     timeout = getattr(provider, "timeout", None) or getattr(settings, "AI_SCRIPT_TIMEOUT", 45)
+    chunk_pages = max(1, int(getattr(settings, "AI_SCRIPT_CHUNK_PAGES", 3) or 3))
     pages = pages or []
     scripts = list(video.scripts or [])
     if not scripts:
@@ -133,11 +134,31 @@ def generate_script_pages_batched(video, pages: list[dict], batch_size: int = 6)
                     "body": _dedupe_page_body(page_data.get("body") or "")[:500],
                 }
             )
-        # 两半并发：线程间只读共享数据、各产各的 {page: script} 字典，主线程统一合并
-        mid = (len(compact_pages) + 1) // 2
-        chunks = [chunk for chunk in (compact_pages[:mid], compact_pages[mid:]) if chunk]
+        # 小块并发：线程间只读共享数据、各产各的 {page: script} 字典，主线程统一合并
+        chunks = [
+            compact_pages[i : i + chunk_pages] for i in range(0, len(compact_pages), chunk_pages)
+        ]
+        filled: set = set()  # 已拿到 AI 结果并合并落库的页
+
+        def _absorb(chunk_result: dict) -> bool:
+            """把一个小块的结果合并进 scripts 并立即落库，返回是否有新增。"""
+            added = False
+            for pg, script in (chunk_result or {}).items():
+                if pg in filled or not script:
+                    continue
+                for item in batch:
+                    if item.get("page") == pg and not str(item.get("script") or "").strip():
+                        item["script"] = _polish_script_text(script)
+                        filled.add(pg)
+                        added = True
+                        break
+            if added:
+                video.scripts = scripts
+                video.save(update_fields=["scripts", "updated_at"])
+            return added
+
         if len(chunks) > 1:
-            with ThreadPoolExecutor(max_workers=2) as pool:
+            with ThreadPoolExecutor(max_workers=min(4, len(chunks))) as pool:
                 # 线程池不继承 contextvars：提交时复制调用上下文（场景/trace_id/触发人）
                 # 带进 worker，否则并发批次的调用流水丢场景归属
                 futures = [
@@ -151,19 +172,30 @@ def generate_script_pages_batched(video, pages: list[dict], batch_size: int = 6)
                     )
                     for chunk in chunks
                 ]
-                chunk_results = [future.result() for future in futures]
+                # as_completed：哪个小块先回来就先合并落库，进度实时可见
+                for future in as_completed(futures):
+                    try:
+                        _absorb(future.result())
+                    except Exception:
+                        continue  # 单块异常不拖垮其他块；无结果页走本地兜底
         else:
-            chunk_results = [_request_script_batch(provider, compact_pages, timeout=timeout)]
-        by_page = {}
-        for result in chunk_results:
-            by_page.update(result)
+            try:
+                _absorb(_request_script_batch(provider, compact_pages, timeout=timeout))
+            except Exception:
+                pass  # 无结果页走本地兜底
+        # AI 没覆盖到的页（失败/超时/漏页）：本地兜底文本补上再落库
+        fallback_added = False
         for item in batch:
+            if item.get("page") in filled:
+                continue
             page_data = page_map.get(item.get("page"), {})
-            script = by_page.get(item.get("page")) or _local_script_for_page(page_data)["script"]
-            item["script"] = _polish_script_text(script)
-            generated += 1
-        video.scripts = scripts
-        video.save(update_fields=["scripts", "updated_at"])
+            item["script"] = _local_script_for_page(page_data)["script"]
+            filled.add(item.get("page"))
+            fallback_added = True
+        if fallback_added:
+            video.scripts = scripts
+            video.save(update_fields=["scripts", "updated_at"])
+        generated = len(batch)
 
     total = len(scripts)
     script_pages = sum(1 for item in scripts if str(item.get("script") or "").strip())
@@ -517,7 +549,8 @@ def synthesize_audio_for_video(video, voice: str | None = None, limit: int | Non
 
     性能：本批页在线程池中并发合成（每页是独立的无状态 API 调用，实测单页约 6s）——
     并发 3 路可把 30 页课件的配音时间从约 3 分钟压到约 1 分钟；
-    整批结束统一写库（此前每页各写一次）。中断/失败的页下次调用补齐。
+    as_completed 每页成功即写库（进度实时可见，中断不丢已合成页）；失败页记
+    audio_error，下次调用补齐。
     """
     provider = get_provider("tts")
     voice = voice or getattr(provider, "voice", "") or getattr(settings, "AI_TTS_VOICE", "Cherry")
@@ -536,6 +569,10 @@ def synthesize_audio_for_video(video, voice: str | None = None, limit: int | Non
 
     ok = 0
     if todo:
+        def _persist():
+            video.scripts = scripts
+            video.save(update_fields=["scripts", "updated_at"])
+
         def _synthesize(item):
             # 每个 item 是独立 dict，线程间无共享状态；provider 只读配置，requests 线程安全
             try:
@@ -552,8 +589,11 @@ def synthesize_audio_for_video(video, voice: str | None = None, limit: int | Non
                 pool.submit(run_in_context, copy_call_context(), _synthesize, item)
                 for item in todo
             ]
-            results = [future.result() for future in futures]
-        ok = sum(1 for flag in results if flag)
+            # as_completed：每合成成功一页立即落库，前端轮询可实时看到配音页数推进
+            for future in as_completed(futures):
+                if future.result():
+                    ok += 1
+                    _persist()
 
     audio_count = sum(1 for item in scripts if item.get("audio_url"))
     script_count = len([item for item in scripts if item.get("script")])
@@ -612,11 +652,16 @@ def ingest_material(material, chunk_size: int = 500) -> int:
     return len(objs)
 
 
+# 向量接口单批上限（DashScope text-embedding 最多 10 条/请求）：超过必须切片，
+# 否则整批 400 全量失败；切片后还可逐批回调进度，让上传弹窗的索引阶段可观测
+EMBED_BATCH_SIZE = 10
+
+
 @scene_decorator(
     AICallLog.Scene.PPT_EMBED,
     course_getter=lambda args, kwargs: getattr(args[0], "course_id", None),
 )
-def ingest_ppt_pages(ppt) -> int:
+def ingest_ppt_pages(ppt, on_progress=None) -> int:
     """把课件 PPT 逐页文本向量化写入知识库片段（每页一个片段）。
 
     课件是向量库的主要内容：QA 检索主要依赖它，因此上传解析成功后
@@ -627,6 +672,10 @@ def ingest_ppt_pages(ppt) -> int:
       旧片段原样保留，也不修改 PPT 的任何状态（QA 侧有原文拼接兜底，
       见 _gather_course_context 第 2 步）；
     - 全链路 allow_fallback=False，杜绝 64 维 Mock 假向量混入真实向量空间。
+
+    分批：单批最多 EMBED_BATCH_SIZE 条（DashScope 上限），逐批
+    on_progress(done, total) 回调；任一批失败即整体返回 0、不删旧片段，
+    与改造前「一次性 embed 失败」语义一致。
     """
     from django.db import transaction
 
@@ -651,12 +700,22 @@ def ingest_ppt_pages(ppt) -> int:
 
     if isinstance(provider, MockProvider):
         return 0
-    try:
-        embeddings = provider.embed(pieces, allow_fallback=False)
-    except Exception:
-        return 0
-    if len(embeddings) != len(pieces) or any(not emb for emb in embeddings):
-        return 0
+    total = len(pieces)
+    embeddings: list = []
+    for start in range(0, total, EMBED_BATCH_SIZE):
+        batch = pieces[start : start + EMBED_BATCH_SIZE]
+        try:
+            batch_embeddings = provider.embed(batch, allow_fallback=False)
+        except Exception:
+            return 0
+        if len(batch_embeddings) != len(batch) or any(not emb for emb in batch_embeddings):
+            return 0
+        embeddings.extend(batch_embeddings)
+        if on_progress:
+            try:
+                on_progress(len(embeddings), total)
+            except Exception:
+                pass  # 进度回调失败不影响入库主流程
 
     objs = [
         KnowledgeChunk(

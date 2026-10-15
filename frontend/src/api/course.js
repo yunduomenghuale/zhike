@@ -25,13 +25,16 @@ export const previewCatalogFromFile = (file) => {
 
 // 章节 PPT 课件
 export const listPpts = (params) => request.get('/ppts/', { params })
-export const uploadPpt = ({ course, catalog, file }) => {
+export const uploadPpt = ({ course, catalog, file, onUploadProgress }) => {
   const form = new FormData()
   form.append('course', course)
   form.append('catalog', catalog)
   form.append('file', file)
   form.append('file_name', file.name)
-  return request.post('/ppts/', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+  return request.post('/ppts/', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    onUploadProgress,
+  })
 }
 export const deletePpt = (id) => request.delete(`/ppts/${id}/`)
 

@@ -657,17 +657,39 @@
         :show-file-list="false"
         :before-upload="handlePptUpload"
         :accept="fileAccept"
-        :disabled="uploading"
+        :disabled="!!currentUploadTask"
         class="ppt-upload"
       >
         <div class="ppt-upload-inner">
           <div class="ppt-upload-icon">
             <el-icon><UploadFilled /></el-icon>
           </div>
-          <div class="ppt-upload-title">{{ uploading ? '正在上传解析...' : '拖入或选择课件文件' }}</div>
+          <div class="ppt-upload-title">{{ currentUploadTask ? '正在上传解析...' : '拖入或选择课件文件' }}</div>
           <div class="ppt-upload-desc">支持 .ppt / .pptx / .pdf；PDF 版式零偏移，推荐使用（PPT 另存为 PDF 即可）</div>
         </div>
       </el-upload>
+      <div v-if="currentUploadTask" class="ppt-upload-progress">
+        <div class="ppt-upload-progress-head">
+          <span class="ppt-upload-progress-stage">
+            <el-icon class="is-loading" v-if="currentUploadTask.phase !== 'done' && currentUploadTask.phase !== 'failed'"><Loading /></el-icon>
+            {{ uploadStageText }}
+          </span>
+        </div>
+        <div class="ppt-upload-progress-bar-row">
+          <el-progress
+            class="ppt-upload-progress-bar"
+            :percentage="uploadProgressPercent"
+            :stroke-width="10"
+            :show-text="false"
+            :status="currentUploadTask.phase === 'failed' ? 'exception' : undefined"
+          />
+          <span
+            v-if="uploadProgressNum"
+            class="ppt-upload-progress-num"
+            :class="{ 'is-failed': currentUploadTask.phase === 'failed' }"
+          >{{ uploadProgressNum }}</span>
+        </div>
+      </div>
       <div v-if="currentPpt?.parsed_pages?.length" class="ppt-page-preview">
         <div class="ppt-preview-head">
           <span>解析预览</span>
@@ -811,10 +833,10 @@
         >
           <el-icon class="is-loading"><Loading /></el-icon>
           <span v-if="genStore.scriptTasks[videoNode.id]">
-            正在生成讲解稿 {{ genStore.scriptTasks[videoNode.id].done }}/{{ genStore.scriptTasks[videoNode.id].total || '…' }}…
+            正在生成讲解稿 {{ genStore.scriptTasks[videoNode.id].done }}/{{ genStore.scriptTasks[videoNode.id].total || videoScripts.length || '…' }}
           </span>
           <span v-else>
-            正在合成配音 {{ genStore.audioTasks[videoNode.id].done }}/{{ genStore.audioTasks[videoNode.id].total || '…' }}…
+            正在合成配音 {{ genStore.audioTasks[videoNode.id].done }}/{{ genStore.audioTasks[videoNode.id].total || audioTotalFallback || '…' }}
             已完成的页可先试听，其余页会自动补齐
           </span>
         </div>
@@ -893,7 +915,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ArrowLeft, ArrowRight, Plus, Edit, Delete, Upload, MagicStick, Folder, Document, Microphone, Headset, UploadFilled, VideoPlay, VideoPause, ChatDotRound, Close, Promotion, Picture, Loading, Right, Collection } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -1237,6 +1259,25 @@ async function genAudio(node) {
 // 后台恢复/进行的生成任务完成后，自动刷新视频数据（按钮从任务态回到持久化进度）
 watch(() => genStore.completedTick, () => { loadVideos() })
 
+// 生成进行中：store 里的任务进度每次前进（轮询/批次响应）都刷新一次视频数据，
+// 让左侧「讲解稿 x/y 页」「配音 x 页」标签与按钮进度同步推进。
+// 此前仅任务结束后才刷新，运行中标签停滞在旧值，与按钮页数对不上。
+const seenTaskDone = {}
+watch(
+  () => [genStore.scriptTasks, genStore.audioTasks],
+  () => {
+    const entries = [
+      ...Object.entries(genStore.scriptTasks),
+      ...Object.entries(genStore.audioTasks),
+    ]
+    const advanced = entries.some(([id, task]) => seenTaskDone[id] !== task.done)
+    if (!advanced) return
+    entries.forEach(([id, task]) => { seenTaskDone[id] = task.done })
+    loadVideos()
+  },
+  { deep: true },
+)
+
 // 对话框打开期间的实时进度：批次推进时只把新配音合并进弹窗（绝不覆盖正在编辑的讲稿文本）
 async function refreshOpenVideoAudio() {
   if (!videoVisible.value || !videoNode.value || !videoDetail.value) return
@@ -1274,6 +1315,11 @@ const scriptOriginals = ref({})
 const videoScripts = computed(() => (
   Array.isArray(videoDetail.value?.scripts) ? videoDetail.value.scripts : []
 ))
+// 弹窗内已知总数兜底：store 任务刚启动、服务端种子/首批响应未到时，横幅先用弹窗
+// 数据里的页数，避免出现「正在合成配音 0/……」总数缺失的观感
+const audioTotalFallback = computed(() =>
+  videoScripts.value.filter((s) => String(s.script || '').trim()).length
+)
 const currentAudioCount = computed(() => audioCount(videoDetail.value))
 const playerPages = computed(() => {
   const ppt = videoNode.value ? pptMap[String(videoNode.value.id)] : null
@@ -1685,29 +1731,219 @@ watch(playerPageIndex, () => {
 
 // ---- 课件 ----
 const pptVisible = ref(false)
-const uploading = ref(false)
+// 每章一个上传/解析任务 { phase, percent, done, total, error, httpPending }：
+// 各章课件弹窗只渲染自己的任务，互不串台；也支持同时上传多个章节的课件
+// （服务端渲染阶段有全局锁排队，见 ppt_parser._render_guard）
+const uploadTasks = reactive({})
+let pptParsePollTimer = null
+// 进度停更超过该时长视为服务端已中断（崩溃/重启）：恢复轮询不拉起、进行中则判失败，避免永冻
+const PPT_PARSE_STALE_MS = 10 * 60 * 1000
+// 服务端 ingest 发生在 parse_status 翻 done 之后（阶段仍为 embed），
+// 因此「进行中」必须按阶段判定而不能只看 parse_status——否则响应到达前轮询失明、进度冻结
+const PPT_PARSE_ACTIVE_STAGES = ['text', 'render', 'embed']
+function isParseInProgress(ppt) {
+  if (!ppt) return false
+  if (ppt.parse_status === 'parsing') return true
+  return PPT_PARSE_ACTIVE_STAGES.includes(ppt.parse_progress?.stage)
+}
+function pptUpdatedAt(ppt) {
+  const raw = ppt?.updated_at
+  if (!raw) return 0
+  const ts = new Date(raw).getTime()
+  return Number.isNaN(ts) ? 0 : ts
+}
 const currentNode = ref(null)
+// 当前弹窗章节的上传任务：没有则该章上传区可正常拖拽，别的章节有任务也不影响
+const currentUploadTask = computed(() =>
+  currentNode.value ? uploadTasks[String(currentNode.value.id)] : null
+)
 function openPpt(node) {
   currentNode.value = node
   pptVisible.value = true
+  maybeResumeParsePoll()
 }
+
+// 刷新页面/重开弹窗时，若该章节课件仍在解析中（服务端同步链路），恢复进度轮询
+async function maybeResumeParsePoll() {
+  if (!currentNode.value) return
+  const key = String(currentNode.value.id)
+  if (uploadTasks[key]) return // 该章节已有任务（上传中或已恢复），不重复拉起
+  try {
+    const list = await listPpts({ catalog: currentNode.value.id })
+    const rows = Array.isArray(list?.results) ? list.results : Array.isArray(list) ? list : []
+    const active = rows.find(isParseInProgress)
+    if (!active) return
+    // 陈旧保护：进度早就停更（服务端此前中断过），不恢复，上传区保持可点击
+    const updatedAt = pptUpdatedAt(active)
+    if (updatedAt && Date.now() - updatedAt > PPT_PARSE_STALE_MS) return
+    const progress = active.parse_progress || {}
+    uploadTasks[key] = {
+      phase: progress.stage || 'text',
+      percent: 0,
+      done: Number(progress.done) || 0,
+      total: Number(progress.total) || 0,
+      error: progress.error || '',
+      httpPending: false, // 恢复轮询：无 HTTP 在途，由轮询自身收尾
+    }
+    ensurePptParsePoll()
+  } catch { /* 拉取失败：不恢复轮询，上传区保持可点击 */ }
+}
+
+// 单个全局轮询表：每 tick 遍历所有进行中的章节任务（支持多章同时上传）
+function ensurePptParsePoll() {
+  if (pptParsePollTimer) return
+  pollPptParse()
+  pptParsePollTimer = setInterval(pollPptParse, 1000)
+}
+
+async function pollPptParse() {
+  const keys = Object.keys(uploadTasks)
+  if (!keys.length) {
+    stopPptParsePoll()
+    return
+  }
+  for (const key of keys) {
+    const task = uploadTasks[key]
+    // 终态闪烁中（等待删除）的任务不再推进；HTTP 在途的任务由上传响应收尾
+    if (!task || task.phase === 'done' || task.phase === 'failed') continue
+    try {
+      const list = await listPpts({ catalog: key })
+      const rows = Array.isArray(list?.results) ? list.results : Array.isArray(list) ? list : []
+      const active = rows.find(isParseInProgress)
+      if (active) {
+        // 恢复轮询（无 HTTP 在途）时进度长时间停更 → 服务端已中断，判失败收尾，
+        // 避免上传响应永远不来导致的进度条「永冻」
+        if (!task.httpPending) {
+          const updatedAt = pptUpdatedAt(active)
+          if (updatedAt && Date.now() - updatedAt > PPT_PARSE_STALE_MS) {
+            await finishUploadTask(key, 'failed', '解析进度长时间未更新，请刷新页面重试')
+            continue
+          }
+        }
+        const progress = active.parse_progress || {}
+        task.phase = progress.stage || 'text'
+        task.done = Number(progress.done) || 0
+        task.total = Number(progress.total) || 0
+        task.error = progress.error || ''
+        continue
+      }
+      // 没有进行中的资源：解析已结束。HTTP 在途时等上传响应收尾；恢复轮询在此收尾
+      if (task.httpPending) continue
+      const failed = rows.find((p) => p.parse_status === 'failed' || p.parse_progress?.stage === 'failed')
+      await finishUploadTask(key, failed ? 'failed' : 'done', failed?.parse_progress?.error || '')
+    } catch { /* 单章轮询失败：等下一轮 */ }
+  }
+}
+
+// 轮询侧收尾：展示终态一小会儿 → 删除任务 → 刷新课件列表
+async function finishUploadTask(key, status = 'done', errorMsg = '') {
+  const task = uploadTasks[key]
+  if (!task) return
+  if (status === 'failed') {
+    task.phase = 'failed'
+    if (errorMsg) task.error = errorMsg
+    ElMessage.error(task.error || '解析失败')
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+  } else {
+    task.phase = 'done'
+    task.percent = 100
+    task.done = task.total
+    await new Promise((resolve) => setTimeout(resolve, 500))
+  }
+  delete uploadTasks[key]
+  loadPpts({ reset: false }).catch(() => {})
+}
+
+function stopPptParsePoll() {
+  if (pptParsePollTimer) {
+    clearInterval(pptParsePollTimer)
+    pptParsePollTimer = null
+  }
+}
+
+const uploadStageText = computed(() => {
+  switch (currentUploadTask.value?.phase) {
+    case 'upload': return '正在上传课件…'
+    case 'text': return '正在解析页面文本…'
+    case 'render': return '正在渲染页面图片…'
+    case 'embed': return '正在建立知识库索引…'
+    case 'done': return '解析完成'
+    case 'failed': {
+      const err = currentUploadTask.value?.error
+      return err ? `解析失败：${err}` : '解析失败'
+    }
+    default: return '正在处理…'
+  }
+})
+
+const uploadProgressPercent = computed(() => {
+  const task = currentUploadTask.value
+  if (!task) return 0
+  if (task.phase === 'done' || task.phase === 'failed') return 100
+  if (task.phase === 'upload') return task.percent
+  if (task.total > 0) return Math.min(100, Math.round((task.done / task.total) * 100))
+  return 100
+})
+
+// 进度条右侧数字：上传中显示字节百分比，解析中显示 done/total（embed 单位为片段）
+const uploadProgressNum = computed(() => {
+  const task = currentUploadTask.value
+  if (!task) return ''
+  if (task.phase === 'upload') return `${task.percent}%`
+  if (task.total) return `${task.done}/${task.total} ${task.phase === 'embed' ? '片段' : '页'}`
+  return ''
+})
+
 async function handlePptUpload(file) {
   if (!isPptFile(file)) {
     ElMessage.warning('课件支持 PPT / PPTX / PDF 文件')
     return false
   }
-  uploading.value = true
+  const catalogId = currentNode.value.id
+  const key = String(catalogId)
+  uploadTasks[key] = { phase: 'upload', percent: 0, done: 0, total: 0, error: '', httpPending: true }
+  // 上传请求返回即解析完成（后端同步链路）；轮询只负责展示解析中间进度
+  ensurePptParsePoll()
   try {
-    const created = await uploadPpt({ course: courseId, catalog: currentNode.value.id, file })
-    const currentCatalogId = currentNode.value.id
+    const created = await uploadPpt({
+      course: courseId,
+      catalog: catalogId,
+      file,
+      onUploadProgress: (e) => {
+        const task = uploadTasks[key]
+        if (!task || !e.total) return
+        task.percent = Math.min(99, Math.round((e.loaded / e.total) * 100))
+        if (e.loaded >= e.total && task.phase === 'upload') {
+          task.phase = 'text' // 字节传完，进入服务端解析
+        }
+      },
+    })
     const savedPpt = created && typeof created === 'object'
       ? created
-      : { catalog: currentCatalogId, file_name: file.name, parsed_pages: [] }
-    setPptMapItem(savedPpt, currentCatalogId)
+      : { catalog: catalogId, file_name: file.name, parsed_pages: [] }
+    setPptMapItem(savedPpt, catalogId)
     ElMessage.success((savedPpt.parsed_pages || []).length ? '上传并解析完成' : '已上传，但未解析到页面文本')
     loadPpts({ reset: false }).catch(() => {})
+    // 展示一小会儿「解析完成」再收起进度条
+    const task = uploadTasks[key]
+    if (task) {
+      task.phase = 'done'
+      task.percent = 100
+      if (!task.total) task.total = (savedPpt.parsed_pages || []).length
+      task.done = task.total
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500))
+  } catch (err) {
+    const message = err?.response?.data?.message || err?.message || '请重试'
+    const task = uploadTasks[key]
+    if (task) {
+      task.phase = 'failed'
+      task.error = message
+    }
+    ElMessage.error(`上传失败：${message}`)
+    await new Promise((resolve) => setTimeout(resolve, 1200))
   } finally {
-    uploading.value = false
+    delete uploadTasks[key]
   }
   return false
 }
@@ -1752,6 +1988,10 @@ onMounted(async () => {
     const res = await getQaVisionCapability()
     visionSupported.value = Boolean(res?.supports_vision)
   } catch { /* 拉取失败：保持隐藏 */ }
+})
+
+onUnmounted(() => {
+  stopPptParsePoll()
 })
 </script>
 
@@ -2687,6 +2927,58 @@ onMounted(async () => {
 
 .ppt-upload {
   width: 100%;
+}
+
+.ppt-upload-progress {
+  margin-top: 12px;
+  padding: 12px 14px 14px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background: var(--el-fill-color-light);
+}
+
+.ppt-upload-progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+}
+
+.ppt-upload-progress-stage {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ppt-upload-progress-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ppt-upload-progress-bar {
+  flex: 1;
+  min-width: 0;
+}
+
+.ppt-upload-progress-num {
+  flex-shrink: 0;
+  /* 与进度条同行、固定最右侧：主色与进度条一致，失败转红；
+     不用 font-variant-numeric: tabular-nums——部分字体回落下数字会改用其他
+     字体渲染，与汉字高度差更明显（曾反馈「只显示上半截」） */
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  color: var(--el-color-primary);
+}
+
+.ppt-upload-progress-num.is-failed {
+  color: var(--el-color-danger);
 }
 
 .ppt-upload :deep(.el-upload) {

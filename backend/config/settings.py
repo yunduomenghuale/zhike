@@ -319,6 +319,10 @@ def _ai_env_float(name: str, default: float) -> float:
 AI_SCRIPT_TIMEOUT = _ai_env_int("AI_SCRIPT_TIMEOUT", 45)
 AI_TTS_TIMEOUT = _ai_env_int("AI_TTS_TIMEOUT", 120)
 AI_TTS_VOICE = os.getenv("AI_TTS_VOICE") or "Cherry"
+# 讲稿批内小块页数：每批（batch_size*2 页）再按此切成小块并发调用，每个小块
+# 完成即落库（as_completed 增量保存）——前端轮询因此在请求进行中就能看到页数
+# 推进，不会「卡住一批、响应后跳一大截」。调大减少调用次数但进度粒度变粗。
+AI_SCRIPT_CHUNK_PAGES = _ai_env_int("AI_SCRIPT_CHUNK_PAGES", 3)
 
 # AI 调用流水（埋点见 apps/ai/calllog.py，管理端统计追溯用）：
 # - AI_CALL_LOG_RETENTION_DAYS：流水保留天数，清理命令 cleanup_ai_call_logs 按此删除；

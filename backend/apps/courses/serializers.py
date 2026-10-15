@@ -69,9 +69,10 @@ class PPTResourceSerializer(serializers.ModelSerializer):
         fields = [
             "id", "course", "catalog", "file_name", "file",
             "parse_status", "parse_status_display", "version",
-            "is_active", "parsed_pages", "chunk_count", "created_at",
+            "is_active", "parsed_pages", "parse_progress", "chunk_count",
+            "created_at", "updated_at",
         ]
-        read_only_fields = ["parse_status", "parsed_pages", "version"]
+        read_only_fields = ["parse_status", "parsed_pages", "parse_progress", "version"]
 
     def validate_file(self, value):
         ext = os.path.splitext(value.name)[1].lower()
