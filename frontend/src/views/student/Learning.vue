@@ -133,6 +133,24 @@
                         <img v-if="m.image" :src="m.image" class="q-image" alt="提问图片" />
                         <template v-if="!m.imageOnly">{{ m.content }}</template>
                       </div>
+                      <!-- 参考来源须为独立 v-if：若插在 v-else-if 与 v-else 之间会抢走用户消息的 v-else 分支 -->
+                      <div v-if="m.role === 'assistant' && m.cited_chunks?.length && !m.streaming" class="chat-sources">
+                        <div class="chat-sources-title">
+                          <el-icon :size="12"><Collection /></el-icon> 参考来源
+                        </div>
+                        <div class="chat-source-tags">
+                          <el-tag
+                            v-for="(g, gi) in groupCitedSources(m.cited_chunks)"
+                            :key="gi"
+                            size="small"
+                            effect="plain"
+                            type="info"
+                            round
+                          >
+                            {{ citedSourceLabel(g) }}
+                          </el-tag>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -383,7 +401,7 @@ import { useRoute } from 'vue-router'
 import {
   Microphone, ArrowLeft, ArrowRight, CircleCheck, CircleClose, VideoPlay,
   Document, ChatDotRound, Folder, Close, MagicStick, Promotion, Picture, Loading,
-  Right, VideoPause, EditPen,
+  Right, VideoPause, EditPen, Collection,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { listClasses } from '@/api/classroom'
@@ -392,6 +410,7 @@ import { chapterProgress } from '@/utils/learningProgress'
 import { listQuestions, practiceSubmit } from '@/api/question'
 import { listMaterials } from '@/api/knowledge'
 import { renderAiMarkdown } from '@/utils/markdown'
+import { groupCitedSources, citedSourceLabel } from '@/utils/cited-sources'
 import { genUid } from '@/utils/uid'
 import { blankAnswerText } from '@/utils/blank-answer'
 
@@ -907,6 +926,8 @@ async function askChat(preset) {
   chatLoading.value = true
   const idx = chatMessages.value.push({ role: 'assistant', content: '', streaming: true }) - 1
   scrollChatToBottom()
+  // 参考来源缓冲：meta 事件先于/穿插 delta 到达，正文结束后统一挂到消息上
+  let pendingCited = []
   try {
     const token = localStorage.getItem('access_token')
     const resp = await fetch('/api/qa-records/ask-stream/', {
@@ -945,7 +966,9 @@ async function askChat(preset) {
         if (!jsonStr) return
         let evt
         try { evt = JSON.parse(jsonStr) } catch { return }
-        if (evt.type === 'delta') {
+        if (evt.type === 'meta') {
+          pendingCited = evt.cited || []
+        } else if (evt.type === 'delta') {
           pendingText += evt.text || ''
           if (!flushTimer) flushTimer = setTimeout(flushAnswer, 60)
         } else if (evt.type === 'error') {
@@ -959,6 +982,8 @@ async function askChat(preset) {
     chatMessages.value[idx].content = chatMessages.value[idx].content || '抱歉，AI 助教暂时没有响应，请稍后再试。'
   } finally {
     chatMessages.value[idx].streaming = false
+    // 参考来源在正文输出完（或出错收尾）后才挂到消息上，避免流式期间闪烁
+    chatMessages.value[idx].cited_chunks = pendingCited
     chatLoading.value = false
     scrollChatToBottom()
   }
@@ -2266,6 +2291,27 @@ onUnmounted(() => {
 
 .chat-md :deep(p:last-child) {
   margin-bottom: 0;
+}
+
+.chat-sources {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed #e2e8f0;
+}
+
+.chat-sources-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.chat-source-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 @media (max-width: 1024px) {

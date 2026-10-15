@@ -46,7 +46,7 @@
       <!-- 讲解稿 -->
       <view v-if="currentScript?.script" class="script">
         <view class="script-label">讲解稿</view>
-        <view class="script-text">{{ currentScript.script }}</view>
+        <rich-text class="script-text md" :nodes="renderMd(currentScript.script)"></rich-text>
       </view>
     </template>
     <view v-else class="tip">本章节还没有可学习的课件</view>
@@ -58,6 +58,7 @@ import { computed, ref } from 'vue'
 import { onHide, onLoad, onUnload } from '@dcloudio/uni-app'
 import { listPpts, listVideos, listWatchProgress, reportVideoProgress } from '@/api/course.js'
 import { mediaURL } from '@/config.js'
+import { renderAiMarkdown as renderMd } from '@/utils/markdown.js'
 
 const catalogId = ref(null)
 const title = ref('课件学习')
@@ -508,5 +509,31 @@ onUnload(() => {
   font-size: 26rpx;
   line-height: 1.85;
   color: #475569;
+}
+
+/* 讲解稿按 markdown 渲染（rich-text） */
+.md :deep(p) {
+  margin: 0 0 10rpx;
+}
+
+.md :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.md :deep(ul),
+.md :deep(ol) {
+  margin: 0 0 10rpx;
+  padding-left: 34rpx;
+}
+
+.md :deep(strong) {
+  font-weight: 700;
+}
+
+.md :deep(code) {
+  padding: 2rpx 8rpx;
+  border-radius: 6rpx;
+  background: #f1f5f9;
+  font-size: 25rpx;
 }
 </style>

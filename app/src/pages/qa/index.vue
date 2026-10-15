@@ -32,7 +32,8 @@
           :class="m.role"
         >
           <view class="bubble">
-            <view class="msg-text">{{ m.content }}</view>
+            <rich-text v-if="m.role === 'assistant'" class="msg-text md" :nodes="renderMd(m.content)"></rich-text>
+            <view v-else class="msg-text">{{ m.content }}</view>
             <view v-if="m.cited?.length" class="sources">
               <view class="sources-label">参考来源</view>
               <view v-for="(g, gi) in groupCitedSources(m.cited)" :key="gi" class="source-item">
@@ -72,6 +73,7 @@ import { onLoad } from '@dcloudio/uni-app'
 import { listClasses } from '@/api/classroom.js'
 import { askQuestion, listQaRecords } from '@/api/knowledge.js'
 import { groupCitedSources, citedSourceLabel } from '@/utils/cited-sources.js'
+import { renderAiMarkdown as renderMd } from '@/utils/markdown.js'
 
 const courses = ref([])
 const currentCourse = ref(null)
@@ -292,6 +294,36 @@ function scrollToBottom(anchor) {
 
 .msg-text.pending {
   color: #94a3b8;
+}
+
+/* AI 回答按 markdown 渲染（rich-text）；breaks 已把换行转 <br>，不能再 pre-wrap */
+.md {
+  white-space: normal;
+}
+
+.md :deep(p) {
+  margin: 0 0 8rpx;
+}
+
+.md :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.md :deep(ul),
+.md :deep(ol) {
+  margin: 0 0 8rpx;
+  padding-left: 34rpx;
+}
+
+.md :deep(strong) {
+  font-weight: 700;
+}
+
+.md :deep(code) {
+  padding: 2rpx 8rpx;
+  border-radius: 6rpx;
+  background: #f1f5f9;
+  font-size: 25rpx;
 }
 
 .sources {

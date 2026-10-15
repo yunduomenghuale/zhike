@@ -654,6 +654,33 @@ QA_SYSTEM_PROMPT = (
 # ---------------------------------------------------------------------------
 # 检索编排：向量召回 -> 重排序 -> 阈值过滤（RAG 引用质量治理）
 # ---------------------------------------------------------------------------
+def _resolve_rerank_threshold(model_name: str) -> float:
+    """解析重排相关性阈值：显式环境变量 > 按模型名匹配的分模型阈值 > 默认值。
+
+    为什么不能一个阈值打天下：不同重排模型的分数尺度差异极大——
+    gte-rerank-v2 相关片段只有 0.09~0.9（无关 ~0.006），qwen3-rerank 相关
+    0.87+（无关 ~0.09）。曾统一按 qwen3 量级取 0.3，结果 gte-rerank 下
+    「考核方式」一问的目标页仅 0.288 被当作不相关滤掉，参考来源全空
+    （2026-10-15 实测复现），故阈值必须随模型解析。
+    """
+    explicit = getattr(settings, "AI_RERANK_THRESHOLD", None)
+    if explicit is not None:
+        try:
+            return float(explicit)
+        except (TypeError, ValueError):
+            pass
+    table = getattr(settings, "AI_RERANK_MODEL_THRESHOLDS", {}) or {}
+    name = (model_name or "").lower()
+    best_key, best_value = "", None
+    for key, value in table.items():
+        key = str(key).lower()
+        if key in name and len(key) > len(best_key):
+            best_key, best_value = key, value
+    if best_value is not None:
+        return float(best_value)
+    return float(getattr(settings, "AI_RERANK_THRESHOLD_DEFAULT", 0.3) or 0.3)
+
+
 def _search_relevant_chunks(
     course_id: int,
     question: str,
@@ -671,18 +698,20 @@ def _search_relevant_chunks(
 
     编排（配了重排能力时）：
     1. 向量召回 AI_RERANK_RECALL 条候选（比 top_k 多，给重排留筛选余地）；
-    2. 重排模型按 query 语义相关性精排，低于 AI_RERANK_THRESHOLD 的片段
-       判定「实际未参考」，不进上下文也不进引用来源；
+    2. 重排模型按 query 语义相关性精排，阈值按模型解析（见 _resolve_rerank_threshold）：
+       - 最高分都低于阈值 → 判定本课资料确实没有与问题直接相关的内容，返回空，
+         上层据此走「资料无相关内容」的话术；
+       - 否则保留分数 >= max(阈值, 最高分 * AI_RERANK_KEEP_RATIO) 的片段——
+         与最高分存在 2 倍以上落差的多为同课程弱相关噪声，相对截断避免乱引用；
     3. 取前 top_k 条返回，score 为重排相关性分。
 
     回退（重排是增强项，不能拖垮问答主链路）：未配置重排能力（Mock）/
-    非 DashScope 端点 / 网络或接口异常 / 响应结构异常时，按原行为返回
-    向量 top_k——噪声问题回到治理前，但问答链路始终可用。
+    非 DashScope 端点 / 网络或接口异常 / 响应结构异常（无有效条目）时，
+    按原行为返回向量 top_k——噪声问题回到治理前，但问答链路始终可用。
     """
     embed_provider = get_provider("embed")
     # 召回数显式配小（< top_k）时尊重配置：候选池小，最终结果就少，不强行抬回 top_k
     recall = max(int(getattr(settings, "AI_RERANK_RECALL", 15) or 15), 1)
-    threshold = float(getattr(settings, "AI_RERANK_THRESHOLD", 0.3) or 0.3)
 
     query_vec = embed_provider.embed([question])[0]
     candidates = [
@@ -699,14 +728,28 @@ def _search_relevant_chunks(
     if not candidates:
         return []
 
+    rerank_provider = get_provider("rerank")
+    # 模型名两种取法：OpenAI 兼容服务用 rerank_model，系统内置本地模型用 model
+    model_name = (
+        getattr(rerank_provider, "rerank_model", "")
+        or getattr(rerank_provider, "model", "")
+        or ""
+    )
+    threshold = _resolve_rerank_threshold(model_name)
+    # keep_ratio 允许显式配 0（关闭相对截断）：不能用 `or` 兜底，否则 0 会被当成未配置
     try:
-        ranked = get_provider("rerank").rerank(
+        keep_ratio = min(max(float(getattr(settings, "AI_RERANK_KEEP_RATIO", 0.5)), 0.0), 1.0)
+    except (TypeError, ValueError):
+        keep_ratio = 0.5
+
+    try:
+        ranked = rerank_provider.rerank(
             question, [chunk.content for chunk, _ in candidates], top_n=top_k
         )
     except Exception:
         return candidates[:top_k]
 
-    picked: list[tuple] = []
+    scored: list[tuple[int, float]] = []
     for item in ranked:
         if not isinstance(item, dict):
             continue
@@ -714,12 +757,23 @@ def _search_relevant_chunks(
         score = item.get("score")
         if not isinstance(index, int) or not 0 <= index < len(candidates):
             continue
-        if not isinstance(score, (int, float)) or score < threshold:
+        if not isinstance(score, (int, float)):
             continue
-        chunk, _ = candidates[index]
-        picked.append((chunk, float(score)))
-    # 全部低于阈值：判定本课资料确实没有与问题直接相关的内容，返回空——
-    # 上层据此走「资料无相关内容」的话术，而不是把关键词命中的噪声当参考来源
+        scored.append((index, float(score)))
+    if not scored:
+        # 协议异常（有候选但重排未返回有效条目）：回退纯向量 top_k，
+        # 而不是把候选全部丢弃导致问答无资料可用
+        return candidates[:top_k]
+
+    top_score = max(score for _, score in scored)
+    if top_score < threshold:
+        # 最高分都够不到阈值：本课资料确实没有与问题直接相关的内容，返回空——
+        # 上层据此走「资料无相关内容」的话术，而不是把关键词命中的噪声当参考来源
+        return []
+    cutoff = max(threshold, top_score * keep_ratio)
+    picked = [
+        (candidates[index][0], score) for index, score in scored if score >= cutoff
+    ]
     return picked[:top_k]
 
 

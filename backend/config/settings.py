@@ -323,11 +323,39 @@ AI_TTS_VOICE = os.getenv("AI_TTS_VOICE") or "Cherry"
 # - AI_RERANK_RECALL：重排前的向量召回候选数。向量检索是纯余弦相似度，关键词面
 #   重合但语义不相关的片段也会拿高分（实测「Java 程序设计考核方式」一问，噪声页
 #   与目标页分数带重叠 0.54~0.76，top_k=5 硬取必混入噪声），故多召回再精排；
-# - AI_RERANK_THRESHOLD：重排相关性分低于该值的片段判定「实际未参考」，不进上下文
-#   与引用来源（gte-rerank-v2 实测目标页 0.63、噪声页 ≤0.15，0.3 可干净分离）。
+# - AI_RERANK_THRESHOLD：显式优先级最高的相关性阈值（None=按模型解析）。不同重排
+#   模型的分数尺度差异极大，单一绝对值必然误杀——gte-rerank-v2 相关片段仅
+#   0.09~0.9、无关 ~0.006；qwen3-rerank 相关 0.87+、无关 ~0.09。曾按 qwen3 量级
+#   统一取 0.3，结果 gte-rerank 下「考核方式」目标页只有 0.288 被过滤、参考来源
+#   全空（2026-10-15 实测复现），故改为按模型名子串匹配分模型阈值；
+# - AI_RERANK_KEEP_RATIO：相对截断比例，保留分数 >= max(阈值, 最高分*比例) 的片段。
+#   最高分与次高分存在 2 倍以上落差时，低分段多为同课程弱相关噪声（关键词面重合），
+#   截断避免「乱引用」；置 0 退回纯阈值过滤。
 #   未配置重排能力或调用失败时，检索编排自动回退纯向量 top_k（原有行为）。
 AI_RERANK_RECALL = _ai_env_int("AI_RERANK_RECALL", 15)
-AI_RERANK_THRESHOLD = _ai_env_float("AI_RERANK_THRESHOLD", 0.3)
+
+
+def _ai_env_float_or_none(name: str):
+    """读取浮点环境变量：未设置/空值返回 None（调用方按需回退），非法值也返回 None。"""
+    raw = os.getenv(name)
+    if raw is None or str(raw).strip() == "":
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+AI_RERANK_THRESHOLD = _ai_env_float_or_none("AI_RERANK_THRESHOLD")
+AI_RERANK_THRESHOLD_DEFAULT = 0.3
+# 按重排模型名（provider.rerank_model）子串匹配，键越长越优先；未命中回退默认值。
+AI_RERANK_MODEL_THRESHOLDS = {
+    "gte-rerank": 0.05,  # DashScope gte-rerank-v2/v1：相关 0.09+、无关 ~0.006
+    "qwen3-rerank": 0.3,  # DashScope qwen3-rerank：相关 0.87+、无关 ~0.09
+    "qwen3-reranker": 0.3,  # 系统内置本地 Qwen3-Reranker-0.6B：与 qwen3-rerank 同量级
+    "bge-reranker": 0.3,  # 本地/OpenAI 兼容 bge-rerank 系列（0~1 相关性）
+}
+AI_RERANK_KEEP_RATIO = _ai_env_float("AI_RERANK_KEEP_RATIO", 0.5)
 
 # 系统内置本地模型的权重目录：生产容器内 /app/data 是 bind mount（见 docker-compose），
 # 故默认落点随之持久化、重建容器不丢；本地开发即 backend/data/models。
