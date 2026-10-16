@@ -13,7 +13,8 @@ def _format_error_detail(detail):
         for field, value in detail.items():
             msg = _format_error_detail(value)
             if msg:
-                parts.append(f"{field}: {msg}")
+                # non_field_errors 是对象级校验，字段前缀无意义，直接展示消息本身
+                parts.append(msg if field == "non_field_errors" else f"{field}: {msg}")
         return "；".join(parts)
     if isinstance(detail, list):
         return "，".join(str(item) for item in detail)

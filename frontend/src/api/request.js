@@ -45,6 +45,21 @@ function refreshAccessToken() {
   return refreshPromise
 }
 
+// 从错误响应中提取可读信息：统一结构 message > DRF 字段错误（含 non_field_errors）> detail
+function extractErrorMsg(error) {
+  const data = error?.response?.data
+  if (data && typeof data === 'object') {
+    if (typeof data.message === 'string' && data.message) return data.message
+    if (typeof data.detail === 'string' && data.detail) return data.detail
+    const nonField = data.non_field_errors
+    if (Array.isArray(nonField) && nonField.length && typeof nonField[0] === 'string') return nonField[0]
+    for (const v of Object.values(data)) {
+      if (Array.isArray(v) && v.length && typeof v[0] === 'string') return v[0]
+    }
+  }
+  return ''
+}
+
 // 响应拦截：解包统一结构 { code, message, data }，集中处理错误；
 // 401 时先尝试静默续期重放，续期失败才登出。
 request.interceptors.response.use(
@@ -108,7 +123,7 @@ request.interceptors.response.use(
         ElMessage.error(msg || '请求失败')
       }
     } else {
-      ElMessage.error(msg || '网络错误')
+      ElMessage.error(extractErrorMsg(error) || msg || '网络错误')
     }
     return Promise.reject(error)
   },

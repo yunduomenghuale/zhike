@@ -77,7 +77,7 @@
               <div v-for="s in row.schedules" :key="s.id" class="schedule-line">
                 <span class="schedule-class">{{ s.classroom_name }}</span>
                 <span class="schedule-time">
-                  {{ s.open_at ? fmtDT(s.open_at) : '未设时间' }} ~ {{ s.close_at ? fmtDT(s.close_at) : '未设时间' }}
+                  {{ s.open_at ? fmtDT(s.open_at) : '立即开放' }} ~ {{ s.close_at ? fmtDT(s.close_at) : '不限制' }}
                 </span>
               </div>
             </template>
@@ -112,11 +112,11 @@
             <el-option v-for="c in classes" :key="c.id" :value="c.id" :label="c.name" />
           </el-select>
         </el-form-item>
-        <el-form-item label="开放时间" required>
-          <el-date-picker v-model="scheduleForm.open_at" type="datetime" style="width: 100%" />
+        <el-form-item label="开放时间">
+          <el-date-picker v-model="scheduleForm.open_at" type="datetime" style="width: 100%" placeholder="留空 = 立即开放" />
         </el-form-item>
-        <el-form-item label="截止时间" required>
-          <el-date-picker v-model="scheduleForm.close_at" type="datetime" style="width: 100%" />
+        <el-form-item label="截止时间">
+          <el-date-picker v-model="scheduleForm.close_at" type="datetime" style="width: 100%" placeholder="留空 = 不限制" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -449,7 +449,13 @@ async function saveSchedule() {
     return
   }
   try {
-    await createLabSchedule(scheduleForm.value)
+    // 与作业/考试同口径：开放时间空 = 立即开放，截止时间空 = 不限制；
+    // el-date-picker 清空后是空字符串，须转 null 否则后端 DateTimeField 报 400
+    await createLabSchedule({
+      ...scheduleForm.value,
+      open_at: scheduleForm.value.open_at || null,
+      close_at: scheduleForm.value.close_at || null,
+    })
     ElMessage.success('排课已保存')
     scheduleVisible.value = false
     await load()

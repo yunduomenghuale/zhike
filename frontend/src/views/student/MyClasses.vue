@@ -7,8 +7,8 @@
             <span class="add-icon">
               <el-icon><Plus /></el-icon>
             </span>
-            <span class="add-main">加入课程</span>
-            <span class="add-sub">输入邀请码，加入课程开始学习</span>
+            <span class="add-main">加入班级</span>
+            <span class="add-sub">输入班级邀请码，加入班级开始学习</span>
           </button>
         </el-col>
         <el-col :xs="24" :sm="12" :lg="8" v-for="c in filteredClasses" :key="`${c.classId}-${c.id}`">
@@ -42,7 +42,7 @@
       <el-empty v-if="!loading && !filteredClasses.length" :description="courseCards.length ? '没有匹配的课程' : '还没有加入任何班级，点击上方卡片用邀请码加入吧'" />
     </div>
 
-    <!-- 加入课程 -->
+    <!-- 加入班级 -->
     <el-dialog v-model="joinVisible" width="480px" align-center :show-close="false" class="join-dialog">
       <template #header>
         <div class="creation-dialog-header">
@@ -50,8 +50,8 @@
             <el-icon><Key /></el-icon>
           </span>
           <div class="creation-dialog-heading">
-            <div class="creation-dialog-title">加入课程</div>
-            <div class="creation-dialog-subtitle">输入教师分享的课程邀请码</div>
+            <div class="creation-dialog-title">加入班级</div>
+            <div class="creation-dialog-subtitle">输入教师分享的班级邀请码</div>
           </div>
           <el-button text circle class="creation-dialog-close" :icon="Close" @click="joinVisible = false" />
         </div>
@@ -68,7 +68,7 @@
       <template #footer>
         <div class="creation-dialog-footer">
           <el-button @click="joinVisible = false">取消</el-button>
-          <el-button type="primary" :loading="joining" @click="join">加入课程</el-button>
+          <el-button type="primary" :loading="joining" @click="join">加入班级</el-button>
         </div>
       </template>
     </el-dialog>

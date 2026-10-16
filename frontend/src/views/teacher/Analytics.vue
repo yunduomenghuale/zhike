@@ -4,7 +4,7 @@
     <div class="an-toolbar">
       <div class="an-toolbar-left">
         <el-select v-model="classId" class="module-select" placeholder="选择班级" popper-class="module-select-popper" style="width: 280px" @change="onClassChange">
-          <el-option v-for="c in classes" :key="c.id" :label="`${classCourseNames(c)} / ${c.name}`" :value="c.id" />
+          <el-option v-for="c in classes" :key="c.id" :label="`${c.name} / ${classCourseNames(c)}`" :value="c.id" />
         </el-select>
       </div>
       <div class="an-toolbar-actions">
@@ -129,6 +129,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { MagicStick, Loading, Notebook, Files, Medal, Cpu } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { renderAiMarkdown } from '@/utils/markdown'
+import { sortedCourseNames } from '@/utils/course-sort'
 import { listClasses } from '@/api/classroom'
 import { getClassStats, generateClassAiReport } from '@/api/analytics'
 
@@ -147,6 +148,16 @@ const router = useRouter()
 const fixedCourseId = computed(() => Number(route.params.id) || null)
 
 function goDetail(row) {
+  // 课程空间内的学习统计：走课程子路由进学生详情（保留课程导航栏）；
+  // 全局「学习统计」页（/teacher/analytics）仍走 MainLayout 路由
+  if (fixedCourseId.value) {
+    router.push({
+      name: 'course-analytics-student',
+      params: { id: fixedCourseId.value, studentId: row.student_id },
+      query: { class: classId.value, course: activeCourseId() },
+    })
+    return
+  }
   router.push({
     name: 'class-student-detail',
     params: { classId: classId.value, studentId: row.student_id },
@@ -155,7 +166,8 @@ function goDetail(row) {
 }
 
 function classCourseNames(item) {
-  return item.course_names?.join('、') || item.course_name || '未关联课程'
+  // 多课程名按首字母排序（英文/数字在前、中文按拼音），与班级卡片口径一致
+  return sortedCourseNames(item).join('、') || '未关联课程'
 }
 
 function activeCourseId() {

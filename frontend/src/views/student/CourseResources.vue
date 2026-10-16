@@ -76,8 +76,10 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { ArrowRight, Collection } from '@element-plus/icons-vue'
-import { listCourseResources, listCourseVideos } from '@/api/course'
+import { listCourseResources, listCourseVideos, signCourseResource } from '@/api/course'
+import { openTabDeferred } from '@/utils/open-tab'
 
 const route = useRoute()
 const router = useRouter()
@@ -135,17 +137,28 @@ function viewerQuery(extra) {
     type: extra.type || 'html',
     kind: extra.kind || '',
     back: 'student-course-resources',
-    t: Date.now(),
   }
 }
 
-function openResource(r) {
+async function openResource(r) {
+  // 先签发唯一签名 URL（未发布/非在读课程后端拒签），再进查看器；
+  // 标签页在点击时同步开出，避免异步后的 window.open 被弹窗拦截
+  const tab = openTabDeferred()
+  let signed
+  try {
+    signed = await signCourseResource(r.id)
+  } catch (e) {
+    tab.close()
+    ElMessage.error(e?.message || '资源打开失败，请稍后重试')
+    return
+  }
   const hash = r.kind === 'mindmap' ? '#chapters-hidden' : ''
-  routeToViewer({
+  const { href } = router.resolve({
     name: 'student-course-resource-viewer',
     params: { id: courseId.value },
-    query: viewerQuery({ src: `${r.url}${hash}`, title: r.title, kind: r.kind }),
+    query: viewerQuery({ src: `${signed.url}${hash}`, title: r.title, kind: r.kind }),
   })
+  tab.open(href)
 }
 
 function openVideo(v) {
@@ -153,12 +166,6 @@ function openVideo(v) {
   videoTitle.value = v.title
   videoUrl.value = v.file_url
   videoVisible.value = true
-}
-
-function routeToViewer(loc) {
-  const { href } = router.resolve(loc)
-  // 查看器占满整个浏览器窗口（新标签页），体验接近独立播放页
-  window.open(href, '_blank')
 }
 
 function fmtSize(bytes) {

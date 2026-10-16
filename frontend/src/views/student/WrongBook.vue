@@ -342,7 +342,7 @@ function openAdd() {
 async function saveNote() {
   if (!noteForm.stem.trim()) return ElMessage.warning('请填写题干')
   const targetCourse = fixedCourseId.value || courseId.value || courses.value[0]?.id
-  if (!targetCourse) return ElMessage.warning('请先加入课程')
+  if (!targetCourse) return ElMessage.warning('请先加入班级')
   adding.value = true
   try {
     await createWrongNote({

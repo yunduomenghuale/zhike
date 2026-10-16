@@ -16,12 +16,14 @@ const courseWorkspaceRoute = {
     { path: 'qa', name: 'course-qa', component: () => import('@/views/teacher/CourseQA.vue'), meta: { title: 'AI 问答', role: 'teacher' } },
     { path: 'questions', name: 'course-questions', component: () => import('@/views/teacher/QuestionManage.vue'), meta: { title: '题库', role: 'teacher' } },
     { path: 'homework', name: 'course-homework', component: () => import('@/views/teacher/HomeworkManage.vue'), meta: { title: '作业', role: 'teacher' } },
+    { path: 'homework/:homeworkId/stats', name: 'course-homework-stats', component: () => import('@/views/teacher/HomeworkStats.vue'), meta: { title: '作业统计', role: 'teacher' } },
     { path: 'exams', name: 'course-exams', component: () => import('@/views/teacher/ExamManage.vue'), meta: { title: '考试', role: 'teacher' } },
     { path: 'exams/:examId/stats', name: 'course-exam-stats', component: () => import('@/views/teacher/ExamStats.vue'), meta: { title: '考试统计', role: 'teacher' } },
     { path: 'labs', name: 'course-labs', component: () => import('@/views/teacher/LabManage.vue'), meta: { title: '虚拟实验', role: 'teacher' } },
     { path: 'resources', name: 'course-resources', component: () => import('@/views/teacher/ResourceManage.vue'), meta: { title: '教学资源', role: 'teacher' } },
     { path: 'resources/viewer', name: 'course-resource-viewer', component: () => import('@/views/common/ResourceViewer.vue'), meta: { title: '资源查看', role: 'teacher' } },
     { path: 'analytics', name: 'course-analytics', component: () => import('@/views/teacher/Analytics.vue'), meta: { title: '学习统计', role: 'teacher' } },
+    { path: 'analytics/students/:studentId', name: 'course-analytics-student', component: () => import('@/views/teacher/StudentDetail.vue'), meta: { title: '学生详情', role: 'teacher' } },
   ],
 }
 
@@ -68,6 +70,7 @@ const routes = [
       { path: 'teacher/knowledge', name: 'knowledge', component: () => import('@/views/teacher/KnowledgeBase.vue'), meta: { title: '知识库', role: 'teacher' } },
       { path: 'teacher/questions', name: 'questions', component: () => import('@/views/teacher/QuestionManage.vue'), meta: { title: '题库', role: 'teacher' } },
       { path: 'teacher/homework', name: 'homework', component: () => import('@/views/teacher/HomeworkManage.vue'), meta: { title: '作业管理', role: 'teacher' } },
+      { path: 'teacher/homework/:id/stats', name: 'homework-stats', component: () => import('@/views/teacher/HomeworkStats.vue'), meta: { title: '作业统计', role: 'teacher', activeMenu: '/teacher/homework' } },
       { path: 'teacher/exams', name: 'exams', component: () => import('@/views/teacher/ExamManage.vue'), meta: { title: '考试', role: 'teacher' } },
       { path: 'teacher/exams/:id/stats', name: 'exam-stats', component: () => import('@/views/teacher/ExamStats.vue'), meta: { title: '考试统计', role: 'teacher', activeMenu: '/teacher/exams' } },
       { path: 'teacher/analytics', name: 'analytics', component: () => import('@/views/teacher/Analytics.vue'), meta: { title: '学习统计', role: 'teacher' } },

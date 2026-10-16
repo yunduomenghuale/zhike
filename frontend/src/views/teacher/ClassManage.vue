@@ -232,6 +232,7 @@ import { ElMessage } from 'element-plus'
 import { DocumentCopy } from '@element-plus/icons-vue'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
 import { listCourses } from '@/api/course'
+import { compareCourseName } from '@/utils/course-sort'
 import {
   listClasses, createClass, updateClass, deleteClass, regenerateCode,
   listClassStudents, removeClassStudent, searchClassStudents, addStudentsBatch,
@@ -249,10 +250,32 @@ async function load() {
   loading.value = true
   try {
     const data = await listClasses()
-    rows.value = data.results ?? data
+    rows.value = sortClassCourses(data.results ?? data)
   } finally {
     loading.value = false
   }
+}
+
+// 班级卡片课程显示统一按「首字母」排序（比较规则见 utils/course-sort）。
+// courses 与 course_names 必须成对重排，否则下标错位会串课程（courseOptions、
+// openEdit 已选课程等按下标取名的消费方都依赖这个对齐）。
+function sortClassCourses(list) {
+  if (!Array.isArray(list)) return list
+  return list.map((row) => {
+    const names = row?.course_names
+    const ids = row?.courses
+    if (!Array.isArray(names) || names.length < 2) return row
+    if (!Array.isArray(ids) || ids.length !== names.length) return row
+    const pairs = names.map((name, i) => ({ id: ids[i], name }))
+    pairs.sort((a, b) => compareCourseName(a.name, b.name))
+    return {
+      ...row,
+      courses: pairs.map((p) => p.id),
+      course_names: pairs.map((p) => p.name),
+      course: pairs[0].id,
+      course_name: pairs[0].name,
+    }
+  })
 }
 
 // ---- 新建/编辑 ----

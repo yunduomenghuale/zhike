@@ -544,3 +544,225 @@ class ExamOptionOrderTests(APITestCase):
             result = build_for_taking(self.paper, self.exam)
             self.assertEqual([o["key"] for o in result[0]["options"]], ["A", "B", "C"])
             self.assertEqual([o["text"] for o in result[0]["options"]], ["质量", "速度", "时间"])
+
+
+class HomeworkStatsTests(APITestCase):
+    """作业统计：总览/分段/逐题/排名/权限（对齐考试统计口径）。"""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.teacher = User.objects.create_user(username="t_hw_stats", password="pw123456!", role=User.Role.TEACHER)
+        cls.other_teacher = User.objects.create_user(username="t_hw_stats_other", password="pw123456!", role=User.Role.TEACHER)
+        cls.s1 = User.objects.create_user(username="s_hw_z", password="pw123456!", role=User.Role.STUDENT, real_name="张三")
+        cls.s2 = User.objects.create_user(username="s_hw_l", password="pw123456!", role=User.Role.STUDENT, real_name="李四")
+        cls.s3 = User.objects.create_user(username="s_hw_w", password="pw123456!", role=User.Role.STUDENT, real_name="王五")
+        cls.course = Course.objects.create(name="大学英语", teacher=cls.teacher)
+        cls.classroom = ClassRoom.objects.create(name="英语1班", teacher=cls.teacher)
+        ClassCourse.objects.create(classroom=cls.classroom, course=cls.course)
+        for s in (cls.s1, cls.s2, cls.s3):
+            ClassStudent.objects.create(classroom=cls.classroom, student=s)
+        cls.catalog = Catalog.objects.create(course=cls.course, title="第一单元")
+        cls.single = Question.objects.create(
+            course=cls.course, catalog=cls.catalog, qtype=Question.QType.SINGLE,
+            stem="How are you?",
+            options=[{"key": "A", "text": "Fine"}, {"key": "B", "text": "Bad"}, {"key": "C", "text": "Sad"}],
+            answer={"key": "A"}, analysis="日常问候", score=Decimal("5"),
+            status=Question.Status.PUBLISHED,
+        )
+        cls.short = Question.objects.create(
+            course=cls.course, catalog=cls.catalog, qtype=Question.QType.SHORT,
+            stem="请用英语自我介绍", answer={"text": "My name is..."},
+            analysis="注意时态", score=Decimal("10"),
+            status=Question.Status.PUBLISHED,
+        )
+        cls.teacher_client = APIClient()
+        cls.teacher_client.force_authenticate(user=cls.teacher)
+        cls.other_client = APIClient()
+        cls.other_client.force_authenticate(user=cls.other_teacher)
+        cls.student_client = APIClient()
+        cls.student_client.force_authenticate(user=cls.s1)
+
+    def _publish_questions_homework(self, *questions):
+        hw = Homework.objects.create(
+            classroom=self.classroom, course=self.course, title="题库作业",
+            mode=Homework.Mode.QUESTIONS, status=Homework.Status.DRAFT,
+            total_score=Decimal("15"),
+        )
+        for order, q in enumerate(questions):
+            HomeworkQuestion.objects.create(homework=hw, question=q, score=q.score, order=order)
+        hw.status = Homework.Status.PUBLISHED
+        hw.save(update_fields=["status", "updated_at"])
+        return hw
+
+    def _submit(self, student, homework_id, answers):
+        client = APIClient()
+        client.force_authenticate(user=student)
+        return client.post(
+            "/api/homework-submissions/",
+            {"homework": homework_id, "content": "我的作答", "answers": json.dumps(answers)},
+            format="json",
+        )
+
+    def test_stats_overview_and_rankings(self):
+        """附件作业：应交 3 / 已交 2 / 未交 1 / 逾期 1 / 待批改 1 / 已发布 1；
+        已出分者排名在前，待批改次之，未提交排后。"""
+        from django.utils import timezone
+        from datetime import timedelta
+
+        hw = Homework.objects.create(
+            classroom=self.classroom, course=self.course, title="附件作业",
+            mode=Homework.Mode.ATTACHMENT, status=Homework.Status.PUBLISHED,
+            total_score=Decimal("100"),
+            deadline=timezone.now() - timedelta(days=1),
+        )
+        self._submit(self.s1, hw.id, {}).data  # 逾期提交
+        self._submit(self.s2, hw.id, {})
+        sub1 = HomeworkSubmission.objects.get(homework=hw, student=self.s1)
+        # s1 批改并发布（90 分）；s2 待批改
+        resp = self.teacher_client.post(
+            f"/api/homework-submissions/{sub1.id}/grade/",
+            {"score": 90, "comment": "很好"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+
+        d = self.teacher_client.get(f"/api/homeworks/{hw.id}/stats/").data["data"]
+        ov = d["overview"]
+        self.assertEqual(ov["student_count"], 3)
+        self.assertEqual(ov["submitted"], 2)
+        self.assertEqual(ov["unsubmitted"], 1)
+        self.assertEqual(ov["late_count"], 2)
+        self.assertEqual(ov["pending_count"], 1)
+        self.assertEqual(ov["released_count"], 1)
+        # 仅 s1 出分：90 分；及格线 60、优秀线 85
+        self.assertEqual(ov["avg_score"], 90.0)
+        self.assertEqual(ov["max_score"], 90.0)
+        self.assertEqual(ov["min_score"], 90.0)
+        self.assertEqual(ov["pass_rate"], 100.0)
+        self.assertEqual(ov["excellent_rate"], 100.0)
+
+        rows = d["rankings"]
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[0]["student_name"], "张三")
+        self.assertEqual(rows[0]["rank"], 1)
+        self.assertEqual(rows[0]["score"], 90.0)
+        self.assertEqual(rows[0]["status"], "returned")
+        self.assertTrue(rows[0]["is_late"])
+        # 待批改：无最终分与排名，客观分 0
+        self.assertEqual(rows[1]["student_name"], "李四")
+        self.assertIsNone(rows[1]["rank"])
+        self.assertIsNone(rows[1]["score"])
+        self.assertEqual(rows[1]["status"], "submitted")
+        # 未提交排最后
+        self.assertEqual(rows[2]["student_name"], "王五")
+        self.assertEqual(rows[2]["status"], "unsubmitted")
+
+        dist = {item["range"]: item["count"] for item in d["score_distribution"]}
+        self.assertEqual(dist["90-100"], 1)
+        self.assertEqual(dist["未出分"], 1)
+
+    def test_stats_question_and_distribution(self):
+        """题库作业（单选+简答）：逐题正确率/选项分布/平均分；
+        待批改行只计入未出分，分段按最终分。"""
+        hw = self._publish_questions_homework(self.single, self.short)
+        items = list(hw.questions.order_by("order", "id"))
+        single_item, short_item = items[0], items[1]
+        # 张三：单选对、简答待批 → 客观 5 分，提交后总分 5（部分分）
+        self._submit(self.s1, hw.id, {
+            str(single_item.id): {"key": "A"},
+            str(short_item.id): {"text": "My name is Zhangsan."},
+        })
+        # 李四：单选错 → 客观 0 分
+        self._submit(self.s2, hw.id, {
+            str(single_item.id): {"key": "B"},
+            str(short_item.id): {"text": "My name is Lisi."},
+        })
+        # 教师批改张三简答 8 分 → 总分 13，已发布
+        sub1 = HomeworkSubmission.objects.get(homework=hw, student=self.s1)
+        short_answer = sub1.answer_items.get(homework_question=short_item)
+        resp = self.teacher_client.post(
+            f"/api/homework-submissions/{sub1.id}/grade/",
+            {"answer_scores": {str(short_answer.id): {"score": 8}}},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+
+        d = self.teacher_client.get(f"/api/homeworks/{hw.id}/stats/").data["data"]
+
+        ov = d["overview"]
+        self.assertEqual(ov["submitted"], 2)
+        self.assertEqual(ov["unsubmitted"], 1)
+        self.assertEqual(ov["pending_count"], 1)
+        self.assertEqual(ov["released_count"], 1)
+        # 仅张三出分 13：及格线 15×60%=9、优秀线 12.75
+        self.assertEqual(ov["avg_score"], 13.0)
+        self.assertEqual(ov["pass_rate"], 100.0)
+        self.assertEqual(ov["excellent_rate"], 100.0)
+
+        qs = {q["question_id"]: q for q in d["question_stats"]}
+        single = qs[single_item.id]
+        self.assertEqual(single["correct_rate"], 50.0)
+        self.assertEqual(single["avg_score"], 2.5)
+        self.assertEqual(single["unanswered"], 0)
+        counts = {o["key"]: o["count"] for o in single["options"]}
+        self.assertEqual(counts, {"A": 1, "B": 1, "C": 0})
+        self.assertTrue(next(o for o in single["options"] if o["key"] == "A")["is_correct"])
+        # 简答：主观题无正确率；仅张三批改出分 8
+        short = qs[short_item.id]
+        self.assertIsNone(short["correct_rate"])
+        self.assertEqual(short["avg_score"], 8.0)
+
+        rows = d["rankings"]
+        self.assertEqual(rows[0]["student_name"], "张三")
+        self.assertEqual(rows[0]["rank"], 1)
+        self.assertEqual(rows[0]["score"], 13.0)
+        # 李四待批改：最终分不入统计，排名无分数
+        self.assertEqual(rows[1]["student_name"], "李四")
+        self.assertIsNone(rows[1]["rank"])
+        self.assertIsNone(rows[1]["score"])
+        self.assertEqual(rows[1]["objective_score"], 0.0)
+        self.assertEqual(rows[2]["student_name"], "王五")
+
+        dist = {item["range"]: item["count"] for item in d["score_distribution"]}
+        # 总分 15：张三 13 → 86.7% 落 80-89；李四未出分
+        self.assertEqual(dist["80-89"], 1)
+        self.assertEqual(dist["未出分"], 1)
+
+    def test_stats_attachment_mode_has_no_question_stats(self):
+        """附件作业无题目维度数据，question_stats 为空列表。"""
+        hw = Homework.objects.create(
+            classroom=self.classroom, course=self.course, title="附件作业",
+            mode=Homework.Mode.ATTACHMENT, status=Homework.Status.PUBLISHED,
+            total_score=Decimal("100"),
+        )
+        d = self.teacher_client.get(f"/api/homeworks/{hw.id}/stats/").data["data"]
+        self.assertEqual(d["question_stats"], [])
+        self.assertEqual(d["homework"]["title"], "附件作业")
+        self.assertEqual(d["homework"]["class_name"], "英语1班")
+        self.assertEqual(d["homework"]["course_name"], "大学英语")
+
+    def test_stats_same_score_same_rank(self):
+        """同分同名次：两人均 90 分 → 并列第 1。"""
+        hw = Homework.objects.create(
+            classroom=self.classroom, course=self.course, title="附件作业",
+            mode=Homework.Mode.ATTACHMENT, status=Homework.Status.PUBLISHED,
+            total_score=Decimal("100"),
+        )
+        for s in (self.s1, self.s2):
+            self._submit(s, hw.id, {})
+            sub = HomeworkSubmission.objects.get(homework=hw, student=s)
+            self.teacher_client.post(
+                f"/api/homework-submissions/{sub.id}/grade/", {"score": 90}, format="json"
+            )
+        rows = self.teacher_client.get(f"/api/homeworks/{hw.id}/stats/").data["data"]["rankings"]
+        self.assertEqual([r["rank"] for r in rows[:2]], [1, 1])
+
+    def test_stats_permission(self):
+        """权限：仅本班授课教师可查看；其他教师 404，学生 403。"""
+        hw = Homework.objects.create(
+            classroom=self.classroom, course=self.course, title="附件作业",
+            mode=Homework.Mode.ATTACHMENT, status=Homework.Status.PUBLISHED,
+            total_score=Decimal("100"),
+        )
+        self.assertEqual(self.other_client.get(f"/api/homeworks/{hw.id}/stats/").status_code, 404)
+        self.assertEqual(self.student_client.get(f"/api/homeworks/{hw.id}/stats/").status_code, 403)

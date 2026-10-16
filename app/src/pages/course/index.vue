@@ -5,7 +5,7 @@
       <input
         v-model="code"
         class="join-input"
-        placeholder="输入邀请码加入课程"
+        placeholder="输入班级邀请码加入班级"
         placeholder-class="ph"
         @confirm="join"
       />
@@ -59,7 +59,7 @@ const loading = ref(false)
 const code = ref('')
 const joining = ref(false)
 
-// 邀请码加班仅学生可用（后端 join 接口为 IsStudent）
+// 邀请码加入仅学生可用（后端 join 接口为 IsStudent）
 const isStudent = uni.getStorageSync('user')?.role === 'student'
 
 async function loadProgress(ids) {

@@ -67,6 +67,10 @@ export const createCourseResource = (data) => request.post('/course-resources/',
 export const deleteCourseResource = (id) => request.delete(`/course-resources/${id}/`)
 export const publishCourseResource = (id) => request.post(`/course-resources/${id}/publish/`)
 export const unpublishCourseResource = (id) => request.post(`/course-resources/${id}/unpublish/`)
+// 签发资源访问 URL（2 小时有效；学生仅限已发布资源，教师可预览本人未发布资源）
+export const signCourseResource = (id) => request.post(`/course-resources/${id}/sign/`)
+// 教师添加资源前预览平台预置页（按路径签发）
+export const signPresetPage = (path) => request.post('/course-resources/preset-sign/', { path })
 
 // ===== 二期C：数字人视频 =====
 export const listCourseVideos = (params) => request.get('/course-videos/', { params })

@@ -150,6 +150,33 @@ class LabFlowTest(TestCase):
         }, format="json")
         self.assertEqual(res.status_code, 400)
 
+    def test_schedule_empty_time_means_open(self):
+        """排课时间留空（空字符串）按“立即开放/不限制”保存，不再 400；
+        之后补截止时间可正常更新窗口。"""
+        lab_id = self._create_lab()
+        # 前端日期选择器清空后提交空字符串（el-date-picker 的空值形态）
+        res = self.tc.post("/api/lab-schedules/", {
+            "lab": lab_id, "classroom": self.classroom.id, "open_at": "", "close_at": "",
+        }, format="json")
+        self.assertIn(res.status_code, (200, 201), res.data)
+        schedule = LabSchedule.objects.get(lab_id=lab_id, classroom=self.classroom)
+        self.assertIsNone(schedule.open_at)
+        self.assertIsNone(schedule.close_at)
+        self.assertTrue(schedule.is_open())  # 空时间 = 始终开放
+
+        # 同班重排：只更新截止时间，开放时间保持为空（不被误清）
+        from django.utils import timezone
+        from datetime import timedelta
+
+        close_at = timezone.now() + timedelta(days=3)
+        res = self.tc.post("/api/lab-schedules/", {
+            "lab": lab_id, "classroom": self.classroom.id, "close_at": close_at.isoformat(),
+        }, format="json")
+        self.assertIn(res.status_code, (200, 201), res.data)
+        schedule.refresh_from_db()
+        self.assertIsNone(schedule.open_at)
+        self.assertIsNotNone(schedule.close_at)
+
     def test_other_teacher_cannot_access(self):
         other = User.objects.create_user("t002", password="pass1234", role="teacher", real_name="王老师")
         client = APIClient()

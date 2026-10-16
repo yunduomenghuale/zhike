@@ -33,6 +33,7 @@ from .serializers import (
     HomeworkSerializer,
     HomeworkSubmissionSerializer,
 )
+from .stats import build_homework_stats
 
 
 def _media_url(rel_path: Path) -> str:
@@ -249,6 +250,17 @@ class HomeworkViewSet(BaseModelViewSet):
                 raise ValidationError({"url": "PDF 渲染失败，请下载后查看"})
             page_urls = [rendered[key] for key in sorted(rendered)]
         return api_response({"pages": page_urls, "name": item.get("name", "")}, message="预览已就绪")
+
+    @action(detail=True, methods=["get"], url_path="stats", permission_classes=[IsTeacher])
+    def stats(self, request, pk=None):
+        """作业统计（对齐考试统计 T-E-07）：发布后全员提交/完成情况分析。
+
+        总览（应交/已交/未交、逾期、待批改、均分、及格率、优秀率）、
+        总分分段分布、逐题得分与选项分布（题库作业）、全班提交与成绩排名。
+        权限同作业管理（本班教师）。
+        """
+        homework = self.get_object()
+        return api_response(build_homework_stats(homework))
 
 
 class HomeworkSubmissionViewSet(BaseModelViewSet):

@@ -12,7 +12,7 @@
       <div class="toolbar module-toolbar">
         <div class="toolbar-left">
           <el-select v-model="classId" class="module-select" placeholder="选择班级" popper-class="module-select-popper" style="width: 280px" @change="loadExams">
-            <el-option v-for="c in classes" :key="c.id" :label="`${classCourseNames(c)} / ${c.name}`" :value="c.id" />
+            <el-option v-for="c in classes" :key="c.id" :label="`${c.name} / ${classCourseNames(c)}`" :value="c.id" />
           </el-select>
         </div>
         <div class="toolbar-right">
@@ -550,6 +550,7 @@ import { listCatalogs } from '@/api/course'
 import { listQuestions, createQuestion } from '@/api/question'
 import { blankItems } from '@/utils/blank-answer'
 import { abbrQtype, abbrDifficulty } from '@/utils/question-abbr'
+import { sortedCourseNames } from '@/utils/course-sort'
 
 const qtypes = [
   { value: 'single', label: '单选题' },
@@ -576,7 +577,8 @@ function openStats(row) {
 }
 
 function classCourseNames(item) {
-  return item.course_names?.join('、') || item.course_name || '未关联课程'
+  // 多课程名按首字母排序（英文/数字在前、中文按拼音），与班级卡片口径一致
+  return sortedCourseNames(item).join('、') || '未关联课程'
 }
 
 async function loadClasses() {

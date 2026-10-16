@@ -93,7 +93,15 @@ const props = defineProps({
 const route = useRoute()
 const router = useRouter()
 const courseId = computed(() => Number(route.params.id) || null)
-const activeTab = computed(() => props.tabs.find((item) => item.name === route.name))
+// 课程空间二级页（作业/考试统计、学生详情、资源查看器）按路由名前缀高亮归属标签
+const activeTab = computed(() => {
+  const name = route.name || ''
+  return (
+    props.tabs.find((item) => item.name === name) ||
+    props.tabs.find((item) => name.startsWith(`${item.name}-`)) ||
+    null
+  )
+})
 
 function goTab(name) {
   router.push({ name, params: { id: courseId.value } })
@@ -493,11 +501,13 @@ watch([activeTab, () => props.courseName], updatePageTitle, { immediate: true })
   flex-direction: column;
   border: 1px solid rgba(37, 99, 235, 0.1);
   border-radius: 30px;
-  background: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.88);
   box-shadow:
     0 30px 80px rgba(37, 99, 235, 0.12),
     inset 0 1px 0 rgba(255, 255, 255, 0.74);
-  backdrop-filter: blur(22px) saturate(1.12);
+  /* 不要在这里加 backdrop-filter：它会给 position:fixed 后代（Element Plus 表格
+     单元格 tooltip 的 popper 用 strategy:fixed 且挂在表格内）创建包含块，
+     导致 tooltip 相对本面板定位、整体偏移（实测偏移 364px）。毛玻璃留给侧栏/顶栏。 */
   overflow: hidden;
 }
 

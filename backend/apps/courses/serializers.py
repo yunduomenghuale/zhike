@@ -150,6 +150,10 @@ class CourseResourceSerializer(serializers.ModelSerializer):
             "id", "course", "catalog", "catalog_title", "kind", "kind_display",
             "title", "path", "url", "intro", "is_published", "order",
         ]
+        # 显式声明 validators 即关闭自动生成的 unique_together 校验
+        # （其「字段 course, path 必须能构成唯一集合」报错不友好），
+        # 改由下方 validate() 提前拦截并给出可读提示；DB 层唯一约束仍作兜底。
+        validators = []
 
     def validate_path(self, value):
         # 只允许平台预置静态页的相对路径，防目录穿越与任意外链
@@ -165,6 +169,19 @@ class CourseResourceSerializer(serializers.ModelSerializer):
         catalog = attrs.get("catalog", getattr(self.instance, "catalog", None))
         if catalog and course and catalog.course_id != course.id:
             raise serializers.ValidationError({"catalog": "所选章节不属于当前课程"})
+        # 同一课程下同一预置页只能挂一次：提前拦截并给友好提示，
+        # 否则模型 unique_together 会抛「字段 course, path 必须能构成唯一集合」
+        path = attrs.get("path", getattr(self.instance, "path", None))
+        if course and path:
+            duplicated = CourseResource.objects.filter(course=course, path=path)
+            if self.instance:
+                duplicated = duplicated.exclude(pk=self.instance.pk)
+            existing = duplicated.first()
+            if existing:
+                name = existing.title or existing.path
+                raise serializers.ValidationError(
+                    f"该课程下已添加过「{name}」，不能重复添加"
+                )
         request = self.context.get("request")
         user = getattr(request, "user", None)
         if user and user.is_authenticated and user.is_teacher:

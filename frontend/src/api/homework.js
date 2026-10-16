@@ -10,6 +10,8 @@ export const removeHomeworkAttachment = (id, url) =>
 // PDF 附件预览：后端逐页渲染为图片，前端无工具栏连续滚动
 export const previewHomeworkAttachment = (id, url) =>
   request.get(`/homeworks/${id}/attachments/preview/`, { params: { url } })
+// 作业统计：发布后全员提交/完成情况分析（对齐考试统计）
+export const getHomeworkStats = (id) => request.get(`/homeworks/${id}/stats/`)
 
 export const listSubmissions = (params) => request.get('/homework-submissions/', { params })
 export const submitHomework = (data) => request.post('/homework-submissions/', data)

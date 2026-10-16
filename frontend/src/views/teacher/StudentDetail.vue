@@ -191,7 +191,9 @@ import { getClassStudentDetail } from '@/api/analytics'
 
 const route = useRoute()
 const router = useRouter()
-const classId = Number(route.params.classId)
+// 课程空间子路由（/teacher/courses/:id/students/:studentId）经 query.class 带班级；
+// 全局路由（/teacher/classes/:classId/students/:studentId）用路径参数
+const classId = Number(route.params.classId || route.query.class)
 const studentId = Number(route.params.studentId)
 
 const loading = ref(false)
@@ -267,7 +269,11 @@ function coverageColor(v) {
 
 function goBack() {
   if (window.history.length > 1) router.back()
-  else router.push('/teacher/classes')
+  else if (route.name === 'course-analytics-student') {
+    router.push({ name: 'course-analytics', params: { id: route.params.id } })
+  } else {
+    router.push('/teacher/classes')
+  }
 }
 
 async function loadCourseOptions() {

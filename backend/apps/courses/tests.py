@@ -1,5 +1,8 @@
+import uuid
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -8,7 +11,7 @@ from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from apps.ai.providers.mock import MockProvider
-from apps.courses.models import Catalog, Course, PPTResource, TeachingVideo, VideoWatchProgress
+from apps.courses.models import Catalog, Course, CourseResource, PPTResource, TeachingVideo, VideoWatchProgress
 from apps.knowledge.models import KnowledgeChunk
 
 
@@ -201,7 +204,8 @@ class CourseResourceTests(APITestCase):
         self.client.force_authenticate(self.teacher)
         res = self._create(self.client)
         self.assertEqual(res.status_code, 201, res.data)
-        self.assertIn("/resources/mindmap/chapter4.html", res.data["data"]["url"])
+        # 每条资源的链接唯一（按访问令牌），不再是共享的 /resources/ 路径
+        self.assertIn("/api/course-resources/page/", res.data["data"]["url"])
         rid = res.data["data"]["id"]
         res = self.client.post(f"/api/course-resources/{rid}/publish/")
         self.assertEqual(res.status_code, 200)
@@ -213,6 +217,27 @@ class CourseResourceTests(APITestCase):
         self.assertEqual(res.status_code, 400)
         res = self._create(self.client, path="https://evil.com/x.html")
         self.assertEqual(res.status_code, 400)
+
+    def test_duplicate_page_rejected_with_friendly_message(self):
+        """同一课程重复添加同一预置页：友好提示，而非 unique_together 原始报错。"""
+        self.client.force_authenticate(self.teacher)
+        res = self._create(self.client)
+        self.assertEqual(res.status_code, 201, res.data)
+        # 换标题/换章节都不行：唯一约束是 (course, path)
+        res = self._create(self.client, title="第4章思维导图V2", catalog=None)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("不能重复添加", res.data["message"])
+        self.assertIn("第4章思维导图", res.data["message"])
+        # 编辑自身（PATCH 同 path）不受影响
+        listing = self.client.get(f"/api/course-resources/?course={self.course.id}")
+        items = listing.data["data"]
+        items = items["results"] if isinstance(items, dict) and "results" in items else items
+        res = self.client.patch(
+            f"/api/course-resources/{items[0]['id']}/",
+            {"title": "第4章思维导图改个名"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
 
     def test_student_sees_only_published_of_enrolled_course(self):
         from apps.classroom.models import ClassCourse, ClassRoom, ClassStudent
@@ -254,6 +279,160 @@ class CourseResourceTests(APITestCase):
         self.client.force_authenticate(other)
         res = self._create(self.client)
         self.assertEqual(res.status_code, 400)  # 序列化器拒绝非自己课程
+
+
+class CourseResourceGateTests(APITestCase):
+    """资源门控：唯一令牌链接 + 签名 URL + 发布状态门控（预置页经 Django 读出）。"""
+
+    def setUp(self):
+        self.root_dir = TemporaryDirectory()
+        root = Path(self.root_dir.name)
+        (root / "mindmap").mkdir(parents=True)
+        (root / "demos").mkdir(parents=True)
+        (root / "vendor").mkdir(parents=True)
+        (root / "mindmap" / "chapter4.html").write_text(
+            "<!doctype html><html><head><title>ch4</title>"
+            '<link rel="stylesheet" href="../vendor/x.css"></head>'
+            '<body><a href="index.html">总览</a></body></html>',
+            encoding="utf-8",
+        )
+        (root / "mindmap" / "index.html").write_text("<html><head></head><body>overview</body></html>", encoding="utf-8")
+        (root / "vendor" / "x.css").write_text("body{color:red}", encoding="utf-8")
+        self.root_override = override_settings(RESOURCES_ROOT=self.root_dir.name)
+        self.root_override.enable()
+        self.addCleanup(self.root_override.disable)
+        self.addCleanup(self.root_dir.cleanup)
+
+        self.teacher = User.objects.create_user(
+            username="gate-teacher", password="StrongPass!123", role=User.Role.TEACHER
+        )
+        self.student = User.objects.create_user(
+            username="gate-student", password="StrongPass!123", role=User.Role.STUDENT
+        )
+        self.course = Course.objects.create(name="计算机网络", teacher=self.teacher)
+        self.catalog = Catalog.objects.create(course=self.course, title="第4章 网络层", is_published=True)
+        self.resource = CourseResource.objects.create(
+            course=self.course, catalog=self.catalog, kind="mindmap",
+            title="第4章思维导图", path="mindmap/chapter4.html",
+        )
+        from apps.classroom.models import ClassCourse, ClassRoom, ClassStudent
+
+        classroom = ClassRoom.objects.create(name="网络2401", teacher=self.teacher)
+        ClassCourse.objects.create(classroom=classroom, course=self.course)
+        ClassStudent.objects.create(classroom=classroom, student=self.student)
+
+    def _sign(self, client, rid=None):
+        res = client.post(f"/api/course-resources/{rid or self.resource.id}/sign/")
+        self.assertEqual(res.status_code, 200, res.data)
+        return res.data["data"]
+
+    def _signed_parts(self, url):
+        parsed = urlparse(url)
+        query = parse_qs(parsed.query)
+        return parsed.path, query["sig"][0], query["exp"][0]
+
+    def test_sign_requires_authentication(self):
+        res = self.client.post(f"/api/course-resources/{self.resource.id}/sign/")
+        self.assertIn(res.status_code, (401, 403))
+
+    def test_student_cannot_sign_unpublished(self):
+        self.client.force_authenticate(self.student)
+        res = self.client.post(f"/api/course-resources/{self.resource.id}/sign/")
+        self.assertEqual(res.status_code, 404)  # queryset 已过滤未发布
+
+    def test_teacher_signs_own_unpublished_for_preview(self):
+        self.client.force_authenticate(self.teacher)
+        data = self._sign(self.client)
+        self.assertIn(f"/api/course-resources/page/{self.resource.access_token}/", data["url"])
+
+    def test_student_signs_published_and_page_serves_with_base(self):
+        self.resource.is_published = True
+        self.resource.save(update_fields=["is_published", "updated_at"])
+        self.client.force_authenticate(self.student)
+        signed = self._sign(self.client)
+        path, sig, exp = self._signed_parts(signed["url"])
+        # 匿名直接访问入口页（签名即凭证，不依赖 JWT）
+        self.client.force_authenticate(None)
+        res = self.client.get(f"{path}?sig={sig}&exp={exp}")
+        self.assertEqual(res.status_code, 200, res.content[:200])
+        self.assertIn("text/html", res["Content-Type"])
+        expected_base = f"/api/course-resources/asset/{self.resource.access_token}/{sig}/{exp}/mindmap/"
+        self.assertIn(f'<base href="{expected_base}">', res.content.decode())
+        # 相对引用的资产（../vendor/x.css → asset/.../vendor/x.css）
+        res = self.client.get(f"/api/course-resources/asset/{self.resource.access_token}/{sig}/{exp}/vendor/x.css")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.content, b"body{color:red}")
+        self.assertIn("text/css", res["Content-Type"])
+        # 页内相对导航（index.html → asset/.../mindmap/index.html）
+        res = self.client.get(f"/api/course-resources/asset/{self.resource.access_token}/{sig}/{exp}/mindmap/index.html")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn(b"overview", res.content)
+
+    def test_page_rejects_tampered_and_expired_signature(self):
+        self.client.force_authenticate(self.teacher)
+        signed = self._sign(self.client)
+        path, sig, exp = self._signed_parts(signed["url"])
+        self.client.force_authenticate(None)
+        # 篡改签名
+        res = self.client.get(f"{path}?sig={'0' * 64}&exp={exp}")
+        self.assertEqual(res.status_code, 403)
+        # 过期时间戳
+        res = self.client.get(f"{path}?sig={sig}&exp=1")
+        self.assertEqual(res.status_code, 403)
+        # 缺失签名
+        res = self.client.get(path)
+        self.assertEqual(res.status_code, 403)
+        # 伪造令牌
+        res = self.client.get(f"/api/course-resources/page/{uuid.uuid4()}/?sig={sig}&exp={exp}")
+        self.assertEqual(res.status_code, 403)
+
+    def test_asset_rejects_traversal(self):
+        self.client.force_authenticate(self.teacher)
+        signed = self._sign(self.client)
+        _, sig, exp = self._signed_parts(signed["url"])
+        res = self.client.get(
+            f"/api/course-resources/asset/{self.resource.access_token}/{sig}/{exp}/../../db.sqlite3"
+        )
+        # <path:rest> 会规范化 ..，落到资源根之外 → 404 提示页
+        self.assertEqual(res.status_code, 404)
+
+    def test_unpublish_invalidates_signed_link(self):
+        # 发布态签发 → 下架后旧签名（签名消息带发布状态）立即失效
+        self.resource.is_published = True
+        self.resource.save(update_fields=["is_published", "updated_at"])
+        self.client.force_authenticate(self.teacher)
+        signed = self._sign(self.client)
+        path, sig, exp = self._signed_parts(signed["url"])
+        self.resource.is_published = False
+        self.resource.save(update_fields=["is_published", "updated_at"])
+        self.client.force_authenticate(None)
+        res = self.client.get(f"{path}?sig={sig}&exp={exp}")
+        self.assertEqual(res.status_code, 403)
+
+    def test_preset_sign_teacher_only_and_page_serves(self):
+        self.client.force_authenticate(self.student)
+        res = self.client.post("/api/course-resources/preset-sign/", {"path": "mindmap/chapter4.html"}, format="json")
+        self.assertIn(res.status_code, (403, 404))
+        self.client.force_authenticate(self.teacher)
+        res = self.client.post("/api/course-resources/preset-sign/", {"path": "mindmap/chapter4.html"}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        url = res.data["data"]["url"]
+        self.assertIn("/api/course-resources/preset/", url)
+        # 非法路径拒签
+        res = self.client.post("/api/course-resources/preset-sign/", {"path": "../../etc/passwd"}, format="json")
+        self.assertEqual(res.status_code, 400)
+        # 预览页与预览资产
+        self.client.force_authenticate(None)
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("<base href=", res.content.decode())
+        segs = urlparse(url).path.strip("/").split("/")  # course-resources preset {sig} {exp} mindmap chapter4.html
+        sig, exp = segs[3], segs[4]
+        res = self.client.get(f"/api/course-resources/preset-asset/{sig}/{exp}/vendor/x.css")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.content, b"body{color:red}")
+        res = self.client.get(f"/api/course-resources/preset-asset/{sig}/{'0' * 64}/vendor/x.css")
+        self.assertEqual(res.status_code, 403)
 
 
 class CourseVideoTests(APITestCase):

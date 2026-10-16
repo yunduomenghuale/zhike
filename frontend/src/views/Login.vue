@@ -48,6 +48,41 @@
 
     <template #register>
       <el-form class="register-form" :model="form" @submit.prevent="submit">
+        <el-form-item class="role-box">
+          <div class="role-options">
+            <button
+              type="button"
+              class="role-card"
+              :class="{ active: form.role === 'student' }"
+              :aria-pressed="form.role === 'student'"
+              @click="form.role = 'student'"
+            >
+              <span class="role-icon student-icon">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 3L1 9L12 15L21 10.09V17H23V9L12 3ZM5 13.18V17.18L12 21L19 17.18V13.18L12 17L5 13.18Z" fill="currentColor" />
+                  <path d="M12 3L1 9L12 15L23 9L12 3Z" fill="currentColor" opacity="0.3" />
+                </svg>
+              </span>
+              <span class="role-label">学生</span>
+            </button>
+
+            <button
+              type="button"
+              class="role-card"
+              :class="{ active: form.role === 'teacher' }"
+              :aria-pressed="form.role === 'teacher'"
+              @click="form.role = 'teacher'"
+            >
+              <span class="role-icon teacher-icon">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 3L1 9L5 11.18V17.18L12 21L19 17.18V11.18L21 10.09V17H23V9L12 3ZM17.82 9L12 12L6.18 9L12 6L17.82 9ZM17 15.99L12 18.72L7 15.99V12.27L12 15L17 12.27V15.99Z" fill="currentColor" />
+                </svg>
+              </span>
+              <span class="role-label">教师</span>
+            </button>
+          </div>
+        </el-form-item>
+
         <el-form-item class="auth-input">
           <el-input v-model="form.username" placeholder="请输入用户名" size="large" />
         </el-form-item>
@@ -96,41 +131,6 @@
           {{ confirmationIssue }}
         </p>
 
-        <el-form-item class="role-box">
-          <div class="role-options">
-            <button
-              type="button"
-              class="role-card"
-              :class="{ active: form.role === 'teacher' }"
-              :aria-pressed="form.role === 'teacher'"
-              @click="form.role = 'teacher'"
-            >
-              <span class="role-icon teacher-icon">
-                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="M12 3L1 9L5 11.18V17.18L12 21L19 17.18V11.18L21 10.09V17H23V9L12 3ZM17.82 9L12 12L6.18 9L12 6L17.82 9ZM17 15.99L12 18.72L7 15.99V12.27L12 15L17 12.27V15.99Z" fill="currentColor" />
-                </svg>
-              </span>
-              <span class="role-label">教师</span>
-            </button>
-
-            <button
-              type="button"
-              class="role-card"
-              :class="{ active: form.role === 'student' }"
-              :aria-pressed="form.role === 'student'"
-              @click="form.role = 'student'"
-            >
-              <span class="role-icon student-icon">
-                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="M12 3L1 9L12 15L21 10.09V17H23V9L12 3ZM5 13.18V17.18L12 21L19 17.18V13.18L12 17L5 13.18Z" fill="currentColor" />
-                  <path d="M12 3L1 9L12 15L23 9L12 3Z" fill="currentColor" opacity="0.3" />
-                </svg>
-              </span>
-              <span class="role-label">学生</span>
-            </button>
-          </div>
-        </el-form-item>
-
         <el-form-item>
           <el-button type="primary" size="large" class="auth-submit" :loading="loading" @click="submit">
             注册并登录
@@ -177,7 +177,7 @@ const form = reactive({
   username: '',
   password: '',
   confirm_password: '',
-  role: 'teacher',
+  role: 'student',
 })
 
 function resetForm() {
@@ -185,7 +185,7 @@ function resetForm() {
     username: '',
     password: '',
     confirm_password: '',
-    role: 'teacher',
+    role: 'student',
   })
   passwordTouched.value = false
   confirmationTouched.value = false

@@ -205,6 +205,9 @@ class CourseResource(BaseModel):
     title = models.CharField("资源标题", max_length=200)
     # 相对 /resources/ 的路径，如 mindmap/chapter1.html、demos/tcp-demo.html
     path = models.CharField("资源路径", max_length=255)
+    # 每条资源独立的访问令牌：对外链接唯一（/api/course-resources/page/{token}/），
+    # 配合签名与发布状态门控，未发布/非本人课程无法拿到有效签名 URL
+    access_token = models.UUIDField("访问令牌", default=uuid4, unique=True, editable=False)
     intro = models.TextField("资源说明", blank=True)
     is_published = models.BooleanField("是否发布", default=False)
     order = models.PositiveIntegerField("排序号", default=0)
@@ -222,7 +225,8 @@ class CourseResource(BaseModel):
 
     @property
     def url(self) -> str:
-        return f"/resources/{self.path.lstrip('/')}"
+        # 规范地址（唯一，按资源令牌）；实际访问需经 /sign/ 签发带时效的签名 URL
+        return f"/api/course-resources/page/{self.access_token}/"
 
 
 def _course_video_file_path(instance, filename):

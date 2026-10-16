@@ -3,10 +3,12 @@ import tempfile
 import time
 
 from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
 from django.conf import settings
 from django.db import transaction
 from django.db.models.deletion import ProtectedError
 from django.db.models import Max
+from django.http import HttpResponse
 from django.utils import timezone
 
 from apps.ai.services import generate_catalog_from_plan, generate_scripts_for_video
@@ -16,6 +18,7 @@ from apps.common.response import api_response
 from apps.common.viewsets import BaseModelViewSet
 from apps.knowledge.models import KnowledgeChunk
 
+from . import resource_gate
 from .models import Catalog, Course, CourseResource, CourseVideo, PPTResource, TeachingVideo, VideoWatchProgress
 from .serializers import (
     CatalogSerializer,
@@ -677,6 +680,13 @@ class CourseResourceViewSet(BaseModelViewSet):
     def perform_create(self, serializer):
         serializer.save()
 
+    @action(detail=True, methods=["post"], url_path="sign", permission_classes=[IsAuthenticated])
+    def sign(self, request, pk=None):
+        """签发资源访问 URL（2 小时有效）。queryset 已按身份+发布状态过滤：
+        学生仅能签发本人已发布资源，教师可预览本人未发布资源。"""
+        resource = self.get_object()
+        return api_response(resource_gate.sign_resource(resource))
+
     @action(detail=True, methods=["post"], url_path="publish", permission_classes=[IsTeacher])
     def publish(self, request, pk=None):
         resource = self.get_object()
@@ -694,6 +704,98 @@ class CourseResourceViewSet(BaseModelViewSet):
         return api_response(
             CourseResourceSerializer(resource, context={"request": request}).data, message="资源已下架"
         )
+
+    @action(detail=False, methods=["post"], url_path="preset-sign", permission_classes=[IsAuthenticated, IsTeacher])
+    def preset_sign(self, request):
+        """教师添加资源前预览平台预置页：按路径签发预览 URL（无需资源行）。"""
+        path = (request.data.get("path") or "").strip().strip("/")
+        if not resource_gate.PRESET_PATH_RE.fullmatch(path):
+            return api_response(message="仅支持预览 mindmap/*.html 或 demos/*.html 预置页", code=400, status=400)
+        return api_response(resource_gate.sign_preset(path))
+
+
+def _resource_error_page(status: int, title: str, hint: str):
+    """门控失败的友好提示页（直接浏览器导航，非 JSON）。"""
+    html = (
+        "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+        f"<title>{title}</title><style>body{{font-family:sans-serif;display:flex;"
+        "align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f1f5f9}}"
+        ".box{{background:#fff;border-radius:12px;padding:32px 40px;max-width:420px;text-align:center;"
+        "box-shadow:0 8px 30px rgba(15,23,42,.08)}}h1{{font-size:18px;color:#0f172a;margin:0 0 10px}}"
+        "p{{font-size:13px;color:#64748b;margin:0;line-height:1.7}}</style></head>"
+        f"<body><div class=\"box\"><h1>{title}</h1><p>{hint}</p></div></body></html>"
+    )
+    return HttpResponse(html, status=status, content_type="text/html; charset=utf-8")
+
+
+def course_resource_page(request, token):
+    """资源入口页：验签 → 读预置 HTML → 注入 <base> 指向签名资产路由。"""
+    resource = CourseResource.objects.filter(access_token=token).first()
+    if resource is None or not resource_gate.verify_resource(
+        resource, request.GET.get("sig", ""), request.GET.get("exp", "")
+    ):
+        return _resource_error_page(403, "资源链接无效或已过期", "请返回课程页面重新打开该资源。")
+    html = resource_gate.read_page(resource)
+    if html is None:
+        return _resource_error_page(404, "资源页面不存在", "平台尚未部署该预置页面，请联系管理员。")
+    base = resource_gate.asset_base(resource, request.GET.get("sig", ""), request.GET.get("exp", ""))
+    response = HttpResponse(
+        resource_gate.inject_base(html, base), content_type="text/html; charset=utf-8"
+    )
+    response["Cache-Control"] = "no-store"
+    response["X-Content-Type-Options"] = "nosniff"
+    # 查看器以同源 iframe 嵌入本页（clickjacking 中间件不覆盖已设置的响应头）
+    response["X-Frame-Options"] = "SAMEORIGIN"
+    return response
+
+
+def course_resource_asset(request, token, sig, exp, rest):
+    """资源资产（JS/CSS/图片等）：同一 token 签名校验后从 RESOURCES_ROOT 读出。"""
+    resource = CourseResource.objects.filter(access_token=token).first()
+    if resource is None or not resource_gate.verify_resource(resource, sig, exp):
+        return _resource_error_page(403, "资源链接无效或已过期", "请返回课程页面重新打开该资源。")
+    path = resource_gate.read_asset(rest)
+    if path is None:
+        return _resource_error_page(404, "资源文件不存在", "请返回课程页面重新打开该资源。")
+    response = HttpResponse(path.read_bytes(), content_type=resource_gate.guess_content_type(path))
+    response["Cache-Control"] = "private, max-age=7200"
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+def course_resource_preset_page(request, sig, exp, rest):
+    """预置页预览入口（教师）：验签 → 读 HTML → 注入 <base>。"""
+    if not resource_gate.verify_preset(sig, exp):
+        return _resource_error_page(403, "预览链接无效或已过期", "请重新选择平台页面生成预览。")
+    if not rest.endswith(".html"):
+        return _resource_error_page(404, "页面不存在", "仅支持预览 HTML 预置页。")
+    path = resource_gate.read_asset(rest)
+    if path is None:
+        return _resource_error_page(404, "页面不存在", "平台尚未部署该预置页面，请联系管理员。")
+    parent = rest.rsplit("/", 1)[0] if "/" in rest else ""
+    base = resource_gate.preset_asset_base(sig, exp, parent)
+    response = HttpResponse(
+        resource_gate.inject_base(path.read_text(encoding="utf-8", errors="replace"), base),
+        content_type="text/html; charset=utf-8",
+    )
+    response["Cache-Control"] = "no-store"
+    response["X-Content-Type-Options"] = "nosniff"
+    response["X-Frame-Options"] = "SAMEORIGIN"
+    return response
+
+
+def course_resource_preset_asset(request, sig, exp, rest):
+    """预置页预览资产（教师签名，2 小时有效）。"""
+    if not resource_gate.verify_preset(sig, exp):
+        return _resource_error_page(403, "预览链接无效或已过期", "请重新选择平台页面生成预览。")
+    path = resource_gate.read_asset(rest)
+    if path is None:
+        return _resource_error_page(404, "资源文件不存在", "请重新选择平台页面生成预览。")
+    response = HttpResponse(path.read_bytes(), content_type=resource_gate.guess_content_type(path))
+    response["Cache-Control"] = "private, max-age=7200"
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 MAX_COURSE_VIDEO_SIZE = 500 * 1024 * 1024  # 500MB

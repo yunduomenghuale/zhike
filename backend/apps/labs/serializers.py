@@ -36,6 +36,18 @@ class LabScheduleSerializer(serializers.ModelSerializer):
         # 唯一性交给视图层 upsert（同班重排=更新窗口），这里不生成 UniqueTogetherValidator
         validators = []
 
+    def to_internal_value(self, data):
+        # 容忍空字符串：日期选择器清空后提交 ""，按“不设置”（开放时间空=立即开放、
+        # 截止时间空=不限制，与作业/考试口径一致）处理，避免 400 日期格式错误。
+        # 仅归一化“提供了但为空”的键；partial 更新中未提供的键保持缺省，避免误清空
+        if isinstance(data, dict):
+            normalized = dict(data)
+            for key in ("open_at", "close_at"):
+                if key in normalized and not normalized[key]:
+                    normalized[key] = None
+            data = normalized
+        return super().to_internal_value(data)
+
     def validate(self, attrs):
         lab, classroom = attrs.get("lab"), attrs.get("classroom")
         if lab and classroom:

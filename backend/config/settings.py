@@ -229,6 +229,14 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+# 课程扩展资源预置静态页根目录（思维导图/交互演示，只读资产）。
+# 解析顺序：env RESOURCES_ROOT 覆盖 → 容器内 /app/resources（生产 bind mount）→
+# 本地开发回退仓库 deploy/resources。入口页与资产均经签名 URL 门控后由 Django 读出，
+# nginx 不再公开 /resources/，避免绕过发布状态直接访问。
+RESOURCES_ROOT = os.getenv("RESOURCES_ROOT") or (
+    BASE_DIR / "resources" if (BASE_DIR / "resources").is_dir() else BASE_DIR.parent / "deploy" / "resources"
+)
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # ---------------------------------------------------------------------------
