@@ -154,6 +154,7 @@ import {
   Bell, FullScreen, Notebook,
   DataAnalysis,
   Setting,
+  Tickets,
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
@@ -301,6 +302,7 @@ const menuGroups = computed(() => {
           { index: '/admin/overview', label: '管理概览', icon: DataAnalysis },
           { index: '/admin/users', label: '用户管理', icon: UserFilled },
           { index: '/admin/teaching', label: '教学监管', icon: Reading },
+          { index: '/admin/audit', label: '操作审计', icon: Tickets },
           { index: '/admin/ai-settings', label: '大模型配置', icon: Setting },
         ],
       },
@@ -916,7 +918,13 @@ function onCommand(cmd) {
 
 .app-stage {
   position: relative;
-  z-index: 1;
+  /* 必须高于 .app-topbar 的 z-index:3：Element Plus 弹窗/抽屉默认不 teleport 到
+     body（appendToBody 默认 false），el-overlay 渲染在本组件树内、被困在 stage
+     的层叠上下文里。若顶栏 z-index 更高，它会盖住整个 stage——包括弹窗——导致
+     工作台/课程列表/管理端等页面所有对话框与抽屉的标题栏、关闭按钮被顶栏遮挡
+     （弹窗高于视口时贴顶必现；课程空间 Shell 同款问题已按同样方式修复）。
+     stage 内容几何上始于顶栏之下，抬高不会与顶栏重叠，仅弹窗遮罩能正确覆盖全屏。 */
+  z-index: 4;
   height: calc(100vh - 52px);
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
