@@ -220,7 +220,13 @@ watch([activeTab, () => props.courseName], updatePageTitle, { immediate: true })
 
 .course-stage {
   position: relative;
-  z-index: 1;
+  /* 必须高于 .course-topbar 的 z-index:2：Element Plus 弹窗默认不 teleport 到
+     body（appendToBody 默认 false），el-overlay/el-dialog 渲染在本组件树内、
+     被困在 stage 的层叠上下文里。若顶栏 z-index 更高，它会盖住整个 stage——
+     包括弹窗——导致「讲解稿与配音」等弹窗的标题栏/关闭按钮被顶栏遮挡
+     （缩放 ≥100% 视口变矮、弹窗居中后顶端贴近顶栏时必现）。
+     stage 内容几何上始于顶栏之下，抬高不会与顶栏重叠，仅弹窗遮罩能正确覆盖全屏。 */
+  z-index: 3;
   height: calc(100vh - 52px);
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);

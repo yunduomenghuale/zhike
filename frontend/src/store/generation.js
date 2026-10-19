@@ -199,18 +199,55 @@ export const useGenerationStore = defineStore('generation', () => {
         saveRecord('audio', id, audioTasks[id])
       }
     }, PROGRESS_POLL_MS)
+    let stallBatches = 0
+    let aborted = false
     try {
       for (;;) {
         if (!stillMine('audio', id)) return
         const res = await generateAudio(id, AUDIO_BATCH_SIZE)
+        const before = audioTasks[id]?.done || 0
         audioTasks[id] = { done: res.audio_pages, total: res.total_pages }
         saveRecord('audio', id, audioTasks[id])
         if (res.done) break
+        // 失败终止：本批一页都没合成成功、且有明确失败页 → 配音服务不可用
+        // （模型下线/Key 失效/限流等）。失败页下轮虽会重试，但根因不消除就会
+        // 无限重试同一批且界面无任何提示（用户实测「配音 0/18」卡死）。
+        // 立即终止并展示失败原因，引导去管理端检查语音合成配置。
+        const failedDetails = Array.isArray(res.failed_details) ? res.failed_details : []
+        const noProgress = res.audio_pages <= before && (res.created_pages || 0) === 0
+        if (noProgress && failedDetails.length > 0) {
+          const first = failedDetails[0]
+          const reason = first?.error ? `（如第 ${first.page} 页：${first.error}）` : ''
+          ElMessage.error({
+            message: `配音失败：${failedDetails.length} 页合成出错${reason}。请检查「管理端 → 大模型配置 → 语音合成」后重试；已完成 ${res.audio_pages}/${res.total_pages} 页，修复后可再次点击「配音」继续补齐。`,
+            duration: 10000,
+            showClose: true,
+          })
+          aborted = true
+          break
+        }
+        // 防御：无失败记录但也连续 3 批无进展（异常形态），同样终止避免死循环
+        if (noProgress) {
+          stallBatches += 1
+          if (stallBatches >= 3) {
+            ElMessage.error({
+              message: `配音中断：连续多批无进展（已完成 ${res.audio_pages}/${res.total_pages} 页），可再次点击「配音」继续。`,
+              duration: 8000,
+              showClose: true,
+            })
+            aborted = true
+            break
+          }
+        } else {
+          stallBatches = 0
+        }
       }
       if (!stillMine('audio', id)) return
+      // 失败终止时不保留持久化记录（根因未除，自动续跑只会再次失败），
+      // 由错误提示引导用户修复后手动重试
       clearRecord('audio', id)
       completedTick.value += 1
-      ElMessage.success(`已完成 ${audioTasks[id].total} 页配音`)
+      if (!aborted) ElMessage.success(`已完成 ${audioTasks[id].total} 页配音`)
     } catch {
       clearRecord('audio', id)
       const p = audioTasks[id] || { done: 0, total: 0 }

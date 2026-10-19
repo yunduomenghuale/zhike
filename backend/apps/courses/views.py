@@ -181,12 +181,15 @@ class CatalogViewSet(BaseModelViewSet):
         scripts = video.scripts or []
         total = len([item for item in scripts if item.get("script")])
         audio_pages = sum(1 for item in scripts if item.get("audio_url"))
-        # 仅把明确合成失败（有 audio_error）的页计为失败；尚未轮到的页不算失败
-        failed_pages = [
-            item.get("page")
+        # 仅把明确合成失败（有 audio_error）的页计为失败；尚未轮到的页不算失败。
+        # failed_details 带上失败原因（provider 报错截断 300 字），供前端在配音
+        # 服务不可用（模型下线/Key 失效等）时展示具体错误并终止循环，而非无限重试。
+        failed_details = [
+            {"page": item.get("page"), "error": item.get("audio_error")}
             for item in scripts
             if item.get("script") and not item.get("audio_url") and item.get("audio_error")
         ]
+        failed_pages = [item["page"] for item in failed_details]
         remaining = total - audio_pages
         return api_response(
             {
@@ -194,6 +197,7 @@ class CatalogViewSet(BaseModelViewSet):
                 "audio_pages": audio_pages,
                 "total_pages": total,
                 "failed_pages": failed_pages,
+                "failed_details": failed_details,
                 "remaining": remaining,
                 "done": remaining == 0,
             },
