@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>sticky bottom 负值截断复现</title>
+<style>
+  /* ===== 复刻 MainLayout.vue 的外壳层级 ===== */
+  html, body { margin: 0; height: 100%; }
+  #app { height: 100%; }
+  .layout { height: 100%; }
+  .app-page { min-height: 100vh; position: relative; overflow: hidden; display: block; background: #f1f5fb; }
+  .app-topbar { height: 52px; position: relative; z-index: 3; padding: 0 30px; display: flex; align-items: center; background: rgba(255,255,255,.88); box-shadow: 0 16px 38px rgba(37,99,235,.08); }
+  .app-stage { position: relative; z-index: 1; height: calc(100vh - 52px); display: grid; grid-template-columns: 300px minmax(0,1fr); gap: 24px; padding: 26px 38px 30px; box-sizing: border-box; }
+  .app-rail { height: 100%; border-radius: 30px; background: rgba(255,255,255,.86); overflow: hidden; }
+  .app-main-panel { min-width: 0; min-height: 0; height: 100%; border-radius: 30px; background: rgba(255,255,255,.82); box-shadow: 0 30px 80px rgba(37,99,235,.12); overflow: hidden; }
+  .app-main-panel .main { height: 100%; padding: 0; overflow-y: auto; background: transparent; }
+  .app-main-panel .main .page-container { min-height: 100%; padding: 30px 36px 36px; box-sizing: border-box; background: transparent; }
+
+  /* ===== 复刻 AdminAISettings.vue 相关样式 ===== */
+  .ai-settings { color: #0f172a; }
+  /* 复刻 Element Plus tabs 结构（dist/index.css 实测值） */
+  .el-tabs { display: flex; flex-direction: column; }
+  .el-tabs__header { height: 44px; border-bottom: 1px solid #e8eef7; margin-bottom: 18px; flex: 0 0 auto; }
+  .el-tabs__content { flex-grow: 1; position: relative; overflow: hidden; }
+  .el-tab-pane { }
+  .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 22px; margin-bottom: 22px; }
+  .page-head h1 { font-size: 30px; margin: 0; }
+  .runtime-badge { min-width: 230px; padding: 12px 15px; border: 1px solid #e2e8f0; border-radius: 16px; background: #fff; }
+  .effective-card, .config-card { border: 1px solid #e5edf8; border-radius: 22px; background: rgba(255,255,255,.94); box-shadow: 0 16px 40px rgba(37,99,235,.07); }
+  .effective-card { padding: 20px; margin-bottom: 16px; }
+  .fake-table { height: 210px; border-radius: 12px; background: repeating-linear-gradient(0deg,#f8fafc,#f8fafc 34px,#eef2f7 34px,#eef2f7 35px); border: 1px solid #edf2f7; }
+  .capability-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 16px; }
+  .config-card { padding: 22px; }
+  .card-head { display: flex; align-items: center; gap: 12px; padding-bottom: 17px; border-bottom: 1px solid #edf2f7; }
+  .head-icon { width: 42px; height: 42px; border-radius: 13px; background: #eff6ff; flex: 0 0 auto; }
+  .card-title { flex: 1; }
+  .card-title h2 { font-size: 17px; margin: 0; }
+  .card-title p { margin: 3px 0 0; color: #94a3b8; font-size: 12px; }
+  .config-form { margin-top: 16px; display: grid; gap: 18px; }
+  .form-item label { display: block; font-size: 13px; color: #475569; margin-bottom: 6px; }
+  .form-item .box { height: 32px; border: 1px solid #dcdfe6; border-radius: 6px; background: #fff; }
+  .form-item .box.tall { height: 56px; }
+  .field-note { margin-top: 7px; color: #94a3b8; font-size: 12px; }
+  .card-foot { margin-top: 14px; padding-top: 13px; border-top: 1px solid #edf2f7; display: flex; align-items: center; justify-content: space-between; }
+  .source-tag { color: #94a3b8; font-size: 12px; }
+  .btn { height: 32px; padding: 0 15px; border: 1px solid #dcdfe6; border-radius: 6px; background: #fff; font-size: 13px; }
+
+  /* ===== 关键：被测的吸底操作栏（与线上一致） ===== */
+  .action-bar {
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    margin: 18px -36px -36px;
+    padding: 15px 36px;
+    border-top: 1px solid #e5edf8;
+    background: rgba(255,255,255,.92);
+    backdrop-filter: blur(16px);
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 10px;
+  }
+  .action-bar > div { margin-right: auto; color: #94a3b8; font-size: 12px; }
+  .action-bar .btn-primary { height: 32px; padding: 0 16px; border: 0; border-radius: 6px; background: #2563eb; color: #fff; font-size: 13px; }
+
+  .marker { position: fixed; left: 8px; top: 8px; z-index: 99; background: #fff; border: 1px solid #ccc; font-size: 11px; padding: 2px 6px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <main class="layout app-page">
+    <header class="app-topbar">智课平台</header>
+    <div class="app-stage">
+      <aside class="app-rail"></aside>
+      <section class="app-main-panel">
+        <div class="main" id="scroller">
+          <div class="page-container ai-settings">
+            <header class="page-head">
+              <div><h1>大模型配置</h1><p>按能力配置平台 AI 使用的服务商、模型和访问凭证。</p></div>
+              <div class="runtime-badge">运行时状态</div>
+            </header>
+
+            <div class="el-tabs">
+              <div class="el-tabs__header">能力配置 / 调用统计 / 调用流水 / 变更记录</div>
+              <div class="el-tabs__content">
+                <div class="el-tab-pane">
+
+            <section class="effective-card">
+              <h2>当前生效配置</h2>
+              <div class="fake-table"></div>
+            </section>
+
+            <section class="capability-grid">
+              <article class="config-card">
+                <div class="card-head"><span class="head-icon"></span><div class="card-title"><h2>对话生成</h2><p>目录识别、逐页讲稿、智能出题、知识问答、学情分析</p></div></div>
+                <div class="config-form">
+                  <div class="form-item"><label>服务商</label><div class="box"></div></div>
+                  <div class="form-item"><label>接口地址</label><div class="box"></div></div>
+                  <div class="form-item"><label>对话模型</label><div class="box"></div></div>
+                  <div class="form-item"><label>超时(秒)</label><div class="box"></div><div class="field-note">单次请求超时；留空默认 45 秒。</div></div>
+                  <div class="form-item"><label>API Key</label><div class="box"></div><div class="field-note">加密保存；留空表示不修改。</div></div>
+                </div>
+                <div class="card-foot"><span class="source-tag">来源：管理端配置</span><button class="btn">测试连接</button></div>
+              </article>
+              <article class="config-card">
+                <div class="card-head"><span class="head-icon"></span><div class="card-title"><h2>向量化</h2><p>知识库资料入库与检索</p></div></div>
+                <div class="config-form">
+                  <div class="form-item"><label>服务商</label><div class="box"></div></div>
+                  <div class="form-item"><label>接口地址</label><div class="box"></div></div>
+                  <div class="form-item"><label>向量模型</label><div class="box"></div></div>
+                  <div class="form-item"><label>超时(秒)</label><div class="box"></div><div class="field-note">单次请求超时；留空默认 60 秒。</div></div>
+                  <div class="form-item"><label>API Key</label><div class="box"></div><div class="field-note">加密保存；留空表示不修改。</div></div>
+                </div>
+                <div class="card-foot"><span class="source-tag">来源：管理端配置</span><button class="btn">测试连接</button></div>
+              </article>
+              <article class="config-card">
+                <div class="card-head"><span class="head-icon"></span><div class="card-title"><h2>重排序</h2><p>知识库检索结果按问题语义精排</p></div></div>
+                <div class="config-form">
+                  <div class="form-item"><label>服务商</label><div class="box"></div></div>
+                  <div class="form-item"><label>接口地址</label><div class="box"></div></div>
+                  <div class="form-item"><label>重排序模型</label><div class="box"></div></div>
+                  <div class="form-item"><label>超时(秒)</label><div class="box"></div><div class="field-note">单次请求超时；留空默认 60 秒。</div></div>
+                  <div class="form-item"><label>API Key</label><div class="box"></div><div class="field-note">加密保存；留空表示不修改。</div></div>
+                </div>
+                <div class="card-foot"><span class="source-tag">来源：管理端配置</span><button class="btn">测试连接</button></div>
+              </article>
+              <article class="config-card">
+                <div class="card-head"><span class="head-icon"></span><div class="card-title"><h2>语音合成</h2><p>PPT 逐页 AI 配音</p></div></div>
+                <div class="config-form">
+                  <div class="form-item"><label>服务商</label><div class="box"></div></div>
+                  <div class="form-item"><label>接口地址</label><div class="box"></div></div>
+                  <div class="form-item"><label>语音模型</label><div class="box"></div></div>
+                  <div class="form-item"><label>超时(秒)</label><div class="box"></div><div class="field-note">单次请求超时；留空默认 120 秒。</div></div>
+                  <div class="form-item"><label>发音人</label><div class="box"></div></div>
+                  <div class="form-item"><label>API Key</label><div class="box"></div><div class="field-note">加密保存；留空表示不修改。</div></div>
+                </div>
+                <div class="card-foot"><span class="source-tag">来源：管理端配置</span><button class="btn">测试连接</button></div>
+              </article>
+            </section>
+                </div>
+              </div>
+            </div>
+
+            <footer class="action-bar" id="actionBar">
+              <div>所有修改已保存</div>
+              <button class="btn-primary">保存并应用</button>
+            </footer>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+</body>
+</html>

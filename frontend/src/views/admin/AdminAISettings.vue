@@ -90,11 +90,6 @@
             </div>
           </article>
         </section>
-
-        <footer class="action-bar">
-          <div><span v-if="dirty">配置有未保存修改</span><span v-else>所有修改已保存</span></div>
-          <el-button type="primary" :icon="Check" :loading="saving" :disabled="!dirty || saving" @click="save">保存并应用</el-button>
-        </footer>
       </el-tab-pane>
 
       <!-- ================= Tab 2：调用统计 ================= -->
@@ -353,6 +348,14 @@
       </el-tab-pane>
     </el-tabs>
 
+    <!-- 保存栏必须放在 el-tabs 之外：el-tabs__content 自带 overflow:hidden，
+         栏的负底边距(-36px,用于伸进页面底边距)会被它裁掉底部（保存按钮被切），
+         且 sticky 会以 el-tabs__content 为吸附容器、永远吸不到面板底部 -->
+    <footer v-if="activeTab === 'config'" class="action-bar">
+      <div><span v-if="dirty">配置有未保存修改</span><span v-else>所有修改已保存</span></div>
+      <el-button type="primary" :icon="Check" :loading="saving" :disabled="!dirty || saving" @click="save">保存并应用</el-button>
+    </footer>
+
     <el-dialog v-model="testDialog.visible" :title="testDialog.title" width="520px" append-to-body class="test-dialog">
       <div class="test-banner" :class="testDialog.status">
         <el-icon class="banner-icon">
@@ -396,6 +399,8 @@ import {
 // 重排序开放通义千问（DashScope 原生 rerank 端点）与系统内置模型；
 // 系统内置模型（local）：向量化内置 BGE-M3、重排序内置 Qwen3-Reranker-0.6B，
 // 权重部署时自动下载、本机 CPU 推理，无需 Key/接口地址（对话/语音暂无内置实现）；
+// 对话卡过滤掉 local（保留 mock 供无 Key 演示）、语音卡同样不含 local——
+// 与后端 CAPABILITY_PROVIDERS 白名单一致，选了也保存不了（序列化层拒收）
 // 对话生成保留模拟模式，便于无 Key 环境演示流程
 const providers = [
   { value:'deepseek', label:'DeepSeek' },
@@ -415,10 +420,10 @@ const presets = {
   mock:{ base_url:'', chat:'', embed:'', rerank:'', tts:'' },
 }
 const capabilityList = [
-  { value:'chat', label:'对话生成', desc:'目录识别、逐页讲稿、智能出题、知识问答、学情分析', icon:ChatDotRound, color:'#2563eb', bg:'#eff6ff', modelLabel:'对话模型', modelPlaceholder:'例如 qwen-plus / deepseek-chat', showTimeout:true, timeoutDefault:45, showVision:true, providers },
+  { value:'chat', label:'对话生成', desc:'目录识别、逐页讲稿、智能出题、知识问答、学情分析', icon:ChatDotRound, color:'#2563eb', bg:'#eff6ff', modelLabel:'对话模型', modelPlaceholder:'例如 qwen-plus / deepseek-chat', showTimeout:true, timeoutDefault:45, showVision:true, providers: providers.filter(i=>i.value!=='local') },
   { value:'embed', label:'向量化', desc:'知识库资料入库与检索', icon:Files, color:'#7c3aed', bg:'#f5f3ff', modelLabel:'向量模型', modelPlaceholder:'例如 text-embedding-v3', showTimeout:true, timeoutDefault:60, providers: realProviders.filter(i=>i.value!=='deepseek') },
   { value:'rerank', label:'重排序', desc:'知识库检索结果按问题语义精排，过滤关键词命中的噪声片段', icon:Sort, color:'#0ea5e9', bg:'#f0f9ff', modelLabel:'重排序模型', modelPlaceholder:'例如 gte-rerank-v2', showTimeout:true, timeoutDefault:60, providers: [{ value:'tongyi', label:'通义千问' }, { value:'local', label:'系统内置模型' }] },
-  { value:'tts', label:'语音合成', desc:'PPT 逐页 AI 配音', icon:Microphone, color:'#f59e0b', bg:'#fffbeb', modelLabel:'语音模型', modelPlaceholder:'例如 qwen3-tts-flash', showTimeout:true, showVoice:true, timeoutDefault:120, providers: realProviders.filter(i=>i.value!=='deepseek') },
+  { value:'tts', label:'语音合成', desc:'PPT 逐页 AI 配音', icon:Microphone, color:'#f59e0b', bg:'#fffbeb', modelLabel:'语音模型', modelPlaceholder:'例如 qwen3-tts-flash', showTimeout:true, showVoice:true, timeoutDefault:120, providers: realProviders.filter(i=>i.value!=='deepseek' && i.value!=='local') },
 ]
 // 统计/流水页的筛选项（与后端 Scene / Provider 枚举一致）
 const capabilityOptions = capabilityList.map(i=>({ value:i.value, label:i.label }))
@@ -886,11 +891,14 @@ onMounted(load)
 </script>
 
 <style scoped>
-.ai-settings{color:#0f172a;padding-bottom:110px!important}.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:22px;margin-bottom:22px}.eyebrow{margin-bottom:6px;color:#2563eb;font-size:12px;font-weight:850;letter-spacing:.16em}h1,h2,h3,p{margin:0}h1{font-size:30px}.page-head p{margin-top:7px;color:#8190a8}.runtime-badge{min-width:230px;padding:12px 15px;border:1px solid #e2e8f0;border-radius:16px;display:flex;align-items:center;gap:11px;background:#fff}.runtime-badge>span{width:10px;height:10px;border-radius:50%;background:#94a3b8;box-shadow:0 0 0 5px #f1f5f9}.runtime-badge>div{display:grid;gap:2px}.runtime-badge small{color:#94a3b8}.runtime-badge.active>span{background:#22c55e;box-shadow:0 0 0 5px #dcfce7}
+.ai-settings{color:#0f172a}.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:22px;margin-bottom:22px}.eyebrow{margin-bottom:6px;color:#2563eb;font-size:12px;font-weight:850;letter-spacing:.16em}h1,h2,h3,p{margin:0}h1{font-size:30px}.page-head p{margin-top:7px;color:#8190a8}.runtime-badge{min-width:230px;padding:12px 15px;border:1px solid #e2e8f0;border-radius:16px;display:flex;align-items:center;gap:11px;background:#fff}.runtime-badge>span{width:10px;height:10px;border-radius:50%;background:#94a3b8;box-shadow:0 0 0 5px #f1f5f9}.runtime-badge>div{display:grid;gap:2px}.runtime-badge small{color:#94a3b8}.runtime-badge.active>span{background:#22c55e;box-shadow:0 0 0 5px #dcfce7}
 .ai-tabs{--el-tabs-header-height:44px}.ai-tabs :deep(.el-tabs__header){margin-bottom:18px}.ai-tabs :deep(.el-tabs__item){font-size:15px;font-weight:700}.ai-tabs :deep(.el-tabs__nav-wrap::after){background:#e8eef7}
 .effective-card,.config-card,.stats-toolbar,.chart-card,.dist-card,.logs-card,.changes-card{border:1px solid #e5edf8;border-radius:22px;background:rgba(255,255,255,.94);box-shadow:0 16px 40px rgba(37,99,235,.07)}.effective-card{padding:20px;margin-bottom:16px}.section-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:14px}.section-head h2{font-size:18px}.effective-table{width:100%;font-size:14px}.effective-table :deep(.el-table__cell){padding:8px 0;font-size:14px}.effective-table :deep(.el-table__cell .cell){padding:0 10px}.effective-table code{background:#f1f5f9;border-radius:5px;padding:2px 7px;font-size:13px;color:#334155}.provider-name{font-weight:600;color:#0f172a}.muted{color:#64748b;font-size:14px}.warn{color:#d97706;font-size:12px}.block{display:block;margin-top:3px;color:#64748b;font-size:12px}.test-cell{display:flex;align-items:flex-start;gap:7px;color:#334155}.test-cell span{font-size:13px;font-weight:500;word-break:break-all}.test-cell small{display:block;margin-top:2px;color:#64748b;font-size:12px}.test-cell.success{color:#16a34a}.test-cell.failed{color:#dc2626}
 .capability-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.config-card{padding:22px}.card-head{display:flex;align-items:center;gap:12px;padding-bottom:17px;border-bottom:1px solid #edf2f7}.card-title{min-width:0;flex:1}.card-head h2{font-size:17px}.card-head p{margin-top:3px;color:#94a3b8;font-size:12px}.head-icon{width:42px;height:42px;border-radius:13px;display:grid;place-items:center;flex:0 0 auto;font-size:19px}.config-form{margin-top:16px}.secret-note{margin-top:7px;color:#94a3b8;font-size:12px;display:flex;align-items:flex-start;gap:5px;line-height:1.5}.field-note{margin-top:7px;color:#94a3b8;font-size:12px;display:flex;align-items:flex-start;gap:5px;line-height:1.5}.card-foot{margin-top:14px;padding-top:13px;border-top:1px solid #edf2f7;display:flex;align-items:center;justify-content:space-between;gap:10px}.source-tag{color:#94a3b8;font-size:12px}.vision-tag{margin-top:5px}.warn-note{color:#b45309}.warn-note .el-icon{color:#d97706}
-.action-bar{position:sticky;bottom:-36px;z-index:5;margin:18px -36px -36px;padding:15px 36px;border-top:1px solid #e5edf8;background:rgba(255,255,255,.92);backdrop-filter:blur(16px);display:flex;justify-content:flex-end;align-items:center;gap:10px}.action-bar>div{margin-right:auto;color:#94a3b8;font-size:12px}
+/* 吸底保存栏：bottom:0 贴滚动视口(.main)底边；负底边距 -36px 伸进页面底边距，
+   滚到底时栏底与面板底边齐平（配合布局默认的 36px 页面底边距）。
+   勿改回负 bottom——那会让栏底掉到视口外被面板 overflow:hidden 裁掉 */
+.action-bar{position:sticky;bottom:0;z-index:5;margin:18px -36px -36px;padding:15px 36px;border-top:1px solid #e5edf8;background:rgba(255,255,255,.92);backdrop-filter:blur(16px);display:flex;justify-content:flex-end;align-items:center;gap:10px}.action-bar>div{margin-right:auto;color:#94a3b8;font-size:12px}
 .test-banner{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;border:1px solid;border-radius:12px;margin-bottom:14px}.test-banner.success{border-color:#bbf7d0;background:#f0fdf4;color:#15803d}.test-banner.failed{border-color:#fecaca;background:#fef2f2;color:#b91c1c}.test-banner.untested{border-color:#e2e8f0;background:#f8fafc;color:#475569}.banner-icon{font-size:22px;margin-top:1px}.banner-text strong{display:block;margin-bottom:4px;font-size:15px}.banner-text p{margin:0;font-size:13px;line-height:1.6;word-break:break-all}.form-note{margin-bottom:12px;padding:8px 12px;border-radius:8px;background:#eff6ff;color:#1d4ed8;font-size:12px;line-height:1.6}.test-dialog :deep(.el-descriptions__content){word-break:break-all;line-height:1.6}
 /* ---- 调用统计 ---- */
 .stats-panel{display:grid;gap:16px}.stats-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:14px 18px}.toolbar-note{color:#94a3b8;font-size:12px;line-height:1.5}.window-note{padding:0 4px;color:#64748b;font-size:12px}.days-input{display:inline-flex;align-items:center;gap:6px}.days-label{color:#64748b;font-size:13px}
