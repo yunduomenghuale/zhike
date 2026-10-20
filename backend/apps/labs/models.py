@@ -77,6 +77,9 @@ class Lab(BaseModel):
     allow_resubmit = models.BooleanField("允许学生重复提交", default=True)  # 训练型：学生可自主重做
     status = models.CharField("状态", max_length=16, choices=Status.choices, default=Status.DRAFT)
     order = models.PositiveIntegerField("排序号", default=0)
+    # 门控访问令牌：实验页对外链接按行持有随机令牌（与课程资源同构），
+    # 签名含发布状态——下线即旧链接失效，重新上线需重新签发进入
+    access_token = models.UUIDField("访问令牌", default=uuid4, editable=False, unique=True)
 
     class Meta:
         verbose_name = "实验"

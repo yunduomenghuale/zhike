@@ -93,11 +93,25 @@
 
     block: function (message) {
       document.addEventListener('DOMContentLoaded', function () {
+        // 与后端 render_block_page 统一风格：浅色卡片居中（实验页被 nginx 直出时
+        // 不经过 Django，票据失效的拦截提示在这里渲染，样式需保持一致）
         var overlay = document.createElement('div');
         overlay.style.cssText =
-          'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99999;display:flex;' +
-          'align-items:center;justify-content:center;color:#fff;font-size:16px;text-align:center;padding:20px;';
-        overlay.textContent = message || '实验不可用';
+          'position:fixed;inset:0;background:#f1f5f9;z-index:99999;display:flex;' +
+          'align-items:center;justify-content:center;font-family:sans-serif;padding:20px;';
+        var box = document.createElement('div');
+        box.style.cssText =
+          'background:#fff;border-radius:12px;padding:32px 40px;max-width:420px;width:100%;' +
+          'text-align:center;box-shadow:0 8px 30px rgba(15,23,42,.08);';
+        var h1 = document.createElement('h1');
+        h1.textContent = '实验暂不可访问';
+        h1.style.cssText = 'font-size:18px;color:#0f172a;margin:0 0 10px;font-weight:600;';
+        var p = document.createElement('p');
+        p.textContent = message || '请从课程实验页重新进入';
+        p.style.cssText = 'font-size:13px;color:#64748b;margin:0;line-height:1.7;';
+        box.appendChild(h1);
+        box.appendChild(p);
+        overlay.appendChild(box);
         document.body.appendChild(overlay);
       });
     },

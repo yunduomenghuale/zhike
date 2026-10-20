@@ -13,6 +13,7 @@ from django.utils import timezone
 
 from apps.ai.services import generate_catalog_from_plan, generate_scripts_for_video
 from apps.common.access import courses_for_user
+from apps.common.error_pages import render_block_page
 from apps.common.permissions import IsStudent, IsTeacher, IsTeacherOrReadOnly
 from apps.common.response import api_response
 from apps.common.viewsets import BaseModelViewSet
@@ -719,18 +720,8 @@ class CourseResourceViewSet(BaseModelViewSet):
 
 
 def _resource_error_page(status: int, title: str, hint: str):
-    """门控失败的友好提示页（直接浏览器导航，非 JSON）。"""
-    html = (
-        "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
-        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-        f"<title>{title}</title><style>body{{font-family:sans-serif;display:flex;"
-        "align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f1f5f9}}"
-        ".box{{background:#fff;border-radius:12px;padding:32px 40px;max-width:420px;text-align:center;"
-        "box-shadow:0 8px 30px rgba(15,23,42,.08)}}h1{{font-size:18px;color:#0f172a;margin:0 0 10px}}"
-        "p{{font-size:13px;color:#64748b;margin:0;line-height:1.7}}</style></head>"
-        f"<body><div class=\"box\"><h1>{title}</h1><p>{hint}</p></div></body></html>"
-    )
-    return HttpResponse(html, status=status, content_type="text/html; charset=utf-8")
+    """门控失败的友好提示页（统一实现见 apps/common/error_pages.py，实验门控同款）。"""
+    return render_block_page(status, title, hint)
 
 
 def course_resource_page(request, token):

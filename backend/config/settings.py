@@ -258,6 +258,13 @@ RESOURCES_ROOT = os.getenv("RESOURCES_ROOT") or (
     BASE_DIR / "resources" if (BASE_DIR / "resources").is_dir() else BASE_DIR.parent / "deploy" / "resources"
 )
 
+# 虚拟实验静态页根目录（deploy/labs，只读资产）。
+# 解析顺序同 RESOURCES_ROOT：env LABS_ROOT → 容器 /app/labs（生产 bind mount）→ 本地 deploy/labs。
+# 页面与资产均经签名门控（labs/gate.py）由 Django 读出，nginx 不再公开 /labs/ 直链。
+LABS_ROOT = os.getenv("LABS_ROOT") or (
+    BASE_DIR / "labs" if (BASE_DIR / "labs").is_dir() else BASE_DIR.parent / "deploy" / "labs"
+)
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # ---------------------------------------------------------------------------

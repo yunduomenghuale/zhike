@@ -187,6 +187,134 @@ class LabFlowTest(TestCase):
         self.assertEqual(res.status_code, 400)  # 非自己课程被序列化器拒绝
 
 
+class LabGateTest(TestCase):
+    """实验门控：随机令牌 + 签名含发布状态（下线即失效）+ 可再上线。"""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.teacher = User.objects.create_user("t101", password="pass1234", role="teacher", real_name="张老师")
+        cls.student = User.objects.create_user("20249999", password="pass1234", role="student", real_name="李同学")
+        cls.course = Course.objects.create(name="计算机网络", teacher=cls.teacher)
+        cls.classroom = ClassRoom.objects.create(name="网络2402", teacher=cls.teacher)
+        ClassCourse.objects.create(classroom=cls.classroom, course=cls.course)
+        ClassStudent.objects.create(classroom=cls.classroom, student=cls.student)
+        cls.template = LabTemplate.objects.create(
+            code="arp-ip-lab", title="ARP实验", default_standard_minutes=30,
+            random_config={"ranges": {"s1": [1, 9]}},
+        )
+        cls.lab = Lab.objects.create(template=cls.template, course=cls.course, title="ARP实验")
+        LabSchedule.objects.create(lab=cls.lab, classroom=cls.classroom)
+
+    def setUp(self):
+        self.tc = APIClient()
+        self.tc.force_authenticate(self.teacher)
+        self.sc = APIClient()
+        self.sc.force_authenticate(self.student)
+        self.lab.refresh_from_db()
+
+    def _publish(self):
+        res = self.tc.post(f"/api/labs/{self.lab.id}/publish/", format="json")
+        self.assertIn(res.status_code, (200, 201), res.data)
+        self.lab.refresh_from_db()
+
+    def _gate(self):
+        from apps.labs import gate
+        return gate.sign_lab(self.lab)["url"]
+
+    def _asset_base(self):
+        """门控资产路由基址（sig/exp 在路径段，非 query）。"""
+        from urllib.parse import parse_qs, urlparse
+
+        parsed = urlparse(self._gate())
+        qs = parse_qs(parsed.query)
+        return f"/api/lab-gate/asset/{self.lab.access_token}/{qs['sig'][0]}/{qs['exp'][0]}/"
+
+    def test_access_token_random_unique(self):
+        """每条 Lab 持有不可猜测的随机 access_token（与课程资源同构）。"""
+        other = Lab.objects.create(template=self.template, course=self.course, title="另一个实验")
+        self.assertNotEqual(self.lab.access_token, other.access_token)
+        self.assertTrue(self.lab.access_token)
+
+    def test_gate_page_and_asset_ok_when_published(self):
+        """发布态：门控页 200（注入 <base> + SAMEORIGIN），资产可读。"""
+        self._publish()
+        url = self._gate()  # /api/lab-gate/page/{token}/?sig=&exp=
+        res = self.sc.get(url)
+        self.assertEqual(res.status_code, 200)
+        self.assertIn(b'<script src="lab-bridge.js">', res.content)  # 实验页本体
+        self.assertIn(b'<base href="/api/lab-gate/asset/', res.content)  # <base> 注入
+        self.assertEqual(res["X-Frame-Options"], "SAMEORIGIN")
+        self.assertEqual(res["Cache-Control"], "no-store")
+        # 资产路由：同签名可读 lab-bridge.js
+        res = self.sc.get(self._asset_base() + "lab-bridge.js")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn(b"LabBridge", res.content)
+
+    def test_gate_invalid_signature_blocked(self):
+        """签名缺失/篡改/过期一律 403 友好页（不泄露实验存在性以外的信息）。"""
+        self._publish()
+        res = self.sc.get(f"/api/lab-gate/page/{self.lab.access_token}/")
+        self.assertEqual(res.status_code, 403)
+        self.assertIn("实验链接无效", res.content.decode())
+        res = self.sc.get(f"/api/lab-gate/page/{self.lab.access_token}/?sig=bad&exp=9999999999")
+        self.assertEqual(res.status_code, 403)
+        res = self.sc.get(f"/api/lab-gate/page/{self.lab.access_token}/?sig=bad&exp=1")
+        self.assertEqual(res.status_code, 403)  # 过期
+
+    def test_close_invalidates_signed_url(self):
+        """下线后旧签名立即失效；重新上线后（closed→published）可再次签发进入。"""
+        self._publish()
+        url = self._gate()
+        self.assertEqual(self.sc.get(url).status_code, 200)
+
+        # 教师下线
+        res = self.tc.post(f"/api/labs/{self.lab.id}/close/", format="json")
+        self.assertIn(res.status_code, (200, 201), res.data)
+        self.lab.refresh_from_db()
+        self.assertEqual(self.lab.status, Lab.Status.CLOSED)
+        # 旧门控链接失效（签名含发布状态）
+        res = self.sc.get(url)
+        self.assertEqual(res.status_code, 403)
+
+        # 票据层同步拦截：有效 attempt_token 在实验下线后也拿不到 seed
+        start = self.sc.post("/api/lab-submissions/start/", {"lab": self.lab.id}, format="json")
+        # start 本身对 closed 实验拒绝（先于票据）
+        self.assertEqual(start.status_code, 400)
+
+        # 重新上线：closed → published（可控上下线）
+        self._publish()
+        self.assertEqual(self.lab.status, Lab.Status.PUBLISHED)
+        new_url = self._gate()
+        self.assertEqual(self.sc.get(new_url).status_code, 200)
+        # 学生可重新 start 拿新票据
+        start = self.sc.post("/api/lab-submissions/start/", {"lab": self.lab.id}, format="json")
+        self.assertEqual(start.status_code, 200, start.data)
+        token = start.data["data"]["attempt_token"]
+        res = self.sc.get(f"/api/lab-submissions/bridge-validate/?token={token}")
+        self.assertEqual(res.status_code, 200, res.data)
+
+    def test_bridge_validate_blocked_after_close(self):
+        """票据有效期内实验被下线：bridge-validate 403（页内桥接同步拒绝）。"""
+        self._publish()
+        start = self.sc.post("/api/lab-submissions/start/", {"lab": self.lab.id}, format="json")
+        token = start.data["data"]["attempt_token"]
+        # 下线前可用
+        self.assertEqual(self.sc.get(f"/api/lab-submissions/bridge-validate/?token={token}").status_code, 200)
+        self.tc.post(f"/api/labs/{self.lab.id}/close/", format="json")
+        res = self.sc.get(f"/api/lab-submissions/bridge-validate/?token={token}")
+        self.assertEqual(res.status_code, 403)
+        self.assertIn("下线", res.data.get("message", ""))
+
+    def test_asset_path_traversal_blocked(self):
+        """资产路由防目录穿越：.. 段与非 LABS_ROOT 路径拒绝。"""
+        self._publish()
+        base = self._asset_base()
+        res = self.sc.get(base + "../../settings.py")
+        self.assertIn(res.status_code, (403, 404))
+        res = self.sc.get(base + "nonexistent.js")
+        self.assertEqual(res.status_code, 404)
+
+
 class LabReportTest(TestCase):
     """二期报告生成/下载冒烟。"""
 

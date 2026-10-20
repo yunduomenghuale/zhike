@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django.db import transaction
+from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import mixins, viewsets
 from rest_framework.decorators import action
@@ -8,16 +9,18 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 
 from apps.common.access import is_platform_admin
+from apps.common.error_pages import render_block_page
 from apps.common.permissions import IsStudent, IsTeacher, IsTeacherOrReadOnly
 from apps.common.response import api_response
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from .auth import LabTokenAuthentication
 from apps.common.viewsets import BaseModelViewSet
+from apps.courses import resource_gate
 from apps.homework.models import question_snapshot
 from apps.questions.grading import grade_objective
 from apps.questions.models import Question
 
-from . import bridge, guide_preset, scoring, seedgen
+from . import bridge, gate, guide_preset, scoring, seedgen
 from .models import (
     Lab,
     LabAnswer,
@@ -310,13 +313,16 @@ class LabSubmissionViewSet(BaseModelViewSet):
             sub.save()
 
         ticket = bridge.issue_token(sub)
+        # 页面层也进门控（签名含发布状态，下线即失效）；attempt_token 拼入 URL，
+        # 实验页 bridge 从 location.search 读取（双层：门控管可读、票据管数据）
+        gate_url = gate.sign_lab(lab)["url"]
         return api_response(
             {
                 "submission": LabSubmissionSerializer(sub, context={"request": request}).data,
                 "attempt_token": ticket.token,
                 "expires_at": ticket.expires_at,
                 "random_seed": sub.random_seed,
-                "page_url": lab.template.page_url,
+                "page_url": f"{gate_url}&token={ticket.token}",
                 "questions": self._build_for_taking(lab),
             },
             message="实验已开始",
@@ -378,6 +384,9 @@ class LabSubmissionViewSet(BaseModelViewSet):
             return api_response(message="无权访问该实验票据", code=403, status=403)
         sub = ticket.submission
         lab = sub.lab
+        # 票据有效期内实验被下线也要拦截（门控签名已失效，票据层同步拒绝）
+        if lab.status != Lab.Status.PUBLISHED:
+            return api_response(message="实验已下线，请联系教师重新上线", code=403, status=403)
         return api_response(
             {
                 "submission_id": sub.id,
@@ -659,3 +668,40 @@ class LabSubmissionViewSet(BaseModelViewSet):
             content_type="application/pdf" if fmt == "pdf" else
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
+
+
+# ---------------------------------------------------------------------------
+# 实验页门控（普通 Django 视图，不进 router——资产路径无尾斜杠，同课程资源门控模式）
+# ---------------------------------------------------------------------------
+
+def lab_gate_page(request, token):
+    """实验入口页：验签（含发布状态）→ 读静态 HTML → 注入 <base> 指向签名资产路由。"""
+    lab = Lab.objects.select_related("template").filter(access_token=token).first()
+    if lab is None or not gate.verify_lab(lab, request.GET.get("sig", ""), request.GET.get("exp", "")):
+        return render_block_page(403, "实验链接无效或已失效", "实验已下线或链接已过期，请返回课程实验页重新进入。")
+    html = gate.read_page(lab)
+    if html is None:
+        return render_block_page(404, "实验页面不存在", "平台尚未部署该实验页面，请联系管理员。")
+    response = HttpResponse(
+        resource_gate.inject_base(html, gate.asset_base(lab, request.GET.get("sig", ""), request.GET.get("exp", ""))),
+        content_type="text/html; charset=utf-8",
+    )
+    response["Cache-Control"] = "no-store"
+    response["X-Content-Type-Options"] = "nosniff"
+    # 与课程资源入口页一致：允许同源 iframe 嵌入（clickjacking 中间件不覆盖已设置的响应头）
+    response["X-Frame-Options"] = "SAMEORIGIN"
+    return response
+
+
+def lab_gate_asset(request, token, sig, exp, rest):
+    """实验页资产（lab-bridge.js 等）：同一令牌签名校验后从 LABS_ROOT 读出。"""
+    lab = Lab.objects.filter(access_token=token).first()
+    if lab is None or not gate.verify_lab(lab, sig, exp):
+        return render_block_page(403, "实验链接无效或已失效", "实验已下线或链接已过期，请返回课程实验页重新进入。")
+    path = gate.read_asset(rest)
+    if path is None:
+        return render_block_page(404, "实验资源文件不存在", "请返回课程实验页重新进入。")
+    response = HttpResponse(path.read_bytes(), content_type=resource_gate.guess_content_type(path))
+    response["Cache-Control"] = "private, max-age=7200"
+    response["X-Content-Type-Options"] = "nosniff"
+    return response

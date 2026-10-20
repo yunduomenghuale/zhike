@@ -51,27 +51,27 @@
     </el-card>
 
     <!-- 我的实验列表 -->
-    <el-card shadow="never">
+    <el-card shadow="never" class="lab-manage-card">
       <template #header><span>我的实验</span></template>
       <el-table :data="labs" v-loading="loading">
-        <el-table-column prop="title" label="实验" min-width="200" />
-        <el-table-column label="状态" width="90">
+        <el-table-column prop="title" label="实验" min-width="170" show-overflow-tooltip />
+        <el-table-column label="状态" width="76">
           <template #default="{ row }">
             <el-tag :type="statusType(row.status)" size="small">{{ statusText(row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="学生完成" width="100" align="center">
+        <el-table-column label="学生完成" width="84" align="center">
           <template #default="{ row }">
             <span class="stu-done">{{ labDone(row) }}/{{ labTotalStudents(row) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="班级均分" width="90" align="center">
+        <el-table-column label="班级均分" width="80" align="center">
           <template #default="{ row }">
             <span v-if="labAvg(row) !== null">{{ labAvg(row) }}</span>
             <span v-else class="stu-done">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="排课窗口" min-width="220">
+        <el-table-column label="排课窗口" min-width="170">
           <template #default="{ row }">
             <template v-if="row.schedules?.length">
               <div v-for="s in row.schedules" :key="s.id" class="schedule-line">
@@ -90,6 +90,8 @@
             <el-button size="small" @click="openSchedule(row)">排课</el-button>
             <el-button v-if="row.status === 'draft'" size="small" type="success" @click="publish(row)">发布</el-button>
             <el-button v-if="row.status === 'published'" size="small" type="warning" @click="close(row)">下线</el-button>
+            <!-- 下线后可随时重新上线：publish 动作无草稿限制，重新签发门控链接即恢复访问 -->
+            <el-button v-if="row.status === 'closed'" size="small" type="success" @click="publish(row)">重新上线</el-button>
             <el-button size="small" type="danger" plain @click="remove(row)">删除</el-button>
           </template>
         </el-table-column>
@@ -487,6 +489,11 @@ onMounted(load)
 
 <style scoped>
 .mb12 { margin-bottom: 12px; }
+/* 课程空间侧栏较宽，窄视口下列宽总和会超出容器；全局隐藏规则会让 EP 的
+   vShow 内联 display 也失效，用户无从发现右侧操作列——这里恢复横向滚动条可见 */
+.lab-manage-card :deep(.el-table .el-scrollbar__bar.is-horizontal) {
+  display: block !important;
+}
 .weight-label { margin-right: 2px; }
 .tip-ico { color: #94a3b8; cursor: help; font-size: 14px; vertical-align: -2px; }
 .weight-tip p { margin: 0 0 4px; font-size: 12px; line-height: 1.6; }
