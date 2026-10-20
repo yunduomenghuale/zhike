@@ -1102,11 +1102,14 @@ function onCommand(cmd) {
   height: 100%;
   border: 1px solid rgba(37, 99, 235, 0.1);
   border-radius: 30px;
-  background: rgba(255, 255, 255, 0.82);
+  /* 背景不透明度补回 0.82→0.92：去掉 backdrop-filter 后保持观感一致。
+     注意：此面板不能再加 backdrop-filter/transform/filter——它们是 fixed 后代的包含块，
+     EP 表格 overflow tooltip 硬编码 appendTo tableWrapper（在面板内、position:fixed），
+     坐标会相对面板而非视口解析，导致气泡偏移出屏（2026-10-20 审计备注气泡实测复现） */
+  background: rgba(255, 255, 255, 0.92);
   box-shadow:
     0 30px 80px rgba(37, 99, 235, 0.12),
     inset 0 1px 0 rgba(255, 255, 255, 0.74);
-  backdrop-filter: blur(22px) saturate(1.12);
   overflow: hidden;
 }
 

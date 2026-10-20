@@ -305,6 +305,17 @@ body,
   display: none !important;
 }
 
+/* 例外：管理端数据表格的横向滚动条必须可见。
+   列宽总和超出容器时内容会被裁掉，而全局隐藏规则让 EP 的 vShow（内联 display）也失效，
+   用户无从发现右侧还有列。纵向滚动条保持全局隐藏风格不变。
+   无溢出时 thumb 无尺寸、轨道无背景，常显 display:block 也不产生可见痕迹。 */
+.admin-teaching .el-table .el-scrollbar__bar.is-horizontal,
+.admin-audit .el-table .el-scrollbar__bar.is-horizontal,
+.admin-users .el-table .el-scrollbar__bar.is-horizontal,
+.ai-settings .el-table .el-scrollbar__bar.is-horizontal {
+  display: block !important;
+}
+
 /* 响应式 */
 @media (max-width: 768px) {
   .page-container {

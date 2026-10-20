@@ -62,6 +62,7 @@ const routes = [
       { path: 'admin/overview', name: 'admin-overview', component: () => import('@/views/admin/AdminOverview.vue'), meta: { title: '管理概览', role: 'admin' } },
       { path: 'admin/users', name: 'admin-users', component: () => import('@/views/admin/AdminUsers.vue'), meta: { title: '用户管理', role: 'admin' } },
       { path: 'admin/teaching', name: 'admin-teaching', component: () => import('@/views/admin/AdminTeaching.vue'), meta: { title: '教学监管', role: 'admin' } },
+      { path: 'admin/audit', name: 'admin-audit', component: () => import('@/views/admin/AdminAudit.vue'), meta: { title: '操作审计', role: 'admin' } },
       { path: 'admin/ai-settings', name: 'admin-ai-settings', component: () => import('@/views/admin/AdminAISettings.vue'), meta: { title: '大模型配置', role: 'admin' } },
 
       { path: 'teacher/courses', name: 'courses', component: () => import('@/views/teacher/CourseList.vue'), meta: { title: '课程管理', role: 'teacher' } },

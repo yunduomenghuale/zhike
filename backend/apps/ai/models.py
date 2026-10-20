@@ -111,48 +111,55 @@ class AICapabilityConfig(BaseModel):
         ("supports_vision", "支持图片"),
     )
 
-    def save(self, *args, **kwargs):
-        """保存时做字段级 diff，写入 AICapabilityChangeLog。
+    def tracked_snapshot(self) -> dict:
+        """受跟踪字段快照（api_key 只存存在性，不取密钥内容），供保存前后对比。
 
-        回答「为什么某天起讲稿/问答行为变了」：每次管理端保存都记录
-        旧值→新值与操作人（updated_by 由序列化器在 save 前写入）。
-        首次创建（如把 chat 从 mock 切成 deepseek）以默认值为旧值同样记录。
-        留痕失败不影响配置保存本身。
+        审计双轨已合并：字段级 diff 由管理端视图在保存前后各取一次本快照得出，
+        随 AdminActionLog.ai_config_save 一并落库（单一审计轨）。
         """
-        creating = self._state.adding
-        old = type(self).objects.filter(pk=self.pk).first() if not creating else type(self)()
-        changes = []
-        for field, label in self._TRACKED_FIELDS:
-            old_value = getattr(old, field, None)
-            new_value = getattr(self, field, None)
-            if old_value != new_value:
-                changes.append(
-                    {"field": field, "label": label, "old": str(old_value or ""), "new": str(new_value or "")}
-                )
-        old_key = bool(getattr(old, "api_key_ciphertext", ""))
-        new_key = bool(self.api_key_ciphertext)
-        if old_key != new_key:
-            changes.append(
-                {
-                    "field": "api_key",
-                    "label": "API Key",
-                    "old": "已配置" if old_key else "未配置",
-                    "new": "已配置" if new_key else "未配置",
-                }
-            )
-        super().save(*args, **kwargs)
-        if changes:
-            try:
-                AICapabilityChangeLog.objects.create(
-                    capability=self.capability,
-                    changed_by=self.updated_by,
-                    changes=changes,
-                )
-            except Exception:
-                # 留痕是旁路观测，不能因为写日志而让配置保存失败
-                import logging
+        snapshot = {field: getattr(self, field, None) for field, _ in self._TRACKED_FIELDS}
+        snapshot["api_key"] = bool(self.api_key_ciphertext)
+        return snapshot
 
-                logging.getLogger(__name__).exception("写入能力配置变更记录失败")
+    @classmethod
+    def diff_snapshots(cls, before: dict, after: dict) -> list:
+        """对比两份 tracked_snapshot，返回字段级变更 [{field,label,old,new}]。
+
+        API Key 只记「已配置/未配置」；布尔 False 等假值按既有约定记空串
+        （str(value or "")）。无差异返回空列表。
+        """
+        labels = dict(cls._TRACKED_FIELDS)
+        labels["api_key"] = "API Key"
+        changes = []
+        for field, label in labels.items():
+            old_value = before.get(field)
+            new_value = after.get(field)
+            if old_value == new_value:
+                continue
+            if field == "api_key":
+                changes.append({
+                    "field": field,
+                    "label": label,
+                    "old": "已配置" if old_value else "未配置",
+                    "new": "已配置" if new_value else "未配置",
+                })
+            else:
+                changes.append({
+                    "field": field,
+                    "label": label,
+                    "old": str(old_value or ""),
+                    "new": str(new_value or ""),
+                })
+        return changes
+
+    def save(self, *args, **kwargs):
+        """保存配置。
+
+        变更留痕已合并到管理端操作审计（AdminActionLog.ai_config_save，
+        字段级 diff 存 new_value.changes）：模型层不再双写
+        AICapabilityChangeLog（该表与端点保留作历史记录，已废弃）。
+        """
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.get_capability_display()} · {self.get_provider_display()} ({'启用' if self.enabled else '停用'})"
@@ -251,9 +258,13 @@ class AICallLog(BaseModel):
 
 
 class AICapabilityChangeLog(BaseModel):
-    """大模型能力配置变更记录（字段级 diff，由 AICapabilityConfig.save() 写入）。
+    """大模型能力配置变更记录（字段级 diff）——已废弃，仅存历史。
 
-    仅管理端保存配置时产生；API Key 等敏感字段只记「已配置/未配置」。
+    审计双轨合并（2026-10-19）：管理端保存 AI 配置改为只写管理端操作审计
+    （AdminActionLog.ai_config_save，new_value.changes 存按能力分组的字段级
+    diff），模型层 AICapabilityConfig.save() 不再写本表。存量数据已由迁移
+    ai/0010 导入审计表；本表与端点 /admin-panel/ai-config-changes/ 暂时保留，
+    仅供查询合并前的历史记录，新代码请勿再写入。
     """
 
     capability = models.CharField(

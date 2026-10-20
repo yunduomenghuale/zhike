@@ -10,7 +10,7 @@
       <el-tab-pane label="能力配置" name="config">
         <section class="effective-card">
           <div class="section-head"><div><h2>当前生效配置</h2></div><el-button :icon="Refresh" @click="load">刷新</el-button></div>
-          <el-table :data="effective" class="effective-table">
+          <el-table :data="effective" class="effective-table" scrollbar-always-on>
             <el-table-column label="能力" width="120">
               <template #default="{ row }"><strong>{{ row.capability_display }}</strong><small class="block">{{ capabilityDesc(row.capability) }}</small></template>
             </el-table-column>
@@ -238,7 +238,7 @@
                 <el-button :icon="Search" @click="applyLogFilters">查询</el-button>
               </div>
             </div>
-            <el-table :data="logs" size="small" v-loading="logsLoading">
+            <el-table :data="logs" size="small" v-loading="logsLoading" scrollbar-always-on>
               <el-table-column label="时间" width="160">
                 <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
               </el-table-column>
@@ -307,28 +307,31 @@
               <el-option v-for="item in capabilityOptions" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
             <el-button :icon="Refresh" @click="reloadChanges">刷新</el-button>
-            <span class="toolbar-note">每次管理端保存配置都会记录字段级旧值→新值；API Key 只记录「已配置 / 未配置」，不落密钥内容。</span>
+            <span class="toolbar-note">每次管理端保存配置都会记录字段级旧值→新值（审计单轨，与「操作审计」页同源）；API Key 只记录「已配置 / 未配置」，不落密钥内容。</span>
           </div>
           <div class="changes-card">
-            <el-table :data="changes" size="small">
+            <el-table :data="changes" size="small" scrollbar-always-on>
               <el-table-column label="时间" width="170">
                 <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
               </el-table-column>
               <el-table-column label="能力" width="110">
-                <template #default="{ row }"><el-tag size="small" effect="plain">{{ row.capability_display }}</el-tag></template>
+                <template #default="{ row }"><el-tag size="small" effect="plain">{{ row.target_label || '—' }}</el-tag></template>
               </el-table-column>
               <el-table-column label="操作人" width="140">
-                <template #default="{ row }">{{ row.changed_by_name || '系统' }}</template>
+                <template #default="{ row }">{{ row.actor_name || '系统' }}</template>
               </el-table-column>
               <el-table-column label="变更明细" min-width="360">
                 <template #default="{ row }">
                   <div class="change-list">
-                    <span v-for="change in row.changes" :key="change.field" class="change-item">
-                      <em>{{ change.label }}</em>
-                      <span class="old">{{ change.old || '（空）' }}</span>
-                      <el-icon><Right /></el-icon>
-                      <span class="new">{{ change.new || '（空）' }}</span>
-                    </span>
+                    <template v-for="(group, gi) in changeGroups(row)" :key="gi">
+                      <span v-for="c in group.changes" :key="c.field" class="change-item">
+                        <em>{{ group.capability_display || group.capability }} · {{ c.label }}</em>
+                        <span class="old">{{ c.old || '（空）' }}</span>
+                        <el-icon><Right /></el-icon>
+                        <span class="new">{{ c.new || '（空）' }}</span>
+                      </span>
+                    </template>
+                    <span v-if="!changeGroups(row).length" class="muted">—</span>
                   </div>
                 </template>
               </el-table-column>
@@ -390,7 +393,7 @@ import { ElMessage } from 'element-plus'
 import { ChatDotRound, Check, CircleCheck, CircleClose, Connection, Download, Files, InfoFilled, Lock, Microphone, Refresh, Right, Search, Sort, Timer, WarningFilled } from '@element-plus/icons-vue'
 import {
   getAdminAIConfiguration, saveAdminAIConfiguration, testAdminAIConnection,
-  getAdminAICallStats, listAdminAICallLogs, exportAdminAICallLogs, listAdminAIConfigChanges,
+  getAdminAICallStats, listAdminAICallLogs, exportAdminAICallLogs, listAdminActionLogs,
 } from '@/api/admin'
 
 // 全量服务商（供生效表格/弹窗按值查标签）；卡片下拉按能力收窄：
@@ -740,15 +743,22 @@ async function exportCsv() {
 }
 
 // ---------------- 配置变更记录 ----------------
+// 审计双轨已合并：变更记录读管理端操作审计单轨（action=ai_config_save，
+// 字段级 diff 按能力分组存 new_value.changes）；AICapabilityChangeLog 端点仅存历史。
 const changeCapability=ref('')
 const changes=ref([]), changesTotal=ref(0), changesPage=ref(1), changesPageSize=ref(20), changesLoading=ref(false)
+
+function changeGroups(row){
+  return (row.new_value && row.new_value.changes) || []
+}
 
 async function loadChanges(){
   changesLoading.value=true
   try{
-    const params={ page: changesPage.value, page_size: changesPageSize.value }
-    if(changeCapability.value) params.capability=changeCapability.value
-    const result=await listAdminAIConfigChanges(params)
+    const params={ action:'ai_config_save', page: changesPage.value, page_size: changesPageSize.value }
+    // 能力筛选走审计 keyword（匹配对象名称=能力显示名，与后端 target_label 一致）
+    if(changeCapability.value) params.keyword=capabilityLabel(changeCapability.value)
+    const result=await listAdminActionLogs(params)
     changes.value=result?.items||[]
     changesTotal.value=result?.total||0
     changesLoaded.value=true
@@ -917,7 +927,7 @@ onMounted(load)
 .dist-badges{display:inline-flex;gap:5px}.badge{font-style:normal;font-size:11px;padding:1px 7px;border-radius:6px;white-space:nowrap}.badge.fail{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca}.badge.mock{background:#f1f5f9;color:#475569;border:1px solid #e2e8f0}
 .dist-hint{margin:12px 0 0;color:#94a3b8;font-size:12px}
 .logs-card{padding:18px}.logs-head{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:12px}.logs-filters{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.mock-tag{margin-left:5px}.ellipsis{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}.error-text{color:#dc2626}.pager{margin-top:14px;justify-content:flex-end}
-.change-list{display:flex;flex-wrap:wrap;gap:6px 14px}.change-item{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#334155;background:#f8fafc;border:1px solid #e8eef7;border-radius:8px;padding:3px 9px}.change-item em{font-style:normal;color:#64748b}.change-item .old{color:#dc2626;text-decoration:line-through}.change-item .new{color:#16a34a;font-weight:600}.change-item .el-icon{font-size:11px;color:#94a3b8}
+.change-list{display:flex;flex-wrap:wrap;gap:6px 14px}.change-item{display:inline-flex;align-items:center;gap:5px;max-width:100%;font-size:12px;color:#334155;background:#f8fafc;border:1px solid #e8eef7;border-radius:8px;padding:3px 9px}.change-item em{font-style:normal;color:#64748b}.change-item .old{color:#dc2626;text-decoration:line-through}.change-item .new{color:#16a34a;font-weight:600}.change-item .el-icon{font-size:11px;color:#94a3b8}.change-item .old,.change-item .new{overflow-wrap:anywhere}
 .changes-card{padding:18px}.changes-card :deep(.el-table){font-size:13px}
 @media(max-width:1200px){.capability-grid{grid-template-columns:1fr}.page-head{align-items:flex-start;flex-direction:column}.stat-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:720px){.action-bar{margin-left:-16px;margin-right:-16px;padding-left:16px;padding-right:16px}.action-bar>div{display:none}.stat-cards{grid-template-columns:1fr}.dist-row{grid-template-columns:minmax(72px,1fr) 1fr 52px auto}.dist-latency{display:none}}
 </style>

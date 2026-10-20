@@ -1,4 +1,6 @@
 """统一 API 响应结构：{ code, message, data }。"""
+from rest_framework import status
+from rest_framework.exceptions import Throttled
 from rest_framework.response import Response
 from rest_framework.views import exception_handler
 
@@ -25,6 +27,17 @@ def custom_exception_handler(exc, context):
     """把 DRF 默认异常包装成统一结构。"""
     response = exception_handler(exc, context)
     if response is None:
+        return response
+
+    # 限流（429）：DRF 默认英文文案本地化，并透传等待秒数
+    if isinstance(exc, Throttled):
+        wait = int(exc.wait) if exc.wait else 60
+        response.data = {
+            "code": status.HTTP_429_TOO_MANY_REQUESTS,
+            "message": f"操作过于频繁，请 {wait} 秒后再试",
+            "data": None,
+        }
+        response["Retry-After"] = str(wait)
         return response
 
     detail = response.data

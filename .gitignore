@@ -30,6 +30,8 @@ backend/seed_learning_stats.py
 backend/media/
 backend/eval_reports/
 backend/login_fail_cache/
+backend/oversight_cache/
+frontend/dist-fresh/
 staticfiles/
 
 # ===== 前端 =====

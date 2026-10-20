@@ -5,6 +5,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 import os
+import sys
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -90,6 +91,12 @@ CACHES = {
         "BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
         "LOCATION": BASE_DIR / "login_fail_cache",
     },
+    # 督管概览重聚合的短 TTL 缓存（trends/alerts）：文件缓存跨 gunicorn worker 一致，
+    # 避免每 worker 各算一遍；容器重建即失效，无持久化需求
+    "oversight": {
+        "BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
+        "LOCATION": BASE_DIR / "oversight_cache",
+    },
 }
 
 ROOT_URLCONF = "config.urls"
@@ -169,6 +176,20 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "EXCEPTION_HANDLER": "apps.common.response.custom_exception_handler",
 }
+
+# 管理端限流档位（platform_admin/throttles.py 按请求方法分档，仅管理端生效，不动全局节流）
+# admin_read 常规读 / admin_write 干预写 / admin_export 导出 / admin_heavy 重建·测试·导入
+ADMIN_THROTTLE_RATES = {
+    "admin_read": "120/min",
+    "admin_write": "30/min",
+    "admin_export": "10/min",
+    "admin_heavy": "5/min",
+}
+
+# 测试运行（manage.py test）默认关闭限流：throttle 计数存 LocMem 会跨用例累积，
+# 干扰既有用例；限流行为由 platform_admin/tests.AdminThrottleTests 专项覆盖。
+if "test" in sys.argv:
+    ADMIN_THROTTLE_RATES = {scope: None for scope in ADMIN_THROTTLE_RATES}
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=12),

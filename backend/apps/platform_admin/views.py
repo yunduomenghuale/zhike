@@ -13,6 +13,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.generics import get_object_or_404
 from rest_framework.views import APIView
+from .throttles import AdminThrottleMixin
 
 from apps.classroom.models import ClassRoom, ClassStudent
 from apps.ai.calllog import ai_scene
@@ -35,6 +36,8 @@ from apps.courses.models import Catalog, Course
 from apps.exams.models import Exam
 from apps.homework.models import Homework
 
+from .audit import log_admin_action
+from .models import AdminActionLog
 from .serializers import (
     AdminClassSerializer,
     AdminCourseSerializer,
@@ -43,7 +46,6 @@ from .serializers import (
     AICallLogSerializer,
     AICapabilityChangeLogSerializer,
     AICapabilityConfigSerializer,
-    CourseStatusSerializer,
     PasswordResetSerializer,
 )
 from .user_import import (
@@ -80,7 +82,7 @@ def _paginated_response(queryset, request, serializer_class):
     })
 
 
-class AdminOverviewView(APIView):
+class AdminOverviewView(AdminThrottleMixin, APIView):
     permission_classes = [IsPlatformAdmin]
     serializer_class = AdminCourseSerializer
 
@@ -124,7 +126,8 @@ class AdminOverviewView(APIView):
         return api_response(data)
 
 
-class AdminUserListCreateView(APIView):
+class AdminUserListCreateView(AdminThrottleMixin, APIView):
+    method_scopes = {"GET": "admin_read", "POST": "admin_write"}
     permission_classes = [IsPlatformAdmin]
     serializer_class = AdminUserWriteSerializer
 
@@ -152,6 +155,14 @@ class AdminUserListCreateView(APIView):
         serializer = AdminUserWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
+        log_admin_action(
+            request.user,
+            AdminActionLog.Action.USER_CREATE,
+            target_type="user",
+            target_id=user.id,
+            target_label=f"{user.real_name or user.username}({user.username})",
+            new_value={"username": user.username, "role": user.role},
+        )
         return api_response(
             AdminUserSerializer(user).data,
             message="账号创建成功",
@@ -159,7 +170,8 @@ class AdminUserListCreateView(APIView):
         )
 
 
-class AdminUserDetailView(APIView):
+class AdminUserDetailView(AdminThrottleMixin, APIView):
+    method_scopes = {"PATCH": "admin_write"}
     permission_classes = [IsPlatformAdmin]
     serializer_class = AdminUserWriteSerializer
 
@@ -174,11 +186,31 @@ class AdminUserDetailView(APIView):
                 return api_response(message="不能移除当前账号的管理员角色", code=400, status=400)
         serializer = AdminUserWriteSerializer(user, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
+        # 变更前快照（仅审计关心的字段），用于 old→new 展示
+        before = {
+            field: getattr(user, field)
+            for field in ("username", "real_name", "phone", "role", "is_active")
+        }
         serializer.save()
+        after = {
+            field: getattr(user, field)
+            for field in ("username", "real_name", "phone", "role", "is_active")
+        }
+        changed = {k: {"old": before[k], "new": after[k]} for k in after if before[k] != after[k]}
+        if changed:
+            log_admin_action(
+                request.user,
+                AdminActionLog.Action.USER_UPDATE,
+                target_type="user",
+                target_id=user.id,
+                target_label=f"{user.real_name or user.username}({user.username})",
+                new_value=changed,
+            )
         return api_response(AdminUserSerializer(user).data, message="用户资料已更新")
 
 
-class AdminPasswordResetView(APIView):
+class AdminPasswordResetView(AdminThrottleMixin, APIView):
+    method_scopes = {"POST": "admin_write"}
     permission_classes = [IsPlatformAdmin]
     serializer_class = PasswordResetSerializer
 
@@ -192,10 +224,17 @@ class AdminPasswordResetView(APIView):
         # 管理员代设密码后，提示用户下次登录自行修改（前端弹窗可跳过）
         user.must_change_password = True
         user.save(update_fields=["password", "must_change_password"])
+        log_admin_action(
+            request.user,
+            AdminActionLog.Action.USER_RESET_PWD,
+            target_type="user",
+            target_id=user.id,
+            target_label=f"{user.real_name or user.username}({user.username})",
+        )
         return api_response(message="密码已重置")
 
 
-class AdminUserImportTemplateView(APIView):
+class AdminUserImportTemplateView(AdminThrottleMixin, APIView):
     """下载学生批量导入模板（xlsx）。"""
 
     permission_classes = [IsPlatformAdmin]
@@ -209,8 +248,9 @@ class AdminUserImportTemplateView(APIView):
         return response
 
 
-class AdminUserImportPreviewView(APIView):
+class AdminUserImportPreviewView(AdminThrottleMixin, APIView):
     """上传 Excel 真实解析，返回逐行校验结果供前端预览/修改。"""
+    method_scopes = {"POST": "admin_heavy"}
 
     permission_classes = [IsPlatformAdmin]
 
@@ -234,8 +274,9 @@ class AdminUserImportPreviewView(APIView):
         })
 
 
-class AdminUserImportConfirmView(APIView):
+class AdminUserImportConfirmView(AdminThrottleMixin, APIView):
     """确认导入：服务端对最终行重新全量校验，全部合法才在事务中批量创建。"""
+    method_scopes = {"POST": "admin_heavy"}
 
     permission_classes = [IsPlatformAdmin]
 
@@ -265,71 +306,18 @@ class AdminUserImportConfirmView(APIView):
                 )
                 user.set_password(initial_password_for(row["username"]))
                 user.save()
+        log_admin_action(
+            request.user,
+            AdminActionLog.Action.USER_IMPORT,
+            target_type="user",
+            target_label=f"批量导入 {len(annotated)} 个学生账号",
+            new_value={"created": len(annotated)},
+        )
         return api_response(
             {"created": len(annotated)},
             message=f"成功导入 {len(annotated)} 个学生账号",
             status=status.HTTP_201_CREATED,
         )
-
-
-class AdminCourseListView(APIView):
-    permission_classes = [IsPlatformAdmin]
-    serializer_class = AdminCourseSerializer
-
-    def get(self, request):
-        queryset = Course.objects.select_related("teacher").annotate(
-            class_count=Count("classes", distinct=True),
-            student_count=Count("classes__students", distinct=True),
-        ).order_by("-created_at")
-        keyword = request.query_params.get("search", "").strip()
-        state = request.query_params.get("status", "").strip()
-        if keyword:
-            queryset = queryset.filter(
-                Q(name__icontains=keyword)
-                | Q(teacher__username__icontains=keyword)
-                | Q(teacher__real_name__icontains=keyword)
-            )
-        if state:
-            queryset = queryset.filter(status=state)
-        return _paginated_response(queryset, request, AdminCourseSerializer)
-
-
-class AdminCourseStatusView(APIView):
-    permission_classes = [IsPlatformAdmin]
-    serializer_class = CourseStatusSerializer
-
-    def patch(self, request, course_id):
-        course = get_object_or_404(Course, pk=course_id)
-        serializer = CourseStatusSerializer(course, data=request.data, partial=True)
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
-        annotated = Course.objects.select_related("teacher").annotate(
-            class_count=Count("classes", distinct=True),
-            student_count=Count("classes__students", distinct=True),
-        ).get(pk=course.pk)
-        return api_response(AdminCourseSerializer(annotated).data, message="课程状态已更新")
-
-
-class AdminClassListView(APIView):
-    permission_classes = [IsPlatformAdmin]
-    serializer_class = AdminClassSerializer
-
-    def get(self, request):
-        queryset = ClassRoom.objects.select_related("teacher").annotate(
-            course_count=Count("courses", distinct=True),
-            student_count=Count("students", distinct=True),
-        ).order_by("-created_at")
-        keyword = request.query_params.get("search", "").strip()
-        state = request.query_params.get("status", "").strip()
-        if keyword:
-            queryset = queryset.filter(
-                Q(name__icontains=keyword)
-                | Q(teacher__username__icontains=keyword)
-                | Q(teacher__real_name__icontains=keyword)
-            )
-        if state:
-            queryset = queryset.filter(status=state)
-        return _paginated_response(queryset, request, AdminClassSerializer)
 
 
 def _ai_capability_payload() -> list[dict]:
@@ -375,7 +363,8 @@ def _ai_capability_payload() -> list[dict]:
     return items
 
 
-class AdminAIConfigurationView(APIView):
+class AdminAIConfigurationView(AdminThrottleMixin, APIView):
+    method_scopes = {"GET": "admin_read", "PUT": "admin_write"}
     permission_classes = [IsPlatformAdmin]
 
     def get(self, request):
@@ -386,6 +375,8 @@ class AdminAIConfigurationView(APIView):
         if not isinstance(payload, list) or not payload:
             return api_response(message="请求格式不正确：capabilities 不能为空", code=400, status=400)
         valid = dict(AICapabilityConfig.Capability.choices)
+        saved_capabilities = []
+        diff_groups = []
         with transaction.atomic():
             for item in payload:
                 capability = item.get("capability")
@@ -394,23 +385,46 @@ class AdminAIConfigurationView(APIView):
                 instance = AICapabilityConfig.objects.filter(capability=capability).first()
                 if instance is None:
                     instance = AICapabilityConfig(capability=capability)
+                # 保存前快照受跟踪字段：保存后对比出字段级 diff，随审计一并落库。
+                # 单一审计轨（AdminActionLog.ai_config_save）；AICapabilityChangeLog 已停写。
+                before = instance.tracked_snapshot()
                 # 保存前快照生效配置：服务商/接口/模型三项均未变时保留历史测试结论
                 before_provider, before_config, _ = get_runtime_config(capability)
-                before = (before_provider, before_config.get("base_url", ""), before_config.get("model", ""))
+                before_effective = (before_provider, before_config.get("base_url", ""), before_config.get("model", ""))
                 serializer = AICapabilityConfigSerializer(
                     instance, data=item, partial=True, context={"request": request}
                 )
                 serializer.is_valid(raise_exception=True)
                 serializer.save()
+                saved_capabilities.append(capability)
+                changes = AICapabilityConfig.diff_snapshots(before, instance.tracked_snapshot())
+                if changes:
+                    diff_groups.append({
+                        "capability": capability,
+                        "capability_display": valid[capability],
+                        "changes": changes,
+                    })
                 after_provider, after_config, _ = get_runtime_config(capability)
-                after = (after_provider, after_config.get("base_url", ""), after_config.get("model", ""))
-                if before != after:
+                after_effective = (after_provider, after_config.get("base_url", ""), after_config.get("model", ""))
+                if before_effective != after_effective:
                     # 配置变更后历史测试结果作废（避免展示过期结论）
                     AITestRecord.objects.filter(capability=capability).delete()
+        # 审计：单一审计轨——字段级 diff 按能力分组进 new_value.changes，
+        # 回答「为什么某天起讲稿/问答行为变了」（AICapabilityChangeLog 已停写，仅存历史）
+        log_admin_action(
+            request.user,
+            AdminActionLog.Action.AI_CONFIG_SAVE,
+            target_type="ai_config",
+            target_label="、".join(
+                dict(AICapabilityConfig.Capability.choices).get(c, c) for c in saved_capabilities
+            ),
+            new_value={"capabilities": saved_capabilities, "changes": diff_groups},
+        )
         return api_response({"items": _ai_capability_payload()}, message="大模型配置已保存并生效")
 
 
-class AdminAIConnectionTestView(APIView):
+class AdminAIConnectionTestView(AdminThrottleMixin, APIView):
+    method_scopes = {"POST": "admin_heavy"}
     permission_classes = [IsPlatformAdmin]
     def post(self, request):
         capability = request.data.get("capability", "chat")
@@ -565,6 +579,17 @@ class AdminAIConnectionTestView(APIView):
         )
         # 测试动作本身已成功执行（连没连上都是有效结果），统一 200 走 data，
         # 由前端弹窗按 last_test_status 呈现，避免拦截器 toast 与弹窗重复提示
+        log_admin_action(
+            request.user,
+            AdminActionLog.Action.AI_CONFIG_TEST,
+            target_type="ai_config",
+            target_label=dict(AICapabilityConfig.Capability.choices).get(capability, capability),
+            new_value={
+                "provider": provider,
+                "model": config.get("model", ""),
+                "status": record.status,
+            },
+        )
         return api_response(
             {
                 "capability": capability,
@@ -577,13 +602,14 @@ class AdminAIConnectionTestView(APIView):
         )
 
 
-class AdminRebuildVectorsView(APIView):
+class AdminRebuildVectorsView(AdminThrottleMixin, APIView):
     """平台级知识库向量重建（换向量模型后必须执行）。
 
     覆盖教辅资料与课件 PPT（课件是向量库的主要内容）。
     范围：course / material / ppt / scope=all（全站，需显式声明防误操作）。
     出错处理同教师端：事前校验失败返回 400 不动数据；单项失败可续跑。
     """
+    method_scopes = {"POST": "admin_heavy"}
 
     permission_classes = [IsPlatformAdmin]
 
@@ -624,6 +650,22 @@ class AdminRebuildVectorsView(APIView):
         report = rebuild_vectors(materials, ppts)
         if report.get("error"):
             return api_response(report, message=report["error"], code=400, status=400)
+        log_admin_action(
+            request.user,
+            AdminActionLog.Action.VECTOR_REBUILD,
+            target_type="vector",
+            target_label=(
+                f"course#{course_id}" if course_id
+                else f"material#{material_id}" if material_id
+                else f"ppt#{ppt_id}" if ppt_id
+                else "全站"
+            ),
+            new_value={
+                "materials": report["materials"]["success"],
+                "ppts": report["ppts"]["success"],
+                "chunks": report["chunks"],
+            },
+        )
         message = (
             f"向量重建完成：资料 {report['materials']['success']}/{report['materials']['total']} 份，"
             f"课件 {report['ppts']['success']}/{report['ppts']['total']} 部，"
@@ -807,7 +849,7 @@ def _call_log_daily(queryset) -> list[dict]:
     ]
 
 
-class AdminAICallLogListView(APIView):
+class AdminAICallLogListView(AdminThrottleMixin, APIView):
     """AI 调用流水明细：筛选 + 分页（默认近 7 天，支持 start/end 日历窗）。"""
 
     permission_classes = [IsPlatformAdmin]
@@ -821,8 +863,9 @@ class AdminAICallLogListView(APIView):
         return _paginated_response(queryset, request, AICallLogSerializer)
 
 
-class AdminAICallLogExportView(APIView):
+class AdminAICallLogExportView(AdminThrottleMixin, APIView):
     """流水导出 CSV（带 BOM，Excel 直接打开中文不乱码）。"""
+    method_scopes = {"GET": "admin_export"}
 
     permission_classes = [IsPlatformAdmin]
 
@@ -872,7 +915,7 @@ class AdminAICallLogExportView(APIView):
         return response
 
 
-class AdminAICallStatsView(APIView):
+class AdminAICallStatsView(AdminThrottleMixin, APIView):
     """调用汇总统计：总量 / 按能力 / 按场景 / 按日趋势 / TOP 触发人 / 异常告警。
 
     窗口：start+end 日历窗（YYYY-MM-DD）或 days 滚动窗（1~365）。
@@ -955,43 +998,19 @@ class AdminAICallStatsView(APIView):
 
     @staticmethod
     def _alerts(queryset):
-        """近 24 小时的异常提示（页面展示，不做消息推送）。"""
-        recent = queryset.filter(created_at__gte=timezone.now() - timedelta(hours=24))
-        alerts = []
-        stats = recent.aggregate(
-            calls=Count("id"), failed=Count("id", filter=Q(success=False))
-        )
-        calls = stats["calls"] or 0
-        if calls >= 5 and (stats["failed"] or 0) / calls > 0.2:
-            alerts.append(
-                {
-                    "level": "warning",
-                    "message": f"近 24 小时失败率 {(stats['failed'] / calls):.0%}"
-                    f"（{stats['failed']}/{calls}），请检查服务商配置与网络",
-                }
-            )
-        # 真实调用回退 Mock：结果可能是占位内容，业务不可信（已知中危的静默回退）
-        fallback = recent.filter(is_mock=True).exclude(provider="mock").count()
-        if fallback:
-            alerts.append(
-                {
-                    "level": "warning",
-                    "message": f"近 24 小时有 {fallback} 次真实模型调用回退到模拟模式，相关业务结果可能不可信",
-                }
-            )
-        slow = recent.filter(capability="chat").aggregate(avg=Avg("latency_ms"))["avg"]
-        if slow and slow > 15000:
-            alerts.append(
-                {
-                    "level": "info",
-                    "message": f"近 24 小时对话平均耗时 {slow / 1000:.1f}s，本地模型可调大超时或扩容",
-                }
-            )
-        return alerts
+        """近 24 小时的异常提示（页面展示，不做消息推送）。口径与平台待办异常共用。"""
+        from .services import ai_health_alerts
+
+        return ai_health_alerts(timezone.now() - timedelta(hours=24))
 
 
-class AdminAIConfigChangeLogListView(APIView):
-    """大模型能力配置变更记录（字段级 old→new，回答「为什么行为变了」）。"""
+class AdminAIConfigChangeLogListView(AdminThrottleMixin, APIView):
+    """大模型能力配置变更记录（字段级 old→new）——已废弃，仅查历史。
+
+    审计双轨合并（2026-10-19）：新记录一律写 AdminActionLog（action=ai_config_save，
+    new_value.changes 存按能力分组的字段级 diff，见 /action-logs/ 与操作审计页）。
+    本端点仅用于查询合并前写入 AICapabilityChangeLog 的存量记录。
+    """
 
     permission_classes = [IsPlatformAdmin]
     serializer_class = AICapabilityChangeLogSerializer

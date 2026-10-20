@@ -21,16 +21,16 @@
     </section>
 
     <section class="table-card">
-      <el-table v-loading="loading" :data="rows" row-key="id" class="user-table">
-        <el-table-column label="用户" min-width="230">
+      <el-table v-loading="loading" :data="rows" row-key="id" class="user-table" scrollbar-always-on>
+        <el-table-column label="用户" min-width="180">
           <template #default="{ row }">
             <div class="identity"><el-avatar :size="40" :src="row.avatar || ''" :icon="UserFilled" /><div><strong>{{ row.real_name || '未填写姓名' }}</strong><span>@{{ row.username }}</span></div></div>
           </template>
         </el-table-column>
-        <el-table-column prop="phone" label="手机号" min-width="145"><template #default="{ row }">{{ row.phone || '—' }}</template></el-table-column>
-        <el-table-column label="角色" width="110"><template #default="{ row }"><el-tag effect="light" :type="roleType(row.role)">{{ row.role_display }}</el-tag></template></el-table-column>
-        <el-table-column label="创建时间" min-width="150"><template #default="{ row }">{{ formatDate(row.date_joined) }}</template></el-table-column>
-        <el-table-column label="账号状态" width="125">
+        <el-table-column prop="phone" label="手机号" min-width="128"><template #default="{ row }">{{ row.phone || '—' }}</template></el-table-column>
+        <el-table-column label="角色" width="100"><template #default="{ row }"><el-tag effect="light" :type="roleType(row.role)">{{ row.role_display }}</el-tag></template></el-table-column>
+        <el-table-column label="创建时间" width="104"><template #default="{ row }">{{ formatDate(row.date_joined) }}</template></el-table-column>
+        <el-table-column label="账号状态" width="110">
           <template #default="{ row }"><el-switch :model-value="row.is_active" :disabled="row.id === profile?.id" inline-prompt active-text="正常" inactive-text="停用" @change="(value) => changeActive(row, value)" /></template>
         </el-table-column>
         <el-table-column label="操作" width="180" fixed="right">

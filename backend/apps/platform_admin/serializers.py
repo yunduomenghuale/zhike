@@ -8,6 +8,8 @@ from apps.ai.models import AICallLog, AICapabilityChangeLog, AICapabilityConfig
 from apps.ai.providers.factory import get_env_config
 from apps.users.serializers import PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, normalize_phone
 
+from .models import AdminActionLog
+
 User = get_user_model()
 
 
@@ -128,6 +130,12 @@ class AdminCourseSerializer(serializers.ModelSerializer):
 class CourseStatusSerializer(serializers.ModelSerializer):
     class Meta:
         model = Course
+        fields = ["status"]
+
+
+class ClassStatusSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ClassRoom
         fields = ["status"]
 
 
@@ -291,4 +299,19 @@ class AICapabilityChangeLogSerializer(serializers.ModelSerializer):
         fields = [
             "id", "created_at", "capability", "capability_display",
             "changed_by", "changed_by_name", "changes",
+        ]
+
+
+class AdminActionLogSerializer(serializers.ModelSerializer):
+    """管理端操作审计（只读）。old_value/new_value 为字段级 old→new 快照。"""
+
+    action_display = serializers.CharField(source="get_action_display", read_only=True)
+    actor_name = serializers.CharField(source="actor.username", read_only=True)
+
+    class Meta:
+        model = AdminActionLog
+        fields = [
+            "id", "created_at", "actor", "actor_name", "action", "action_display",
+            "target_type", "target_id", "target_label",
+            "old_value", "new_value", "note",
         ]

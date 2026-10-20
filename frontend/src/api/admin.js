@@ -47,6 +47,46 @@ export const exportAdminAICallLogs = (params) => (
   request.get('/admin-panel/ai-call-logs/export/', { params, responseType: 'blob' })
 )
 export const getAdminAICallStats = (params) => request.get('/admin-panel/ai-call-stats/', { params })
+// 已废弃：审计双轨合并（2026-10-19）后配置变更记录读操作审计单轨
+// （listAdminActionLogs + action=ai_config_save）；此端点仅查合并前存量，勿在新代码使用
 export const listAdminAIConfigChanges = (params) => (
   request.get('/admin-panel/ai-config-changes/', { params })
+)
+
+// ---- 督管增强（2026-10-19）：趋势/异常/三维监管/操作审计 ----
+export const getAdminTrends = (params) => (
+  request.get('/admin-panel/overview/trends/', { params })
+)
+export const getAdminAlerts = () => request.get('/admin-panel/overview/alerts/')
+
+export const getAdminCourseDetail = (id) => (
+  request.get(`/admin-panel/courses/${id}/detail/`)
+)
+export const getAdminClassDetail = (id, params) => (
+  request.get(`/admin-panel/classes/${id}/detail/`, { params })
+)
+export const updateAdminClassStatus = (id, status) => (
+  request.patch(`/admin-panel/classes/${id}/status/`, { status })
+)
+
+export const listAdminTeachers = (params) => request.get('/admin-panel/teachers/', { params })
+export const getAdminTeacherDetail = (id) => (
+  request.get(`/admin-panel/teachers/${id}/detail/`)
+)
+
+// CSV 导出：课程/班级/教师上限 5000 行、审计 5 万行；blob 下载
+export const exportAdminCourses = (params) => (
+  request.get('/admin-panel/courses/export/', { params, responseType: 'blob' })
+)
+export const exportAdminClasses = (params) => (
+  request.get('/admin-panel/classes/export/', { params, responseType: 'blob' })
+)
+export const exportAdminTeachers = (params) => (
+  request.get('/admin-panel/teachers/export/', { params, responseType: 'blob' })
+)
+export const listAdminActionLogs = (params) => (
+  request.get('/admin-panel/action-logs/', { params })
+)
+export const exportAdminActionLogs = (params) => (
+  request.get('/admin-panel/action-logs/export/', { params, responseType: 'blob' })
 )

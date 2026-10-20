@@ -8,7 +8,9 @@
 """
 from unittest.mock import patch
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.cache import caches
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from datetime import datetime, time as dtime, timedelta
@@ -214,20 +216,47 @@ class AdminAICapabilityVisionTests(TestCase):
         self.assertFalse(AICapabilityConfig.objects.get(capability="tts").supports_vision)
         self.assertFalse(chat_supports_vision())
 
-    def test_change_log_records_supports_vision(self):
-        """开关变更写入字段级留痕（回答「为什么某天起问答能发图片了」）。"""
+    def test_audit_log_records_supports_vision_change(self):
+        """开关变更写入单一审计轨（AdminActionLog.ai_config_save 字段级 diff）。
+
+        审计双轨合并后模型层停写 AICapabilityChangeLog，留痕只落审计表。
+        """
         self._put([self._chat_item(supports_vision=False)])
         self._put([self._chat_item(supports_vision=True)])
         # 首次保存 False=默认值不产生 diff；仅第二次 True 记一条
         logs = [
-            log for log in AICapabilityChangeLog.objects.filter(capability="chat")
-            if any(c["field"] == "supports_vision" for c in log.changes)
+            log for log in AdminActionLog.objects.filter(
+                action=AdminActionLog.Action.AI_CONFIG_SAVE)
+            if any(
+                g["capability"] == "chat"
+                and any(c["field"] == "supports_vision" for c in g["changes"])
+                for g in (log.new_value or {}).get("changes", [])
+            )
         ]
         self.assertEqual(len(logs), 1)
-        change = next(c for c in logs[0].changes if c["field"] == "supports_vision")
+        group = next(
+            g for g in logs[0].new_value["changes"] if g["capability"] == "chat"
+        )
+        change = next(c for c in group["changes"] if c["field"] == "supports_vision")
         self.assertEqual(change["label"], "支持图片")
         # 布尔旧值为 False 时按既有约定记空串（str(value or "")）
         self.assertEqual((change["old"], change["new"]), ("", "True"))
+        self.assertEqual(group["capability_display"], "对话生成")
+        # 模型层不再双写 AICapabilityChangeLog（单一审计轨）
+        self.assertFalse(AICapabilityChangeLog.objects.exists())
+
+    def test_model_save_alone_writes_no_changelog(self):
+        """单一审计轨：绕过视图直接 save 模型不再产生任何留痕（diff 由视图采集）。"""
+        AICapabilityConfig.objects.create(
+            capability="chat", provider="deepseek", model_name="deepseek-chat"
+        )
+        cfg = AICapabilityConfig.objects.get(capability="chat")
+        cfg.model_name = "deepseek-reasoner"
+        cfg.save()
+        self.assertFalse(AICapabilityChangeLog.objects.exists())
+        self.assertFalse(
+            AdminActionLog.objects.filter(action=AdminActionLog.Action.AI_CONFIG_SAVE).exists()
+        )
 
 
 class AdminAICapabilityTimeoutVoiceTests(TestCase):
@@ -875,36 +904,41 @@ class AdminAICallLogAPITests(TestCase):
 
     # ---- 配置变更记录 ----
 
-    def test_config_change_log_records_field_diff_without_key(self):
+    def test_audit_log_records_field_diff_without_key(self):
+        """保存写入单一审计轨：字段级 old→new，API Key 只记存在性不落明文。"""
         self.client.force_authenticate(user=self.admin)
-        # 首次创建即以默认值为旧值记录 diff
-        cfg = AICapabilityConfig.objects.create(
-            capability="chat", provider="deepseek",
-            model_name="deepseek-chat", base_url="https://api.deepseek.com",
-        )
-        # 更新模型 + 首次配置 Key（updated_by 模拟序列化器保存前写入）
-        cfg.model_name = "deepseek-reasoner"
-        cfg.set_api_key("sk-new-secret")
-        cfg.updated_by = self.admin
-        cfg.save()
+        # 首次保存（停用状态免 Key 校验）：以默认值为旧值
+        resp = self.client.put(URL, {"capabilities": [{
+            "capability": "chat", "provider": "deepseek", "enabled": False,
+            "base_url": "https://api.deepseek.com", "model_name": "deepseek-chat",
+        }]}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        # 更新模型 + 首次配置 Key（仍停用：diff 只含这两项）
+        resp = self.client.put(URL, {"capabilities": [{
+            "capability": "chat", "provider": "deepseek", "enabled": False,
+            "base_url": "https://api.deepseek.com", "model_name": "deepseek-reasoner",
+            "api_key": "sk-new-secret",
+        }]}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
 
-        resp = self.client.get("/api/admin-panel/ai-config-changes/")
-        self.assertEqual(resp.status_code, 200)
-        items = resp.json()["data"]["items"]
-        self.assertGreaterEqual(len(items), 1)
-        latest = items[0]  # 按创建时间倒序
-        changes = latest["changes"]
-        serialized = str(changes)
-        self.assertNotIn("sk-new-secret", serialized)
-        by_field = {c["field"]: c for c in changes}
+        latest = AdminActionLog.objects.filter(
+            action=AdminActionLog.Action.AI_CONFIG_SAVE).order_by("-id").first()
+        self.assertEqual(latest.actor, self.admin)
+        self.assertEqual(latest.target_label, "对话生成")
+        self.assertEqual(latest.new_value["capabilities"], ["chat"])
+        group = next(g for g in latest.new_value["changes"] if g["capability"] == "chat")
+        by_field = {c["field"]: c for c in group["changes"]}
         self.assertEqual(set(by_field), {"model_name", "api_key"})
         self.assertEqual(by_field["model_name"]["old"], "deepseek-chat")
         self.assertEqual(by_field["model_name"]["new"], "deepseek-reasoner")
         self.assertEqual(by_field["api_key"]["old"], "未配置")
         self.assertEqual(by_field["api_key"]["new"], "已配置")
-        self.assertEqual(latest["changed_by_name"], "admin_log")
+        self.assertNotIn("sk-new-secret", str(latest.new_value))
+        # 单一审计轨：模型层未双写 AICapabilityChangeLog
+        self.assertFalse(AICapabilityChangeLog.objects.exists())
 
     def test_config_change_log_filter_by_capability(self):
+        """遗留端点（仅查合并前存量）：按能力筛选 AICapabilityChangeLog。"""
         AICapabilityChangeLog.objects.create(
             capability="chat", changes=[{"field": "model_name", "old": "a", "new": "b"}]
         )
@@ -934,3 +968,488 @@ class AdminAICallLogAPITests(TestCase):
     def test_anonymous_unauthorized(self):
         resp = self.client.get("/api/admin-panel/ai-call-stats/")
         self.assertIn(resp.status_code, (401, 403))
+
+
+# ---------------------------------------------------------------------------
+# 督管增强（趋势/异常/三维监管/操作审计）——2026-10-19
+# ---------------------------------------------------------------------------
+from apps.classroom.models import ClassRoom, ClassStudent  # noqa: E402
+from apps.courses.models import Catalog, PPTResource  # noqa: E402
+from apps.exams.models import Exam, ExamSubmission  # noqa: E402
+from apps.homework.models import Homework, HomeworkSubmission  # noqa: E402
+
+from .models import AdminActionLog  # noqa: E402
+
+
+class OversightFixtureMixin:
+    """督管测试公共数据：管理员/教师/学生 + 课程/班级/章节。"""
+
+    def setUp(self):
+        # 概览缓存（trends/alerts 短 TTL）切到 LocMem 并在每个用例前清空，
+        # 避免跨用例读到上一次的聚合结果（如 test_trends_counts_today 依赖新造用户）
+        self._oversight_cache_ctx = override_settings(
+            CACHES={
+                **settings.CACHES,
+                "oversight": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"},
+            }
+        )
+        self._oversight_cache_ctx.enable()
+        self.addCleanup(self._oversight_cache_ctx.disable)
+        caches["oversight"].clear()
+
+        self.admin = User.objects.create_user(
+            username="admin_ov", password="pw123456!", role=User.Role.ADMIN
+        )
+        self.teacher = User.objects.create_user(
+            username="t_ov", password="pw123456!", role=User.Role.TEACHER,
+            real_name="督管教师",
+        )
+        self.student = User.objects.create_user(
+            username="s_ov", password="pw123456!", role=User.Role.STUDENT,
+            real_name="督管学生",
+        )
+        self.course = Course.objects.create(
+            name="督管课程", teacher=self.teacher, term="2026秋"
+        )
+        self.classroom = ClassRoom.objects.create(
+            name="督管班级", teacher=self.teacher
+        )
+        self.classroom.courses.add(self.course)
+        ClassStudent.objects.create(classroom=self.classroom, student=self.student)
+        self.catalog = Catalog.objects.create(
+            course=self.course, title="第一章", order=1
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.admin)
+
+
+class OversightOverviewTests(OversightFixtureMixin, TestCase):
+    """A1 趋势 / A2 待办异常。"""
+
+    def test_trends_zero_filled_and_summary(self):
+        resp = self.client.get("/api/admin-panel/overview/trends/", {"days": 7})
+        self.assertEqual(resp.status_code, 200, resp.data)
+        data = resp.data["data"]
+        self.assertIn(len(data["daily"]), (7, 8))  # 滚动窗跨 7~8 个日历日
+        for field in ("new_users", "new_courses", "new_classes", "active_students"):
+            self.assertIn(field, data["daily"][0])
+            self.assertIn(field, data["summary"])
+            self.assertIn("delta", data["summary"][field])
+
+    def test_trends_counts_today(self):
+        User.objects.create_user(username="s_new", password="pw123456!", role=User.Role.STUDENT)
+        resp = self.client.get("/api/admin-panel/overview/trends/", {"days": 1})
+        today = resp.data["data"]["daily"][-1]["date"]
+        row = resp.data["data"]["daily"][-1]
+        self.assertGreaterEqual(row["new_users"], 1, (today, row))
+
+    def test_trends_days_out_of_range(self):
+        self.assertEqual(self.client.get(
+            "/api/admin-panel/overview/trends/", {"days": 400}).status_code, 400)
+        # 非法值回退默认 30 天（与 _page_params 的宽容策略一致）
+        resp = self.client.get("/api/admin-panel/overview/trends/", {"days": "abc"})
+        self.assertEqual(resp.data["data"]["days"], 30)
+
+    def test_alerts_counts(self):
+        # 待批改作业 1 份
+        hw = Homework.objects.create(
+            classroom=self.classroom, course=self.course, title="作业甲",
+            status=Homework.Status.PUBLISHED,
+        )
+        HomeworkSubmission.objects.create(homework=hw, student=self.student)
+        # 成绩未发布考试 1 场
+        exam = Exam.objects.create(
+            course=self.course, classroom=self.classroom, name="考试甲",
+            status=Exam.Status.FINISHED,
+        )
+        ExamSubmission.objects.create(
+            exam=exam, student=self.student,
+            status=ExamSubmission.Status.SUBMITTED, score_released=False,
+        )
+        # 解析失败课件 1 部
+        PPTResource.objects.create(
+            course=self.course, catalog=self.catalog, file_name="坏课件.pptx",
+            parse_status=PPTResource.ParseStatus.FAILED,
+        )
+        items = {i["key"]: i for i in
+                 self.client.get("/api/admin-panel/overview/alerts/").data["data"]["items"]}
+        self.assertEqual(items["pending_grading"]["count"], 1)
+        self.assertEqual(items["unreleased_exams"]["count"], 1)
+        self.assertEqual(items["failed_ppt"]["count"], 1)
+        self.assertTrue(all("jump_url" in i for i in items.values()))
+
+    def test_trends_cached_second_call_is_hit(self):
+        from apps.platform_admin import services
+
+        calls = []
+        real = services.platform_trends
+
+        def counting(days):
+            calls.append(days)
+            return real(days)
+
+        with patch.object(services, "platform_trends", counting):
+            r1 = self.client.get("/api/admin-panel/overview/trends/", {"days": 7})
+            r2 = self.client.get("/api/admin-panel/overview/trends/", {"days": 7})
+            r3 = self.client.get("/api/admin-panel/overview/trends/", {"days": 30})
+        # days=7 第二次命中缓存（不重算），days=30 是另一个 key 正常重算
+        self.assertEqual(calls, [7, 30])
+        self.assertEqual(r1.data["data"], r2.data["data"])
+
+    def test_alerts_cached_second_call_is_hit(self):
+        from apps.platform_admin import services
+
+        calls = []
+        real = services.platform_alerts
+
+        def counting():
+            calls.append(1)
+            return real()
+
+        with patch.object(services, "platform_alerts", counting):
+            r1 = self.client.get("/api/admin-panel/overview/alerts/")
+            r2 = self.client.get("/api/admin-panel/overview/alerts/")
+        self.assertEqual(calls, [1])
+        self.assertEqual(r1.data["data"], r2.data["data"])
+
+    def test_cache_key_and_version_prefix(self):
+        from apps.platform_admin.services import _CACHE_VERSION, cached_platform_trends
+
+        cached_platform_trends(7)
+        self.assertIsNotNone(caches["oversight"].get(f"{_CACHE_VERSION}:trends:7"))
+        self.assertIsNone(caches["oversight"].get(f"{_CACHE_VERSION}:trends:30"))
+
+
+class OversightCourseTests(OversightFixtureMixin, TestCase):
+    """A3/A4 课程监管。"""
+
+    def test_course_list_asset_counts(self):
+        PPTResource.objects.create(
+            course=self.course, catalog=self.catalog, file_name="课件.pptx",
+            parse_status=PPTResource.ParseStatus.DONE,
+        )
+        items = self.client.get(
+            "/api/admin-panel/courses/", {"page_size": 10}).data["data"]["items"]
+        row = next(i for i in items if i["id"] == self.course.id)
+        self.assertEqual(row["catalog_count"], 1)
+        self.assertEqual(row["ppt_count"], 1)
+        self.assertIn("last_content_update", row)
+
+    def test_course_detail_structure(self):
+        hw = Homework.objects.create(
+            classroom=self.classroom, course=self.course, title="作业甲",
+            status=Homework.Status.PUBLISHED,
+        )
+        HomeworkSubmission.objects.create(homework=hw, student=self.student)
+        data = self.client.get(
+            f"/api/admin-panel/courses/{self.course.id}/detail/").data["data"]
+        self.assertEqual(data["name"], "督管课程")
+        self.assertEqual(data["stats"]["catalogs"], 1)
+        self.assertEqual(len(data["catalog_tree"]), 1)
+        self.assertEqual(data["catalog_tree"][0]["ppt_status"], None)
+        self.assertEqual(len(data["homeworks"]), 1)
+        self.assertEqual(data["homeworks"][0]["submitted"], 1)
+        self.assertEqual(len(data["classes"]), 1)
+        self.assertIn("homework_rate", data["classes"][0])
+
+    def test_course_status_change_audit_and_affected(self):
+        resp = self.client.patch(
+            f"/api/admin-panel/courses/{self.course.id}/status/",
+            {"status": "archived"}, format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["data"]["status"], "archived")
+        self.assertEqual(resp.data["data"]["affected"]["classes"], 1)
+        self.assertEqual(resp.data["data"]["affected"]["students"], 1)
+        log = AdminActionLog.objects.get(action=AdminActionLog.Action.COURSE_STATUS)
+        self.assertEqual(log.old_value, {"status": "active"})
+        self.assertEqual(log.new_value, {"status": "archived"})
+        self.assertEqual(log.actor, self.admin)
+
+    def test_course_status_no_change_no_audit(self):
+        self.client.patch(
+            f"/api/admin-panel/courses/{self.course.id}/status/",
+            {"status": "active"}, format="json",
+        )
+        self.assertEqual(AdminActionLog.objects.count(), 0)
+
+
+class OversightClassTests(OversightFixtureMixin, TestCase):
+    """A6/A7/A8 班级监管：复用教师端聚合 + 干预审计。"""
+
+    def test_class_detail_matches_teacher_endpoint(self):
+        """平台端班级详情与教师端学情统计口径一致（复用同一聚合实现）。"""
+        teacher_client = APIClient()
+        teacher_client.force_authenticate(user=self.teacher)
+        teacher_resp = teacher_client.get(f"/api/analytics/class/{self.classroom.id}/")
+        self.assertEqual(teacher_resp.status_code, 200, teacher_resp.data)
+        admin_resp = self.client.get(
+            f"/api/admin-panel/classes/{self.classroom.id}/detail/")
+        self.assertEqual(admin_resp.status_code, 200, admin_resp.data)
+        self.assertEqual(
+            admin_resp.data["data"]["summary"], teacher_resp.data["data"]["summary"]
+        )
+        self.assertEqual(
+            admin_resp.data["data"]["students"], teacher_resp.data["data"]["students"]
+        )
+
+    def test_class_status_change_audit(self):
+        resp = self.client.patch(
+            f"/api/admin-panel/classes/{self.classroom.id}/status/",
+            {"status": "closed"}, format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["data"]["status"], "closed")
+        self.assertIn("affected", resp.data["data"])
+        self.assertEqual(AdminActionLog.objects.filter(
+            action=AdminActionLog.Action.CLASS_STATUS).count(), 1)
+
+    def test_class_status_invalid_no_audit(self):
+        resp = self.client.patch(
+            f"/api/admin-panel/classes/{self.classroom.id}/status/",
+            {"status": "bogus"}, format="json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(AdminActionLog.objects.count(), 0)
+
+    def test_class_list_progress_summary(self):
+        hw = Homework.objects.create(
+            classroom=self.classroom, course=self.course, title="作业甲",
+            status=Homework.Status.PUBLISHED,
+        )
+        HomeworkSubmission.objects.create(homework=hw, student=self.student)
+        items = self.client.get(
+            "/api/admin-panel/classes/", {"page_size": 10}).data["data"]["items"]
+        row = next(i for i in items if i["id"] == self.classroom.id)
+        self.assertEqual(row["homework_rate"], 100)
+        self.assertEqual(row["warning_count"], 0)
+
+
+class OversightTeacherTests(OversightFixtureMixin, TestCase):
+    """A9/A10 教师监管。"""
+
+    def test_teacher_list_counts(self):
+        items = self.client.get("/api/admin-panel/teachers/").data["data"]["items"]
+        row = next(i for i in items if i["id"] == self.teacher.id)
+        self.assertEqual(row["course_count"], 1)
+        self.assertEqual(row["class_count"], 1)
+        self.assertEqual(row["student_count"], 1)
+        self.assertIn("ai_calls", row)
+
+    def test_teacher_list_search(self):
+        items = self.client.get(
+            "/api/admin-panel/teachers/", {"search": "督管"}).data["data"]["items"]
+        self.assertEqual(len(items), 1)
+
+    def test_teacher_detail(self):
+        data = self.client.get(
+            f"/api/admin-panel/teachers/{self.teacher.id}/detail/").data["data"]
+        self.assertEqual(data["username"], "t_ov")
+        self.assertEqual(len(data["courses"]), 1)
+        self.assertEqual(len(data["classes"]), 1)
+        self.assertEqual(data["ai_by_capability"], [])
+
+
+class OversightAuditTests(OversightFixtureMixin, TestCase):
+    """A12 操作审计 + 存量写操作埋点。"""
+
+    def test_user_create_update_reset_audit(self):
+        # 创建
+        resp = self.client.post("/api/admin-panel/users/", {
+            "username": "s_audit", "real_name": "审计生", "phone": "13800000009",
+            "role": "student", "password": "pw123456!",
+        }, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        uid = resp.data["data"]["id"]
+        log = AdminActionLog.objects.get(action=AdminActionLog.Action.USER_CREATE)
+        self.assertEqual(log.target_id, uid)
+        # 编辑（字段 diff）
+        self.client.patch(f"/api/admin-panel/users/{uid}/",
+                          {"real_name": "审计生改"}, format="json")
+        log = AdminActionLog.objects.get(action=AdminActionLog.Action.USER_UPDATE)
+        self.assertEqual(log.new_value["real_name"], {"old": "审计生", "new": "审计生改"})
+        # 无字段变化的编辑不落库
+        count = AdminActionLog.objects.count()
+        self.client.patch(f"/api/admin-panel/users/{uid}/",
+                          {"real_name": "审计生改"}, format="json")
+        self.assertEqual(AdminActionLog.objects.count(), count)
+        # 重置密码
+        self.client.post(f"/api/admin-panel/users/{uid}/reset-password/",
+                         {"password": "pw654321!"}, format="json")
+        self.assertEqual(AdminActionLog.objects.filter(
+            action=AdminActionLog.Action.USER_RESET_PWD).count(), 1)
+
+    def test_import_confirm_audit(self):
+        resp = self.client.post("/api/admin-panel/users/import-confirm/", {
+            "rows": [{"username": "imp001", "real_name": "导入生"}],
+        }, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        log = AdminActionLog.objects.get(action=AdminActionLog.Action.USER_IMPORT)
+        self.assertEqual(log.new_value["created"], 1)
+
+    def test_import_failed_no_audit(self):
+        resp = self.client.post("/api/admin-panel/users/import-confirm/", {
+            "rows": [{"username": "x", "real_name": "太短"}],
+        }, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(AdminActionLog.objects.count(), 0)
+
+    def test_action_log_filters(self):
+        AdminActionLog.objects.create(
+            actor=self.admin, action=AdminActionLog.Action.COURSE_STATUS,
+            target_type="course", target_id=1, target_label="课程A",
+            old_value={"status": "active"}, new_value={"status": "archived"},
+        )
+        resp = self.client.get("/api/admin-panel/action-logs/",
+                               {"action": "course_status"})
+        self.assertEqual(resp.data["data"]["total"], 1)
+        item = resp.data["data"]["items"][0]
+        self.assertEqual(item["action_display"], "课程状态变更")
+        self.assertEqual(item["actor_name"], "admin_ov")
+
+    def test_export_csv_has_bom(self):
+        for url in ("/api/admin-panel/courses/export/",
+                    "/api/admin-panel/classes/export/",
+                    "/api/admin-panel/teachers/export/",
+                    "/api/admin-panel/action-logs/export/"):
+            resp = self.client.get(url)
+            self.assertEqual(resp.status_code, 200, url)
+            self.assertTrue(resp.content.startswith(b"\xef\xbb\xbf"), url)
+
+    def test_export_csv_renders_ai_config_changes(self):
+        """CSV 变更列渲染 ai_config_save 的按能力分组 diff（单一审计轨形状）。"""
+        AdminActionLog.objects.create(
+            actor=self.admin, action=AdminActionLog.Action.AI_CONFIG_SAVE,
+            target_type="ai_config", target_label="对话生成",
+            new_value={
+                "capabilities": ["chat"],
+                "changes": [{
+                    "capability": "chat",
+                    "capability_display": "对话生成",
+                    "changes": [
+                        {"field": "model_name", "label": "模型名称", "old": "a", "new": "b"},
+                        {"field": "api_key", "label": "API Key", "old": "未配置", "new": "已配置"},
+                    ],
+                }],
+            },
+        )
+        self.client.force_authenticate(user=self.admin)
+        resp = self.client.get("/api/admin-panel/action-logs/export/")
+        self.assertEqual(resp.status_code, 200)
+        content = resp.content.decode("utf-8-sig")
+        self.assertIn("对话生成·模型名称: a → b", content)
+        self.assertIn("对话生成·API Key: 未配置 → 已配置", content)
+
+
+class OversightPermissionTests(OversightFixtureMixin, TestCase):
+    """新端点全部仅平台管理员可用。"""
+
+    URLS = (
+        "/api/admin-panel/overview/trends/",
+        "/api/admin-panel/overview/alerts/",
+        "/api/admin-panel/courses/",
+        "/api/admin-panel/courses/export/",
+        f"/api/admin-panel/classes/",
+        "/api/admin-panel/classes/export/",
+        "/api/admin-panel/teachers/",
+        "/api/admin-panel/teachers/export/",
+        "/api/admin-panel/action-logs/",
+        "/api/admin-panel/action-logs/export/",
+    )
+
+    def test_non_admin_forbidden(self):
+        for user in (self.teacher, self.student):
+            self.client.force_authenticate(user=user)
+            for url in self.URLS:
+                self.assertEqual(self.client.get(url).status_code, 403, (user.username, url))
+
+    def test_anonymous_unauthorized(self):
+        self.client.force_authenticate(user=None)
+        for url in self.URLS[:3]:
+            self.assertIn(self.client.get(url).status_code, (401, 403))
+
+
+# ---------------------------------------------------------------------------
+# 管理端限流（督管增强三期）：分档计数 / 429 本地化 / scope 独立 / 可整体关闭
+# 注意：manage.py test 下 settings 已默认将各档位置 None（防跨用例累积），
+# 本类用 override_settings 重新开启小额度进行验证。
+# ---------------------------------------------------------------------------
+from django.core.cache import cache as django_cache  # noqa: E402
+
+THROTTLE_ON = {
+    "ADMIN_THROTTLE_RATES": {
+        "admin_read": "3/min",
+        "admin_write": "2/min",
+        "admin_export": "1/min",
+        "admin_heavy": "1/min",
+    }
+}
+THROTTLE_OFF = {
+    "ADMIN_THROTTLE_RATES": {
+        "admin_read": None,
+        "admin_write": None,
+        "admin_export": None,
+        "admin_heavy": None,
+    }
+}
+
+
+@override_settings(**THROTTLE_ON)
+class AdminThrottleTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="admin_thr", password="pw123456!", role=User.Role.ADMIN
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.admin)
+        django_cache.clear()  # 清掉历史计数，保证用例间独立
+
+    def test_read_scope_throttled_after_limit(self):
+        url = "/api/admin-panel/overview/"
+        codes = [self.client.get(url).status_code for _ in range(4)]
+        self.assertEqual(codes, [200, 200, 200, 429])
+
+    def test_429_payload_localized_with_retry_after(self):
+        url = "/api/admin-panel/overview/"
+        for _ in range(3):
+            self.client.get(url)
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 429)
+        self.assertEqual(resp.data["code"], 429)
+        self.assertIn("操作过于频繁", resp.data["message"])
+        self.assertIn("Retry-After", resp.headers)
+
+    def test_scopes_are_counted_independently(self):
+        # 读档打满后，重操作档仍有自己的额度（不同 scope 独立计数）
+        for _ in range(3):
+            self.client.get("/api/admin-panel/overview/")
+        heavy = self.client.post("/api/admin-panel/users/import-preview/", {}, format="json")
+        self.assertNotEqual(heavy.status_code, 429)
+        # 重操作档额度=1/min，第二次即被限流
+        self.assertEqual(
+            self.client.post("/api/admin-panel/users/import-preview/", {}, format="json").status_code,
+            429,
+        )
+
+    def test_export_scope_separate_from_read(self):
+        # 导出档（1/min）与读档独立：导出一次后读仍可用，再次导出被限流
+        self.assertEqual(self.client.get("/api/admin-panel/courses/export/").status_code, 200)
+        self.assertEqual(self.client.get("/api/admin-panel/courses/export/").status_code, 429)
+        self.assertEqual(self.client.get("/api/admin-panel/overview/").status_code, 200)
+
+    def test_permission_denied_does_not_consume_bucket(self):
+        # 权限校验先于限流（DRF initial 顺序）：非管理员 403 不消耗 admin 的读档额度
+        teacher = User.objects.create_user(
+            username="t_thr", password="pw123456!", role=User.Role.TEACHER
+        )
+        self.client.force_authenticate(user=teacher)
+        self.assertEqual(self.client.get("/api/admin-panel/overview/").status_code, 403)
+        self.client.force_authenticate(user=self.admin)
+        codes = [self.client.get("/api/admin-panel/overview/").status_code for _ in range(3)]
+        self.assertEqual(codes, [200, 200, 200])
+
+    @override_settings(**THROTTLE_OFF)
+    def test_rates_none_disables_throttling(self):
+        url = "/api/admin-panel/overview/"
+        codes = [self.client.get(url).status_code for _ in range(10)]
+        self.assertEqual(set(codes), {200})
