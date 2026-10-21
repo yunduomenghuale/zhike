@@ -186,6 +186,8 @@ class AICallLog(BaseModel):
         MATERIAL_EMBED = "material_embed", "教辅资料向量化"
         PPT_EMBED = "ppt_embed", "课件向量化"
         QA = "qa", "知识库问答"
+        QA_REWRITE = "qa_rewrite", "问答查询改写"
+        QA_SUMMARY = "qa_summary", "问答会话摘要"
         QUESTION_GEN = "question_gen", "题目生成"
         GRADING = "grading", "作业批改"
         ANALYTICS = "analytics", "学情分析"

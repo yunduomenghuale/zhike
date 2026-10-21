@@ -107,12 +107,33 @@
                 <button class="dock-tab" :class="{ active: dockTab === 'script' }" @click="switchDockTab('script')">
                   <el-icon><Document /></el-icon> 讲解稿
                 </button>
+                <template v-if="dockTab === 'chat'">
+                  <button class="dock-mini-btn" title="新会话" @click="newChatSession">
+                    <el-icon :size="13"><Plus /></el-icon>
+                  </button>
+                  <button class="dock-mini-btn" title="历史会话" @click="chatHistoryOpen = !chatHistoryOpen">
+                    <el-icon :size="13"><Clock /></el-icon>
+                  </button>
+                </template>
                 <button class="dock-close" title="收起" @click="dockVisible = false">
                   <el-icon><Close /></el-icon>
                 </button>
               </div>
 
               <div v-show="dockTab === 'chat'" class="dock-chat">
+                <div v-if="chatHistoryOpen" class="chat-history-panel">
+                  <button
+                    v-for="s in chatSessions"
+                    :key="s.id"
+                    class="chat-history-item"
+                    :class="{ active: s.id === chatSessionId }"
+                    @click="switchChatSession(s.id)"
+                  >
+                    <span class="chat-history-q">{{ s.title || '新会话' }}</span>
+                    <span class="chat-history-n">{{ s.record_count }} 条</span>
+                  </button>
+                  <div v-if="!chatSessions.length" class="chat-history-empty">暂无历史会话</div>
+                </div>
                 <div ref="chatScrollRef" class="chat-messages">
                   <div v-if="!chatMessages.length" class="chat-empty">
                     <div class="chat-empty-hero">
@@ -125,7 +146,7 @@
                       <button v-for="q in chatSuggests" :key="q" class="chat-suggest" @click="askChat(q)">{{ q }}</button>
                     </div>
                   </div>
-                  <div v-for="(m, i) in chatMessages" :key="i" class="chat-row" :class="m.role">
+                  <div v-for="(m, i) in chatMessages" :key="i" class="chat-row" :class="m.role" @click="onChatAreaClick">
                     <div class="chat-bubble" :class="{ bare: m.imageOnly }">
                       <span v-if="m.streaming && !m.content" class="chat-typing"><i></i><i></i><i></i></span>
                       <div v-else-if="m.role === 'assistant'" class="chat-text chat-md" v-html="renderMd(m.content + (m.streaming ? ' ▍' : ''))"></div>
@@ -134,22 +155,15 @@
                         <template v-if="!m.imageOnly">{{ m.content }}</template>
                       </div>
                       <!-- 参考来源须为独立 v-if：若插在 v-else-if 与 v-else 之间会抢走用户消息的 v-else 分支 -->
-                      <div v-if="m.role === 'assistant' && m.cited_chunks?.length && !m.streaming" class="chat-sources">
-                        <div class="chat-sources-title">
-                          <el-icon :size="12"><Collection /></el-icon> 参考来源
-                        </div>
-                        <div class="chat-source-tags">
-                          <el-tag
-                            v-for="(g, gi) in groupCitedSources(m.cited_chunks)"
-                            :key="gi"
-                            size="small"
-                            effect="plain"
-                            type="info"
-                            round
-                          >
-                            {{ citedSourceLabel(g) }}
-                          </el-tag>
-                        </div>
+                      <div v-if="m.role === 'assistant' && m.historyDropped && !m.streaming" class="chat-note">对话较长，已省略部分早期内容</div>
+                      <div v-if="m.role === 'assistant' && m.rewritten && !m.streaming" class="chat-note">已按上下文理解检索：{{ m.rewritten }}</div>
+                      <CitedSources
+                        v-if="m.role === 'assistant' && m.cited_chunks?.length && !m.streaming"
+                        :cited="m.cited_chunks"
+                        :highlight="flashNums"
+                      />
+                      <div v-if="m.role === 'assistant' && !m.streaming && m.content" class="chat-actions">
+                        <QaFeedback :record-id="m.mid" v-model="m.feedback" />
                       </div>
                     </div>
                   </div>
@@ -403,7 +417,7 @@ import { useRoute } from 'vue-router'
 import {
   Microphone, ArrowLeft, ArrowRight, CircleCheck, CircleClose, VideoPlay,
   Document, ChatDotRound, Folder, Close, MagicStick, Promotion, Picture, Loading,
-  Right, VideoPause, EditPen, Collection,
+  Right, VideoPause, EditPen, Plus, Clock,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { listClasses } from '@/api/classroom'
@@ -411,9 +425,10 @@ import { listCatalogs, listPpts, listVideos, listWatchProgress, reportVideoProgr
 import { chapterProgress } from '@/utils/learningProgress'
 import { listQuestions, practiceSubmit } from '@/api/question'
 import { listMaterials, getQaVisionCapability } from '@/api/knowledge'
-import { renderAiMarkdown } from '@/utils/markdown'
-import { groupCitedSources, citedSourceLabel } from '@/utils/cited-sources'
-import { genUid } from '@/utils/uid'
+import { renderQaAnswer } from '@/utils/markdown'
+import CitedSources from '@/components/qa/CitedSources.vue'
+import QaFeedback from '@/components/qa/QaFeedback.vue'
+import { listQaSessions, listQaSessionRecords } from '@/api/knowledge'
 import { blankAnswerText } from '@/utils/blank-answer'
 
 const courses = ref([])
@@ -480,6 +495,8 @@ async function loadTree() {
   materialsLoaded = false
   materials.value = []
   chatMessages.value = []
+  chatSessionId.value = null
+  chatSessions.value = []
   stopPlayer()
   const data = await listCatalogs({ course: courseId.value, tree: 1 })
   tree.value = data.results ?? data
@@ -565,6 +582,56 @@ function stopProgressTimer() {
 }
 
 // 章节动作：'' 完整讲解 / 'script' 讲稿 / 'chat' AI 问答
+// ---- 章节 AI 问答会话管理 ----
+async function loadChapterSessions(node) {
+  const catalogId = node.id
+  chatMessages.value = []
+  chatSessionId.value = null
+  let list = []
+  try {
+    const data = await listQaSessions({ course: courseId.value, catalog: catalogId })
+    list = data.results ?? data
+  } catch {
+    list = []
+  }
+  // 竞态守卫：拉取期间用户已切到其他章节，放弃恢复
+  if (current.value?.id !== catalogId) return
+  chatSessions.value = list
+  // 期间用户已在当前章节开聊（新会话首轮），不覆盖
+  if (list.length && !chatMessages.value.length) {
+    await switchChatSession(list[0].id)
+  }
+}
+
+async function switchChatSession(id) {
+  chatSessionId.value = id
+  chatHistoryOpen.value = false
+  try {
+    const rows = await listQaSessionRecords(id)
+    const list = rows.results ?? rows
+    chatMessages.value = list.flatMap((r) => ([
+      { role: 'user', content: r.question },
+      {
+        role: 'assistant',
+        content: r.answer,
+        cited_chunks: r.cited_chunks,
+        mid: r.id,
+        feedback: r.feedback || 0,
+        rewritten: r.rewritten_question || '',
+      },
+    ]))
+  } catch {
+    chatMessages.value = []
+  }
+  scrollChatToBottom()
+}
+
+function newChatSession() {
+  chatSessionId.value = null
+  chatMessages.value = []
+  chatHistoryOpen.value = false
+}
+
 async function openChapter(node, action = '') {
   stopPlayer()
   dockVisible.value = false
@@ -576,6 +643,8 @@ async function openChapter(node, action = '') {
     scripts.value = []
     pageDurations.value = {}
     pageWatched.value = {}
+    // 切章节：后台拉该章最近问答会话续聊（不阻塞课件加载）
+    loadChapterSessions(node)
   }
   if (!pages.value.length && !learnLoading.value) await loadLearn()
   if (pages.value.length) {
@@ -663,7 +732,11 @@ const chatMessages = ref([])
 const chatInput = ref('')
 const chatImage = ref('')
 const chatFileRef = ref(null)
-const chatSessionId = genUid()
+// AI 问答会话：chatSessionId 为当前 QASession（null = 新会话，首次提问由后端创建）；
+// 会话与章节绑定——切章节时拉该章最近会话续聊，跨章节串话从机制上消除
+const chatSessionId = ref(null)
+const chatSessions = ref([])
+const chatHistoryOpen = ref(false)
 
 function onPickChatImage(e) {
   const file = e.target.files?.[0]
@@ -930,10 +1003,13 @@ async function askChat(preset) {
   chatImage.value = ''
   nextTick(autoGrowInput)
   chatLoading.value = true
-  const idx = chatMessages.value.push({ role: 'assistant', content: '', streaming: true }) - 1
+  const idx = chatMessages.value.push({ role: 'assistant', content: '', streaming: true, mid: null, feedback: 0 }) - 1
   scrollChatToBottom()
   // 参考来源缓冲：meta 事件先于/穿插 delta 到达，正文结束后统一挂到消息上
   let pendingCited = []
+  let pendingRewritten = ''
+  let droppedLevel = 0
+  let doneRecordId = null
   try {
     const token = localStorage.getItem('access_token')
     const resp = await fetch('/api/qa-records/ask-stream/', {
@@ -942,7 +1018,13 @@ async function askChat(preset) {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ course: courseId.value, catalog: current.value?.id, question: text, session: chatSessionId, ...(img ? { image: img } : {}) }),
+      body: JSON.stringify({
+        course: courseId.value,
+        catalog: current.value?.id,
+        question: text,
+        ...(chatSessionId.value ? { session_id: chatSessionId.value } : {}),
+        ...(img ? { image: img } : {}),
+      }),
     })
     if (!resp.ok || !resp.body) throw new Error('bad response')
 
@@ -974,9 +1056,16 @@ async function askChat(preset) {
         try { evt = JSON.parse(jsonStr) } catch { return }
         if (evt.type === 'meta') {
           pendingCited = evt.cited || []
+          pendingRewritten = evt.rewritten_question || ''
+          adoptChatSessionId(evt.session_id, text)
+        } else if (evt.type === 'history_dropped') {
+          // 上下文超限已分级降级：记录级别，正文结束后提示
+          droppedLevel = evt.level || 4
         } else if (evt.type === 'delta') {
           pendingText += evt.text || ''
           if (!flushTimer) flushTimer = setTimeout(flushAnswer, 60)
+        } else if (evt.type === 'done') {
+          doneRecordId = evt.record_id || null
         } else if (evt.type === 'error') {
           pendingText += `\n[出错] ${evt.message || '生成失败'}`
         }
@@ -988,10 +1077,32 @@ async function askChat(preset) {
     chatMessages.value[idx].content = chatMessages.value[idx].content || '抱歉，AI 助教暂时没有响应，请稍后再试。'
   } finally {
     chatMessages.value[idx].streaming = false
+    chatMessages.value[idx].mid = doneRecordId
     // 参考来源在正文输出完（或出错收尾）后才挂到消息上，避免流式期间闪烁
     chatMessages.value[idx].cited_chunks = pendingCited
+    chatMessages.value[idx].rewritten = pendingRewritten
+    chatMessages.value[idx].historyDropped = droppedLevel
     chatLoading.value = false
     scrollChatToBottom()
+  }
+}
+
+// 新会话首次提问：meta 带回后端创建的 session_id，认领为当前会话并插入历史列表
+function adoptChatSessionId(sessionId, firstQuestion) {
+  if (!sessionId || chatSessionId.value === sessionId) return
+  const isNew = chatSessionId.value === null
+  chatSessionId.value = sessionId
+  if (isNew) {
+    chatSessions.value = [
+      {
+        id: sessionId,
+        title: firstQuestion.slice(0, 30),
+        record_count: 0,
+        last_message_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      ...chatSessions.value,
+    ]
   }
 }
 
@@ -1009,7 +1120,22 @@ function scrollChatIfNearBottom() {
   if (el.scrollHeight - el.scrollTop - el.clientHeight < 120) scrollChatToBottom()
 }
 
-const renderMd = renderAiMarkdown
+const renderMd = renderQaAnswer
+
+// 回答中 [N] 引用上标的点击处理：滚动到本消息参考来源并闪烁高亮对应编号
+const flashNums = ref(new Set())
+let flashTimer = null
+function onChatAreaClick(e) {
+  const sup = e.target.closest('.cite-sup')
+  if (!sup) return
+  const n = Number(sup.dataset.cite)
+  if (!n) return
+  const sourcesEl = sup.closest('.chat-row')?.querySelector('.cited-sources')
+  flashNums.value = new Set([n])
+  if (flashTimer) clearTimeout(flashTimer)
+  flashTimer = setTimeout(() => { flashNums.value = new Set() }, 1600)
+  sourcesEl?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+}
 
 function fileUrl(file) {
   return file || '#'
@@ -2305,25 +2431,99 @@ onUnmounted(() => {
   margin-bottom: 0;
 }
 
-.chat-sources {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px dashed #e2e8f0;
+.chat-note {
+  margin-top: 6px;
+  color: #94a3b8;
+  font-size: 11.5px;
+  line-height: 1.5;
 }
 
-.chat-sources-title {
+.chat-md :deep(.cite-sup) {
+  color: #2563eb;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0 1px;
+}
+
+.chat-md :deep(.cite-sup):hover {
+  text-decoration: underline;
+}
+
+.dock-mini-btn {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.dock-mini-btn:hover {
+  background: var(--gray-100, #f1f5f9);
+  color: #2563eb;
+}
+
+.chat-history-panel {
+  max-height: 180px;
+  overflow-y: auto;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 6px;
+}
+
+.chat-history-item {
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin-bottom: 6px;
-  color: #94a3b8;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.chat-history-item:hover {
+  background: var(--gray-100, #f1f5f9);
+}
+
+.chat-history-item.active {
+  background: var(--primary-50, #eff6ff);
+}
+
+.chat-history-q {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #334155;
   font-size: 12px;
 }
 
-.chat-source-tags {
+.chat-history-n {
+  flex-shrink: 0;
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.chat-history-empty {
+  padding: 14px 0;
+  color: #94a3b8;
+  font-size: 12px;
+  text-align: center;
+}
+
+.chat-actions {
+  margin-top: 6px;
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  justify-content: flex-end;
 }
 
 @media (max-width: 1024px) {

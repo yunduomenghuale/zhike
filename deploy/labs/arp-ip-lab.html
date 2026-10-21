@@ -1624,8 +1624,6 @@
     }
 
     async function submitExperiment() {
-        if (labScheduleState === 'not_started') { alert('实验未开放，不能提交报告'); return; }
-        if (labScheduleState === 'ended') { alert('实验已结束，不能再提交报告'); return; }
         if (demoMode || demoUsed) {
             consolePrint('[提示] 演示模式下无法提交实验报告，请手动完成实验后提交换');
             return;
@@ -1696,56 +1694,6 @@
 
     <script>
     (async function() {
-    var THIS_LAB_ID = 'arp-ip-lab';
-    var user = JSON.parse(localStorage.getItem('currentUser') || '{}');
-    var schedules = {};
-    try {
-        var res = await fetch(API_BASE + '/api/lab-schedules', {headers:{'Authorization':'Bearer '+(localStorage.getItem('authToken')||'')}});
-        var data = await res.json();
-        schedules = data.schedules || {};
-    } catch(e) {}
-    var s = schedules[THIS_LAB_ID] || {};
-    var now = new Date().getTime();
-    window.labScheduleState = 'not_started';
-    if (s.alwaysOpen) window.labScheduleState = 'open';
-    else if (s.startTime && now < new Date(s.startTime).getTime()) window.labScheduleState = 'not_started';
-    else if (s.endTime && now > new Date(s.endTime).getTime()) window.labScheduleState = 'ended';
-    else if (s.startTime || s.endTime) window.labScheduleState = 'open';
-
-    if (user.type === 'student' && labScheduleState === 'not_started') {
-        var startStr = s.startTime ? new Date(s.startTime).toLocaleString('zh-CN') : '';
-        var endStr = s.endTime ? new Date(s.endTime).toLocaleString('zh-CN') : '';
-        var overlay = document.createElement('div');
-        overlay.id = 'labScheduleOverlay';
-        overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:99999;display:flex;align-items:center;justify-content:center;';
-        overlay.innerHTML = '<div style="background:white;border-radius:20px;padding:40px 50px;text-align:center;max-width:500px;box-shadow:0 20px 60px rgba(0,0,0,0.3);">' +
-            '<div style="font-size:60px;margin-bottom:20px;">⏰</div>' +
-            '<h2 style="color:#e74c3c;margin-bottom:15px;">实验未开放</h2>' +
-            '<p style="color:#666;font-size:16px;line-height:1.8;">该实验尚未到开放时间，暂时无法操作</p>' +
-            (startStr ? '<p style="color:#333;font-size:15px;margin-top:10px;">开放时间：' + startStr + ' — ' + endStr + '</p>' : '') +
-            '<button onclick="window.location.href=\'../index.html\'" style="margin-top:25px;padding:12px 40px;background:linear-gradient(135deg,#4a90e2,#357abd);color:white;border:none;border-radius:10px;font-size:16px;cursor:pointer;transition:all 0.3s;">返回首页</button>' +
-            '</div>';
-        document.body.appendChild(overlay);
-        var cmdInput = document.getElementById('commandInput');
-        if (cmdInput) cmdInput.disabled = true;
-        var demoBtn = document.querySelector('.btn-demo');
-        if (demoBtn) demoBtn.disabled = true;
-        var submitBtn = document.querySelector('.btn-submit');
-        if (submitBtn) submitBtn.disabled = true;
-    } else if (user.type === 'student' && labScheduleState === 'ended') {
-        var submitBtn2 = document.querySelector('.btn-submit');
-        if (submitBtn2) {
-            submitBtn2.disabled = true;
-            submitBtn2.title = '实验已结束，不能再提交报告';
-            submitBtn2.style.opacity = '0.5';
-            submitBtn2.style.cursor = 'not-allowed';
-        }
-        var banner = document.createElement('div');
-        banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:linear-gradient(135deg,#f39c12,#e67e22);color:white;text-align:center;padding:12px;font-size:15px;z-index:9998;box-shadow:0 -2px 10px rgba(0,0,0,0.2);';
-        banner.innerHTML = '⚠️ 实验已结束，您可以查看实验内容，但不能再提交实验报告';
-        document.body.appendChild(banner);
-        document.body.style.paddingBottom = '50px';
-    }
 
     function toggleHintPanel() {
         var panel = document.getElementById('floatHintPanel');

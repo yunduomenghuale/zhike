@@ -51,16 +51,19 @@
           />
         </div>
         <div class="side-list">
-          <button
+          <div
             v-for="s in sessionItems"
             :key="s.id"
             class="side-item"
             :class="{ active: s.id === viewSessionKey }"
             @click="switchSession(s.id)"
           >
-            <span class="side-item-q">{{ s.title }}</span>
-            <span class="side-item-time">{{ s.count }} 条对话 · {{ fmtSideTime(s.time) }}</span>
-          </button>
+            <span class="side-item-q">{{ s.title || '新会话' }}</span>
+            <span class="side-item-time">{{ s.record_count }} 条对话 · {{ fmtSideTime(s.last_message_at || s.updated_at) }}</span>
+            <button class="side-item-del" title="删除会话" @click="removeSession(s, $event)">
+              <el-icon :size="12"><Close /></el-icon>
+            </button>
+          </div>
           <div v-if="!sessionItems.length" class="side-empty">
             {{ historyKeyword ? '没有匹配的会话' : '暂无历史会话' }}
           </div>
@@ -87,7 +90,7 @@
           </div>
         </div>
 
-        <div v-for="(m, i) in filteredMessages" :key="i" class="qa-item">
+        <div v-for="(m, i) in filteredMessages" :key="i" class="qa-item" @click="onAnswerAreaClick">
           <div class="message question">
             <div class="message-content">
               <div class="bubble question-bubble" :class="{ bare: m.imageOnly }">
@@ -104,22 +107,11 @@
                 <div v-else class="answer-thinking">
                   <el-icon class="is-loading" :size="15"><Loading /></el-icon> 正在检索课程资料…
                 </div>
-                <div v-if="m.cited_chunks?.length" class="sources">
-                  <div class="sources-title">
-                    <el-icon><Collection /></el-icon> 参考来源
-                  </div>
-                  <div class="source-tags">
-                    <el-tag
-                      v-for="(g, gi) in groupCitedSources(m.cited_chunks)"
-                      :key="gi"
-                      size="small"
-                      effect="plain"
-                      type="info"
-                      round
-                    >
-                      {{ citedSourceLabel(g) }}
-                    </el-tag>
-                  </div>
+                <div v-if="m.historyDropped" class="qa-note">对话较长，已省略部分早期内容</div>
+                <div v-if="m.rewritten && !m.streaming" class="qa-note">已按上下文理解检索：{{ m.rewritten }}</div>
+                <CitedSources v-if="m.cited_chunks?.length" :cited="m.cited_chunks" :highlight="flashNums" />
+                <div v-if="!m.streaming && m.answer" class="qa-actions">
+                  <QaFeedback :record-id="m.mid" v-model="m.feedback" />
                 </div>
               </div>
             </div>
@@ -172,21 +164,34 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
-  ChatDotRound, MagicStick, Loading, Promotion, Picture, Close, Collection,
+  ChatDotRound, MagicStick, Loading, Promotion, Picture, Close,
   Search, Clock, Plus,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { genUid } from '@/utils/uid'
-import { renderAiMarkdown } from '@/utils/markdown'
-import { groupCitedSources, citedSourceLabel } from '@/utils/cited-sources'
+import { renderQaAnswer } from '@/utils/markdown'
+import CitedSources from '@/components/qa/CitedSources.vue'
+import QaFeedback from '@/components/qa/QaFeedback.vue'
 import { listClasses } from '@/api/classroom'
-import { listQaRecords } from '@/api/knowledge'
-import { useUserStore } from '@/store/user'
+import { listQaSessions, listQaSessionRecords, deleteQaSession } from '@/api/knowledge'
 
-const renderMd = renderAiMarkdown
+const renderMd = renderQaAnswer
+
+// 回答中 [N] 引用上标的点击处理：滚动到本消息参考来源并闪烁高亮对应编号
+const flashNums = ref(new Set())
+let flashTimer = null
+function onAnswerAreaClick(e) {
+  const sup = e.target.closest('.cite-sup')
+  if (!sup) return
+  const n = Number(sup.dataset.cite)
+  if (!n) return
+  const sourcesEl = sup.closest('.qa-item')?.querySelector('.cited-sources')
+  flashNums.value = new Set([n])
+  if (flashTimer) clearTimeout(flashTimer)
+  flashTimer = setTimeout(() => { flashNums.value = new Set() }, 1600)
+  sourcesEl?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+}
 
 const route = useRoute()
-const userStore = useUserStore()
 const fixedCourseId = computed(() => Number(route.params.id) || null)
 
 const courses = ref([])
@@ -200,54 +205,56 @@ const fileInputRef = ref(null)
 const historyOpen = ref(false)
 const historyKeyword = ref('')
 
-// 会话制：records 为全部历史记录，messages 为当前会话消息
-const records = ref([])
-const sessionId = ref(genUid())
-const viewSessionKey = ref(sessionId.value)
-
-function legacyKey(r) {
-  return r.session || `legacy-${r.mid}`
-}
+// 会话制：sessions 来自 QASession API（后端持久化，含历史回填会话）；
+// currentSessionId 为当前会话（null = 新会话，首次提问时由后端创建）
+const sessions = ref([])
+const currentSessionId = ref(null)
+const viewSessionKey = ref(null)
 
 const sessionItems = computed(() => {
   const kw = historyKeyword.value.trim().toLowerCase()
-  const groups = new Map()
-  for (const r of records.value) {
-    const key = legacyKey(r)
-    let g = groups.get(key)
-    if (!g) {
-      g = { id: key, title: r.question, time: r.created_at, first: r.created_at, count: 0 }
-      groups.set(key, g)
-    }
-    g.count += 1
-    if (new Date(r.created_at) < new Date(g.first)) {
-      g.first = r.created_at
-      g.title = r.question
-    }
-    if (new Date(r.created_at) > new Date(g.time)) g.time = r.created_at
-  }
-  let list = [...groups.values()].sort((a, b) => new Date(b.time) - new Date(a.time))
-  if (kw) list = list.filter((g) => g.title.toLowerCase().includes(kw))
+  let list = sessions.value
+  if (kw) list = list.filter((s) => (s.title || '').toLowerCase().includes(kw))
   return list
 })
 
 function newChat() {
-  sessionId.value = genUid()
-  viewSessionKey.value = sessionId.value
+  currentSessionId.value = null
+  viewSessionKey.value = null
   messages.value = []
   historyOpen.value = false
 }
 
-function switchSession(key) {
+async function switchSession(id) {
   historyOpen.value = false
-  viewSessionKey.value = key
-  const rec = records.value.find((r) => legacyKey(r) === key)
-  sessionId.value = rec?.session || genUid()
-  messages.value = records.value
-    .filter((r) => legacyKey(r) === key)
-    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
-    .map((r) => ({ ...r }))
+  viewSessionKey.value = id
+  currentSessionId.value = id
+  try {
+    const rows = await listQaSessionRecords(id)
+    messages.value = (rows.results ?? rows).map((r) => ({
+      mid: r.id,
+      question: r.question,
+      answer: r.answer,
+      cited_chunks: r.cited_chunks,
+      feedback: r.feedback || 0,
+      rewritten: r.rewritten_question || '',
+      created_at: r.created_at,
+    }))
+  } catch {
+    messages.value = []
+  }
   scrollToBottom()
+}
+
+async function removeSession(s, e) {
+  e.stopPropagation()
+  try {
+    await deleteQaSession(s.id)
+  } catch {
+    return ElMessage.error('删除会话失败')
+  }
+  sessions.value = sessions.value.filter((x) => x.id !== s.id)
+  if (currentSessionId.value === s.id) newChat()
 }
 
 function fmtSideTime(t) {
@@ -336,34 +343,27 @@ async function loadCourses() {
   courses.value = [...map.values()]
   if (fixedCourseId.value) {
     courseId.value = fixedCourseId.value
-    loadHistory()
+    loadSessions()
   } else if (courses.value.length) {
     courseId.value = courses.value[0].id
-    loadHistory()
+    loadSessions()
   }
 }
 
-async function loadHistory() {
+async function loadSessions() {
   if (!courseId.value) return
-  const params = { course: courseId.value, page_size: 100 }
-  if (userStore.profile?.id) params.student = userStore.profile.id
-  const data = await listQaRecords(params)
-  // 排除章节面板内的提问（带 catalog 的记录）；聊天区初始为空白新会话
-  records.value = (data.results ?? data)
-    .filter((r) => !r.catalog)
-    .map((r) => ({
-      mid: r.id,
-      session: r.session || '',
-      question: r.question,
-      answer: r.answer,
-      cited_chunks: r.cited_chunks,
-      created_at: r.created_at,
-    }))
+  try {
+    // catalog 空串 = 只看课程级会话（章节会话在章节讲解 Dock 内提问）
+    const data = await listQaSessions({ course: courseId.value, catalog: '' })
+    sessions.value = data.results ?? data
+  } catch {
+    sessions.value = []
+  }
 }
 
 function onCourseChange() {
   newChat()
-  loadHistory()
+  loadSessions()
 }
 
 async function ask(preset) {
@@ -376,19 +376,17 @@ async function ask(preset) {
   question.value = ''
   imageData.value = ''
   const msg = {
-    mid: `n${Date.now()}`,
-    session: sessionId.value,
+    mid: null, // done 事件带回 record_id 后填充（反馈按钮依赖）
     question: text,
     image: img,
     imageOnly: !q,
     answer: '',
     cited_chunks: [],
+    feedback: 0,
     created_at: new Date().toISOString(),
     streaming: true,
   }
   messages.value.push(msg)
-  // 同步进 records，历史面板的会话分组实时更新
-  records.value.push({ ...msg })
   scrollToBottom()
   // 关键：必须经响应式数组写入才会触发 Vue 重渲染——直接改 msg 原始对象
   // （msg.answer +=）绕过代理，页面上只会攒到最后一次性显示（假流式）
@@ -398,6 +396,9 @@ async function ask(preset) {
   }
   // 参考来源先存不显示：正文流式输出完后（finally）再一次性展示
   let pendingCited = []
+  let pendingRewritten = ''
+  let droppedLevel = 0
+  let doneRecordId = null
   try {
     const token = localStorage.getItem('access_token')
     const resp = await fetch('/api/qa-records/ask-stream/', {
@@ -409,7 +410,7 @@ async function ask(preset) {
       body: JSON.stringify({
         course: courseId.value,
         question: text,
-        session: sessionId.value,
+        ...(currentSessionId.value ? { session_id: currentSessionId.value } : {}),
         ...(img ? { image: img } : {}),
       }),
     })
@@ -445,9 +446,16 @@ async function ask(preset) {
         try { evt = JSON.parse(jsonStr) } catch { return }
         if (evt.type === 'meta') {
           pendingCited = evt.cited || []
+          pendingRewritten = evt.rewritten_question || ''
+          adoptSessionId(evt.session_id, text)
+        } else if (evt.type === 'history_dropped') {
+          // 上下文超限已分级降级：记录级别，正文结束后提示
+          droppedLevel = evt.level || 4
         } else if (evt.type === 'delta') {
           pendingText += evt.text || ''
           if (!flushTimer) flushTimer = setTimeout(flushAnswer, 60)
+        } else if (evt.type === 'done') {
+          doneRecordId = evt.record_id || null
         } else if (evt.type === 'error') {
           pendingText += `\n[出错] ${evt.message || '生成失败'}`
         }
@@ -464,16 +472,36 @@ async function ask(preset) {
     }
   } finally {
     // 正文已输出完（或出错收尾），此时才展示参考来源并移除流式光标
-    patchMsg({ cited_chunks: pendingCited, streaming: false })
+    patchMsg({ mid: doneRecordId, cited_chunks: pendingCited, streaming: false, rewritten: pendingRewritten, historyDropped: droppedLevel })
     asking.value = false
     scrollToBottom()
+  }
+}
+
+// 新会话首次提问：meta 带回后端创建的 session_id，认领为当前会话并插入历史面板
+function adoptSessionId(sessionId, firstQuestion) {
+  if (!sessionId || currentSessionId.value === sessionId) return
+  const isNew = currentSessionId.value === null
+  currentSessionId.value = sessionId
+  viewSessionKey.value = sessionId
+  if (isNew) {
+    sessions.value = [
+      {
+        id: sessionId,
+        title: firstQuestion.slice(0, 30),
+        record_count: 0,
+        last_message_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      ...sessions.value,
+    ]
   }
 }
 
 watch(fixedCourseId, (id) => {
   if (!id) return
   courseId.value = id
-  loadHistory()
+  loadSessions()
 })
 
 onMounted(loadCourses)
@@ -681,6 +709,7 @@ onMounted(loadCourses)
 }
 
 .side-item {
+  position: relative;
   display: grid;
   gap: 4px;
   padding: 9px 10px;
@@ -690,6 +719,30 @@ onMounted(loadCourses)
   text-align: left;
   cursor: pointer;
   transition: background 0.15s ease;
+}
+
+.side-item-del {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 18px;
+  height: 18px;
+  display: none;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--gray-400);
+  cursor: pointer;
+}
+
+.side-item:hover .side-item-del {
+  display: grid;
+}
+
+.side-item-del:hover {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--danger);
 }
 
 .side-item:hover {
@@ -898,25 +951,28 @@ onMounted(loadCourses)
   font-size: 13px;
 }
 
-.sources {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px dashed var(--gray-200);
-}
-
-.sources-title {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-bottom: 8px;
-  color: var(--gray-500);
+.qa-note {
+  margin-top: 8px;
+  color: var(--gray-400);
   font-size: 12px;
+  line-height: 1.5;
 }
 
-.source-tags {
+.qa-actions {
+  margin-top: 8px;
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  justify-content: flex-end;
+}
+
+.answer-md :deep(.cite-sup) {
+  color: var(--primary-600);
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0 1px;
+}
+
+.answer-md :deep(.cite-sup):hover {
+  text-decoration: underline;
 }
 
 .input-dock {

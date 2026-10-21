@@ -46,6 +46,7 @@ class Command(BaseCommand):
             help="JSON 文件：[\"问题1\", ...] 或 [{\"question\": \"...\"}, ...]",
         )
         parser.add_argument("--top-k", type=int, default=5, help="检索片段数（与线上一致，默认 5）")
+        parser.add_argument("--catalog", type=int, default=0, help="章节 ID：跑章节级用例（候选池与线上章节提问一致）")
         parser.add_argument("--out", type=str, default="", help="报告输出路径（默认 eval_reports/ 下按时间命名）")
 
     # ------------------------------------------------------------------ 问题来源
@@ -103,26 +104,31 @@ class Command(BaseCommand):
         return questions
 
     # ------------------------------------------------------------------ 跑问答，收集样本
-    def _collect_samples(self, course_id: int, questions: list[str], top_k: int):
-        from apps.ai.providers.factory import get_provider
-        from apps.ai.services import knowledge_qa
-        from apps.ai.vectorstore import search_chunks
+    def _collect_samples(self, course_id: int, questions: list[str], top_k: int, catalog_id=None):
+        from apps.ai.services import _search_relevant_chunks, knowledge_qa
 
-        provider = get_provider("embed")
         samples = []
         for i, question in enumerate(questions, 1):
             self.stdout.write(f"[{i}/{len(questions)}] {question[:40]}")
-            # 检索：与线上 _gather_course_context 的知识库检索部分保持一致
+            # 检索：与线上同一条编排（_search_relevant_chunks：向量召回+重排+阈值
+            # 过滤）。旧版用裸 search_chunks 纯向量 top_k，重排上线后评估的
+            # context_precision 系统性偏低，已对齐（2026-10-21）。
             contexts: list[str] = []
             try:
                 with ai_scene(AICallLog.Scene.RAG_EVAL):
-                    query_vec = provider.embed([question])[0]
-                contexts = [c.content for c, score in search_chunks(course_id, query_vec, top_k=top_k) if score > 0]
+                    contexts = [
+                        unit.text
+                        for unit in _search_relevant_chunks(
+                            course_id, question, catalog_id=catalog_id, top_k=top_k
+                        )
+                    ]
             except Exception as exc:
                 self.stdout.write(self.style.WARNING(f"  检索失败：{exc}"))
             # 生成：直接调线上同一条问答链路
             try:
-                answer, _cited = knowledge_qa(course_id=course_id, question=question)
+                answer, _cited, _rewritten, _snapshot = knowledge_qa(
+                    course_id=course_id, question=question, catalog_id=catalog_id
+                )
             except Exception as exc:
                 self.stdout.write(self.style.WARNING(f"  问答失败，跳过：{exc}"))
                 continue
@@ -205,9 +211,19 @@ class Command(BaseCommand):
 
         questions = self._load_questions(course_id, options)
         self.stdout.write(f"共 {len(questions)} 个测试问题，开始跑问答链路…")
-        samples = self._collect_samples(course_id, questions, options["top_k"])
+        samples = self._collect_samples(
+            course_id, questions, options["top_k"], catalog_id=options["catalog"] or None
+        )
         if not samples:
             raise CommandError("没有成功采集到任何问答样本")
+        empty_retrieval = sum(1 for s in samples if not s["contexts"])
+        retrieval_empty_rate = round(empty_retrieval / len(samples), 4)
+        if empty_retrieval:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"检索为空 {empty_retrieval}/{len(samples)}（{retrieval_empty_rate:.0%}）——这些问题只有通识回答"
+                )
+            )
         if len(samples) < 5:
             self.stdout.write(self.style.WARNING("有效样本少于 5 条，结果仅适合链路调试，不代表整体 RAG 质量"))
 
@@ -249,8 +265,10 @@ class Command(BaseCommand):
             json.dumps(
                 {
                     "course_id": course_id,
+                    "catalog_id": options["catalog"] or None,
                     "judge_model": os.environ.get("KIMI_MODEL", "kimi-k3"),
                     "sample_count": len(samples),
+                    "retrieval_empty_rate": retrieval_empty_rate,
                     "means": means,
                     "samples": df.to_dict(orient="records"),
                 },

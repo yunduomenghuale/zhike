@@ -2,7 +2,7 @@ from pathlib import Path
 
 from rest_framework import serializers
 
-from .models import KnowledgeChunk, Material, QARecord
+from .models import KnowledgeChunk, Material, QARecord, QASession
 
 
 class MaterialSerializer(serializers.ModelSerializer):
@@ -58,6 +58,23 @@ class QARecordSerializer(serializers.ModelSerializer):
         model = QARecord
         fields = [
             "id", "course", "classroom", "catalog", "session", "student", "student_name",
-            "question", "answer", "cited_chunks", "created_at",
+            "question", "answer", "cited_chunks", "rewritten_question", "feedback", "created_at",
         ]
-        read_only_fields = ["student", "answer", "cited_chunks"]
+        read_only_fields = ["student", "answer", "cited_chunks", "rewritten_question", "feedback"]
+
+
+class QASessionSerializer(serializers.ModelSerializer):
+    """问答会话列表项（record_count / last_message_at 由视图 annotate）。"""
+
+    record_count = serializers.IntegerField(read_only=True, default=0)
+    last_message_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    catalog_title = serializers.CharField(source="catalog.title", read_only=True, default="")
+
+    class Meta:
+        model = QASession
+        fields = [
+            "id", "course", "catalog", "catalog_title", "title", "status",
+            "record_count", "last_message_at", "created_at", "updated_at",
+        ]
+        # title/status 允许经 PATCH 修改（改名/归档）；创建时 title 由后端生成
+        read_only_fields = ["record_count", "last_message_at"]

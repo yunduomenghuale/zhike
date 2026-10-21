@@ -42,3 +42,14 @@ export const askQuestion = (data) => request.post('/qa-records/ask/', data)
 // 当前对话模型是否支持图片（多模态）：不支持时前端隐藏图片上传入口，
 // 避免用户发送图片后被接口拒绝；拉取失败按不支持处理（fail-closed）
 export const getQaVisionCapability = () => request.get('/qa-records/vision-capability/')
+
+// 问答反馈：value 1 有用 / -1 无用 / 0 取消（幂等覆盖）
+export const submitQaFeedback = (id, value) => request.post(`/qa-records/${id}/feedback/`, { value })
+
+// ===== 问答会话（QASession）=====
+// params: { course, catalog?（空字符串=只看课程级）, status? }
+export const listQaSessions = (params) => request.get('/qa-sessions/', { params })
+export const createQaSession = (data) => request.post('/qa-sessions/', data)
+export const updateQaSession = (id, data) => request.patch(`/qa-sessions/${id}/`, data)
+export const deleteQaSession = (id) => request.delete(`/qa-sessions/${id}/`)
+export const listQaSessionRecords = (id) => request.get(`/qa-sessions/${id}/records/`)

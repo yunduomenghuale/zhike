@@ -25,20 +25,31 @@ def search_chunks(
     top_k: int = 5,
     *,
     student_access: bool = False,
-    classroom_id=None,
+    classroom_ids=None,
     catalog_id=None,
 ):
     """返回按相似度降序的 (chunk, score) 列表。
 
-    片段来源有二：教辅资料（material）与课件 PPT（ppt，每页一片段）。
-    旧版本课件（is_active=False）的片段不参与检索——上传新版本时已随之删除，
-    这里再兜底一道，防止历史数据残留。
+    片段来源有三：教辅资料（material）、课件 PPT（ppt，每页一片段）、
+    逐页讲解稿（script，每页一片段）。旧版本课件（is_active=False）的片段
+    不参与检索——上传新版本时已随之删除，这里再兜底一道。
 
-    传入 catalog_id 时只检索该章节名下的片段（资料挂该章节 / 课件挂该章节）：
-    「这一章的重点是什么」类章节语义问题，候选池不应混入其他章节与未挂章节的
-    资料（如遗留的测试上传）——重排只能压分，挡不住语义沾边的跨章节内容。
-    未挂章节的片段不参与章节检索；调用方在章节无片段时可自行退回全课程。
+    章节候选池（传 catalog_id 时）= 挂该章节的片段 + 未挂章节的通用资料
+    片段（catalog 为空的 material 片段，如教材电子版/考纲——这类资料本就
+    不该强制挂章节，2026-10-21 起纳入章节候选池；过滤走 chunk 冗余的
+    catalog 字段，不再 join 来源表）。调用方在章节无片段时可自行退回全课程。
+
+    classroom_ids：学生可见的班级集合（在读班级，由调用方解析）。学生检索
+    资料片段时，「面向全课程的资料（classroom 为空）+ 定向到其在读班级的
+    资料」均可见。
+
+    学生可见性按来源分别判定：资料要求 qa_open + 班级可见；课件要求当前
+    版本 + 章节已发布；讲稿要求视频已发布 + 章节已发布。
+
+    回滚开关：settings.AI_QA_DISABLE_SCRIPT_SOURCE 为真时讲稿片段不参与
+    检索（讲稿入检索体系的一键退回，退回后 QA 侧走原文限量兜底）。
     """
+    from django.conf import settings
     from django.db.models import Q
 
     from apps.knowledge.models import KnowledgeChunk
@@ -46,30 +57,42 @@ def search_chunks(
     chunks = (
         KnowledgeChunk.objects.filter(course_id=course_id)
         .exclude(embedding=[])
-        # 只保留资料片段与当前启用版本课件的片段
+        # 只保留资料/讲稿片段与当前启用版本课件的片段
         .filter(Q(ppt__isnull=True) | Q(ppt__is_active=True))
-        # 引用展示要取 material.file_name / material.catalog.title /
-        # ppt.file_name / ppt.catalog.title，一次带出避免 N+1
-        .select_related("material", "material__catalog", "ppt", "ppt__catalog")
+        # 引用展示要取来源名与章节标题，一次带出避免 N+1
+        .select_related(
+            "material", "material__catalog",
+            "ppt", "ppt__catalog",
+            "video", "video__catalog",
+        )
     )
+    if getattr(settings, "AI_QA_DISABLE_SCRIPT_SOURCE", False):
+        chunks = chunks.exclude(source=KnowledgeChunk.Source.SCRIPT)
     if catalog_id:
-        # 章节语义问题：资料/课件任一来源挂在该章节下即入选（二者互斥，不会重复）
+        # 挂该章节的片段 + 未挂章节的通用资料片段
         chunks = chunks.filter(
-            Q(material__catalog_id=catalog_id) | Q(ppt__catalog_id=catalog_id)
+            Q(catalog_id=catalog_id)
+            | Q(catalog__isnull=True, source=KnowledgeChunk.Source.MATERIAL)
         )
     if student_access:
-        # 资料片段：qa_open 开启且班级可见；课件片段：已发布章节的当前版本
-        material_q = Q(material__isnull=False, material__qa_open=True)
+        material_q = Q(source=KnowledgeChunk.Source.MATERIAL, material__qa_open=True)
         ppt_q = Q(
-            ppt__isnull=False,
+            source=KnowledgeChunk.Source.PPT,
             ppt__is_active=True,
             ppt__catalog__is_published=True,
         )
-        if classroom_id:
-            material_q &= Q(material__classroom__isnull=True) | Q(material__classroom_id=classroom_id)
+        script_q = Q(
+            source=KnowledgeChunk.Source.SCRIPT,
+            video__is_published=True,
+            video__catalog__is_published=True,
+        )
+        if classroom_ids:
+            material_q &= Q(material__classroom__isnull=True) | Q(
+                material__classroom_id__in=list(classroom_ids)
+            )
         else:
             material_q &= Q(material__classroom__isnull=True)
-        chunks = chunks.filter(material_q | ppt_q)
+        chunks = chunks.filter(material_q | ppt_q | script_q)
     scored = [(c, cosine(query_vec, c.embedding)) for c in chunks]
     scored.sort(key=lambda x: x[1], reverse=True)
     return scored[:top_k]

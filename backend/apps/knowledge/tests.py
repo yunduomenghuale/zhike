@@ -361,7 +361,7 @@ class RebuildVectorsTests(TestCase):
 
     def test_empty_lists(self):
         report = rebuild_vectors([], [])
-        self.assertEqual(report["error"], "没有需要重建的资料或课件")
+        self.assertEqual(report["error"], "没有需要重建的资料、课件或讲稿")
         self.assertEqual(report["total"], 0)
         self.assertEqual(report["ppts"]["total"], 0)
 
@@ -463,7 +463,7 @@ class RebuildVectorsAPITests(TestCase):
             "/api/materials/rebuild-vectors/", {"course": self.other_course.id}, format="json"
         )
         self.assertEqual(resp.status_code, 400)
-        self.assertIn("没有需要重建的资料或课件", resp.data["message"])
+        self.assertIn("没有需要重建的资料、课件或讲稿", resp.data["message"])
 
     def test_rebuild_without_course_rejected(self):
         resp = self.client.post("/api/materials/rebuild-vectors/", {}, format="json")

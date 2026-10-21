@@ -243,7 +243,7 @@ class AccessControlTests(PlatformFixtureMixin, APITestCase):
             self.course1.id,
             [1.0, 0.0],
             student_access=True,
-            classroom_id=self.class1.id,
+            classroom_ids=[self.class1.id],
         )
 
         self.assertEqual([chunk.id for chunk, _ in results], [visible.id])

@@ -6,12 +6,13 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from django.conf import settings
 
-from .calllog import copy_call_context, run_in_context, scene_decorator
+from .calllog import ai_scene, copy_call_context, run_in_context, scene_decorator
 from .models import AICallLog
 from .providers.factory import get_provider
 from .vectorstore import search_chunks
@@ -615,10 +616,74 @@ def synthesize_audio_for_video(video, voice: str | None = None, limit: int | Non
     AICallLog.Scene.MATERIAL_EMBED,
     course_getter=lambda args, kwargs: getattr(args[0], "course_id", None),
 )
+def split_text_semantic(raw: str, size: int = 500, overlap: int = 60) -> list[str]:
+    """语义切分：段落优先、句子兜底、相邻片段重叠。
+
+    旧版 500 字符硬切会切断句子、割裂语义，跨片段的答案两边都残缺
+    （2026-10-21 治理）。规则：
+    1. 按换行/空行切段落，顺序聚合到 size 内成片段；
+    2. 单段落超 size：按句末标点（。！？；）断句再聚合，仍超才硬切；
+    3. 相邻片段尾部重叠 overlap 字符，重叠起点落在标点/空白边界，不截断词。
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return []
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n|\n", raw) if p.strip()]
+    sentences: list[str] = []
+    for para in paragraphs:
+        if len(para) <= size:
+            sentences.append(para)
+            continue
+        # 段落超长：断句（保留句末标点）
+        buf = ""
+        for part in re.split(r"(?<=[。！？；!?;])", para):
+            part = part.strip()
+            if not part:
+                continue
+            if len(part) > size:
+                # 单句仍超长：硬切
+                if buf:
+                    sentences.append(buf)
+                    buf = ""
+                sentences.extend(part[i : i + size] for i in range(0, len(part), size))
+            elif buf and len(buf) + len(part) > size:
+                sentences.append(buf)
+                buf = part
+            else:
+                buf = f"{buf}{part}" if buf else part
+        if buf:
+            sentences.append(buf)
+
+    chunks: list[str] = []
+    buf = ""
+    for sent in sentences:
+        if not buf:
+            buf = sent
+        elif len(buf) + len(sent) + 1 <= size:
+            buf = f"{buf}\n{sent}"
+        else:
+            chunks.append(buf)
+            buf = sent
+    if buf:
+        chunks.append(buf)
+
+    if overlap > 0 and len(chunks) > 1:
+        overlapped = [chunks[0]]
+        for i in range(1, len(chunks)):
+            tail = chunks[i - 1][-overlap:]
+            m = re.search(r"[。！？；!?;\n]", tail)
+            if m and m.end() < len(tail):
+                tail = tail[m.end() :]
+            overlapped.append(tail + chunks[i])
+        chunks = overlapped
+    return chunks
+
+
 def ingest_material(material, chunk_size: int = 500) -> int:
     """把资料文本抽取→切分→向量化→写入知识库片段。返回片段数。
 
     文本抽取按文件类型（TXT/PDF/Word/PPT）自动进行；抽取为空时标记解析失败。
+    切分走语义切分（段落优先+句子兜底+重叠），与 rebuild_vectors 口径一致。
     """
     from apps.knowledge.extractor import extract_text
     from apps.knowledge.models import KnowledgeChunk
@@ -632,14 +697,16 @@ def ingest_material(material, chunk_size: int = 500) -> int:
         material.save(update_fields=["parse_status", "updated_at"])
         return 0
 
-    pieces = [raw_text[i : i + chunk_size] for i in range(0, len(raw_text), chunk_size)] or [raw_text]
+    pieces = split_text_semantic(raw_text, size=chunk_size) or [raw_text]
 
     embeddings = provider.embed(pieces)
     material.chunks.all().delete()
     objs = [
         KnowledgeChunk(
+            source=KnowledgeChunk.Source.MATERIAL,
             material=material,
             course_id=material.course_id,
+            catalog_id=material.catalog_id,
             content=piece,
             embedding=emb,
         )
@@ -719,8 +786,10 @@ def ingest_ppt_pages(ppt, on_progress=None) -> int:
 
     objs = [
         KnowledgeChunk(
+            source=KnowledgeChunk.Source.PPT,
             ppt=ppt,
             course_id=ppt.course_id,
+            catalog_id=ppt.catalog_id,
             content=piece,
             page=page_no,
             embedding=emb,
@@ -733,17 +802,156 @@ def ingest_ppt_pages(ppt, on_progress=None) -> int:
     return len(objs)
 
 
+def ingest_video_scripts(video) -> int:
+    """把教学视频的逐页讲解稿向量化写入知识库片段（每页一个片段）。
+
+    讲稿是「最贴近讲课内容」的自然语言材料：入库后与课件/资料同池检索
+    （替代旧版在 _gather_course_context 里无检索全量拼接的做法——课程级
+    提问时讲稿覆盖随机且与已入库 PPT 页内容重复，2026-10-21 治理）。
+    片段文本带 PPT 页标题（讲稿口语化、缺术语，标题利于检索命中）。
+
+    与 ingest_ppt_pages 同款约定：Mock/失败静默返回 0、旧片段保留；
+    全链路 allow_fallback=False；先算后删、事务内替换；调用方负责在
+    讲稿整体就绪（整章生成完成/单页编辑保存）后调用，幂等全量替换。
+    """
+    from django.db import transaction
+
+    from apps.knowledge.models import KnowledgeChunk
+
+    video.refresh_from_db(fields=["scripts"])
+    # PPT 页标题映射：讲稿片段带页标题利于检索（讲稿本身口语化、缺术语）
+    page_titles: dict = {}
+    for pg in (video.ppt.parsed_pages or []) if video.ppt else []:
+        if isinstance(pg, dict) and pg.get("page"):
+            page_titles[int(pg["page"])] = (pg.get("title") or "").strip()
+
+    pieces: list[str] = []
+    page_nos: list = []
+    for s in video.scripts or []:
+        if not isinstance(s, dict):
+            continue
+        text = (s.get("script") or "").strip()
+        if not text:
+            continue
+        page_no = s.get("page") or len(pieces) + 1
+        title = page_titles.get(int(page_no) if page_no else 0, "")
+        pieces.append(f"{title}\n{text}" if title else text)
+        page_nos.append(page_no)
+    if not pieces:
+        return 0
+
+    provider = get_provider("embed")
+    from apps.ai.providers.mock import MockProvider
+
+    if isinstance(provider, MockProvider):
+        return 0
+    embeddings: list = []
+    for start in range(0, len(pieces), EMBED_BATCH_SIZE):
+        batch = pieces[start : start + EMBED_BATCH_SIZE]
+        try:
+            batch_embeddings = provider.embed(batch, allow_fallback=False)
+        except Exception:
+            return 0
+        if len(batch_embeddings) != len(batch) or any(not emb for emb in batch_embeddings):
+            return 0
+        embeddings.extend(batch_embeddings)
+
+    objs = [
+        KnowledgeChunk(
+            source=KnowledgeChunk.Source.SCRIPT,
+            video=video,
+            course_id=video.course_id,
+            catalog_id=video.catalog_id,
+            content=piece,
+            page=page_no,
+            embedding=emb,
+        )
+        for piece, page_no, emb in zip(pieces, page_nos, embeddings)
+    ]
+    with transaction.atomic():
+        video.chunks.all().delete()
+        KnowledgeChunk.objects.bulk_create(objs)
+    return len(objs)
+
+
 # ---------------------------------------------------------------------------
 # 知识库问答（需求 S-K-01/02/04）
 # ---------------------------------------------------------------------------
 QA_SYSTEM_PROMPT = (
-    "你是课程 AI 助教，语气自然、友好、有条理。"
-    "请优先依据下面提供的「课程资料」（课件 PPT、讲解稿、知识库片段）回答学生的问题，答案要简明、分点清晰。"
-    "如果课程资料里没有相关内容，可以结合你的通识知识作答，但要提醒学生这部分未在本课程资料中出现。"
-    "如果学生的问题或图片与本课程明显无关，不要展开详细解答，只需简要说明它与本课程无关，"
-    "并友好地引导学生围绕本课程内容提问。"
-    "遇到寒暄、问候或与课程无关的闲聊，友好、简短地回应即可，不要生硬地拒答。"
+    "你是一位严谨、耐心的课程助教，负责根据教师提供的课程资料回答学生问题。\n"
+    "【回答依据与优先级】\n"
+    "1. 优先依据「课程资料片段」回答；片段按【资料N】编号，标头注明了来源类型、章节与页码。\n"
+    "2. 多个片段内容冲突时以来源优先级仲裁：课件 > 讲解稿 > 课程资料；"
+    "资料与你的通识冲突时以资料为准，并可简要说明。\n"
+    "3. 使用了某资料片段的内容时，在该句末尾标注来源编号，格式如 [1][3]；"
+    "未使用资料的内容不要标注。\n"
+    "4. 资料不足以回答时，明确说明「课程资料中暂未覆盖该内容」，"
+    "再基于通识简要回答并提示学生向教师确认。\n"
+    "【回答风格】\n"
+    "- 循序渐进：先给定义/结论，再展开解释，适当分点。\n"
+    "- 学生追问时结合对话上下文理解指代（如「它」「第五个」），保持连贯。\n"
+    "- 如果学生的问题或图片与本课程明显无关，简要说明并友好地引导其围绕课程提问；"
+    "寒暄问候友好简短回应即可。\n"
 )
+
+# 前端图片提问未配文字时的默认问题文案（与前端两处保持一致）：此时检索无意义——
+# 拿这句去 embed 只会命中噪声片段，跳过 RAG 直接走视觉理解。
+IMAGE_ONLY_DEFAULT_QUESTION = "请描述并解读这张图片"
+
+
+def est_tokens(text: str) -> int:
+    """中英混合 token 保守估算：CJK 约 1.5 字/token，其余约 4 字符/token。
+
+    用于上下文预算管理（历史装填 / RAG 注入）。宁可高估不可低估——低估会在
+    provider 侧才触发上下文超限，走分级降级重试，白白多一次模型调用。
+    """
+    if not text:
+        return 0
+    cjk = sum(
+        1
+        for ch in text
+        if "\u4e00" <= ch <= "\u9fff" or "\u3000" <= ch <= "\u303f" or "\uff00" <= ch <= "\uffef"
+    )
+    return math.ceil(cjk / 1.5 + (len(text) - cjk) / 4)
+
+
+def rewrite_query_for_retrieval(question: str, history: list[dict] | None) -> str:
+    """多轮对话时把最新问题改写成可独立检索的完整问题（查询改写）。
+
+    为什么需要：追问（"第五个详细讲讲""那它呢"）拿原句去 embed 检索必然退化
+    ——历史只进 messages 没进检索，多轮越深入回答越脱离课程资料。改写结果
+    只用于检索（embed/重排 query），不进 messages、不改变学生看到的问题；
+    任何异常（超时/格式异常）静默回退原问题——改写是增强项，不能拖垮主链路。
+    """
+    if not history:
+        return question
+    # 取最近 3 轮（问答对 = 2 条 message）作改写上下文
+    lines = []
+    for msg in history[-6:]:
+        role = "问" if msg.get("role") == "user" else "答"
+        lines.append(f"{role}: {str(msg.get('content') or '')[:200]}")
+    prompt = (
+        "你是检索查询改写器。根据对话历史，把学生的最新问题改写成可独立检索的完整问题："
+        "补全指代（这个/它/第N个/上面说的）、保留专业术语、不回答问题本身。"
+        "只输出改写后的问题，单行，不要解释。\n\n"
+        "对话历史：\n" + "\n".join(lines) + f"\n最新问题：{question}"
+    )
+    try:
+        provider = get_provider("chat")
+        with ai_scene(AICallLog.Scene.QA_REWRITE):
+            rewritten = provider.chat(
+                [{"role": "user", "content": prompt}],
+                temperature=0,
+                enable_thinking=False,
+            )
+    except Exception:
+        return question
+    rewritten = (rewritten or "").strip()
+    rewritten = rewritten.splitlines()[0].strip() if rewritten else ""
+    # 防空输出 / 异常长输出（模型没按指令只给问题时回退原问题）
+    if not rewritten or len(rewritten) > 500:
+        return question
+    return rewritten
 
 
 # ---------------------------------------------------------------------------
@@ -776,16 +984,70 @@ def _resolve_rerank_threshold(model_name: str) -> float:
     return float(getattr(settings, "AI_RERANK_THRESHOLD_DEFAULT", 0.3) or 0.3)
 
 
+class RetrievalUnit:
+    """同页融合后的检索单元：主片段 + （可选）同页另一来源片段。
+
+    讲稿由该页 PPT 生成，同页课件片段与讲稿片段同时命中时，同一知识点会以
+    两种形态重复占用注入单元与引用编号——融合为一个单元（高分者为主片段，
+    另一个内容并入），信息不丢、编号不重复（2026-10-21 讲稿入检索体系引入）。
+    """
+
+    __slots__ = ("chunk", "score", "peer")
+
+    def __init__(self, chunk, score: float, peer=None):
+        self.chunk, self.score, self.peer = chunk, score, peer
+
+    @property
+    def sources(self) -> list[str]:
+        """单元包含的来源类型（主片段在前），如 ["ppt"] / ["ppt", "script"]。"""
+        kinds = [self.chunk.source]
+        if self.peer is not None:
+            kinds.append(self.peer.source)
+        return kinds
+
+    @property
+    def text(self) -> str:
+        if self.peer is None:
+            return self.chunk.content
+        return f"{self.chunk.content}\n{self.peer.content}"
+
+
+def _merge_same_page_units(picked: list[tuple]) -> list[RetrievalUnit]:
+    """把 top_k 结果按 (章节, 页码) 融合同页 ppt+script 片段（见 RetrievalUnit）。
+
+    material 片段无页码概念，不参与融合；融合保持原有降序位置。
+    """
+    by_page: dict[tuple, RetrievalUnit] = {}
+    order: list[RetrievalUnit] = []
+    for chunk, score in picked:
+        key = None
+        if chunk.page and chunk.source in ("ppt", "script"):
+            key = (chunk.catalog_id, chunk.page)
+        if key and key in by_page:
+            unit = by_page[key]
+            # 高分者为主片段（同分保留先到者）
+            if score > unit.score:
+                unit.peer, unit.chunk, unit.score = unit.chunk, chunk, score
+            else:
+                unit.peer = chunk
+            continue
+        unit = RetrievalUnit(chunk, score)
+        if key:
+            by_page[key] = unit
+        order.append(unit)
+    return order
+
+
 def _search_relevant_chunks(
     course_id: int,
     question: str,
     *,
     student_access: bool = False,
-    classroom_id=None,
+    classroom_ids=None,
     catalog_id=None,
     top_k: int = 5,
-) -> list[tuple]:
-    """检索并精排课程知识库片段，返回 [(chunk, score)]（按相关性降序）。
+) -> list[RetrievalUnit]:
+    """检索并精排课程知识库片段，返回 [RetrievalUnit]（按相关性降序，同页已融合）。
 
     为什么需要重排：向量检索是纯余弦相似度，关键词面重合但语义不相关的片段
     也会拿高分——实测「Java 程序设计这门课的考核方式是什么？」一问，噪声页
@@ -824,7 +1086,7 @@ def _search_relevant_chunks(
             query_vec,
             top_k=recall,
             student_access=student_access,
-            classroom_id=classroom_id,
+            classroom_ids=classroom_ids,
             catalog_id=catalog_id,
         )
         if score > 0
@@ -838,7 +1100,7 @@ def _search_relevant_chunks(
                 query_vec,
                 top_k=recall,
                 student_access=student_access,
-                classroom_id=classroom_id,
+                classroom_ids=classroom_ids,
             )
             if score > 0
         ]
@@ -864,7 +1126,7 @@ def _search_relevant_chunks(
             question, [chunk.content for chunk, _ in candidates], top_n=top_k
         )
     except Exception:
-        return candidates[:top_k]
+        return _merge_same_page_units(candidates[:top_k])
 
     scored: list[tuple[int, float]] = []
     for item in ranked:
@@ -880,7 +1142,7 @@ def _search_relevant_chunks(
     if not scored:
         # 协议异常（有候选但重排未返回有效条目）：回退纯向量 top_k，
         # 而不是把候选全部丢弃导致问答无资料可用
-        return candidates[:top_k]
+        return _merge_same_page_units(candidates[:top_k])
 
     top_score = max(score for _, score in scored)
     if top_score < threshold:
@@ -891,83 +1153,139 @@ def _search_relevant_chunks(
     picked = [
         (candidates[index][0], score) for index, score in scored if score >= cutoff
     ]
-    return picked[:top_k]
+    # 同页 ppt+script 融合：讲稿由该页 PPT 生成，同现于结果时合并为一个单元
+    return _merge_same_page_units(picked[:top_k])
+
+
+# 注入标头的来源类型名（与 cited.source 一致；前端来源徽章同口径）
+_SOURCE_LABELS = {
+    "material": "课程资料",
+    "ppt": "课件",
+    "script": "讲解稿",
+    "ppt+script": "课件+讲稿",
+    "script+ppt": "讲稿+课件",
+    "prev": "上一轮参考",
+}
+
+# 单个注入单元（原文兜底课件 / 单章讲稿汇总）的字符上限：
+# 防止一个单元吃光整个 RAG 预算，也让截断发生在单元边界而非句子中间
+_CONTEXT_UNIT_MAX_CHARS = 800
+
+
+def _chunk_display_name(chunk) -> str:
+    """参考来源展示名：优先真实章节名（教师上传文件名可能与章节无关/混乱）。
+    资料挂章节 → 「章节标题 · 资料」，未挂 → 原文件名；
+    课件片段 → 「章节标题课件」，回退文件名；讲稿片段 → 「章节标题讲解稿」。
+    """
+    material = chunk.material
+    if material is not None:
+        if material.catalog_id and material.catalog:
+            return f"{material.catalog.title} · 资料"
+        return material.file_name
+    if chunk.ppt is not None:
+        ppt_obj = chunk.ppt
+        if ppt_obj.catalog_id and ppt_obj.catalog:
+            return f"{ppt_obj.catalog.title}课件"
+        return ppt_obj.file_name or "课程课件"
+    if chunk.video is not None:
+        video = chunk.video
+        if video.catalog_id and video.catalog:
+            return f"{video.catalog.title}讲解稿"
+        return "课程讲解稿"
+    return "课程资料"
+
+
+def _context_header(n: int, source: str, name: str, page=None) -> str:
+    """注入标头：【资料N｜类型｜名称｜页码】——模型据此在回答中标注 [N] 引用，
+    编号与 cited[n] 一一对应，前端可据此做引用回链。"""
+    page_part = f"｜P{page}" if page else ""
+    return f"【资料{n}｜{_SOURCE_LABELS.get(source, '课程资料')}｜{name}{page_part}】"
 
 
 def _gather_course_context(
     course_id,
     question: str,
     catalog_id=None,
-    max_chars: int = 6000,
     *,
     student_access: bool = False,
-    classroom_id=None,
-) -> tuple[str, list[dict]]:
-    """汇总某课程可用于问答的资料上下文（需求 S-K-01/02）。
+    classroom_ids=None,
+    token_budget: int | None = None,
+) -> tuple[str, list[dict], dict]:
+    """汇总某课程可用于问答的资料上下文（需求 S-K-01/02）。返回 (context, cited, snapshot)。
 
-    资料来源（按优先级）：知识库检索片段 → 课件 PPT 讲义 → 逐页讲解稿。
-    把 PPT / 讲解稿也当作「资料」，避免知识库为空时一律拒答。
-    传入 catalog_id 时向量检索收敛到该章节名下的片段，课件与讲稿也优先取该章节。返回 (context, cited)。
+    资料来源按优先级填充 RAG 预算（AI_QA_RAG_TOKEN_BUDGET，token 维度）：
+    1. 知识库检索片段（_search_relevant_chunks 编排：向量召回+重排+阈值过滤
+       +同页融合；讲稿片段与课件/资料同池竞争）；
+    2. 课件 PPT 原文兜底（仅该课件未入向量库时，避免与检索结果重复占用预算）；
+    3. 逐页讲解稿原文兜底（同样仅未入向量库时启用；讲稿已入检索体系，
+       正常走第 1 步同页融合，不再无差别全量拼接）。
 
-    知识库检索走 _search_relevant_chunks 编排：向量召回多路候选后按问题
-    语义重排并过滤低相关片段（未配重排则回退纯向量 top_k）。
+    每个注入单元带结构化标头（【资料N｜类型｜名称｜页码】），编号与 cited
+    一一对应——模型知道每段出处并可标注 [N] 引用，前端可做引用回链；预算
+    按 token 估算（est_tokens）并在单元边界截断。
+    snapshot 为上下文快照（预算/命中片段元数据/降级级别），供 QARecord 审计
+    与追问兜底使用。
     """
     from apps.courses.models import PPTResource, TeachingVideo
+    from apps.knowledge.models import KnowledgeChunk
 
-    parts: list[str] = []
+    if token_budget is None:
+        token_budget = int(getattr(settings, "AI_QA_RAG_TOKEN_BUDGET", 3000) or 3000)
+
+    units: list[str] = []  # 注入单元（标头+内容），按优先级序
     cited: list[dict] = []
+    used_tokens = 0
+
+    def _try_add(source: str, name: str, content: str, cited_item: dict, page=None) -> bool:
+        """预算内追加一个注入单元；返回是否成功。编号 = 单元序号，与 cited 对齐。"""
+        nonlocal used_tokens
+        content = content[:_CONTEXT_UNIT_MAX_CHARS].strip()
+        if not content:
+            return False
+        n = len(units) + 1
+        header = _context_header(n, source, name, page)
+        cost = est_tokens(header) + est_tokens(content)
+        if used_tokens + cost > token_budget:
+            return False
+        units.append(f"{header}\n{content}")
+        cited.append({"n": n, "source": source, **cited_item})
+        used_tokens += cost
+        return True
 
     # 1) 知识库向量检索（若有片段）。课程没有任何片段时跳过 embed 调用，
     #    省一次 embedding API 往返（首字延迟的主要来源之一）。
-    #    检索走 _search_relevant_chunks 编排（向量召回 + 重排 + 阈值过滤）：
-    #    关键词命中但语义不相关的噪声片段不会进上下文与引用来源；
-    #    章节内提问（catalog_id）时候选池收敛到该章节，跨章节与未挂章节资料
-    #    不会被「这一章的重点是什么」这类问题带进引用。
-    from apps.knowledge.models import KnowledgeChunk
-
     if KnowledgeChunk.objects.filter(course_id=course_id).exists():
         try:
-            for chunk, score in _search_relevant_chunks(
+            for unit in _search_relevant_chunks(
                 course_id,
                 question,
                 student_access=student_access,
-                classroom_id=classroom_id,
+                classroom_ids=classroom_ids,
                 catalog_id=catalog_id,
             ):
-                parts.append(chunk.content)
-                material = chunk.material
-                # 参考来源优先展示真实章节名（教师上传文件名可能与章节无关/混乱）：
-                # 已关联章节 → 「章节标题 · 资料」；未关联回退原文件名。
-                # 课件片段（material 为空）→「章节标题课件」，回退文件名
-                if material is not None:
-                    if material.catalog_id and material.catalog:
-                        material_name = f"{material.catalog.title} · 资料"
-                    else:
-                        material_name = material.file_name
-                elif chunk.ppt is not None:
-                    ppt_obj = chunk.ppt
-                    if ppt_obj.catalog_id and ppt_obj.catalog:
-                        material_name = f"{ppt_obj.catalog.title}课件"
-                    else:
-                        material_name = ppt_obj.file_name or "课程课件"
-                else:
-                    material_name = "课程资料"
-                cited.append(
+                chunk = unit.chunk
+                source_key = "+".join(unit.sources)  # ppt / material / ppt+script
+                name = _chunk_display_name(chunk)
+                added = _try_add(
+                    source_key,
+                    name,
+                    unit.text,
                     {
                         "chunk_id": chunk.id,
-                        "material_name": material_name,
+                        "material_name": name,
                         "page": chunk.page,
                         "snippet": chunk.content[:120],
-                        "score": round(score, 4),
-                    }
+                        "score": round(unit.score, 4),
+                    },
+                    page=chunk.page,
                 )
+                if not added:  # 预算耗尽：后续片段排名更低，整段舍弃
+                    break
         except Exception:
             pass
 
-    # 2) 课件 PPT 讲义（把 PPT 当资料）。
-    #    正常情况下课件已逐页入向量库（ingest_ppt_pages），检索即可覆盖；
-    #    仅当该课件没有任何向量片段（向量模型不可用/从未重建）时才原文拼接兜底，
-    #    避免同一份内容既进检索结果又进原文、挤占上下文预算。
+    # 2) 课件 PPT 讲义原文兜底：仅当该课件没有任何向量片段（向量模型不可用/
+    #    从未重建）时启用，避免同一份内容既进检索结果又进原文、挤占预算。
     ppt_qs = PPTResource.objects.filter(course_id=course_id, is_active=True).select_related("catalog")
     if student_access:
         ppt_qs = ppt_qs.filter(catalog__is_published=True)
@@ -985,35 +1303,61 @@ def _gather_course_context(
             seg = f"{pg.get('title', '')} {pg.get('body', '')}".strip()
             if seg:
                 page_segs.append(seg)
-        if page_segs:
-            parts.extend(page_segs)
-            # 参考来源展示真实章节名：「章节标题课件」，无章节时回退文件名
-            if ppt.catalog_id and ppt.catalog:
-                ppt_name = f"{ppt.catalog.title}课件"
-            else:
-                ppt_name = ppt.file_name or "课程课件"
-            cited.append(
-                {
-                    "material_name": ppt_name,
-                    "page": None,
-                    "snippet": page_segs[0][:120],
-                }
-            )
+        if not page_segs:
+            continue
+        ppt_name = (
+            f"{ppt.catalog.title}课件" if ppt.catalog_id and ppt.catalog else (ppt.file_name or "课程课件")
+        )
+        _try_add(
+            "ppt",
+            ppt_name,
+            "\n".join(page_segs),
+            {"material_name": ppt_name, "page": None, "snippet": page_segs[0][:120]},
+        )
 
-    # 3) 逐页讲解稿（自然语言，最贴近讲课内容）
-    vid_qs = TeachingVideo.objects.filter(course_id=course_id)
+    # 3) 逐页讲解稿原文兜底：仅当该视频讲稿未入向量库（向量模型不可用/尚未
+    #    回填/回滚开关关闭讲稿检索）时才原文限量拼接——正常已走第 1 步检索。
+    script_disabled = bool(getattr(settings, "AI_QA_DISABLE_SCRIPT_SOURCE", False))
+    vid_qs = TeachingVideo.objects.filter(course_id=course_id).select_related("catalog")
     if student_access:
         vid_qs = vid_qs.filter(catalog__is_published=True, is_published=True)
     if catalog_id:
         vid_qs = vid_qs.filter(catalog_id=catalog_id)
-    for vid in vid_qs:
+    for vid in vid_qs.order_by("catalog_id"):
+        if not script_disabled and vid.chunks.exists():
+            continue  # 已入向量库：走检索与同页融合，不重复拼接原文
+        texts = []
         for s in (vid.scripts or []):
             t = (s.get("script") or "").strip()
             if t:
-                parts.append(t)
+                page_no = s.get("page")
+                texts.append(f"P{page_no} {t}" if page_no else t)
+        if not texts:
+            continue
+        script_name = (
+            f"{vid.catalog.title}讲解稿" if vid.catalog_id and vid.catalog else "课程讲解稿"
+        )
+        _try_add(
+            "script",
+            script_name,
+            "\n".join(texts),
+            {"material_name": script_name, "page": None, "snippet": texts[0][:120]},
+        )
 
-    context = "\n---\n".join(p for p in parts if p)[:max_chars]
-    return context, cited
+    # 上下文快照：预算与命中片段元数据（QARecord 审计 / 追问兜底用）
+    snapshot = {
+        "budgets": {"rag_tokens": token_budget},
+        "chunks": [
+            {
+                k: item[k]
+                for k in ("n", "chunk_id", "source", "page", "score")
+                if item.get(k) is not None
+            }
+            for item in cited
+        ],
+        "degraded_level": 0,
+    }
+    return "\n\n".join(units), cited, snapshot
 
 
 _HISTORY_ELLIPSIS = "……（中间省略）……"
@@ -1043,19 +1387,28 @@ def build_qa_history(
     exclude_id=None,
     max_turns: int = 10,
     max_chars_per_msg: int = 4000,
-    total_char_budget: int = 24000,
+    total_token_budget: int | None = None,
 ) -> list[dict]:
     """取同会话最近 N 轮问答，拼成多轮 messages（需求：AI 问答多轮对话）。
 
     - 只认「student + course + session」三元组，天然会话隔离；
     - 超长回答以「首尾保留」方式裁剪（绝不整轮丢弃）——课程问答的总结/
       详解类回答天然很长，整轮跳过会让多轮上下文在最常见场景下失效；
-    - 总预算 total_char_budget 从新往旧收，超出丢最旧轮次；
+    - 总预算为 token 维度（est_tokens 估算）：缺省按 AI_CHAT_CONTEXT_WINDOW
+      联动（窗口 − RAG 注入 − 输出预留 − system/模板 − 安全余量），窗口配小
+      时历史自动收紧；从新往旧装填，超预算丢最旧轮次；
     - 生成失败/空回答不入历史；返回按时间正序的 messages。
     """
     if not session:
         return []
     from apps.knowledge.models import QARecord
+
+    if total_token_budget is None:
+        window = int(getattr(settings, "AI_CHAT_CONTEXT_WINDOW", 32768) or 32768)
+        rag = int(getattr(settings, "AI_QA_RAG_TOKEN_BUDGET", 3000) or 3000)
+        reserve = int(getattr(settings, "AI_QA_OUTPUT_RESERVE", 2048) or 2048)
+        # system/模板约 600，安全余量 512；下限 2000 保证小窗口模型也能带几轮
+        total_token_budget = max(2000, window - rag - reserve - 600 - 512)
 
     qs = (
         QARecord.objects.filter(course_id=course_id, student_id=student_id, session=session)
@@ -1075,10 +1428,10 @@ def build_qa_history(
         # 失败/兜底回答不入历史
         if not q or not a or a.startswith("[出错]") or "AI 助教暂时没有响应" in a[:60]:
             continue
-        pair_chars = len(q) + len(a)
-        if used + pair_chars > total_char_budget:
+        pair_tokens = est_tokens(q) + est_tokens(a)
+        if used + pair_tokens > total_token_budget:
             break
-        used += pair_chars
+        used += pair_tokens
         turns.append((q, a))
     turns.reverse()  # 恢复时间正序
 
@@ -1089,10 +1442,196 @@ def build_qa_history(
     return history
 
 
+# 会话滚动摘要参数：会话超过 12 轮后，每累计 6 轮未摘要内容触发一次压缩；
+# 原文保留最近 6 轮，更早轮次以摘要形式注入（见 build_conversation_context）
+QA_SUMMARY_TRIGGER_TURNS = 12
+QA_SUMMARY_KEEP_RECENT_TURNS = 6
+QA_SUMMARY_MIN_BATCH_TURNS = 6
+QA_MAX_RECENT_TURNS = 10
+
+
+def build_conversation_context(
+    qa_session,
+    *,
+    max_recent_turns: int = QA_MAX_RECENT_TURNS,
+    max_chars_per_msg: int = 4000,
+    total_token_budget: int | None = None,
+) -> list[dict]:
+    """基于持久化会话（QASession）装配历史 messages：[摘要段] + 预算内最近原文轮。
+
+    - 有滚动摘要时：摘要作为 system 段置顶，原文轮只取 summary_upto_turn 之后的；
+    - 预算装填（est_tokens，与上下文窗口联动）：从新往旧，超预算丢最旧轮次；
+    - 失败/兜底回答不入历史；返回按时间正序的 messages。
+    """
+    if qa_session is None:
+        return []
+    if total_token_budget is None:
+        window = int(getattr(settings, "AI_CHAT_CONTEXT_WINDOW", 32768) or 32768)
+        rag = int(getattr(settings, "AI_QA_RAG_TOKEN_BUDGET", 3000) or 3000)
+        reserve = int(getattr(settings, "AI_QA_OUTPUT_RESERVE", 2048) or 2048)
+        total_token_budget = max(2000, window - rag - reserve - 600 - 512)
+
+    rows = list(
+        qa_session.records.exclude(answer="")
+        .exclude(question="")
+        .filter(turn_index__gt=qa_session.summary_upto_turn)
+        .order_by("-turn_index", "-id")[:max_recent_turns]
+    )
+
+    turns: list[tuple[str, str]] = []
+    used = 0
+    for rec in rows:  # 从新往旧收，超预算时丢最旧轮次
+        q = _clip_history_text(rec.question.strip(), 300)
+        a = _clip_history_text((rec.answer or "").strip(), max_chars_per_msg)
+        if not q or not a or a.startswith("[出错]") or "AI 助教暂时没有响应" in a[:60]:
+            continue
+        pair_tokens = est_tokens(q) + est_tokens(a)
+        if used + pair_tokens > total_token_budget:
+            break
+        used += pair_tokens
+        turns.append((q, a))
+    turns.reverse()  # 恢复时间正序
+
+    history: list[dict] = []
+    if qa_session.summary:
+        history.append(
+            {
+                "role": "system",
+                "content": (
+                    "以下是本对话此前内容的摘要（背景信息，非学生发言，"
+                    "回答时不要向学生复述摘要本身）：\n" + qa_session.summary
+                ),
+            }
+        )
+    for q, a in turns:
+        history.append({"role": "user", "content": q})
+        history.append({"role": "assistant", "content": a})
+    return history
+
+
+def maybe_update_session_summary(qa_session) -> bool:
+    """滚动摘要：会话轮数超阈值且未摘要轮数达到一个批次时，把早期轮次压缩进摘要。
+
+    时机：回答全文产出后执行（不阻塞正文显示）；失败静默保留旧摘要——
+    摘要是增强项，不能拖垮问答主链路。
+    """
+    if qa_session is None:
+        return False
+    total = qa_session.records.exclude(answer="").count()
+    pending = total - qa_session.summary_upto_turn
+    if total <= QA_SUMMARY_TRIGGER_TURNS or pending < QA_SUMMARY_MIN_BATCH_TURNS:
+        return False
+    compress_to = total - QA_SUMMARY_KEEP_RECENT_TURNS  # 摘要覆盖到该轮次
+    rows = list(
+        qa_session.records.exclude(answer="")
+        .filter(turn_index__gt=qa_session.summary_upto_turn, turn_index__lte=compress_to)
+        .order_by("turn_index")
+    )
+    if not rows:
+        return False
+    lines = [f"问: {r.question[:300]}\n答: {(r.answer or '')[:300]}" for r in rows]
+    prompt = (
+        "你在维护一段师生问答对话的滚动摘要，供后续对话保持连贯。\n"
+        "把「旧摘要 + 新增问答轮」压缩为不超过 400 字的新摘要。保留：学生问过的问题主题、"
+        "助手给出的关键结论与定义、学生表现出的薄弱点、尚未解决的疑问。丢弃寒暄与重复。"
+        "只输出新摘要本身。\n\n"
+        f"旧摘要：{qa_session.summary or '（无）'}\n\n新增问答：\n" + "\n\n".join(lines)
+    )
+    try:
+        provider = get_provider("chat")
+        with ai_scene(AICallLog.Scene.QA_SUMMARY):
+            summary = provider.chat(
+                [{"role": "user", "content": prompt}],
+                temperature=0,
+                enable_thinking=False,
+            )
+    except Exception:
+        return False
+    summary = (summary or "").strip()
+    if not summary:
+        return False
+    qa_session.summary = summary[:2000]
+    qa_session.summary_upto_turn = compress_to
+    qa_session.save(update_fields=["summary", "summary_upto_turn", "updated_at"])
+    return True
+
+
+def _prev_snapshot_fallback_units(prev_chunks, *, max_items: int = 3, token_budget: int = 800):
+    """把上一轮 context_snapshot.chunks 的片段内容装配为「上一轮参考」注入单元。
+
+    学生追问（"第五个详细讲讲"）经改写仍检索为空时，上一轮引用过的片段
+    就是最可能的上下文来源——直接捞出内容注入，避免追问无根回答。
+    返回 (units, cited)：与 _gather_course_context 相同的数据结构。
+    """
+    if not prev_chunks:
+        return [], []
+    from apps.knowledge.models import KnowledgeChunk
+
+    ids = []
+    for item in prev_chunks:
+        cid = item.get("chunk_id")
+        if cid and cid not in ids:
+            ids.append(cid)
+        if len(ids) >= max_items:
+            break
+    if not ids:
+        return [], []
+    by_id = {
+        c.id: c
+        for c in KnowledgeChunk.objects.filter(id__in=ids).select_related(
+            "material", "material__catalog", "ppt", "ppt__catalog", "video", "video__catalog"
+        )
+    }
+    units: list[str] = []
+    cited: list[dict] = []
+    used = 0
+    for item in prev_chunks:
+        chunk = by_id.get(item.get("chunk_id"))
+        if chunk is None:
+            continue
+        n = len(units) + 1
+        name = _chunk_display_name(chunk)
+        header = _context_header(n, "prev", name, chunk.page)
+        content = chunk.content[:_CONTEXT_UNIT_MAX_CHARS]
+        cost = est_tokens(header) + est_tokens(content)
+        if used + cost > token_budget:
+            break
+        units.append(f"{header}\n{content}")
+        cited.append(
+            {
+                "n": n,
+                "source": "prev",
+                "chunk_id": chunk.id,
+                "material_name": name,
+                "page": chunk.page,
+                "snippet": chunk.content[:120],
+            }
+        )
+        used += cost
+    return units, cited
+
+
+def _apply_prev_snapshot_fallback(context, cited, snapshot: dict, prev_snapshot):
+    """追问检索兜底：检索为空时用上一轮引用片段作「上一轮参考」。返回 (context, cited)。"""
+    if cited or not prev_snapshot:
+        return context, cited
+    prev_units, prev_cited = _prev_snapshot_fallback_units(prev_snapshot)
+    if not prev_units:
+        return context, cited
+    context = f"{context}\n\n" + "\n\n".join(prev_units) if context else "\n\n".join(prev_units)
+    snapshot["fallback_used"] = True
+    snapshot["chunks"] = [
+        {k: item[k] for k in ("n", "chunk_id", "source", "page") if item.get(k) is not None}
+        for item in prev_cited
+    ]
+    return context, prev_cited
+
+
 def _qa_user_text(context: str, question: str, history) -> str:
     """构造问答 user 文本；带历史时附加「结合上文理解指代」提示。"""
     base = (
-        f"课程资料：\n{context}\n\n学生问题：{question}"
+        "以下是与问题相关的课程资料片段（按相关度排序，编号供引用）：\n\n"
+        f"{context}\n\n学生问题：{question}"
         if context
         else f"（本课程暂无可引用的课程资料）\n\n学生问题：{question}"
     )
@@ -1112,21 +1651,50 @@ def _build_qa_messages(question, user_content, image_b64, history):
     return messages
 
 
-def _chat_with_history_fallback(provider, messages, history, **kwargs):
-    """chat 并处理上下文超限：预算裁剪失手时（罕见），丢历史降级重试一次。
+def _degraded_history_chain(history: list[dict]) -> list[list[dict]]:
+    """上下文超限的分级降级链（按序重试）：L1 丢旧一半 → L2 仅最近 2 轮 → L4 全丢。
 
-    返回 (answer, degraded)。degraded=True 表示本次丢弃了多轮历史。
+    旧版超限一次丢光全部历史，多轮对话瞬间失忆；分级后超长会话先丢最旧的，
+    尽量保住最近上下文。L3（仅摘要无原文轮）依赖会话摘要能力，随会话模型
+    改造启用（设计文档 §6.4）。链内按长度去重（历史太短时 L1 与 L2 相同）。
+    """
+    if not history:
+        return []
+    pairs = len(history) // 2
+    if pairs <= 2:
+        return [[]]
+    chain: list[list[dict]] = []
+    for keep in (max(2, pairs // 2), 2, 0):
+        candidate = history[-keep * 2 :] if keep else []
+        if len(candidate) < len(history) and (not chain or len(candidate) < len(chain[-1])):
+            chain.append(candidate)
+    if not chain or chain[-1]:
+        chain.append([])
+    return chain
+
+
+def _chat_with_history_fallback(provider, messages, history, **kwargs):
+    """chat 并处理上下文超限：按 L1→L2→L4 分级降级重试（预算裁剪失手时）。
+
+    返回 (answer, degraded_level)：0=未降级；1=丢旧一半；2=仅最近 2 轮；4=全丢。
     """
     from apps.ai.providers.base import token_limit_error_hint
 
     try:
-        return provider.chat(messages, **kwargs), False
+        return provider.chat(messages, **kwargs), 0
     except Exception as exc:
-        if history and token_limit_error_hint(str(exc)):
-            # 降级：只保留 system + 当前问题（完整丢弃多轮历史）
-            retry = [messages[0], messages[-1]]
-            return provider.chat(retry, **kwargs), True
-        raise
+        if not history or not token_limit_error_hint(str(exc)):
+            raise
+    for idx, degraded_history in enumerate(_degraded_history_chain(history), start=1):
+        level = 4 if not degraded_history else idx
+        retry = [messages[0], *degraded_history, messages[-1]]
+        try:
+            return provider.chat(retry, **kwargs), level
+        except Exception as exc:
+            if not token_limit_error_hint(str(exc)):
+                raise
+    # 所有降级级仍超限（极小概率：当前问题+RAG 本身就超窗口），异常自然上抛
+    return provider.chat([messages[0], messages[-1]], **kwargs), 4
 
 
 @scene_decorator(
@@ -1140,21 +1708,39 @@ def knowledge_qa(
     image_b64: str | None = None,
     *,
     student_access: bool = False,
-    classroom_id=None,
+    classroom_ids=None,
     history: list[dict] | None = None,
-) -> tuple[str, list[dict]]:
+    prev_snapshot=None,
+) -> tuple[str, list[dict], str]:
+    """非流式知识库问答（移动端用）。返回 (answer, cited, rewritten_question, snapshot)。
+
+    rewritten_question 为改写后的检索问题（与原问题相同时为空串），仅供展示
+    与审计，不改变学生看到的问题；snapshot 为上下文快照（含 degraded_level），
+    供 QARecord 落库审计。prev_snapshot 为会话上一轮的 snapshot.chunks，
+    当前检索为空时用作「上一轮参考」追问兜底。
+    """
     provider = get_provider("chat")
-    context, cited = _gather_course_context(
-        course_id,
-        question,
-        catalog_id=catalog_id,
-        student_access=student_access,
-        classroom_id=classroom_id,
-    )
+    history = history or []
+    # 多轮追问：先改写为可独立检索的问题（失败静默回退原问题）
+    rewritten = rewrite_query_for_retrieval(question, history)
+    if image_b64 and question.strip() == IMAGE_ONLY_DEFAULT_QUESTION:
+        # 纯图片提问：默认文案检索无意义，跳过 RAG 直接走视觉理解
+        context, cited = "", []
+        snapshot = {"budgets": {}, "chunks": [], "degraded_level": 0}
+    else:
+        context, cited, snapshot = _gather_course_context(
+            course_id,
+            rewritten,
+            catalog_id=catalog_id,
+            student_access=student_access,
+            classroom_ids=classroom_ids,
+        )
+        context, cited = _apply_prev_snapshot_fallback(context, cited, snapshot, prev_snapshot)
     user_content = _qa_user_text(context, question, history)
     messages = _build_qa_messages(question, user_content, image_b64, history)
-    answer, _ = _chat_with_history_fallback(provider, messages, history, **_QA_NO_THINKING)
-    return answer, cited
+    answer, level = _chat_with_history_fallback(provider, messages, history, **_QA_NO_THINKING)
+    snapshot["degraded_level"] = level
+    return answer, cited, (rewritten if rewritten != question else ""), snapshot
 
 
 def _qa_user_content(text: str, image_b64: str | None):
@@ -1185,48 +1771,72 @@ def knowledge_qa_stream(
     image_b64: str | None = None,
     *,
     student_access: bool = False,
-    classroom_id=None,
+    classroom_ids=None,
     history: list[dict] | None = None,
+    prev_snapshot=None,
 ):
     """知识库问答的流式版本（需求 S-K-01/02/04）。
 
-    先产出一条 {"type":"meta","cited":[...]} 事件（引用片段），
-    再逐段产出 {"type":"delta","text":"..."} 事件（回答文本）。
+    先产出一条 {"type":"meta","cited":[...],"rewritten_question":str} 事件
+    （引用片段带编号 n 与来源 source；rewritten 为改写后的检索问题，与
+    原问题相同时为空串），再逐段产出 {"type":"delta","text":"..."} 事件。
     资料来源除知识库片段外，也纳入课件 PPT 与讲解稿，避免生硬拒答。
-    上下文超限时（预算裁剪失手的罕见场景）自动丢弃多轮历史重试一次，
-    并追加一条 {"type":"history_dropped"} 事件告知前端。
+    上下文超限时按 L1→L2→L4 分级丢弃部分历史重试（仅在未产出任何 delta
+    时才重试，已产出内容的流无法干净重试），每级重试前产出一条
+    {"type":"history_dropped","level":N} 事件告知前端。
     """
     provider = get_provider("chat")
-    context, cited = _gather_course_context(
-        course_id,
-        question,
-        catalog_id=catalog_id,
-        student_access=student_access,
-        classroom_id=classroom_id,
-    )
-    yield {"type": "meta", "cited": cited}
+    history = history or []
+    # 多轮追问：先改写为可独立检索的问题（失败静默回退原问题）
+    rewritten = rewrite_query_for_retrieval(question, history)
+    if image_b64 and question.strip() == IMAGE_ONLY_DEFAULT_QUESTION:
+        # 纯图片提问：默认文案检索无意义，跳过 RAG 直接走视觉理解
+        context, cited = "", []
+        snapshot = {"budgets": {}, "chunks": [], "degraded_level": 0}
+    else:
+        context, cited, snapshot = _gather_course_context(
+            course_id,
+            rewritten,
+            catalog_id=catalog_id,
+            student_access=student_access,
+            classroom_ids=classroom_ids,
+        )
+        context, cited = _apply_prev_snapshot_fallback(context, cited, snapshot, prev_snapshot)
+    yield {
+        "type": "meta",
+        "cited": cited,
+        "rewritten_question": rewritten if rewritten != question else "",
+        "snapshot": snapshot,
+    }
 
     user_content = _qa_user_text(context, question, history)
-    messages = _build_qa_messages(question, user_content, image_b64, history)
 
     from apps.ai.providers.base import token_limit_error_hint
 
+    chain = [history, *_degraded_history_chain(history)]
     produced = False
-    try:
-        for piece in provider.chat_stream(messages, **_QA_NO_THINKING):
-            if piece:
-                produced = True
-                yield {"type": "delta", "text": piece}
-    except Exception as exc:
-        if history and not produced and token_limit_error_hint(str(exc)):
-            # 降级：完整丢弃历史，仅 system + 当前问题重试
-            retry = [messages[0], messages[-1]]
-            yield {"type": "history_dropped"}
-            for piece in provider.chat_stream(retry, **_QA_NO_THINKING):
+    last_exc: Exception | None = None
+    for idx, level_history in enumerate(chain):
+        messages = _build_qa_messages(question, user_content, image_b64, level_history)
+        if idx > 0:
+            level = 4 if not level_history else idx
+            # snapshot 与 meta 事件同一对象引用：此处更新，调用方落库即为最终级别
+            snapshot["degraded_level"] = level
+            # 降级重试：先发事件让前端尽早提示（重试失败则由上层 error 事件收尾）
+            yield {"type": "history_dropped", "level": level}
+        try:
+            for piece in provider.chat_stream(messages, **_QA_NO_THINKING):
                 if piece:
+                    produced = True
                     yield {"type": "delta", "text": piece}
             return
-        raise
+        except Exception as exc:
+            last_exc = exc
+            if produced or not token_limit_error_hint(str(exc)):
+                raise
+            # 未产出任何内容且是上下文超限：继续下一级降级
+    if last_exc is not None:
+        raise last_exc
 
 
 # ---------------------------------------------------------------------------

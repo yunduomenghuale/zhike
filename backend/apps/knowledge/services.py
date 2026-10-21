@@ -32,6 +32,7 @@ _CHUNK_SIZE = 500
 
 from apps.ai.calllog import scene_decorator
 from apps.ai.models import AICallLog
+from apps.ai.services import split_text_semantic
 
 
 class RebuildError(RuntimeError):
@@ -39,19 +40,21 @@ class RebuildError(RuntimeError):
 
 
 @scene_decorator(AICallLog.Scene.VECTOR_REBUILD)
-def rebuild_vectors(materials=None, ppts=None) -> dict:
-    """用当前生效的向量模型重建给定资料与课件的向量。
+def rebuild_vectors(materials=None, ppts=None, videos=None) -> dict:
+    """用当前生效的向量模型重建给定资料、课件与讲稿的向量。
 
     materials：Material 可迭代对象（调用方需先完成权限/范围过滤）。
     ppts：PPTResource 可迭代对象（只重建当前启用版本 is_active=True）。
+    videos：TeachingVideo 可迭代对象（讲稿片段，每页一片段）。
     返回报告::
 
         {
-            "materials": {"total", "success", "failed": [{"kind": "material", "material_id", "file_name", "reason"}]},
-            "ppts": {"total", "success", "chunks", "failed": [{"kind": "ppt", "ppt_id", "file_name", "reason"}]},
-            "total": 资料+课件总数, "success": 成功总数,   # 兼容旧字段
+            "materials": {"total", "success", "failed": [...]},
+            "ppts": {"total", "success", "chunks", "failed": [...]},
+            "videos": {"total", "success", "chunks", "failed": [...]},
+            "total": 资料+课件+讲稿总数, "success": 成功总数,
             "failed": 合并失败清单（条目带 kind，可续跑）,
-            "chunks": 重建片段总数（资料+课件）,
+            "chunks": 重建片段总数（资料+课件+讲稿）,
             "provider": 实际 provider 名, "model": 向量模型名, "dimension": 向量维度,
             "error": "",  # 非空表示事前校验失败，整体未执行
         }
@@ -62,6 +65,7 @@ def rebuild_vectors(materials=None, ppts=None) -> dict:
     report = {
         "materials": {"total": 0, "success": 0, "failed": []},
         "ppts": {"total": 0, "success": 0, "chunks": 0, "failed": []},
+        "videos": {"total": 0, "success": 0, "chunks": 0, "failed": []},
         "total": 0,
         "success": 0,
         "failed": [],
@@ -73,11 +77,13 @@ def rebuild_vectors(materials=None, ppts=None) -> dict:
     }
     materials = list(materials or [])
     ppts = list(ppts or [])
+    videos = list(videos or [])
     report["materials"]["total"] = len(materials)
     report["ppts"]["total"] = len(ppts)
-    report["total"] = len(materials) + len(ppts)
-    if not materials and not ppts:
-        report["error"] = "没有需要重建的资料或课件"
+    report["videos"]["total"] = len(videos)
+    report["total"] = len(materials) + len(ppts) + len(videos)
+    if not materials and not ppts and not videos:
+        report["error"] = "没有需要重建的资料、课件或讲稿"
         return report
 
     provider = get_provider("embed")
@@ -121,18 +127,29 @@ def rebuild_vectors(materials=None, ppts=None) -> dict:
             report["success"] += 1
         except Exception as exc:
             _record_failure(report, "ppt", ppt.id, ppt.file_name, str(exc))
+    for video in videos:
+        try:
+            count = _rebuild_script_one(video, provider, dimension)
+            report["videos"]["chunks"] += count
+            report["chunks"] += count
+            report["videos"]["success"] += 1
+            report["success"] += 1
+        except Exception as exc:
+            _record_failure(report, "video", video.id, f"{video.catalog_id} 章节讲稿", str(exc))
     return report
 
 
 def _record_failure(report: dict, kind: str, obj_id, file_name: str, reason: str) -> None:
     """记录失败项：同时进分项清单与合并清单（带 kind 便于前端续跑）。"""
+    id_key = {"material": "material_id", "ppt": "ppt_id", "video": "video_id"}[kind]
     item = {
         "kind": kind,
-        "material_id" if kind == "material" else "ppt_id": obj_id,
+        id_key: obj_id,
         "file_name": file_name,
         "reason": reason[:300],
     }
-    report["materials" if kind == "material" else "ppts"]["failed"].append(item)
+    section = {"material": "materials", "ppt": "ppts", "video": "videos"}[kind]
+    report[section]["failed"].append(item)
     report["failed"].append(item)
 
 
@@ -154,7 +171,7 @@ def _rebuild_one(material, provider, dimension: int) -> int:
         material.save(update_fields=["parse_status", "updated_at"])
         raise RebuildError("未能抽取到文本内容（文件可能为扫描件、空文件或已损坏）")
 
-    pieces = [raw_text[i : i + _CHUNK_SIZE] for i in range(0, len(raw_text), _CHUNK_SIZE)] or [raw_text]
+    pieces = split_text_semantic(raw_text, size=_CHUNK_SIZE) or [raw_text]
 
     # 防线 4：禁用 mock 兜底；防线 2：先算后删——全部校验通过才替换旧片段
     try:
@@ -173,8 +190,10 @@ def _rebuild_one(material, provider, dimension: int) -> int:
 
     objs = [
         KnowledgeChunk(
+            source=KnowledgeChunk.Source.MATERIAL,
             material=material,
             course_id=material.course_id,
+            catalog_id=material.catalog_id,
             content=piece,
             embedding=emb,
         )
@@ -229,8 +248,10 @@ def _rebuild_ppt_one(ppt, provider, dimension: int) -> int:
 
     objs = [
         KnowledgeChunk(
+            source=KnowledgeChunk.Source.PPT,
             ppt=ppt,
             course_id=ppt.course_id,
+            catalog_id=ppt.catalog_id,
             content=piece,
             page=page_no,
             embedding=emb,
@@ -239,5 +260,67 @@ def _rebuild_ppt_one(ppt, provider, dimension: int) -> int:
     ]
     with transaction.atomic():
         ppt.chunks.all().delete()
+        KnowledgeChunk.objects.bulk_create(objs)
+    return len(objs)
+
+
+def _rebuild_script_one(video, provider, dimension: int) -> int:
+    """重建单部教学视频的讲稿向量（每页一个片段），返回片段数。失败抛 RebuildError。
+
+    与 _rebuild_ppt_one 的差别：片段文本带 PPT 页标题（与 ingest_video_scripts
+    口径一致——重建切分方式必须和入库时相同，否则讲稿更新又会生成另一套片段）。
+    """
+    from django.db import transaction
+
+    from .models import KnowledgeChunk
+
+    page_titles: dict = {}
+    for pg in (video.ppt.parsed_pages or []) if video.ppt else []:
+        if isinstance(pg, dict) and pg.get("page"):
+            page_titles[int(pg["page"])] = (pg.get("title") or "").strip()
+
+    pieces: list[str] = []
+    page_nos: list = []
+    for s in video.scripts or []:
+        if not isinstance(s, dict):
+            continue
+        text = (s.get("script") or "").strip()
+        if not text:
+            continue
+        page_no = s.get("page") or len(pieces) + 1
+        title = page_titles.get(int(page_no) if page_no else 0, "")
+        pieces.append(f"{title}\n{text}" if title else text)
+        page_nos.append(page_no)
+    if not pieces:
+        raise RebuildError("讲稿没有可入库的页面内容")
+
+    try:
+        embeddings = provider.embed(pieces, allow_fallback=False)
+    except Exception as exc:
+        raise RebuildError(f"向量生成失败：{str(exc)[:200]}")
+    if len(embeddings) != len(pieces):
+        raise RebuildError(
+            f"向量数量与讲稿页面不一致（返回 {len(embeddings)} 条 / 应有 {len(pieces)} 条），已保留旧向量"
+        )
+    for emb in embeddings:
+        if not emb or len(emb) != dimension:
+            raise RebuildError(
+                f"向量维度不一致（期望 {dimension} 维，实际 {len(emb) if emb else 0} 维），已保留旧向量"
+            )
+
+    objs = [
+        KnowledgeChunk(
+            source=KnowledgeChunk.Source.SCRIPT,
+            video=video,
+            course_id=video.course_id,
+            catalog_id=video.catalog_id,
+            content=piece,
+            page=page_no,
+            embedding=emb,
+        )
+        for piece, page_no, emb in zip(pieces, page_nos, embeddings)
+    ]
+    with transaction.atomic():
+        video.chunks.all().delete()
         KnowledgeChunk.objects.bulk_create(objs)
     return len(objs)

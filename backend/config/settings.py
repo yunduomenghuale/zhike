@@ -405,6 +405,20 @@ AI_RERANK_MODEL_THRESHOLDS = {
 }
 AI_RERANK_KEEP_RATIO = _ai_env_float("AI_RERANK_KEEP_RATIO", 0.5)
 
+# 问答上下文预算（token 维度，估算器 est_tokens 见 apps/ai/services.py）：
+# - AI_CHAT_CONTEXT_WINDOW：chat 模型上下文窗口，所有预算的基准。历史预算 =
+#   窗口 − RAG − 输出预留 − system/模板(≈600) − 安全余量(≈512)，窗口配小（如本地
+#   8k 模型）时历史自动收紧，避免一追问就触发上下文超限降级；
+# - AI_QA_RAG_TOKEN_BUDGET：检索资料注入预算。片段按相关度整取（在片段边界
+#   截断，不再出现 6000 字符硬切砍断句子的情形），超预算的低排名片段整段舍弃；
+# - AI_QA_OUTPUT_RESERVE：为模型回答预留的输出空间（max_tokens 量级）。
+AI_CHAT_CONTEXT_WINDOW = _ai_env_int("AI_CHAT_CONTEXT_WINDOW", 32768)
+AI_QA_RAG_TOKEN_BUDGET = _ai_env_int("AI_QA_RAG_TOKEN_BUDGET", 3000)
+AI_QA_OUTPUT_RESERVE = _ai_env_int("AI_QA_OUTPUT_RESERVE", 2048)
+# 讲稿入检索体系的回滚开关：置 1 后讲稿片段不参与向量检索（QA 侧退回
+# 原文限量兜底）——检索结果分布异常时一键退回，无需回滚代码与数据。
+AI_QA_DISABLE_SCRIPT_SOURCE = os.getenv("AI_QA_DISABLE_SCRIPT_SOURCE", "").lower() in ("1", "true", "yes", "on")
+
 # 系统内置本地模型的权重目录：生产容器内 /app/data 是 bind mount（见 docker-compose），
 # 故默认落点随之持久化、重建容器不丢；本地开发即 backend/data/models。
 # 下载源为 ModelScope（国内可达）；首次使用惰性下载，也可 manage.py download_models

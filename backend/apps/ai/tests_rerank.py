@@ -230,26 +230,26 @@ class RetrievalOrchestrationTests(TestCase):
     def test_rerank_filters_noise_below_threshold(self):
         """核心场景：只有目标页过阈值，噪声页（向量高分但语义不相关）被滤掉。"""
         result, rerank = self._run(rerank_scores=[0.9, 0.1, 0.05, 0.02, 0.01])
-        self.assertEqual([c.page for c, _ in result], [1])
-        self.assertEqual(result[0][1], 0.9)  # score 为重排分
+        self.assertEqual([u.chunk.page for u in result], [1])
+        self.assertEqual(result[0].score, 0.9)  # score 为重排分
         self.assertEqual(rerank.calls[0]["query"], "考核方式是什么？")
         self.assertEqual(rerank.calls[0]["top_n"], 5)
 
     def test_rerank_reorders_candidates_and_keeps_close_scores(self):
         """重排分覆盖向量顺序：分数接近（无 2 倍落差）的多个相关片段都保留。"""
         result, _ = self._run(rerank_scores=[0.8, 0.9, 0.7, 0.1, 0.05])
-        self.assertEqual([c.page for c, _ in result], [2, 1, 3])
-        self.assertEqual([round(s, 4) for _, s in result], [0.9, 0.8, 0.7])
+        self.assertEqual([u.chunk.page for u in result], [2, 1, 3])
+        self.assertEqual([round(u.score, 4) for u in result], [0.9, 0.8, 0.7])
 
     def test_fallback_to_vector_when_rerank_unconfigured(self):
         """未配置重排（Mock 抛 NotImplementedError）：回退纯向量 top_k，问答可用。"""
         result, _ = self._run(raise_exc=NotImplementedError("mock 暂不支持重排序"))
-        self.assertEqual([c.page for c, _ in result], [1, 2, 3, 4, 5])
+        self.assertEqual([u.chunk.page for u in result], [1, 2, 3, 4, 5])
 
     def test_fallback_to_vector_when_rerank_errors(self):
         """重排调用失败（网络/5xx/协议异常）：同样回退纯向量 top_k。"""
         result, _ = self._run(raise_exc=RuntimeError("HTTP 503"))
-        self.assertEqual([c.page for c, _ in result], [1, 2, 3, 4, 5])
+        self.assertEqual([u.chunk.page for u in result], [1, 2, 3, 4, 5])
 
     def test_all_below_threshold_returns_empty(self):
         """全部低于阈值：判定资料未覆盖该问题，返回空（上层走「无相关内容」话术）。"""
@@ -263,18 +263,18 @@ class RetrievalOrchestrationTests(TestCase):
             AI_RERANK_RECALL=3,
         )
         self.assertEqual(len(rerank.calls[0]["documents"]), 3)
-        self.assertEqual([c.page for c, _ in result], [1])
+        self.assertEqual([u.chunk.page for u in result], [1])
 
     def test_recall_respects_explicit_small_value(self):
         """召回数显式配小（2 < top_k）：只把 2 个候选交给重排，结果不超过 2 条。"""
         result, rerank = self._run(rerank_scores=[0.9, 0.8], AI_RERANK_RECALL=2)
         self.assertEqual(len(rerank.calls[0]["documents"]), 2)
-        self.assertEqual([c.page for c, _ in result], [1, 2])
+        self.assertEqual([u.chunk.page for u in result], [1, 2])
 
     def test_threshold_from_settings(self):
         """阈值取 settings.AI_RERANK_THRESHOLD：调高后原能过阈值的片段被滤掉。"""
         result, _ = self._run(rerank_scores=[0.9, 0.4, 0.1, 0.05, 0.02], AI_RERANK_THRESHOLD=0.5)
-        self.assertEqual([c.page for c, _ in result], [1])
+        self.assertEqual([u.chunk.page for u in result], [1])
 
     def test_gte_rerank_low_scores_kept_by_model_threshold(self):
         """回归（2026-10-15）：gte-rerank-v2 相关片段只有 0.09~0.9，按 qwen3 量级
@@ -285,8 +285,8 @@ class RetrievalOrchestrationTests(TestCase):
             rerank_model="gte-rerank-v2",
         )
         self.assertEqual(rerank.calls[0]["top_n"], 5)
-        self.assertEqual([c.page for c, _ in result], [1])
-        self.assertEqual(result[0][1], 0.288)
+        self.assertEqual([u.chunk.page for u in result], [1])
+        self.assertEqual(result[0].score, 0.288)
 
     def test_gte_rerank_offtopic_scores_still_filtered(self):
         """gte-rerank 对无关问题的最高分仅 ~0.006：低于该模型阈值，仍返回空。"""
@@ -300,28 +300,28 @@ class RetrievalOrchestrationTests(TestCase):
         """相对截断：与最高分存在 2 倍以上落差的多为同课程弱相关噪声，不进引用。"""
         # 最高分 0.9，截断线 max(0.3, 0.45)=0.45：0.44 恰好在线下被滤掉
         result, _ = self._run(rerank_scores=[0.9, 0.44, 0.2, 0.1, 0.05])
-        self.assertEqual([c.page for c, _ in result], [1])
+        self.assertEqual([u.chunk.page for u in result], [1])
 
     def test_keep_ratio_zero_disables_relative_cutoff(self):
         """AI_RERANK_KEEP_RATIO=0 退回纯阈值过滤：过阈值的片段全部保留。"""
         result, _ = self._run(
             rerank_scores=[0.9, 0.4, 0.35, 0.1, 0.05], AI_RERANK_KEEP_RATIO=0
         )
-        self.assertEqual([c.page for c, _ in result], [1, 2, 3])
+        self.assertEqual([u.chunk.page for u in result], [1, 2, 3])
 
     def test_empty_ranked_falls_back_to_vector(self):
         """协议异常（重排返回空列表）：回退纯向量 top_k，不把候选全部丢弃。"""
         result, _ = self._run(rerank_scores=[])
-        self.assertEqual([c.page for c, _ in result], [1, 2, 3, 4, 5])
+        self.assertEqual([u.chunk.page for u in result], [1, 2, 3, 4, 5])
 
 
 class CatalogScopedRetrievalTests(TestCase):
-    """章节语义问题的检索范围治理（2026-10-15 实测回归）。
+    """章节语义问题的检索范围治理（2026-10-15 实测回归；2026-10-21 候选池扩展）。
 
     背景：学生在「第4章 网络层」内提问「这一章的重点是什么？」，参考来源却
-    出现未挂章节的「在线预览测试.pdf」（重排分 0.1661 反超目标页）——全课程
-    检索把章节外资料送进候选池，重排压分挡不住语义沾边的内容。修复：传入
-    catalog_id 时候选池收敛到该章节名下的片段（资料/课件挂靠该章节）。
+    出现跨章节的资料——修复为候选池收敛到该章节。2026-10-21 起候选池扩展为
+    「挂该章节的片段 + 未挂章节的通用资料片段」（教材/考纲类资料本就不该
+    强制挂章节）；跨章节资料仍严格排除。
     """
 
     def setUp(self):
@@ -341,7 +341,9 @@ class CatalogScopedRetrievalTests(TestCase):
         for page in (2, 5):
             KnowledgeChunk.objects.create(
                 course_id=self.course.id,
+                source=KnowledgeChunk.Source.PPT,
                 ppt=self.ppt,
+                catalog=self.cat_a,
                 content=f"第4章课件第{page}页",
                 page=page,
                 embedding=[1.0, 3.0],
@@ -352,17 +354,21 @@ class CatalogScopedRetrievalTests(TestCase):
         )
         KnowledgeChunk.objects.create(
             course_id=self.course.id,
+            source=KnowledgeChunk.Source.MATERIAL,
             material=material_b,
+            catalog=self.cat_b,
             content="第5章资料",
             embedding=[1.0, 3.0],
         )
-        # 未挂章节的资料（模拟遗留的测试上传）：全课程检索会命中它
+        # 未挂章节的资料（教材/考纲类通用资料）：纳入各章节候选池
         material_none = Material.objects.create(
             course=self.course, catalog=None, file_name="在线预览测试.pdf"
         )
         KnowledgeChunk.objects.create(
             course_id=self.course.id,
+            source=KnowledgeChunk.Source.MATERIAL,
             material=material_none,
+            catalog=None,
             content="测试上传内容",
             embedding=[1.0, 2.0],
         )
@@ -376,27 +382,45 @@ class CatalogScopedRetrievalTests(TestCase):
             )
         return result, rerank
 
-    def test_chapter_scope_excludes_other_chapter_and_uncategorized(self):
-        """章节内提问：候选池只有该章节课件片段，跨章节资料与未挂章节资料不进候选。"""
+    def test_chapter_scope_includes_general_but_not_other_chapters(self):
+        """章节内提问：候选池=该章节片段+未挂章节通用资料；跨章节资料不进候选。"""
         result, rerank = self._run()
-        # 交给重排的候选仅章节A的 2 页课件（未挂章节的测试 PDF 被挡在候选池外）
-        self.assertEqual(rerank.calls[0]["documents"], ["第4章课件第2页", "第4章课件第5页"])
-        self.assertEqual([c.page for c, _ in result], [2, 5])
+        # 余弦序：测试上传 [1,2]≈0.447 > 课件 [1,3]≈0.316（query [1,0]）
+        docs = rerank.calls[0]["documents"]
+        self.assertEqual(docs, ["测试上传内容", "第4章课件第2页", "第4章课件第5页"])
+        self.assertNotIn("第5章资料", docs)  # 跨章节资料严格排除
+        # 重排分 0.9/0.8 按下标给前两个候选（通用资料、课件P2），P5 无分被丢弃
+        self.assertEqual([u.chunk.page for u in result], [None, 2])
 
     def test_chapter_scope_falls_back_to_course_when_chapter_has_no_chunks(self):
-        """章节没有任何挂靠片段（资料未挂章节/无课件）：退回全课程检索，不拒答。"""
-        from apps.courses.models import Catalog
+        """章节候选池为空（无挂靠片段且课程无通用资料）：退回全课程检索，不拒答。"""
+        from apps.courses.models import Catalog, Course, PPTResource
 
-        empty_cat = Catalog.objects.create(course=self.course, title="第6章 新建")
+        # 全新课程：只有一章课件、无通用资料，空章节的候选池为空才会触发退回
+        course2 = Course.objects.create(name="操作系统", teacher=self.teacher)
+        cat = Catalog.objects.create(course=course2, title="第1章 概述")
+        ppt2 = PPTResource.objects.create(
+            course=course2, catalog=cat, file_name="概述课件.pdf", is_active=True
+        )
+        KnowledgeChunk.objects.create(
+            course_id=course2.id,
+            source=KnowledgeChunk.Source.PPT,
+            ppt=ppt2,
+            catalog=cat,
+            content="概述课件第1页",
+            page=1,
+            embedding=[1.0, 3.0],
+        )
+        empty_cat = Catalog.objects.create(course=course2, title="第9章 新建")
         embed = _FakeEmbed([1.0, 0.0])
-        rerank = _FakeRerank(scores=[0.9, 0.8, 0.7, 0.6], model="gte-rerank-v2")
+        rerank = _FakeRerank(scores=[0.9], model="gte-rerank-v2")
         with _patch_providers(embed, rerank):
             result = _search_relevant_chunks(
-                self.course.id, "这一章的重点是什么？", catalog_id=empty_cat.id
+                course2.id, "这一章的重点是什么？", catalog_id=empty_cat.id
             )
-        # 兜底走全课程：4 个片段（章节A课件×2 + 章节B资料 + 未挂章节资料）都进候选
-        self.assertEqual(len(rerank.calls[0]["documents"]), 4)
-        self.assertEqual(len(result), 4)
+        # 退回全课程：唯一片段（概述课件第1页）进候选并入选
+        self.assertEqual(rerank.calls[0]["documents"], ["概述课件第1页"])
+        self.assertEqual([u.chunk.page for u in result], [1])
 
     def test_chapter_scope_still_applies_rerank_threshold(self):
         """章节收敛不跳过阈值治理：全部低于阈值仍返回空（不走全课程兜底放大噪声）。"""

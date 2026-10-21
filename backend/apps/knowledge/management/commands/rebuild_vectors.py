@@ -29,7 +29,7 @@ class Command(BaseCommand):
         parser.add_argument("--all", action="store_true", help="重建全部资料与当前启用课件")
 
     def handle(self, *args, **options):
-        from apps.courses.models import PPTResource
+        from apps.courses.models import PPTResource, TeachingVideo
         from apps.knowledge.models import Material
         from apps.knowledge.services import rebuild_vectors
 
@@ -43,6 +43,7 @@ class Command(BaseCommand):
 
         materials = Material.objects.none()
         ppts = PPTResource.objects.none()
+        videos = TeachingVideo.objects.none()
         if material_id:
             materials = Material.objects.filter(pk=material_id)
             if not materials.exists():
@@ -54,11 +55,13 @@ class Command(BaseCommand):
         elif course_id:
             materials = Material.objects.filter(course_id=course_id)
             ppts = PPTResource.objects.filter(course_id=course_id, is_active=True)
+            videos = TeachingVideo.objects.filter(course_id=course_id).exclude(scripts=[])
         else:
             materials = Material.objects.all()
             ppts = PPTResource.objects.filter(is_active=True)
+            videos = TeachingVideo.objects.exclude(scripts=[])
 
-        report = rebuild_vectors(materials, ppts)
+        report = rebuild_vectors(materials, ppts, videos)
         if report.get("error"):
             raise CommandError(report["error"])
 
@@ -69,13 +72,14 @@ class Command(BaseCommand):
             self.style.SUCCESS(
                 f"重建完成：资料 {report['materials']['success']}/{report['materials']['total']} 份，"
                 f"课件 {report['ppts']['success']}/{report['ppts']['total']} 部，"
+                f"讲稿 {report['videos']['success']}/{report['videos']['total']} 部，"
                 f"共 {report['chunks']} 个片段"
             )
         )
         if report["failed"]:
             for item in report["failed"]:
-                obj_id = item.get("material_id") or item.get("ppt_id")
-                kind_label = "资料" if item["kind"] == "material" else "课件"
+                obj_id = item.get("material_id") or item.get("ppt_id") or item.get("video_id")
+                kind_label = {"material": "资料", "ppt": "课件", "video": "讲稿"}[item["kind"]]
                 self.stdout.write(
                     self.style.ERROR(
                         f"失败：{kind_label} {obj_id}（{item['file_name']}）→ {item['reason']}"

@@ -614,7 +614,7 @@ class AdminRebuildVectorsView(AdminThrottleMixin, APIView):
     permission_classes = [IsPlatformAdmin]
 
     def post(self, request):
-        from apps.courses.models import PPTResource
+        from apps.courses.models import PPTResource, TeachingVideo
         from apps.knowledge.models import Material
         from apps.knowledge.services import rebuild_vectors
 
@@ -624,8 +624,10 @@ class AdminRebuildVectorsView(AdminThrottleMixin, APIView):
         ppt_id = request.data.get("ppt")
         qs = Material.objects.all()
         ppt_qs = PPTResource.objects.filter(is_active=True)
+        video_qs = TeachingVideo.objects.all()
         materials = qs.none()
         ppts = ppt_qs.none()
+        videos = video_qs.none()
         if material_id:
             materials = qs.filter(pk=material_id)
             if not materials.exists():
@@ -637,9 +639,11 @@ class AdminRebuildVectorsView(AdminThrottleMixin, APIView):
         elif course_id:
             materials = qs.filter(course_id=course_id)
             ppts = ppt_qs.filter(course_id=course_id)
+            videos = video_qs.filter(course_id=course_id).exclude(scripts=[])
         elif scope == "all":
             materials = qs
             ppts = ppt_qs
+            videos = video_qs.exclude(scripts=[])
         else:
             return api_response(
                 message="请指定 course / material / ppt，或显式传 scope=all 重建全站向量",
@@ -647,7 +651,7 @@ class AdminRebuildVectorsView(AdminThrottleMixin, APIView):
                 status=400,
             )
 
-        report = rebuild_vectors(materials, ppts)
+        report = rebuild_vectors(materials, ppts, videos)
         if report.get("error"):
             return api_response(report, message=report["error"], code=400, status=400)
         log_admin_action(
@@ -663,12 +667,14 @@ class AdminRebuildVectorsView(AdminThrottleMixin, APIView):
             new_value={
                 "materials": report["materials"]["success"],
                 "ppts": report["ppts"]["success"],
+                "videos": report["videos"]["success"],
                 "chunks": report["chunks"],
             },
         )
         message = (
             f"向量重建完成：资料 {report['materials']['success']}/{report['materials']['total']} 份，"
             f"课件 {report['ppts']['success']}/{report['ppts']['total']} 部，"
+            f"讲稿 {report['videos']['success']}/{report['videos']['total']} 部，"
             f"共 {report['chunks']} 个片段"
         )
         if report["failed"]:

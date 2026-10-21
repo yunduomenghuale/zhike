@@ -38,6 +38,9 @@ def _invalidate_teaching_video_for_new_ppt(catalog, ppt):
     if not video:
         return
 
+    # 讲稿片段随讲稿一并清除（换版后旧讲稿不再参与检索）
+    video.chunks.all().delete()
+
     video.ppt = ppt
     video.scripts = []
     video.audio_url = ""
@@ -154,6 +157,11 @@ class CatalogViewSet(BaseModelViewSet):
         video.save()
 
         result = generate_script_pages_batched(video, ppt.parsed_pages, batch_size=limit)
+        if result.get("done"):
+            # 整章讲稿生成完成：入库向量库参与检索（失败静默，QA 侧有兜底）
+            from apps.ai.services import ingest_video_scripts
+
+            ingest_video_scripts(video)
         return api_response(
             result,
             message=f"已生成 {result['script_pages']}/{result['pages']} 页讲解稿",
@@ -434,6 +442,10 @@ class TeachingVideoViewSet(BaseModelViewSet):
         video.gen_status = TeachingVideo.GenStatus.SCRIPT_READY
         video.is_published = True
         video.save(update_fields=["scripts", "audio_url", "subtitle_url", "video_url", "gen_status", "is_published", "updated_at"])
+        # 讲稿整体就绪：入库向量库参与检索（失败静默，QA 侧有兜底）
+        from apps.ai.services import ingest_video_scripts
+
+        ingest_video_scripts(video)
         return api_response(self.get_serializer(video).data, message="讲解稿生成完成")
 
     @action(detail=True, methods=["post"], url_path="update-script", permission_classes=[IsTeacher])
@@ -474,6 +486,11 @@ class TeachingVideoViewSet(BaseModelViewSet):
 
         video.scripts = scripts
         video.save(update_fields=["scripts", "audio_url", "subtitle_url", "video_url", "gen_status", "is_published", "updated_at"])
+        if changed:
+            # 讲稿内容变化：重建该视频讲稿片段（幂等全量替换，失败静默）
+            from apps.ai.services import ingest_video_scripts
+
+            ingest_video_scripts(video)
         return api_response(self.get_serializer(video).data, message="讲稿已保存，修改页需要重新配音")
 
     @action(detail=True, methods=["post"], url_path="regenerate-script-page", permission_classes=[IsTeacher])
@@ -524,6 +541,10 @@ class TeachingVideoViewSet(BaseModelViewSet):
         video.video_url = ""
         video.gen_status = TeachingVideo.GenStatus.SCRIPT_READY
         video.save(update_fields=["scripts", "audio_url", "subtitle_url", "video_url", "gen_status", "is_published", "updated_at"])
+        # 单页讲稿重生成：重建该视频讲稿片段（幂等全量替换，失败静默）
+        from apps.ai.services import ingest_video_scripts
+
+        ingest_video_scripts(video)
         return api_response(self.get_serializer(video).data, message="该页讲稿已重新生成，需要重新配音")
 
     @action(detail=True, methods=["post"], url_path="regenerate-audio-page", permission_classes=[IsTeacher])

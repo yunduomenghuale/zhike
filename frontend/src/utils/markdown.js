@@ -32,3 +32,26 @@ export function renderAiMarkdown(text) {
     .map((part, index) => (index % 2 === 1 ? part : boldFallback(part)))
     .join('')
 }
+
+// 引用标注 [N] → 可点上标（配合问答参考来源编号 n，见 CitedSources 组件）：
+// - 上标点击后由消息容器委托处理（滚动到来源区并闪烁高亮）；
+// - 仅匹配独立出现的 [N]（前非单词字符、后非 (，避免误伤 [1](url) 等形态）；
+// - 跳过代码段（与加粗兜底同一 CODE_SEGMENT 切分策略）。
+export function linkCitations(html) {
+  return String(html || '')
+    .split(CODE_SEGMENT)
+    .map((part, index) =>
+      index % 2 === 1
+        ? part
+        : part.replace(
+            /(?<![\w\]/])\[(\d{1,2})\](?!\()/g,
+            '<sup class="cite-sup" data-cite="$1">[$1]</sup>'
+          )
+    )
+    .join('')
+}
+
+// 问答回答的统一渲染：markdown + 引用上标
+export function renderQaAnswer(text) {
+  return linkCitations(renderAiMarkdown(text))
+}
