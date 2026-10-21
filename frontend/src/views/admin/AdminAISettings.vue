@@ -389,7 +389,7 @@
 
 <script setup>
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { ChatDotRound, Check, CircleCheck, CircleClose, Connection, Download, Files, InfoFilled, Lock, Microphone, Refresh, Right, Search, Sort, Timer, WarningFilled } from '@element-plus/icons-vue'
 import {
   getAdminAIConfiguration, saveAdminAIConfiguration, testAdminAIConnection,
@@ -876,6 +876,18 @@ async function testConnection(value){
   }finally{ testing.value='' }
 }
 async function save(){
+  // 「支持图片」开关防护：生效值为开启而表单要关闭时二次确认——
+  // 防止误触开关或旧标签页（保存前打开、表单还是旧状态）静默覆盖关闭，
+  // 导致学生端图片上传入口无故消失（曾实际发生：开启 1 分钟后被覆盖为关闭）
+  if(effectiveItem('chat').supports_vision && !forms.chat.supports_vision){
+    try{
+      await ElMessageBox.confirm(
+        '「支持图片」开关当前为开启状态，本次保存将关闭它，学生端的图片上传入口会立即隐藏。确定关闭吗？',
+        '关闭图片上传入口',
+        { type:'warning', confirmButtonText:'确定关闭', cancelButtonText:'取消' }
+      )
+    }catch{ return } // 用户取消：不保存
+  }
   for(const cap of capabilityList){
     const form=forms[cap.value]
     if(form.enabled && form.provider!=='mock'){

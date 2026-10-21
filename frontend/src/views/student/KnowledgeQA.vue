@@ -137,7 +137,7 @@
           @keydown.enter.exact.prevent="ask()"
         />
         <div class="dock-toolbar">
-          <div class="dock-chips">
+          <div v-if="visionSupported" class="dock-chips">
             <input ref="fileInputRef" type="file" accept="image/*" hidden @change="onPickImage" />
             <button class="dock-chip tool-chip" title="提交图片提问" @click="fileInputRef?.click()">
               <el-icon :size="15"><Picture /></el-icon>
@@ -172,7 +172,7 @@ import { renderQaAnswer } from '@/utils/markdown'
 import CitedSources from '@/components/qa/CitedSources.vue'
 import QaFeedback from '@/components/qa/QaFeedback.vue'
 import { listClasses } from '@/api/classroom'
-import { listQaSessions, listQaSessionRecords, deleteQaSession } from '@/api/knowledge'
+import { listQaSessions, listQaSessionRecords, deleteQaSession, getQaVisionCapability } from '@/api/knowledge'
 
 const renderMd = renderQaAnswer
 
@@ -202,6 +202,10 @@ const asking = ref(false)
 const listRef = ref(null)
 const imageData = ref('')
 const fileInputRef = ref(null)
+// 问答图片上传入口：按对话模型的视觉能力显示（平台级配置，挂载时查一次）；
+// 拉取失败默认 false——没有入口优于用户发送图片后被接口拒绝
+const visionSupported = ref(false)
+watch(visionSupported, (on) => { if (!on) imageData.value = '' })
 const historyOpen = ref(false)
 const historyKeyword = ref('')
 
@@ -504,7 +508,13 @@ watch(fixedCourseId, (id) => {
   loadSessions()
 })
 
-onMounted(loadCourses)
+onMounted(async () => {
+  await loadCourses()
+  try {
+    const res = await getQaVisionCapability()
+    visionSupported.value = Boolean(res?.supports_vision)
+  } catch { /* 拉取失败：保持隐藏 */ }
+})
 </script>
 
 <style scoped>
@@ -1002,7 +1012,6 @@ onMounted(loadCourses)
 .dock-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
   margin-top: 8px;
 }
@@ -1079,6 +1088,9 @@ onMounted(loadCourses)
   width: 40px;
   height: 40px;
   flex-shrink: 0;
+  /* vision 关闭后 dock-chips 消失，margin-left:auto 保证发送按钮仍贴右
+     （space-between 单子元素会落左） */
+  margin-left: auto;
   font-size: 16px;
   box-shadow: 0 8px 16px rgba(37, 99, 235, 0.25);
 }

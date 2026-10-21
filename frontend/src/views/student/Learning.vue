@@ -2171,10 +2171,10 @@ onUnmounted(() => {
 .chat-input-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
 }
-
+/* margin-left:auto 让发送按钮永远贴右：vision 开启时图片按钮贴左、发送贴右；
+   vision 关闭后 chat-tool 消失，发送按钮仍靠右（space-between 单子元素会落左） */
 .chat-tool {
   display: inline-flex;
   align-items: center;
@@ -2239,6 +2239,8 @@ onUnmounted(() => {
   width: 34px;
   height: 34px;
   flex: 0 0 auto;
+  /* margin-left:auto 让发送按钮永远贴右（vision 关闭后 chat-tool 消失也不会落左） */
+  margin-left: auto;
   display: grid;
   place-items: center;
   border: 0;
