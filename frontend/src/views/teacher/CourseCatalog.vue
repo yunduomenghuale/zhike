@@ -1982,16 +1982,28 @@ function setPptMapItem(ppt, fallbackCatalogId = null) {
   }
 }
 
-onMounted(async () => {
-  loadCourseName(); loadTree()
+// 视觉能力拉取：挂载时查一次；标签页切回时重查——
+// 管理端改「支持图片」开关后，已打开的课程页不会自动响应，
+// 用户切回本标签即拿到新值（图片入口随之显隐）
+async function loadVisionCapability() {
   try {
     const res = await getQaVisionCapability()
     visionSupported.value = Boolean(res?.supports_vision)
   } catch { /* 拉取失败：保持隐藏 */ }
+}
+function onVisibilityChange() {
+  if (document.visibilityState === 'visible') loadVisionCapability()
+}
+
+onMounted(async () => {
+  loadCourseName(); loadTree()
+  await loadVisionCapability()
+  document.addEventListener('visibilitychange', onVisibilityChange)
 })
 
 onUnmounted(() => {
   stopPptParsePoll()
+  document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 </script>
 

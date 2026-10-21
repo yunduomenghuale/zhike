@@ -161,7 +161,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   ChatDotRound, MagicStick, Loading, Promotion, Picture, Close,
@@ -508,12 +508,26 @@ watch(fixedCourseId, (id) => {
   loadSessions()
 })
 
-onMounted(async () => {
-  await loadCourses()
+// 视觉能力拉取：挂载时查一次；标签页切回时重查——
+// 管理端改「支持图片」开关后，已打开的问答页不会自动响应，
+// 用户切回本标签即拿到新值（图片入口随之显隐）
+async function loadVisionCapability() {
   try {
     const res = await getQaVisionCapability()
     visionSupported.value = Boolean(res?.supports_vision)
   } catch { /* 拉取失败：保持隐藏 */ }
+}
+function onVisibilityChange() {
+  if (document.visibilityState === 'visible') loadVisionCapability()
+}
+
+onMounted(async () => {
+  await loadCourses()
+  await loadVisionCapability()
+  document.addEventListener('visibilitychange', onVisibilityChange)
+})
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 </script>
 
