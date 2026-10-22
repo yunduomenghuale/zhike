@@ -63,6 +63,32 @@ class QARecordSerializer(serializers.ModelSerializer):
         read_only_fields = ["student", "answer", "cited_chunks", "rewritten_question", "feedback"]
 
 
+class TeacherQAIssueSerializer(serializers.ModelSerializer):
+    """教师端问题下钻明细（质量看板 Phase 2）。
+
+    在 QARecordSerializer 基础上补充下钻定位所需的派生字段：
+    course_name / catalog_title / student_name 供列表直接展示；
+    degraded_level / skip_retrieval 来自 context_snapshot（审计字段，
+    不下发学生端），用于解释「这条问题为什么有问题」。
+    """
+
+    course_name = serializers.CharField(source="course.name", read_only=True)
+    catalog_title = serializers.CharField(source="catalog.title", read_only=True, default="")
+    student_name = serializers.CharField(source="student.real_name", read_only=True)
+    degraded_level = serializers.IntegerField(
+        source="context_snapshot.degraded_level", read_only=True, default=0
+    )
+
+    class Meta:
+        model = QARecord
+        fields = [
+            "id", "course", "course_name", "catalog", "catalog_title",
+            "student", "student_name", "question", "answer", "cited_chunks",
+            "rewritten_question", "feedback", "degraded_level",
+            "skip_retrieval", "created_at",
+        ]
+
+
 class QASessionSerializer(serializers.ModelSerializer):
     """问答会话列表项（record_count / last_message_at 由视图 annotate）。"""
 

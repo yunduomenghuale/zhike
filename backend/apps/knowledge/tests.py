@@ -14,11 +14,14 @@ from pathlib import Path
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.utils import timezone
+from datetime import timedelta
 from rest_framework.test import APIClient
 
-from apps.ai.models import AICapabilityConfig
+from apps.ai.models import AICallLog, AICapabilityConfig
 from apps.ai.providers.mock import MockProvider
-from apps.knowledge.models import KnowledgeChunk, Material
+from apps.courses.models import Course
+from apps.knowledge.models import KnowledgeChunk, Material, QARecord
 from apps.knowledge.services import rebuild_vectors
 
 User = get_user_model()
@@ -533,3 +536,238 @@ class QaVisionCapabilityTests(TestCase):
     def test_anonymous_unauthorized(self):
         resp = self.client.get("/api/qa-records/vision-capability/")
         self.assertEqual(resp.status_code, 401)
+
+
+class TeacherQAQualityStatsTests(TestCase):
+    """教师端问答质量统计端点（质量看板 Phase 2）。
+
+    覆盖：行级过滤（仅本人课程）、口径与平台端一致（为空率排除纯图片
+    提问）、无成本段、课程级告警（不含平台级/AI 健康告警）、环比基线、权限。
+    """
+
+    def setUp(self):
+        self.teacher = User.objects.create_user(
+            username="t_qa_stats", password="pw123456!",
+            role=User.Role.TEACHER, real_name="张老师",
+        )
+        self.other_teacher = User.objects.create_user(
+            username="t_qa_other", password="pw123456!", role=User.Role.TEACHER
+        )
+        self.student = User.objects.create_user(
+            username="s_qa_stats", password="pw123456!", role=User.Role.STUDENT
+        )
+        self.course = Course.objects.create(name="本班课程", teacher=self.teacher)
+        self.other_course = Course.objects.create(name="他人课程", teacher=self.other_teacher)
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.teacher)
+
+    def _qa(self, *, cited=None, skip=False, rewritten="", feedback=0, snapshot=None, course=None):
+        return QARecord.objects.create(
+            course=course or self.course,
+            student=self.student,
+            question="测试问题",
+            answer="测试回答",
+            cited_chunks=[] if cited is None else cited,
+            rewritten_question=rewritten,
+            context_snapshot=snapshot or {},
+            feedback=feedback,
+            skip_retrieval=skip,
+        )
+
+    def _data(self, **params):
+        resp = self.client.get("/api/qa-quality-stats/", params)
+        self.assertEqual(resp.status_code, 200, resp.data)
+        return resp.data["data"]
+
+    def test_scope_only_own_courses(self):
+        """他人课程的提问不进统计（行级过滤 course__teacher=user）。"""
+        self._qa(cited=[{"n": 1, "source": "material"}])
+        self._qa(cited=[], course=self.other_course)
+        data = self._data()
+        self.assertEqual(data["totals"]["questions"], 1)
+        self.assertEqual([r["course_id"] for r in data["by_course"]], [self.course.id])
+
+    def test_metric_definitions_match_platform_caliber(self):
+        """指标口径同平台端：为空率排除纯图片提问；改写/好评/兜底率同分母。"""
+        self._qa(cited=[], skip=False)                     # 检索为空
+        self._qa(cited=[], skip=True)                      # 纯图片：不进为空分母
+        self._qa(
+            cited=[{"n": 1, "source": "material"}],
+            rewritten="改写后", feedback=1,
+            snapshot={"degraded_level": 4, "fallback_used": True},
+        )
+        data = self._data()
+        totals = data["totals"]
+        self.assertEqual(totals["questions"], 3)
+        self.assertEqual(totals["skip_retrieval"], 1)
+        self.assertEqual(totals["empty_retrieval"]["rate"], 0.5)   # 1 / (3-1)
+        self.assertAlmostEqual(totals["rewrite"]["rate"], 1 / 3, places=4)
+        self.assertEqual(totals["feedback"]["rate"], 1.0)
+        self.assertAlmostEqual(totals["fallback"]["rate"], 1 / 3, places=4)
+        self.assertEqual(data["degraded"]["L4"], 1)
+
+    def test_no_cost_section_for_teacher(self):
+        """AICallLog 无课程归属：教师端响应不含成本段（即使有 QA 调用）。"""
+        AICallLog.objects.create(
+            capability="chat", provider="tongyi", scene="qa", success=True,
+            prompt_tokens=100, total_tokens=120,
+        )
+        data = self._data()
+        self.assertNotIn("cost", data["totals"])
+
+    def test_previous_period_baseline(self):
+        """环比基线：上周期记录只影响 rate_previous，不影响当前窗口。"""
+        self._qa(cited=[])  # 当前窗 1 提问 1 为空
+        prev = self._qa(cited=[{"n": 1, "source": "material"}])
+        QARecord.objects.filter(pk=prev.pk).update(
+            created_at=timezone.now() - timedelta(days=8)
+        )
+        data = self._data(days=7)
+        self.assertEqual(data["totals"]["empty_retrieval"]["rate"], 1.0)
+        self.assertEqual(data["totals"]["empty_retrieval"]["rate_previous"], 0.0)
+
+    def test_course_level_alert_without_platform_or_ai_health(self):
+        """告警只出课程级为空率；平台级（course_id=None）与 AI 健康告警不出现。"""
+        for i in range(20):
+            self._qa(cited=[] if i < 7 else [{"n": 1, "source": "material"}])
+        alerts = self._data()["alerts"]
+        empty_alerts = [a for a in alerts if a["type"] == "empty_retrieval_high"]
+        self.assertEqual(len(empty_alerts), 1)
+        self.assertEqual(empty_alerts[0]["course_id"], self.course.id)
+        self.assertIn("本班课程", empty_alerts[0]["title"])
+        # 平台级为空率告警与 AI 服务健康告警均不下发教师端
+        self.assertEqual([a for a in alerts if a["course_id"] is None], [])
+        self.assertEqual([a for a in alerts if a["type"] == "ai_health"], [])
+
+    def test_non_teacher_forbidden(self):
+        student_client = APIClient()
+        student_client.force_authenticate(user=self.student)
+        self.assertEqual(student_client.get("/api/qa-quality-stats/").status_code, 403)
+
+    def test_anonymous_unauthorized(self):
+        self.assertEqual(APIClient().get("/api/qa-quality-stats/").status_code, 401)
+
+    def test_invalid_window_params_rejected(self):
+        resp = self.client.get("/api/qa-quality-stats/", {"start": "2026/10/01"})
+        self.assertEqual(resp.status_code, 400)
+
+
+class TeacherQAIssueTests(TestCase):
+    """教师端问题下钻端点（质量看板 Phase 2）。
+
+    覆盖：类型过滤（empty/disliked/all 同统计口径）、课程归属校验（404）、
+    窗口过滤、分页、序列化字段（degraded_level/skip_retrieval）、权限。
+    """
+
+    def setUp(self):
+        self.teacher = User.objects.create_user(
+            username="t_qa_issue", password="pw123456!", role=User.Role.TEACHER
+        )
+        self.other_teacher = User.objects.create_user(
+            username="t_qa_issue_other", password="pw123456!", role=User.Role.TEACHER
+        )
+        self.student = User.objects.create_user(
+            username="s_qa_issue", password="pw123456!", role=User.Role.STUDENT
+        )
+        self.course = Course.objects.create(name="本班课程", teacher=self.teacher)
+        self.other_course = Course.objects.create(name="他人课程", teacher=self.other_teacher)
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.teacher)
+
+    def _qa(self, *, cited=None, skip=False, feedback=0, snapshot=None, course=None):
+        return QARecord.objects.create(
+            course=course or self.course,
+            student=self.student,
+            question="测试问题",
+            answer="测试回答",
+            cited_chunks=[] if cited is None else cited,
+            context_snapshot=snapshot or {},
+            feedback=feedback,
+            skip_retrieval=skip,
+        )
+
+    def _issues(self, **params):
+        resp = self.client.get("/api/qa-issues/", params)
+        self.assertEqual(resp.status_code, 200, resp.data)
+        return resp.data["data"]
+
+    def test_type_empty_excludes_skip_retrieval(self):
+        """type=empty 只列真·检索为空；纯图片提问（skip）不计（口径同看板）。"""
+        empty = self._qa(cited=[])
+        self._qa(cited=[], skip=True)
+        self._qa(cited=[{"n": 1, "source": "material"}])
+        data = self._issues(type="empty")
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(data["results"][0]["id"], empty.id)
+
+    def test_type_disliked(self):
+        disliked = self._qa(cited=[{"n": 1, "source": "material"}], feedback=-1)
+        self._qa(cited=[{"n": 1, "source": "material"}], feedback=1)
+        self._qa(cited=[{"n": 1, "source": "material"}])
+        data = self._issues(type="disliked")
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(data["results"][0]["id"], disliked.id)
+
+    def test_type_all_default(self):
+        for _ in range(3):
+            self._qa()
+        data = self._issues()
+        self.assertEqual(data["total"], 3)
+
+    def test_invalid_type_returns_400(self):
+        resp = self.client.get("/api/qa-issues/", {"type": "bogus"})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_other_teacher_course_returns_404(self):
+        """他人课程一律 404（防用存在性差异枚举课程）。"""
+        resp = self.client.get("/api/qa-issues/", {"course": self.other_course.id})
+        self.assertEqual(resp.status_code, 404)
+
+    def test_course_filter_narrows_results(self):
+        other = Course.objects.create(name="本班课程二", teacher=self.teacher)
+        mine = self._qa()
+        self._qa(course=other)
+        data = self._issues(course=self.course.id)
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(data["results"][0]["id"], mine.id)
+
+    def test_window_filters_old_records(self):
+        old = self._qa()
+        QARecord.objects.filter(pk=old.pk).update(
+            created_at=timezone.now() - timedelta(days=40)
+        )
+        self._qa()
+        data = self._issues(days=30)
+        self.assertEqual(data["total"], 1)
+
+    def test_pagination(self):
+        for _ in range(3):
+            self._qa()
+        data = self._issues(page=1, page_size=2)
+        self.assertEqual(data["total"], 3)
+        self.assertEqual(len(data["results"]), 2)
+        data2 = self._issues(page=2, page_size=2)
+        self.assertEqual(len(data2["results"]), 1)
+
+    def test_serializer_derived_fields(self):
+        """下钻明细带 degraded_level / skip_retrieval / 课程名等定位字段。"""
+        rec = self._qa(cited=[], snapshot={"degraded_level": 2}, feedback=-1)
+        row = self._issues(type="empty")["results"][0]
+        self.assertEqual(row["id"], rec.id)
+        self.assertEqual(row["course_name"], "本班课程")
+        self.assertEqual(row["catalog_title"], "")
+        self.assertEqual(row["degraded_level"], 2)
+        self.assertFalse(row["skip_retrieval"])
+        self.assertEqual(row["feedback"], -1)
+        self.assertIn("answer", row)
+
+    def test_other_teacher_records_not_listed(self):
+        """他人课程的提问不出现在下钻列表（行级过滤）。"""
+        self._qa(course=self.other_course)
+        data = self._issues()
+        self.assertEqual(data["total"], 0)
+
+    def test_non_teacher_forbidden(self):
+        student_client = APIClient()
+        student_client.force_authenticate(user=self.student)
+        self.assertEqual(student_client.get("/api/qa-issues/").status_code, 403)

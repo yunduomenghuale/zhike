@@ -6,6 +6,7 @@ from django.db.models import Count, Max, Q
 from django.http import FileResponse, StreamingHttpResponse
 from rest_framework.decorators import action
 from rest_framework.exceptions import MethodNotAllowed, NotFound, PermissionDenied, ValidationError
+from rest_framework.generics import ListAPIView
 from rest_framework.permissions import IsAuthenticated
 
 from apps.ai.providers.factory import chat_supports_vision
@@ -17,7 +18,14 @@ from apps.ai.services import (
     maybe_update_session_summary,
 )
 from apps.common.access import classrooms_for_user, courses_for_user, is_platform_admin
-from apps.common.permissions import IsTeacherOrReadOnly
+from apps.common.pagination import StandardPagination
+from apps.common.permissions import IsTeacher, IsTeacherOrReadOnly
+from apps.common.qa_stats import (
+    BaseQAQualityStatsView,
+    CallLogWindowError,
+    call_log_window,
+    qa_record_qs,
+)
 from apps.common.response import api_response
 from apps.common.viewsets import BaseModelViewSet
 
@@ -31,7 +39,12 @@ from .preview import (
     read_material_text,
     render_material_pages,
 )
-from .serializers import MaterialSerializer, QARecordSerializer, QASessionSerializer
+from .serializers import (
+    MaterialSerializer,
+    QARecordSerializer,
+    QASessionSerializer,
+    TeacherQAIssueSerializer,
+)
 from .services import rebuild_vectors
 
 
@@ -584,3 +597,71 @@ class QASessionViewSet(BaseModelViewSet):
         sess = self.get_object()
         rows = sess.records.select_related("student").order_by("turn_index", "id")
         return api_response(QARecordSerializer(rows, many=True).data)
+
+
+class TeacherQAQualityStatsView(BaseQAQualityStatsView):
+    """教师端问答质量统计（本人课程，质量看板 Phase 2，2026-10-22）。
+
+    指标口径与平台端 AdminQAQualityStatsView 完全一致（共享
+    apps.common.qa_stats 的窗口/聚合/告警函数）：检索为空率、改写触发率、
+    降级分布、好评率/覆盖率、兜底率、来源分布、课程排行、日趋势、环比基线。
+    差异：
+    - 行级过滤：仅本人负责课程（course__teacher=user，同 QARecordViewSet 口径）
+    - 无成本：AICallLog 无课程归属，教师端不展示
+    - 告警：仅课程级为空率 + 本人课程 L4 突增（平台级信号与 AI 服务健康
+      不向教师展示）
+    """
+
+    permission_classes = [IsTeacher]
+    include_cost = False
+    include_platform_alerts = False
+
+    def qa_base_queryset(self, request):
+        return QARecord.objects.filter(course__teacher=request.user)
+
+
+class TeacherQAIssueListView(ListAPIView):
+    """教师端问题下钻（质量看板 Phase 2）：按类型列出本人课程的问题明细。
+
+    type：
+    - empty：检索为空（cited_chunks=[] 且非纯图片提问，口径同质量看板）
+    - disliked：学生点了「无用」
+    - all：全部（默认）
+    course：可选，限定单门课程（必须属于本人，否则 404 防越权枚举）。
+    窗口/分页：复用 call_log_window（默认 30 天，与统计页默认一致）与
+    StandardPagination；回答全文随行下发（前端抽屉内展开查看）。
+    """
+
+    permission_classes = [IsTeacher]
+    serializer_class = TeacherQAIssueSerializer
+    pagination_class = StandardPagination
+
+    ISSUE_FILTERS = {
+        "empty": Q(cited_chunks=[]) & Q(skip_retrieval=False),
+        "disliked": Q(feedback=-1),
+    }
+
+    def get_queryset(self):
+        request = self.request
+        issue_type = (request.query_params.get("type") or "all").strip()
+        if issue_type != "all" and issue_type not in self.ISSUE_FILTERS:
+            raise ValidationError({"type": "不支持的问题类型（可选 all / empty / disliked）"})
+        try:
+            window = call_log_window(request, default_days=30)
+        except CallLogWindowError as exc:
+            raise ValidationError({"window": str(exc)}) from None
+        base = QARecord.objects.filter(course__teacher=request.user)
+        course_id = (request.query_params.get("course") or "").strip()
+        if course_id:
+            if not course_id.isdigit():
+                raise ValidationError({"course": "课程参数不正确"})
+            # 归属校验走行级过滤（courses_for_user 对教师=teacher=user），
+            # 他人课程一律 404，避免用存在性差异枚举课程
+            course = courses_for_user(request.user).filter(pk=int(course_id)).first()
+            if not course:
+                raise NotFound("课程不存在或无权访问")
+            base = base.filter(course=course)
+        qs = qa_record_qs(window["start"], window["end"], base=base)
+        if issue_type in self.ISSUE_FILTERS:
+            qs = qs.filter(self.ISSUE_FILTERS[issue_type])
+        return qs.select_related("student", "course", "catalog").order_by("-created_at")

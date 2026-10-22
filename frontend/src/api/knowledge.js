@@ -39,6 +39,15 @@ export const downloadMaterial = (id) =>
 export const listQaRecords = (params) => request.get('/qa-records/', { params })
 export const askQuestion = (data) => request.post('/qa-records/ask/', data)
 
+// ===== 教师端问答质量（质量看板 Phase 2）=====
+// 指标口径同管理端（为空率/改写率/好评率/兜底率/降级/来源/课程排行/告警），
+// 仅收窄本人课程、无成本段；params: { days } 或 { start, end } 日历窗
+export const getTeacherQAQualityStats = (params) => request.get('/qa-quality-stats/', { params })
+
+// 问题下钻：type=all|empty|disliked，course 可选（须本人课程，否则 404），
+// 窗口参数同统计端点，另支持 page/page_size 分页
+export const listTeacherQAIssues = (params) => request.get('/qa-issues/', { params })
+
 // 当前对话模型是否支持图片（多模态）：不支持时前端隐藏图片上传入口，
 // 避免用户发送图片后被接口拒绝；拉取失败按不支持处理（fail-closed）
 export const getQaVisionCapability = () => request.get('/qa-records/vision-capability/')

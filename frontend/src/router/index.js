@@ -75,6 +75,7 @@ const routes = [
       { path: 'teacher/exams', name: 'exams', component: () => import('@/views/teacher/ExamManage.vue'), meta: { title: '考试', role: 'teacher' } },
       { path: 'teacher/exams/:id/stats', name: 'exam-stats', component: () => import('@/views/teacher/ExamStats.vue'), meta: { title: '考试统计', role: 'teacher', activeMenu: '/teacher/exams' } },
       { path: 'teacher/analytics', name: 'analytics', component: () => import('@/views/teacher/Analytics.vue'), meta: { title: '学习统计', role: 'teacher' } },
+      { path: 'teacher/qa-quality', name: 'qa-quality', component: () => import('@/views/teacher/QAQuality.vue'), meta: { title: '问答质量', role: 'teacher' } },
 
       { path: 'student/my-classes', name: 'my-classes', component: () => import('@/views/student/MyClasses.vue'), meta: { title: '我的班级', role: 'student' } },
       { path: 'student/learning', name: 'learning', component: () => import('@/views/student/Learning.vue'), meta: { title: '课程学习', role: 'student' } },
