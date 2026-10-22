@@ -615,6 +615,20 @@ class TeacherQAQualityStatsTests(TestCase):
         data = self._data()
         self.assertNotIn("cost", data["totals"])
 
+    def test_by_source_merges_ppt_script_alias(self):
+        """来源分布：ppt+script 与 script+ppt 同义（仅主片段顺序不同），归并计数为一行。"""
+        self._qa(cited=[
+            {"n": 1, "source": "ppt"},
+            {"n": 2, "source": "ppt+script"},
+            {"n": 3, "source": "script"},
+            {"n": 4, "source": "script+ppt"},
+            {"n": 5, "source": "material"},
+        ])
+        self._qa(cited=[{"n": 1, "source": "ppt+script"}])
+        by_source = self._data()["by_source"]
+        self.assertEqual(by_source, {"ppt": 1, "script": 1, "script+ppt": 3, "material": 1})
+        self.assertNotIn("ppt+script", by_source)
+
     def test_previous_period_baseline(self):
         """环比基线：上周期记录只影响 rate_previous，不影响当前窗口。"""
         self._qa(cited=[])  # 当前窗 1 提问 1 为空

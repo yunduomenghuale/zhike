@@ -259,6 +259,12 @@ def quality_daily(qs) -> list[dict]:
     ]
 
 
+# 同页融合单元的来源键：ppt+script 与 script+ppt 同义（仅主片段顺序不同，
+# 见 ai/services.py _merge_same_page_units），分布口径归并为 script+ppt，
+# 避免看板上同一语义拆成两种类型（曾致前端 raw key「ppt+script」裸奔）
+_SOURCE_KEY_ALIAS = {"ppt+script": "script+ppt"}
+
+
 def quality_by_source(qs) -> dict:
     """引用来源分布：cited_chunks[].source 计数（一条多引用各计一次）。
 
@@ -277,6 +283,7 @@ def quality_by_source(qs) -> dict:
             continue
         for item in cited:
             source = (item or {}).get("source") or "unknown"
+            source = _SOURCE_KEY_ALIAS.get(source, source)
             counter[source] = counter.get(source, 0) + 1
     if truncated:
         logger.warning(

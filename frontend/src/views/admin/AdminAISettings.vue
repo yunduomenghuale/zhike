@@ -973,9 +973,10 @@ const qaDegradedRows = computed(() => {
   }))
 })
 
-// 引用来源分布（material 资料 / script 讲解稿 / ppt 课件 / script+ppt 组合 / unknown 历史记录无来源键）
-const qaSourceLabels = { material: '知识库资料', script: '讲解稿', ppt: '课件 PPT', 'script+ppt': '讲解稿+课件', unknown: '其他' }
-const qaSourceColors = { material: 'linear-gradient(90deg,#93c5fd,#2563eb)', script: 'linear-gradient(90deg,#c4b5fd,#7c3aed)', ppt: 'linear-gradient(90deg,#7dd3fc,#0284c7)', 'script+ppt': 'linear-gradient(90deg,#5eead4,#0d9488)', unknown: 'linear-gradient(90deg,#cbd5e1,#94a3b8)' }
+// 引用来源分布（material 资料 / script 讲解稿 / ppt 课件 / script+ppt 与 ppt+script 同义组合 / unknown 历史记录无来源键）
+// 后端已把 ppt+script 归一为 script+ppt（qa_stats._SOURCE_KEY_ALIAS），此处补映射仅为防御 raw key 裸奔
+const qaSourceLabels = { material: '知识库资料', script: '讲解稿', ppt: '课件 PPT', 'ppt+script': '讲解稿+课件', 'script+ppt': '讲解稿+课件', unknown: '其他' }
+const qaSourceColors = { material: 'linear-gradient(90deg,#93c5fd,#2563eb)', script: 'linear-gradient(90deg,#c4b5fd,#7c3aed)', ppt: 'linear-gradient(90deg,#7dd3fc,#0284c7)', 'ppt+script': 'linear-gradient(90deg,#5eead4,#0d9488)', 'script+ppt': 'linear-gradient(90deg,#5eead4,#0d9488)', unknown: 'linear-gradient(90deg,#cbd5e1,#94a3b8)' }
 const qaSourceRows = computed(() => {
   const src = qa.value?.by_source || {}
   const entries = Object.entries(src)
