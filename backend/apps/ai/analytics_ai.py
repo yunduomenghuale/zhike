@@ -451,7 +451,11 @@ def run_class_analytics(task: AITask) -> None:
             merged = {}
             for item in data:
                 if isinstance(item, dict) and item.get("student_id") is not None and item.get("comment"):
-                    merged[item["student_id"]] = str(item["comment"]).strip()
+                    try:
+                        sid = int(item["student_id"])
+                    except (TypeError, ValueError):
+                        continue
+                    merged[sid] = str(item["comment"]).strip()
             return merged or None
 
         if len(batches) == 1:
