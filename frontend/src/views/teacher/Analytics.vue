@@ -8,7 +8,7 @@
         </el-select>
       </div>
       <div class="an-toolbar-actions">
-        <el-button class="an-primary-btn" type="primary" :icon="MagicStick" :loading="aiLoading" :disabled="!classId" @click="generateReport">
+        <el-button class="an-primary-btn" type="primary" :icon="MagicStick" :loading="aiBusy" :disabled="!classId" @click="generateReport">
           {{ aiReport ? '重新生成报告' : '生成分析报告' }}
         </el-button>
       </div>
@@ -17,14 +17,29 @@
     <el-empty v-if="!classId" description="请先选择班级" />
 
     <template v-else>
-      <!-- AI 学情分析报告（生成后展示） -->
-      <div v-if="aiLoading || aiReport" class="ai-card" :class="{ 'is-loading': aiLoading }">
-        <div v-if="aiLoading" class="ai-body">
+      <!-- AI 学情分析报告（异步任务：生成中渐进展示，失败可重试） -->
+      <div v-if="aiBusy || aiReport || aiFailed" class="ai-card" :class="{ 'is-loading': aiBusy }">
+        <div v-if="aiBusy" class="ai-body">
           <div class="ai-loading-tip">
             <el-icon class="is-loading" :size="15"><Loading /></el-icon>
-            AI 正在分析班级数据，请稍候…
+            {{ aiProgressMsg }}
           </div>
-          <el-skeleton :rows="4" animated />
+          <el-progress
+            v-if="aiProgressPct !== null"
+            :percentage="aiProgressPct"
+            :stroke-width="6"
+            :show-text="false"
+            class="ai-progress"
+          />
+          <el-skeleton v-if="!aiReport" :rows="4" animated />
+          <div v-else class="ai-md" v-html="renderMd(aiReport)"></div>
+        </div>
+        <div v-else-if="aiFailed" class="ai-body">
+          <div class="ai-failed-tip">
+            <el-icon :size="15"><WarningFilled /></el-icon>
+            分析失败：{{ aiError || '未知错误' }}
+          </div>
+          <el-button size="small" type="primary" @click="generateReport">重新生成</el-button>
         </div>
         <template v-else>
           <div class="ai-head">
@@ -32,6 +47,7 @@
               <el-icon :size="15"><MagicStick /></el-icon>
             </span>
             <span class="ai-head-title">AI 学情分析</span>
+            <el-tag v-if="aiDegraded" type="warning" size="small" effect="light" round>部分内容降级</el-tag>
             <span class="ai-head-time">生成于 {{ fmtDateTime(aiGeneratedAt) }}</span>
           </div>
           <div class="ai-body ai-md" v-html="renderMd(aiReport)"></div>
@@ -116,7 +132,8 @@
             <el-icon :size="13" class="stu-ai-icon"><MagicStick /></el-icon>
             <span>{{ aiComments[row.student_id] }}</span>
           </div>
-          <div v-else-if="aiLoading" class="stu-ai muted">AI 简评生成中…</div>
+          <div v-else-if="isNoDataStudent(row)" class="stu-ai muted">暂无学习数据，未参与本次分析</div>
+          <div v-else-if="aiBusy" class="stu-ai muted">AI 简评生成中…</div>
         </div>
       </div>
     </template>
@@ -126,12 +143,13 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { MagicStick, Loading, Notebook, Files, Medal, Cpu } from '@element-plus/icons-vue'
+import { MagicStick, Loading, Notebook, Files, Medal, Cpu, WarningFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { renderAiMarkdown } from '@/utils/markdown'
 import { sortedCourseNames } from '@/utils/course-sort'
 import { listClasses } from '@/api/classroom'
 import { getClassStats, generateClassAiReport } from '@/api/analytics'
+import { useAiTaskPolling } from '@/composables/useAiTaskPolling'
 
 const renderMd = renderAiMarkdown
 
@@ -139,10 +157,31 @@ const classes = ref([])
 const classId = ref(null)
 const loading = ref(false)
 const students = ref([])
-const aiLoading = ref(false)
-const aiReport = ref('')
-const aiComments = ref({})
-const aiGeneratedAt = ref(null)
+// AI 学情分析：异步任务（submit → 轮询 /ai-tasks/<id>/ → 终态渲染）
+const { task: aiTask, start: startPolling, stop: stopPolling } = useAiTaskPolling()
+const aiSubmitting = ref(false)
+const aiResult = computed(() => aiTask.value?.result || null)
+const aiReport = computed(() => aiResult.value?.report || '')
+const aiComments = computed(() => aiResult.value?.comments || {})
+const aiGeneratedAt = computed(() => aiResult.value?.generated_at || null)
+const aiDegraded = computed(() => Boolean(aiResult.value?.degraded))
+const aiFailed = computed(() => aiTask.value?.status === 'failed')
+const aiError = computed(() => aiTask.value?.error || '')
+const aiBusy = computed(
+  () => aiSubmitting.value || (aiTask.value ? ['pending', 'running'].includes(aiTask.value.status) : false)
+)
+const aiProgressMsg = computed(() => aiTask.value?.progress?.message || 'AI 正在分析班级数据，请稍候…')
+const aiProgressPct = computed(() => {
+  const p = aiTask.value?.progress
+  if (!p || !p.total) return null
+  return Math.round(((p.done || 0) / p.total) * 100)
+})
+const noDataIds = computed(
+  () => new Set((aiResult.value?.no_data_students || []).map((s) => Number(s.student_id)))
+)
+function isNoDataStudent(row) {
+  return noDataIds.value.has(Number(row.student_id))
+}
 const route = useRoute()
 const router = useRouter()
 const fixedCourseId = computed(() => Number(route.params.id) || null)
@@ -208,9 +247,8 @@ function fmtDateTime(t) {
 }
 
 function resetAi() {
-  aiReport.value = ''
-  aiComments.value = {}
-  aiGeneratedAt.value = null
+  stopPolling()
+  aiTask.value = null
 }
 
 async function loadClasses() {
@@ -245,16 +283,20 @@ function onClassChange() {
 }
 
 async function generateReport() {
-  if (!classId.value || aiLoading.value) return
-  aiLoading.value = true
+  if (!classId.value || aiBusy.value) return
+  aiSubmitting.value = true
   try {
+    // D5 异步化：提交即返回 task_id，轮询任务终态（S1 报告 / S2 简评增量落库，渐进渲染）
     const data = await generateClassAiReport(classId.value, { course: activeCourseId() })
-    aiReport.value = data.report || ''
-    aiComments.value = data.comments || {}
-    aiGeneratedAt.value = data.generated_at
-    if (!aiReport.value) ElMessage.warning('AI 暂未生成有效内容，请重试')
+    startPolling(data.task_id, {
+      onSuccess: () => {
+        if (!aiReport.value) ElMessage.warning('AI 暂未生成有效内容，请重试')
+      },
+    })
+  } catch {
+    // 频率限制（429）/ 无学生（400）等已由响应拦截器统一提示，仅复位提交态
   } finally {
-    aiLoading.value = false
+    aiSubmitting.value = false
   }
 }
 
@@ -363,6 +405,17 @@ onMounted(loadClasses)
   margin-bottom: 12px;
   font-size: 13px;
   color: var(--primary-600);
+}
+.ai-progress {
+  margin-bottom: 14px;
+}
+.ai-failed-tip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--danger);
 }
 .ai-md {
   font-size: 14px;
