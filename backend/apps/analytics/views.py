@@ -60,33 +60,52 @@ class ClassStatsView(APIView):
 
 
 class ClassAIReportView(APIView):
-    """AI 学情分析报告：基于班级统计数据生成整体报告 + 逐学生简评。"""
+    """AI 学情分析报告（异步，需求 T-L-04 延伸）。
+
+    旧同步接口已直接切换（D5 定稿）：报告在后台线程分段生成（约 2-4 分钟），
+    请求秒级返回 {task_id}，前端轮询 GET /api/ai-tasks/<id>/ 看阶段进度，
+    完成后渲染 report + 学生卡片简评。
+
+    频率限制（F6，DB 判定）：同班级 10 分钟内已有进行中/已完成的
+    class_analytics 任务则拒绝（LLM 成本保护）；上一次失败允许立即重试。
+    """
 
     permission_classes = [IsTeacher]
     serializer_class = AnalyticsResponseSerializer
+    RATE_LIMIT_MINUTES = 10
 
     def post(self, request, class_id):
-        from apps.ai.services import analyze_class_stats
+        from datetime import timedelta
+
+        from apps.ai.models import AITask
+        from apps.ai.tasks import submit_ai_task
 
         classroom, course, error = _resolve_classroom_course(request, class_id)
         if error:
             return error
 
-        stats = build_class_stats(classroom, course.id)
-        if not stats["students"]:
+        if not ClassStudent.objects.filter(classroom=classroom).exists():
             return api_response(message="班级暂无学生，无法生成分析", code=400, status=400)
 
-        result = analyze_class_stats(stats)
-        comments = {
-            item["student_id"]: item["comment"]
-            for item in result.get("student_comments", [])
-            if isinstance(item, dict) and item.get("student_id") is not None and item.get("comment")
-        }
-        return api_response({
-            "report": result.get("overview", ""),
-            "comments": comments,
-            "generated_at": timezone.now(),
-        })
+        recent = AITask.objects.filter(
+            task_type=AITask.TaskType.CLASS_ANALYTICS,
+            classroom=classroom,
+            created_at__gte=timezone.now() - timedelta(minutes=self.RATE_LIMIT_MINUTES),
+        ).exclude(status=AITask.Status.FAILED).exists()
+        if recent:
+            return api_response(
+                message="分析任务刚提交过，请稍后再试（10 分钟内限一次）",
+                code=429,
+                status=429,
+            )
+
+        task = submit_ai_task(
+            AITask.TaskType.CLASS_ANALYTICS,
+            user=request.user,
+            classroom=classroom,
+            course=course,
+        )
+        return api_response({"task_id": task.id})
 
 
 class ClassStudentDetailView(APIView):
