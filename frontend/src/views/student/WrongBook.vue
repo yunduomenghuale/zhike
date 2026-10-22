@@ -142,6 +142,11 @@
         <el-form-item label="题干">
           <el-input v-model="noteForm.stem" type="textarea" :rows="3" resize="none" placeholder="题目内容" />
         </el-form-item>
+        <el-form-item v-if="catalogOptions.length" label="所属章节（选填，用于章节学情总结）">
+          <el-select v-model="noteForm.catalog" class="module-select" popper-class="module-select-popper" placeholder="不指定" clearable style="width: 100%">
+            <el-option v-for="c in catalogOptions" :key="c.id" :label="c.title" :value="c.id" />
+          </el-select>
+        </el-form-item>
         <div class="note-form-grid">
           <el-form-item label="我的答案">
             <el-input v-model="noteForm.my_answer" placeholder="如 A / 填空内容" />
@@ -188,6 +193,7 @@ import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
 import { listClasses } from '@/api/classroom'
 import { getMyWrongQuestions } from '@/api/analytics'
 import { createWrongNote, deleteWrongNote, listWrongMastery, listWrongNotes, toggleWrongMastery } from '@/api/question'
+import { listCatalogs } from '@/api/course'
 import { blankAnswerText } from '@/utils/blank-answer'
 
 const route = useRoute()
@@ -332,11 +338,28 @@ async function toggleMastery(q) {
 // ---- 手动添加 ----
 const addVisible = ref(false)
 const adding = ref(false)
-const noteForm = reactive({ stem: '', my_answer: '', correct_answer: '', analysis: '' })
+const noteForm = reactive({ stem: '', my_answer: '', correct_answer: '', analysis: '', catalog: null })
+const catalogOptions = ref([])
 
-function openAdd() {
-  Object.assign(noteForm, { stem: '', my_answer: '', correct_answer: '', analysis: '' })
+function flattenCatalog(nodes, depth = 0, out = []) {
+  for (const n of nodes || []) {
+    out.push({ id: n.id, title: `${'　'.repeat(depth)}${n.title}` })
+    flattenCatalog(n.children, depth + 1, out)
+  }
+  return out
+}
+
+async function openAdd() {
+  Object.assign(noteForm, { stem: '', my_answer: '', correct_answer: '', analysis: '', catalog: null })
   addVisible.value = true
+  const targetCourse = fixedCourseId.value || courseId.value || courses.value[0]?.id
+  if (!targetCourse) return
+  try {
+    const data = await listCatalogs({ course: targetCourse, tree: 1 })
+    catalogOptions.value = flattenCatalog(data.results ?? data)
+  } catch {
+    catalogOptions.value = []
+  }
 }
 
 async function saveNote() {
@@ -347,6 +370,7 @@ async function saveNote() {
   try {
     await createWrongNote({
       course: targetCourse,
+      catalog: noteForm.catalog || null,
       stem: noteForm.stem.trim(),
       my_answer: noteForm.my_answer.trim(),
       correct_answer: noteForm.correct_answer.trim(),

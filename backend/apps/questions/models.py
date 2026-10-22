@@ -162,7 +162,8 @@ class WrongNote(BaseModel):
     """学生手动添加的错题记录（错题本补充入口）。
 
     自动收录的错题来自答题记录；手动条目由学生自行整理，
-    与课程关联，便于按课程复习。
+    与课程关联，便于按课程复习。catalog 可空：录入时可选章节，
+    历史数据留空，总结中按课程级纳入（D3 定稿）。
     """
 
     student = models.ForeignKey(
@@ -170,6 +171,10 @@ class WrongNote(BaseModel):
     )
     course = models.ForeignKey(
         "courses.Course", on_delete=models.CASCADE, related_name="wrong_notes", verbose_name="课程"
+    )
+    catalog = models.ForeignKey(
+        "courses.Catalog", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="wrong_notes", verbose_name="章节",
     )
     stem = models.TextField("题干")
     my_answer = models.CharField("我的答案", max_length=500, blank=True)

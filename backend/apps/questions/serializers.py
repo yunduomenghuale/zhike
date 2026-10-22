@@ -102,13 +102,14 @@ class AnswerRecordSerializer(serializers.ModelSerializer):
 
 class WrongNoteSerializer(serializers.ModelSerializer):
     course_name = serializers.CharField(source="course.name", read_only=True)
+    catalog_title = serializers.CharField(source="catalog.title", read_only=True, default="")
 
     class Meta:
         from .models import WrongNote
 
         model = WrongNote
         fields = [
-            "id", "course", "course_name", "stem", "my_answer",
+            "id", "course", "course_name", "catalog", "catalog_title", "stem", "my_answer",
             "correct_answer", "analysis", "created_at",
         ]
         read_only_fields = ["student"]
