@@ -7,6 +7,7 @@ from .views import (
     AdminAIConfigChangeLogListView,
     AdminOverviewView,
     AdminPasswordResetView,
+    AdminQAQualityStatsView,
     AdminRebuildVectorsView,
     AdminUserDetailView,
     AdminUserImportConfirmView,
@@ -59,6 +60,7 @@ urlpatterns = [
     path("ai-call-logs/", AdminAICallLogListView.as_view(), name="admin-ai-call-logs"),
     path("ai-call-logs/export/", AdminAICallLogExportView.as_view(), name="admin-ai-call-logs-export"),
     path("ai-call-stats/", AdminAICallStatsView.as_view(), name="admin-ai-call-stats"),
+    path("qa-quality-stats/", AdminQAQualityStatsView.as_view(), name="admin-qa-quality-stats"),
     path("ai-config-changes/", AdminAIConfigChangeLogListView.as_view(), name="admin-ai-config-changes"),
     path("rebuild-vectors/", AdminRebuildVectorsView.as_view(), name="admin-rebuild-vectors"),
 ]

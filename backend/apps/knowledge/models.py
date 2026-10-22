@@ -217,6 +217,9 @@ class QARecord(BaseModel):
     context_snapshot = models.JSONField("上下文快照", default=dict, blank=True)
     # 学生反馈：1 有用 / -1 无用 / 0 未评（质量闭环指标来源）
     feedback = models.SmallIntegerField("学生反馈", default=0)
+    # 纯图片提问（默认文案）：跳过检索直接走视觉理解，cited 为空属正常
+    # 不算「检索为空」，统计为空率时排除（质量看板口径，2026-10-22）
+    skip_retrieval = models.BooleanField("跳过检索", default=False)
 
     class Meta:
         verbose_name = "知识库问答记录"

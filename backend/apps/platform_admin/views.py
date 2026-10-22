@@ -35,6 +35,7 @@ from apps.common.response import api_response
 from apps.courses.models import Catalog, Course
 from apps.exams.models import Exam
 from apps.homework.models import Homework
+from apps.knowledge.models import QARecord
 
 from .audit import log_admin_action
 from .models import AdminActionLog
@@ -1008,6 +1009,343 @@ class AdminAICallStatsView(AdminThrottleMixin, APIView):
         from .services import ai_health_alerts
 
         return ai_health_alerts(timezone.now() - timedelta(hours=24))
+
+
+# 问答质量看板：来源分布扫描样本上限（SQLite 无法 ORM 聚合 JSON 数组，Python 侧扫描）
+_QA_SOURCE_SCAN_LIMIT = 20000
+
+
+def _qa_record_qs(start, end):
+    """按 [start, end] 闭区间过滤问答记录（口径同调用日志：end +1s 兼容微秒级）。"""
+    return QARecord.objects.filter(
+        created_at__gte=start, created_at__lt=end + timedelta(seconds=1)
+    )
+
+
+def _qa_rate(count, denom):
+    """比率统一出口：分母为 0 时返回 None（前端显示「—」）。"""
+    return round(count / denom, 4) if denom else None
+
+
+class AdminQAQualityStatsView(AdminThrottleMixin, APIView):
+    """问答质量统计（质量看板 Phase 1，2026-10-22）。
+
+    指标口径（与管理端看板卡片 tooltip 文案一致）：
+    - 检索为空率：cited_chunks=[] 且非纯图片默认文案（skip_retrieval）÷（总数 - skip）
+    - 改写触发率：rewritten_question 非空 ÷ 总数（多轮追问才触发，首轮天然不触发）
+    - 降级分布：context_snapshot.degraded_level 分桶 L0/L1/L2/L4
+    - 好评率：feedback=1 ÷（feedback∈{1,-1}）；覆盖率：有评价 ÷ 总数
+    - 兜底触发率：context_snapshot.fallback_used=True ÷ 总数（检索为空补上一轮片段）
+    - 来源分布：cited_chunks[].source 计数（一条多引用各计一次）
+    - 成本：AICallLog scene=QA 窗口内 token 合计（无单价字段，不折算金额）
+
+    窗口与环比基线口径同 AdminAICallStatsView（复用 _call_log_window：days 滚动窗
+    或 start+end 日历窗，返回前一等长周期基线）。
+    """
+
+    permission_classes = [IsPlatformAdmin]
+
+    # 告警阈值（建议值，上线后按实际分布调整）
+    EMPTY_RATE_WARN = 0.30
+    EMPTY_RATE_ERROR = 0.50
+    L4_RATE_WARN = 0.10
+    L4_SURGE_RATIO = 2.0
+    COURSE_ALERT_MIN_QUESTIONS = 20  # 课程级告警最小样本量，防小样本噪声
+
+    def get(self, request):
+        try:
+            window = _call_log_window(request, default_days=30)
+        except CallLogWindowError as exc:
+            return api_response(message=str(exc), code=400, status=400)
+        current = self._collect(window["start"], window["end"])
+        previous = self._collect(window["previous_start"], window["previous_end"], breakdowns=False)
+        totals = current["totals"]
+        # 环比基线：各比率附前一等长周期同口径值（None=上周期无数据）
+        for name in ("empty_retrieval", "rewrite", "fallback"):
+            totals[name]["rate_previous"] = previous["totals"][name]["rate"]
+        totals["feedback"]["rate_previous"] = previous["totals"]["feedback"]["rate"]
+        totals["feedback"]["coverage_previous"] = previous["totals"]["feedback"]["coverage"]
+        degraded = current["degraded"]
+        degraded["degraded_rate_previous"] = previous["degraded"]["degraded_rate"]
+        return api_response({
+            # 统一转本地时区输出（同调用统计页口径）
+            "window": {
+                "start": timezone.localtime(window["start"]).isoformat(),
+                "end": timezone.localtime(window["end"]).isoformat(),
+                "days": window["days"],
+                "source": window["source"],
+                "previous_start": timezone.localtime(window["previous_start"]).isoformat(),
+                "previous_end": timezone.localtime(window["previous_end"]).isoformat(),
+            },
+            "totals": totals,
+            "degraded": degraded,
+            "by_course": current["by_course"],
+            "daily": current["daily"],
+            "by_source": current["by_source"],
+            "alerts": self._alerts(),
+        })
+
+    @classmethod
+    def _collect(cls, start, end, breakdowns: bool = True) -> dict:
+        """汇总一个时间窗的指标（totals / 降级分布；breakdowns 时再加课程排行/日趋势/来源）。"""
+        qs = _qa_record_qs(start, end)
+        agg = qs.aggregate(
+            questions=Count("id"),
+            skip=Count("id", filter=Q(skip_retrieval=True)),
+            # 注意：聚合别名避开 filter 引用的字段名（empty/rewritten 等）
+            empty=Count("id", filter=Q(cited_chunks=[]) & Q(skip_retrieval=False)),
+            rewritten=Count("id", filter=Q(rewritten_question__gt="")),
+            rated=Count("id", filter=Q(feedback__in=[1, -1])),
+            positive=Count("id", filter=Q(feedback=1)),
+            fallback=Count("id", filter=Q(context_snapshot__fallback_used=True)),
+            degraded_l1=Count("id", filter=Q(context_snapshot__degraded_level=1)),
+            degraded_l2=Count("id", filter=Q(context_snapshot__degraded_level=2)),
+            degraded_l4=Count("id", filter=Q(context_snapshot__degraded_level=4)),
+        )
+        questions = agg["questions"] or 0
+        skip = agg["skip"] or 0
+        empty_denom = questions - skip
+        degraded_total = (
+            (agg["degraded_l1"] or 0) + (agg["degraded_l2"] or 0) + (agg["degraded_l4"] or 0)
+        )
+        # 成本：AICallLog scene=QA 窗口内 token 合计（无单价字段，不折算金额）
+        cost = _call_log_qs(start, end).filter(scene=AICallLog.Scene.QA).aggregate(
+            calls=Count("id"),
+            prompt_tokens=Sum("prompt_tokens"),
+            completion_tokens=Sum("completion_tokens"),
+            total_tokens=Sum("total_tokens"),
+        )
+        result = {
+            "totals": {
+                "questions": questions,
+                "skip_retrieval": skip,
+                "empty_retrieval": {
+                    "count": agg["empty"] or 0,
+                    "rate": _qa_rate(agg["empty"] or 0, empty_denom),
+                },
+                "rewrite": {
+                    "count": agg["rewritten"] or 0,
+                    "rate": _qa_rate(agg["rewritten"] or 0, questions),
+                },
+                "feedback": {
+                    "rated": agg["rated"] or 0,
+                    "positive": agg["positive"] or 0,
+                    "rate": _qa_rate(agg["positive"] or 0, agg["rated"] or 0),
+                    "coverage": _qa_rate(agg["rated"] or 0, questions),
+                },
+                "fallback": {
+                    "count": agg["fallback"] or 0,
+                    "rate": _qa_rate(agg["fallback"] or 0, questions),
+                },
+                "cost": {
+                    "calls": cost["calls"] or 0,
+                    "prompt_tokens": cost["prompt_tokens"] or 0,
+                    "completion_tokens": cost["completion_tokens"] or 0,
+                    "total_tokens": cost["total_tokens"] or 0,
+                },
+            },
+            "degraded": {
+                "L0": questions - degraded_total,
+                "L1": agg["degraded_l1"] or 0,
+                "L2": agg["degraded_l2"] or 0,
+                "L4": agg["degraded_l4"] or 0,
+                "degraded_rate": _qa_rate(degraded_total, questions),
+            },
+        }
+        if breakdowns:
+            result["by_course"] = cls._by_course(qs)
+            result["daily"] = cls._daily(qs)
+            result["by_source"] = cls._by_source(qs)
+        return result
+
+    @staticmethod
+    def _by_course(qs) -> list[dict]:
+        """课程排行：提问量 / 为空率 / 好评率 / 降级率（红绿由前端按阈值标注）。"""
+        rows = list(
+            qs.values(
+                "course_id", "course__name",
+                "course__teacher__username", "course__teacher__real_name",
+            )
+            .annotate(
+                questions=Count("id"),
+                skip=Count("id", filter=Q(skip_retrieval=True)),
+                empty=Count("id", filter=Q(cited_chunks=[]) & Q(skip_retrieval=False)),
+                rated=Count("id", filter=Q(feedback__in=[1, -1])),
+                positive=Count("id", filter=Q(feedback=1)),
+                degraded=Count("id", filter=Q(context_snapshot__degraded_level__gt=0)),
+            )
+            .order_by("-questions")
+        )
+        return [
+            {
+                "course_id": row["course_id"],
+                "course_name": row["course__name"],
+                "teacher": row["course__teacher__real_name"] or row["course__teacher__username"],
+                "questions": row["questions"] or 0,
+                "empty_rate": _qa_rate(row["empty"] or 0, (row["questions"] or 0) - (row["skip"] or 0)),
+                "feedback_rate": _qa_rate(row["positive"] or 0, row["rated"] or 0),
+                "rated": row["rated"] or 0,
+                "degraded_rate": _qa_rate(row["degraded"] or 0, row["questions"] or 0),
+            }
+            for row in rows
+        ]
+
+    @staticmethod
+    def _daily(qs) -> list[dict]:
+        """日趋势（本地时区）：提问量 / 为空率 / 好评率 / 降级率。"""
+        rows = list(
+            qs.annotate(day=TruncDate("created_at", tzinfo=timezone.get_current_timezone()))
+            .values("day")
+            .annotate(
+                questions=Count("id"),
+                skip=Count("id", filter=Q(skip_retrieval=True)),
+                empty=Count("id", filter=Q(cited_chunks=[]) & Q(skip_retrieval=False)),
+                rated=Count("id", filter=Q(feedback__in=[1, -1])),
+                positive=Count("id", filter=Q(feedback=1)),
+                degraded=Count("id", filter=Q(context_snapshot__degraded_level__gt=0)),
+            )
+            .order_by("day")
+        )
+        return [
+            {
+                "date": row["day"].isoformat() if row["day"] else None,
+                "questions": row["questions"] or 0,
+                "empty_rate": _qa_rate(row["empty"] or 0, (row["questions"] or 0) - (row["skip"] or 0)),
+                "feedback_rate": _qa_rate(row["positive"] or 0, row["rated"] or 0),
+                "degraded_rate": _qa_rate(row["degraded"] or 0, row["questions"] or 0),
+            }
+            for row in rows
+        ]
+
+    @staticmethod
+    def _by_source(qs) -> dict:
+        """引用来源分布：cited_chunks[].source 计数（一条多引用各计一次）。
+
+        SQLite 无 JSON 数组聚合函数，Python 侧扫描窗口样本（上限 _QA_SOURCE_SCAN_LIMIT
+        条记录，超出截断并记服务端日志；正常数据量下不会触发）。
+        """
+        counter: dict[str, int] = {}
+        scanned = 0
+        truncated = False
+        for cited in qs.values_list("cited_chunks", flat=True).iterator(chunk_size=500):
+            if scanned >= _QA_SOURCE_SCAN_LIMIT:
+                truncated = True
+                break
+            scanned += 1
+            if not isinstance(cited, list):
+                continue
+            for item in cited:
+                source = (item or {}).get("source") or "unknown"
+                counter[source] = counter.get(source, 0) + 1
+        if truncated:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "qa-quality by_source 扫描超过 %d 条记录上限，结果已截断",
+                _QA_SOURCE_SCAN_LIMIT,
+            )
+        return counter
+
+    def _alerts(self) -> list[dict]:
+        """告警（仅展示不推送）：为空率超阈值（平台 + 课程级）、L4 突增、AI 失败（复用口径）。
+
+        为空率/L4 固定按「近 7 天」评估——告警是运维信号，与看板窗口选择解耦。
+        """
+        from .services import ai_health_alerts
+
+        now = timezone.now()
+        alerts: list[dict] = []
+        week_start = now - timedelta(days=7)
+        qs = _qa_record_qs(week_start, now)
+        agg = qs.aggregate(
+            questions=Count("id"),
+            skip=Count("id", filter=Q(skip_retrieval=True)),
+            empty=Count("id", filter=Q(cited_chunks=[]) & Q(skip_retrieval=False)),
+            degraded_l4=Count("id", filter=Q(context_snapshot__degraded_level=4)),
+        )
+        questions = agg["questions"] or 0
+        empty_rate = _qa_rate(agg["empty"] or 0, questions - (agg["skip"] or 0))
+        if empty_rate is not None and questions >= 10:
+            if empty_rate > self.EMPTY_RATE_ERROR:
+                alerts.append({
+                    "type": "empty_retrieval_high",
+                    "level": "error",
+                    "title": "检索为空率偏高",
+                    "detail": f"近 7 天检索为空率 {empty_rate:.1%}，"
+                              f"超过 {self.EMPTY_RATE_ERROR:.0%} 阈值，建议检查课程资料覆盖",
+                    "course_id": None,
+                })
+            elif empty_rate > self.EMPTY_RATE_WARN:
+                alerts.append({
+                    "type": "empty_retrieval_high",
+                    "level": "warning",
+                    "title": "检索为空率偏高",
+                    "detail": f"近 7 天检索为空率 {empty_rate:.1%}，"
+                              f"超过 {self.EMPTY_RATE_WARN:.0%} 阈值，建议关注资料覆盖",
+                    "course_id": None,
+                })
+        # 课程级为空率告警（最小样本量防噪声）
+        for row in self._by_course(qs):
+            rate = row["empty_rate"]
+            if rate is None or row["questions"] < self.COURSE_ALERT_MIN_QUESTIONS:
+                continue
+            level = "error" if rate > self.EMPTY_RATE_ERROR else (
+                "warning" if rate > self.EMPTY_RATE_WARN else None
+            )
+            if level:
+                alerts.append({
+                    "type": "empty_retrieval_high",
+                    "level": level,
+                    "title": f"检索为空率偏高 · {row['course_name']}",
+                    "detail": f"近 7 天该课程为空率 {rate:.1%}，"
+                              f"超过 {self.EMPTY_RATE_ERROR:.0%} 阈值",
+                    "course_id": row["course_id"],
+                })
+        # L4 突增：近 7 天占比超阈值，或较前 7 天翻倍
+        l4_rate = _qa_rate(agg["degraded_l4"] or 0, questions)
+        prev = _qa_record_qs(
+            week_start - timedelta(days=7), week_start - timedelta(seconds=1)
+        ).aggregate(
+            questions=Count("id"),
+            degraded_l4=Count("id", filter=Q(context_snapshot__degraded_level=4)),
+        )
+        prev_questions = prev["questions"] or 0
+        prev_l4_rate = _qa_rate(prev["degraded_l4"] or 0, prev_questions)
+        if l4_rate is not None and l4_rate > self.L4_RATE_WARN:
+            alerts.append({
+                "type": "l4_surge",
+                "level": "warning",
+                "title": "上下文全丢（L4）占比偏高",
+                "detail": f"近 7 天 L4 占比 {l4_rate:.1%}，超过 {self.L4_RATE_WARN:.0%} 阈值，"
+                          "通常意味着长会话频繁触发上下文超限",
+                "course_id": None,
+            })
+        elif (
+            l4_rate is not None
+            and l4_rate > 0
+            and prev_l4_rate is not None
+            and prev_l4_rate > 0  # 上周期零 L4 时无正基数可比（0→超阈值已由绝对阈值分支覆盖）
+            and prev_questions >= 10
+            and l4_rate >= prev_l4_rate * self.L4_SURGE_RATIO
+        ):
+            alerts.append({
+                "type": "l4_surge",
+                "level": "warning",
+                "title": "上下文全丢（L4）环比突增",
+                "detail": f"近 7 天 L4 占比 {l4_rate:.1%}，为前 7 天（{prev_l4_rate:.1%}）的 "
+                          f"{l4_rate / prev_l4_rate:.1f} 倍",
+                "course_id": None,
+            })
+        # AI 失败率：复用 ai_health_alerts（近 24h，口径与调用统计页一致）
+        for item in ai_health_alerts(now - timedelta(hours=24)):
+            alerts.append({
+                "type": "ai_health",
+                "level": item.get("level", "warning"),
+                "title": "AI 服务异常",
+                "detail": item.get("message", ""),
+                "course_id": None,
+            })
+        return alerts
 
 
 class AdminAIConfigChangeLogListView(AdminThrottleMixin, APIView):

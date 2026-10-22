@@ -405,6 +405,7 @@ class QARecordViewSet(BaseModelViewSet):
             cited_chunks=cited,
             rewritten_question=rewritten[:500],
             context_snapshot=snapshot,
+            skip_retrieval=snapshot.get("skip_retrieval", False),
         )
         _touch_session(qa_session, question)
         maybe_update_session_summary(qa_session)
@@ -487,6 +488,7 @@ class QARecordViewSet(BaseModelViewSet):
                     cited_chunks=cited,
                     rewritten_question=rewritten[:500],
                     context_snapshot=snapshot,
+                    skip_retrieval=snapshot.get("skip_retrieval", False),
                 )
                 _touch_session(qa_session, question)
                 # 滚动摘要：阈值触发时在正文产出后执行（不阻塞正文显示），失败静默

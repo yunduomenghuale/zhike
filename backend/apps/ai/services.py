@@ -1724,9 +1724,10 @@ def knowledge_qa(
     # 多轮追问：先改写为可独立检索的问题（失败静默回退原问题）
     rewritten = rewrite_query_for_retrieval(question, history)
     if image_b64 and question.strip() == IMAGE_ONLY_DEFAULT_QUESTION:
-        # 纯图片提问：默认文案检索无意义，跳过 RAG 直接走视觉理解
+        # 纯图片提问：默认文案检索无意义，跳过 RAG 直接走视觉理解。
+        # skip_retrieval 标记供质量看板排除「为空率」分母（cited 为空属正常）
         context, cited = "", []
-        snapshot = {"budgets": {}, "chunks": [], "degraded_level": 0}
+        snapshot = {"budgets": {}, "chunks": [], "degraded_level": 0, "skip_retrieval": True}
     else:
         context, cited, snapshot = _gather_course_context(
             course_id,
@@ -1790,9 +1791,10 @@ def knowledge_qa_stream(
     # 多轮追问：先改写为可独立检索的问题（失败静默回退原问题）
     rewritten = rewrite_query_for_retrieval(question, history)
     if image_b64 and question.strip() == IMAGE_ONLY_DEFAULT_QUESTION:
-        # 纯图片提问：默认文案检索无意义，跳过 RAG 直接走视觉理解
+        # 纯图片提问：默认文案检索无意义，跳过 RAG 直接走视觉理解。
+        # skip_retrieval 标记供质量看板排除「为空率」分母（cited 为空属正常）
         context, cited = "", []
-        snapshot = {"budgets": {}, "chunks": [], "degraded_level": 0}
+        snapshot = {"budgets": {}, "chunks": [], "degraded_level": 0, "skip_retrieval": True}
     else:
         context, cited, snapshot = _gather_course_context(
             course_id,

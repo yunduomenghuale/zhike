@@ -23,7 +23,9 @@ from apps.ai.models import (
     AITestRecord,
 )
 from apps.ai.providers.factory import build_provider, chat_supports_vision, get_runtime_config
+from apps.ai.services import IMAGE_ONLY_DEFAULT_QUESTION, knowledge_qa
 from apps.courses.models import Course
+from apps.knowledge.models import QARecord
 
 User = get_user_model()
 
@@ -1453,3 +1455,267 @@ class AdminThrottleTests(TestCase):
         url = "/api/admin-panel/overview/"
         codes = [self.client.get(url).status_code for _ in range(10)]
         self.assertEqual(set(codes), {200})
+
+
+# ---------------------------------------------------------------------------
+# 问答质量看板（qa-quality-stats）指标口径与告警测试（2026-10-22）
+# ---------------------------------------------------------------------------
+QA_STATS_URL = "/api/admin-panel/qa-quality-stats/"
+
+
+class _FakeChatProvider:
+    """knowledge_qa 测试替身：只实现 chat 签名，避免依赖真实/模拟 Provider。"""
+
+    def chat(self, messages, **kwargs):
+        return "测试回答"
+
+
+@override_settings(**THROTTLE_OFF)
+class AdminQAQualityStatsTests(TestCase):
+    """问答质量统计端点：窗口 / 指标口径 / 环比基线 / 告警 / 权限。"""
+
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="admin_qa", password="pw123456!", role=User.Role.ADMIN
+        )
+        self.teacher = User.objects.create_user(
+            username="teacher_qa", password="pw123456!",
+            role=User.Role.TEACHER, real_name="测试教师",
+        )
+        self.student = User.objects.create_user(
+            username="student_qa", password="pw123456!", role=User.Role.STUDENT
+        )
+        self.course = Course.objects.create(name="测试课程", teacher=self.teacher)
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.admin)
+
+    def _qa(self, *, cited=None, skip=False, rewritten="", feedback=0, snapshot=None, course=None):
+        return QARecord.objects.create(
+            course=course or self.course,
+            student=self.student,
+            question="测试问题",
+            answer="测试回答",
+            cited_chunks=[] if cited is None else cited,
+            rewritten_question=rewritten,
+            context_snapshot=snapshot or {},
+            feedback=feedback,
+            skip_retrieval=skip,
+        )
+
+    def _data(self, **params):
+        resp = self.client.get(QA_STATS_URL, params)
+        self.assertEqual(resp.status_code, 200, resp.data)
+        return resp.data["data"]
+
+    # ---------- 基础结构 ----------
+
+    def test_empty_database_returns_zero_and_none_rates(self):
+        data = self._data()
+        self.assertEqual(data["totals"]["questions"], 0)
+        self.assertIsNone(data["totals"]["empty_retrieval"]["rate"])
+        self.assertIsNone(data["totals"]["rewrite"]["rate"])
+        self.assertIsNone(data["totals"]["feedback"]["rate"])
+        self.assertIsNone(data["totals"]["feedback"]["coverage"])
+        self.assertIsNone(data["totals"]["fallback"]["rate"])
+        self.assertEqual(data["degraded"]["L0"], 0)
+        self.assertEqual(data["by_course"], [])
+        self.assertEqual(data["daily"], [])
+        self.assertEqual(data["by_source"], {})
+        self.assertEqual(data["alerts"], [])
+        self.assertEqual(data["totals"]["cost"]["total_tokens"], 0)
+
+    def test_window_params_in_source(self):
+        data = self._data(days=30)
+        self.assertEqual(data["window"]["days"], 30)
+        self.assertEqual(data["window"]["source"], "days")
+        self.assertIn("previous_start", data["window"])
+        self.assertIn("previous_end", data["window"])
+
+    # ---------- 指标口径 ----------
+
+    def test_metric_definitions(self):
+        """五条记录覆盖全部指标：空检索 / 图片跳过 / 改写 / 反馈 / 兜底 / 降级 / 来源。"""
+        self._qa(cited=[], skip=False)                                   # 检索为空
+        self._qa(cited=[], skip=True)                                    # 图片默认文案：不进为空分母
+        self._qa(                                                         # 全指标记录
+            cited=[{"n": 1, "source": "material"}],
+            rewritten="改写后的问题", feedback=1,
+            snapshot={"degraded_level": 4, "fallback_used": True},
+        )
+        self._qa(                                                         # 双来源 + 差评 + L1
+            cited=[{"n": 1, "source": "script"}, {"n": 2, "source": "ppt"}],
+            feedback=-1, snapshot={"degraded_level": 1},
+        )
+        self._qa(cited=[{"n": 1, "source": "material"}])                 # 正常无反馈
+        AICallLog.objects.create(
+            capability="chat", provider="tongyi", scene="qa", success=True,
+            prompt_tokens=100, completion_tokens=20, total_tokens=120,
+        )
+        data = self._data()
+        totals = data["totals"]
+        self.assertEqual(totals["questions"], 5)
+        self.assertEqual(totals["skip_retrieval"], 1)
+        # 为空率 = 1 / (5-1) = 0.25（图片默认文案记录不进分母）
+        self.assertEqual(totals["empty_retrieval"]["count"], 1)
+        self.assertEqual(totals["empty_retrieval"]["rate"], 0.25)
+        # 改写率 = 1/5 = 0.2；好评率 = 1/2 = 0.5；覆盖率 = 2/5 = 0.4
+        self.assertEqual(totals["rewrite"]["rate"], 0.2)
+        self.assertEqual(totals["feedback"]["rate"], 0.5)
+        self.assertEqual(totals["feedback"]["coverage"], 0.4)
+        # 兜底率 = 1/5 = 0.2
+        self.assertEqual(totals["fallback"]["rate"], 0.2)
+        # 降级：L0=3 / L1=1 / L4=1，降级率 = 2/5 = 0.4
+        self.assertEqual(data["degraded"], {
+            "L0": 3, "L1": 1, "L2": 0, "L4": 1, "degraded_rate": 0.4,
+            "degraded_rate_previous": None,
+        })
+        # 来源：material×2 / script×1 / ppt×1（一条多引用各计一次）
+        self.assertEqual(data["by_source"], {"material": 2, "script": 1, "ppt": 1})
+        # 成本：仅 scene=qa 的调用计入
+        self.assertEqual(totals["cost"]["calls"], 1)
+        self.assertEqual(totals["cost"]["total_tokens"], 120)
+        # 课程排行
+        row = data["by_course"][0]
+        self.assertEqual(row["course_name"], "测试课程")
+        self.assertEqual(row["teacher"], "测试教师")
+        self.assertEqual(row["questions"], 5)
+        self.assertEqual(row["empty_rate"], 0.25)
+        self.assertEqual(row["feedback_rate"], 0.5)
+
+    def test_skip_retrieval_excluded_from_empty_denominator(self):
+        """纯图片默认文案：cited 为空但不算「检索为空」，且不进分母。"""
+        self._qa(cited=[], skip=True)
+        self._qa(cited=[], skip=True)
+        self._qa(cited=[], skip=False)
+        data = self._data()
+        self.assertEqual(data["totals"]["empty_retrieval"]["count"], 1)
+        self.assertEqual(data["totals"]["empty_retrieval"]["rate"], 1.0)
+
+    def test_non_qa_scene_call_log_not_in_cost(self):
+        AICallLog.objects.create(
+            capability="chat", provider="tongyi", scene="script_gen", success=True,
+            prompt_tokens=999, total_tokens=999,
+        )
+        self.assertEqual(self._data()["totals"]["cost"]["total_tokens"], 0)
+
+    # ---------- 环比基线 ----------
+
+    def test_previous_period_baseline(self):
+        """前一等长周期基线：当前窗记录 + 上周期记录，rate_previous 取上周期同口径。"""
+        self._qa(cited=[])  # 当前窗：1 提问 1 为空 → rate 1.0
+        prev = self._qa(cited=[{"n": 1, "source": "material"}])
+        QARecord.objects.filter(pk=prev.pk).update(
+            created_at=timezone.now() - timedelta(days=8)
+        )
+        data = self._data(days=7)
+        self.assertEqual(data["totals"]["empty_retrieval"]["rate"], 1.0)
+        self.assertEqual(data["totals"]["empty_retrieval"]["rate_previous"], 0.0)
+        self.assertEqual(data["degraded"]["degraded_rate_previous"], 0.0)
+
+    # ---------- 窗口参数 ----------
+
+    def test_invalid_window_params_rejected(self):
+        resp = self.client.get(QA_STATS_URL, {"start": "2026/10/01"})
+        self.assertEqual(resp.status_code, 400)
+        resp = self.client.get(QA_STATS_URL, {"start": "2026-10-10", "end": "2026-10-01"})
+        self.assertEqual(resp.status_code, 400)
+
+    # ---------- 告警 ----------
+
+    def _seed_week_questions(self, count, empty_count, l4_count=0, course=None):
+        for i in range(count):
+            is_empty = i < empty_count
+            is_l4 = i >= empty_count and i < empty_count + l4_count
+            self._qa(
+                cited=[] if is_empty else [{"n": 1, "source": "material"}],
+                snapshot={"degraded_level": 4} if is_l4 else {"degraded_level": 0},
+                course=course,
+            )
+
+    def test_empty_rate_platform_alert(self):
+        # 10 条中 4 条为空（40%）：> 30% 触发 warning；再补到 > 50% 触发 error
+        self._seed_week_questions(10, 4)
+        alerts = [a for a in self._data()["alerts"] if a["type"] == "empty_retrieval_high"]
+        platform_alerts = [a for a in alerts if a["course_id"] is None]
+        self.assertEqual(len(platform_alerts), 1)
+        self.assertEqual(platform_alerts[0]["level"], "warning")
+        self.assertIn("40.0%", platform_alerts[0]["detail"])
+        # 追加到 6/12 = 50% → 严格大于 50% 才 error，先补到 7/13 ≈ 53.8%
+        self._seed_week_questions(3, 3)
+        alerts = [a for a in self._data()["alerts"] if a["type"] == "empty_retrieval_high"]
+        platform_alerts = [a for a in alerts if a["course_id"] is None]
+        self.assertEqual(platform_alerts[0]["level"], "error")
+
+    def test_course_level_empty_alert_needs_min_sample(self):
+        # 19 条（低于 20 样本门槛）：无课程级告警
+        self._seed_week_questions(19, 10)
+        alerts = [a for a in self._data()["alerts"] if a["type"] == "empty_retrieval_high"]
+        self.assertEqual([a for a in alerts if a["course_id"] is not None], [])
+        # 补足 20 条且为空率 > 30%：出现课程级告警（带 course_id）
+        self._seed_week_questions(1, 1)
+        alerts = [a for a in self._data()["alerts"] if a["type"] == "empty_retrieval_high"]
+        course_alerts = [a for a in alerts if a["course_id"] is not None]
+        self.assertEqual(len(course_alerts), 1)
+        self.assertEqual(course_alerts[0]["course_id"], self.course.id)
+        self.assertIn("测试课程", course_alerts[0]["title"])
+
+    def test_l4_surge_alert(self):
+        # 10 条中 2 条 L4（20% > 10% 阈值）→ l4_surge 告警
+        self._seed_week_questions(10, 0, l4_count=2)
+        alerts = [a for a in self._data()["alerts"] if a["type"] == "l4_surge"]
+        self.assertEqual(len(alerts), 1)
+        self.assertIn("20.0%", alerts[0]["detail"])
+
+    def test_l4_surge_no_division_by_zero_when_prev_zero(self):
+        """上周期有量（≥10）但零 L4：环比无正基数，不误报也不 500。"""
+        # 前 7 天：10 条全部 L0（prev_l4_rate=0.0）
+        for _ in range(10):
+            prev_rec = self._qa(
+                cited=[{"n": 1, "source": "material"}], snapshot={"degraded_level": 0}
+            )
+            QARecord.objects.filter(pk=prev_rec.pk).update(
+                created_at=timezone.now() - timedelta(days=10)
+            )
+        # 当前 7 天：12 条中 1 条 L4（8.3%：低于 10% 绝对阈值）
+        self._seed_week_questions(11, 0)
+        self._qa(cited=[{"n": 1, "source": "material"}], snapshot={"degraded_level": 4})
+        alerts = [a for a in self._data(days=7)["alerts"] if a["type"] == "l4_surge"]
+        self.assertEqual(alerts, [])
+
+    def test_no_alerts_below_thresholds(self):
+        # 10 条中 2 条为空（20% < 30%）：无告警
+        self._seed_week_questions(10, 2)
+        alerts = [a for a in self._data()["alerts"] if a["type"] in ("empty_retrieval_high", "l4_surge")]
+        self.assertEqual(alerts, [])
+
+    # ---------- 权限 ----------
+
+    def test_non_admin_forbidden(self):
+        self.client.force_authenticate(user=self.teacher)
+        self.assertEqual(self.client.get(QA_STATS_URL).status_code, 403)
+
+    # ---------- 落库写入路径 ----------
+
+    def test_knowledge_qa_image_only_marks_skip_retrieval(self):
+        """纯图片默认文案提问：snapshot 带 skip_retrieval=True（看板排除口径的来源）。"""
+        with patch("apps.ai.services.get_provider", return_value=_FakeChatProvider()):
+            answer, cited, rewritten, snapshot = knowledge_qa(
+                course_id=self.course.id,
+                question=IMAGE_ONLY_DEFAULT_QUESTION,
+                image_b64="data:image/png;base64,AAAA",
+            )
+        self.assertEqual(cited, [])
+        self.assertIs(snapshot.get("skip_retrieval"), True)
+
+    def test_knowledge_qa_normal_path_has_no_skip_flag(self):
+        """正常文字提问：不进 skip 分支，snapshot 不带 skip_retrieval。"""
+        fake_snapshot = {"budgets": {}, "chunks": [], "degraded_level": 0}
+        with patch("apps.ai.services.get_provider", return_value=_FakeChatProvider()), \
+                patch("apps.ai.services._gather_course_context",
+                      return_value=("上下文", [{"n": 1, "source": "material"}], fake_snapshot)):
+            answer, cited, rewritten, snapshot = knowledge_qa(
+                course_id=self.course.id,
+                question="什么是进程",
+                image_b64=None,
+            )
+        self.assertNotIn("skip_retrieval", snapshot)

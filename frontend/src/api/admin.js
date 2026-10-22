@@ -47,6 +47,10 @@ export const exportAdminAICallLogs = (params) => (
   request.get('/admin-panel/ai-call-logs/export/', { params, responseType: 'blob' })
 )
 export const getAdminAICallStats = (params) => request.get('/admin-panel/ai-call-stats/', { params })
+// 问答质量看板（为空率/改写率/好评率/兜底率/降级/来源/课程排行/告警）
+export const getAdminQAQualityStats = (params) => (
+  request.get('/admin-panel/qa-quality-stats/', { params })
+)
 // 已废弃：审计双轨合并（2026-10-19）后配置变更记录读操作审计单轨
 // （listAdminActionLogs + action=ai_config_save）；此端点仅查合并前存量，勿在新代码使用
 export const listAdminAIConfigChanges = (params) => (
