@@ -1,6 +1,12 @@
 from django.urls import path
 
-from .views import ClassAIReportView, ClassStatsView, ClassStudentDetailView, MyWrongQuestionsView
+from .views import (
+    ChapterSummaryView,
+    ClassAIReportView,
+    ClassStatsView,
+    ClassStudentDetailView,
+    MyWrongQuestionsView,
+)
 
 urlpatterns = [
     path("class/<int:class_id>/", ClassStatsView.as_view(), name="class-stats"),
@@ -10,5 +16,6 @@ urlpatterns = [
         ClassStudentDetailView.as_view(),
         name="class-student-detail",
     ),
+    path("chapter-summaries/", ChapterSummaryView.as_view(), name="chapter-summaries"),
     path("my-wrong-questions/", MyWrongQuestionsView.as_view(), name="my-wrong-questions"),
 ]

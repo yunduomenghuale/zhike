@@ -108,6 +108,100 @@ class ClassAIReportView(APIView):
         return api_response({"task_id": task.id})
 
 
+def _submit_chapter_summary(student, catalog, *, force: bool = False, triggered_by=None):
+    """幂等提交章节总结任务。返回 (task, cached, error_message)。
+
+    规则（设计 §4.1）：
+    - 已有 PENDING/RUNNING/SUCCESS 记录 → 跳过（含重看重复触发），返回旧的；
+    - force=True → 新建一版（version 递进，查询取最大版本），限频 5 分钟 1 次（D8）；
+    - 上一次 FAILED → 允许再次提交（不消耗 force 限频）。
+    """
+    from datetime import timedelta
+
+    from apps.ai.models import AITask
+    from apps.ai.tasks import submit_ai_task
+
+    latest = (
+        AITask.objects.filter(
+            task_type=AITask.TaskType.CHAPTER_SUMMARY, student=student, catalog=catalog
+        )
+        .order_by("-version", "-id")
+        .first()
+    )
+    if latest and latest.status in (AITask.Status.PENDING, AITask.Status.RUNNING):
+        return latest, True, None  # 进行中：不重复提交（force 也返回旧的）
+    if latest and latest.status == AITask.Status.SUCCESS and not force:
+        return latest, True, None
+    if force and latest and latest.created_at >= timezone.now() - timedelta(minutes=5):
+        return None, False, "总结刚生成过，请 5 分钟后再试"
+
+    version = (latest.version if latest else 0) + 1
+    task = submit_ai_task(
+        AITask.TaskType.CHAPTER_SUMMARY,
+        user=triggered_by or student,
+        student=student,
+        catalog=catalog,
+        course=catalog.course,
+        version=version,
+    )
+    return task, False, None
+
+
+class ChapterSummaryView(APIView):
+    """学生端章节学习 AI 总结（设计 §4.4，挂 analytics 不新建 app，F12）。
+
+    POST body {course_id, catalog_id, force?} → {task_id, cached}；
+    已有成功/进行中记录直接复用（幂等），force=1 新建一版（version 递进）。
+    GET ?course_id=&catalog_id= → 本人最新成功版本（含 result），没有则 summary=null。
+    """
+
+    permission_classes = [IsStudent]
+    serializer_class = AnalyticsResponseSerializer
+
+    def post(self, request):
+        from apps.ai.models import AITask
+
+        catalog = Catalog.objects.filter(
+            id=request.data.get("catalog_id"), course_id=request.data.get("course_id")
+        ).select_related("course").first()
+        # 章节存在 + 学生已通过班级选修该课程（防越权总结他人课程）
+        if not catalog or not ClassStudent.objects.filter(
+            student=request.user, classroom__courses=catalog.course
+        ).exists():
+            return api_response(message="章节不存在或未学习该课程", code=404, status=404)
+
+        force = str(request.data.get("force") or "").lower() in ("1", "true", "yes")
+        task, cached, error = _submit_chapter_summary(request.user, catalog, force=force)
+        if error:
+            return api_response(message=error, code=429, status=429)
+        return api_response({"task_id": task.id, "cached": cached})
+
+    def get(self, request):
+        from apps.ai.models import AITask
+
+        task = (
+            AITask.objects.filter(
+                task_type=AITask.TaskType.CHAPTER_SUMMARY,
+                student=request.user,
+                catalog_id=request.query_params.get("catalog_id"),
+                status=AITask.Status.SUCCESS,
+            )
+            .order_by("-version", "-id")
+            .first()
+        )
+        result = task.result if task else None
+        return api_response({
+            "summary": {
+                "task_id": task.id,
+                "version": task.version,
+                "degraded": (result or {}).get("degraded", False),
+                "generated_at": (result or {}).get("generated_at"),
+                "result": result,
+            }
+            if task else None
+        })
+
+
 class ClassStudentDetailView(APIView):
     """教师查看班级内单个学生的学习详情（练习/作业/考试/预警）。"""
 

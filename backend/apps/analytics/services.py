@@ -11,10 +11,11 @@ from django.utils import timezone
 from apps.classroom.models import ClassStudent
 from apps.courses.models import Catalog, VideoWatchProgress
 from apps.exams.models import Exam, ExamSubmission
-from apps.homework.models import Homework, HomeworkSubmission
+from apps.exams.resolver import build_for_review
+from apps.homework.models import Homework, HomeworkAnswer, HomeworkSubmission
 from apps.knowledge.models import QARecord
 from apps.labs.models import Lab, LabSubmission
-from apps.questions.models import AnswerRecord
+from apps.questions.models import AnswerRecord, Question, WrongMastery, WrongNote
 
 INACTIVE_DAYS = 7
 LOW_ACCURACY = 60
@@ -435,4 +436,214 @@ def build_class_stats_v2(classroom, course_id) -> dict:
         "qa_heat": qa_heat,
         "video_behavior": video_behavior,
         "time_trend": time_trend,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 章节学习总结（P2）：build_chapter_profile
+# 统计先于 AI：能 SQL 算的全部代码算好，LLM 只做归因解读与建议生成。
+# ---------------------------------------------------------------------------
+CHAPTER_WRONG_TOP_N = 8       # 章节练习错题条数上限（与班级口径一致）
+CHAPTER_QA_TOP_N = 5          # 章节提问条数上限
+CHAPTER_QA_DISLIKED_N = 3     # 章节被点「无用」的提问条数上限
+CHAPTER_TAG_TOP_N = 8         # 知识点预聚合条数上限
+
+
+def build_chapter_profile(student, catalog, *, for_student: bool) -> dict:
+    """聚合某学生某章节的学习画像（喂章节总结 LLM 用）。
+
+    for_student=True 时执行成绩可见性门控（F1）：作业只纳入 correct_status=RETURNED
+    的分数、考试只纳入 score_released=True 的分数；未发布的只进 visibility 计数，
+    表述为「成绩尚未发布」，不把分值/批改写进产物。客观题答案/解析学生提交后
+    即可见，练习错题证据不受门控。for_student=False（教师视角）看全量。
+    """
+    course = catalog.course
+    course_id = course.id
+
+    # ---- 视频学习行为（video↔catalog 1:1，聚合兜底多视频）----
+    progresses = list(
+        VideoWatchProgress.objects.filter(video__catalog_id=catalog.id, student=student)
+    )
+    completed_at = None
+    if progresses:
+        done = [p for p in progresses if p.status == VideoWatchProgress.Status.COMPLETED]
+        watch = max(progresses, key=lambda p: p.watch_seconds)
+        if done:
+            completed_at = max(p.updated_at for p in done).isoformat()
+        page_count = watch.page_count or 0
+        learning = {
+            "watch_seconds": watch.watch_seconds,
+            "pages_watched": f"{min(watch.last_page + 1, page_count)}/{page_count}" if page_count else "0/0",
+            "completed": bool(done),
+            "completed_at": completed_at,
+        }
+    else:
+        learning = {"watch_seconds": 0, "pages_watched": "0/0", "completed": False, "completed_at": None}
+
+    # ---- 章节练习（AnswerRecord scene=PRACTICE, question__catalog=本章）----
+    practice_qs = AnswerRecord.objects.filter(
+        student=student, scene=AnswerRecord.Scene.PRACTICE, question__catalog_id=catalog.id
+    ).select_related("question")
+    p_total = practice_qs.count()
+    p_correct = practice_qs.filter(is_correct=True).count()
+    wrong_rows = [
+        {
+            "stem": r.question.stem,
+            "my_answer": _answer_text(r.student_answer),
+            "correct_answer": _answer_text(r.question.answer),
+            "analysis": r.question.analysis,
+            "knowledge_tags": r.question.knowledge_tags or [],
+            "difficulty": r.question.get_difficulty_display(),
+        }
+        for r in practice_qs.filter(is_correct=False).select_related("question")[:CHAPTER_WRONG_TOP_N]
+    ]
+    practice = {
+        "total": p_total,
+        "correct": p_correct,
+        "accuracy": round(p_correct / p_total * 100) if p_total else None,
+        "wrong": wrong_rows,
+    }
+
+    # ---- 知识点预聚合（本章练习 tag → 错题数/总题数，纯计算）----
+    tag_stat: dict = {}
+    for tags, is_correct in practice_qs.values_list("question__knowledge_tags", "is_correct"):
+        for tag in tags or []:
+            stat = tag_stat.setdefault(str(tag), {"wrong": 0, "total": 0})
+            stat["total"] += 1
+            if not is_correct:
+                stat["wrong"] += 1
+    knowledge_agg = sorted(
+        (
+            {
+                "tag": tag,
+                "wrong": s["wrong"],
+                "total": s["total"],
+                "rate": round(s["wrong"] / s["total"] * 100) if s["total"] else 0,
+            }
+            for tag, s in tag_stat.items()
+        ),
+        key=lambda x: (-x["wrong"], -x["total"]),
+    )[:CHAPTER_TAG_TOP_N]
+
+    # ---- 作业（章节归属：homework_question__question__catalog 实时 join，F9）----
+    homework_pending_release = 0
+    hw_answers = (
+        HomeworkAnswer.objects.filter(
+            submission__student=student,
+            homework_question__question__catalog_id=catalog.id,
+        )
+        .select_related("submission", "submission__homework", "homework_question")
+        .order_by("submission__homework_id", "homework_question__order")
+    )
+    homework_map: dict = {}
+    for ans in hw_answers:
+        sub = ans.submission
+        entry = homework_map.setdefault(
+            sub.homework_id,
+            {"title": sub.homework.title, "score": None, "total_score": float(sub.homework.total_score),
+             "rate": None, "wrong_points": []},
+        )
+        if for_student:
+            if sub.correct_status != HomeworkSubmission.CorrectStatus.RETURNED:
+                homework_pending_release += 1
+                continue
+        if sub.score is not None:
+            entry["score"] = float(sub.score)
+            if sub.homework.total_score:
+                entry["rate"] = round(float(sub.score) / float(sub.homework.total_score) * 100)
+        snap = ans.homework_question.snapshot or {}
+        if ans.is_correct is False:
+            entry["wrong_points"].append({
+                "stem": snap.get("stem", ""),
+                "knowledge_tags": snap.get("knowledge_tags") or [],
+            })
+    homework = list(homework_map.values())
+
+    # ---- 考试（逐题对错复用 exams/resolver.py：乱序映射 + layout，F8）----
+    exam_pending_release = 0
+    chapter_qids = set(
+        Question.objects.filter(catalog_id=catalog.id).values_list("id", flat=True)
+    )
+    exams_out = []
+    submissions = (
+        ExamSubmission.objects.filter(
+            student=student,
+            exam__course_id=course_id,
+            status__in=[ExamSubmission.Status.SUBMITTED, ExamSubmission.Status.TIMEOUT],
+        )
+        .select_related("exam", "paper")
+        .order_by("-submitted_at")
+    )
+    for sub in submissions:
+        if not sub.paper or not chapter_qids:
+            continue
+        released = sub.score_released
+        if for_student and not released:
+            exam_pending_release += 1
+        entries = build_for_review(sub.paper, sub, sub.exam)
+        wrong_points = [
+            {
+                "stem": e.get("stem", ""),
+                "correct_answer": "、".join(e.get("correct_answer") or []),
+                "my_answer": "、".join(e.get("student_answer") or []),
+                "my_score": e.get("my_score"),
+            }
+            for e in entries
+            if e.get("question_id") in chapter_qids and e.get("is_correct") is False
+        ]
+        if not wrong_points:
+            continue  # 本卷不含本章错题，不占总结篇幅
+        item = {"name": sub.exam.name, "score": None, "wrong_points": wrong_points}
+        if not for_student or released:
+            item["score"] = float(sub.total_score) if sub.total_score is not None else None
+        exams_out.append(item)
+
+    # ---- 实验（提交即出分，无门控）----
+    labs_out = []
+    for lab in Lab.objects.filter(course_id=course_id, catalog_id=catalog.id, status=Lab.Status.PUBLISHED):
+        sub = LabSubmission.objects.filter(lab=lab, student=student).first()
+        if not sub:
+            continue
+        labs_out.append({
+            "title": lab.title,
+            "total_score": float(sub.total_score) if sub.total_score is not None else None,
+            "passed_steps": sub.passed_steps,
+            "total_steps": sub.total_steps,
+        })
+
+    # ---- 章节问答 ----
+    qa_qs = QARecord.objects.filter(student=student, catalog_id=catalog.id).order_by("-created_at")
+    qa_count = qa_qs.count()
+    qa_questions = [q.question[:80] for q in qa_qs[:CHAPTER_QA_TOP_N]]
+    qa_disliked = [q.question[:80] for q in qa_qs.filter(feedback=-1)[:CHAPTER_QA_DISLIKED_N]]
+    qa = {"count": qa_count, "questions": qa_questions, "disliked": qa_disliked}
+
+    # ---- 错题本（D3：手动错题按 catalog 归属；历史数据 catalog 为空按课程级不计入本章）----
+    note_ids = list(
+        WrongNote.objects.filter(student=student, catalog_id=catalog.id).values_list("id", flat=True)
+    )
+    mastered = (
+        WrongMastery.objects.filter(student=student, note_id__in=note_ids, removed=False).count()
+        if note_ids else 0
+    )
+    wrong_book = {"mastered": mastered, "pending": max(len(note_ids) - mastered, 0)}
+
+    visibility = {}
+    if for_student:
+        visibility = {
+            "homework_pending_release": homework_pending_release,
+            "exam_pending_release": exam_pending_release,
+        }
+
+    return {
+        "chapter": {"title": catalog.title, "course": course.name},
+        "learning": learning,
+        "practice": practice,
+        "homework": homework,
+        "exams": exams_out,
+        "labs": labs_out,
+        "qa": qa,
+        "wrong_book": wrong_book,
+        "knowledge_agg": knowledge_agg,
+        "visibility": visibility,
     }

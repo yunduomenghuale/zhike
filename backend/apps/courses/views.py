@@ -659,9 +659,27 @@ class TeachingVideoViewSet(BaseModelViewSet):
         elif progress.status != VideoWatchProgress.Status.COMPLETED:
             progress.status = VideoWatchProgress.Status.IN_PROGRESS
         progress.save()
-        return api_response(
-            VideoWatchProgressSerializer(progress).data, message="进度已记录"
-        )
+
+        # 章节完成即自动提交 AI 学习总结（设计 §4.1：异步不阻塞进度上报；
+        # 幂等——已有 pending/running/success 任务则跳过，重看重复触发不刷量）。
+        # F13：summary_task_id 为加性字段，旧版移动端忽略即可。
+        summary_task_id = None
+        if completed:
+            import logging
+
+            from apps.analytics.views import _submit_chapter_summary
+
+            try:
+                task, cached, _error = _submit_chapter_summary(request.user, video.catalog)
+                if not cached:
+                    summary_task_id = task.id
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "章节总结自动提交失败（video_id=%s）", video.id
+                )
+        data = VideoWatchProgressSerializer(progress).data
+        data["summary_task_id"] = summary_task_id
+        return api_response(data, message="进度已记录")
 
 
 class WatchProgressViewSet(BaseModelViewSet):

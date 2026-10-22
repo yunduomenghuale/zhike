@@ -1,4 +1,4 @@
-"""AI 分析流水线：班级学情分析（S0-S3）与章节学习总结（P2 占位）。
+"""AI 分析流水线：班级学情分析（S0-S3）与章节学习总结（单轮）。
 
 由 apps/ai/tasks.py 的 _run_task 在恢复的请求上下文中分发调用。
 
@@ -536,8 +536,177 @@ def _join_report(sections: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 章节学习总结（P2 占位；submit 前不会有此类型任务）
+# 章节学习总结（P2）：单轮 LLM + 严格 JSON schema
 # ---------------------------------------------------------------------------
+_SUMMARY_KEYS = ("overview", "knowledge_points", "weak_points", "highlights", "suggestions", "next_step")
+
+_SUMMARY_SYSTEM_PROMPT = (
+    "你是学生的学习督导，擅长从学习数据中发现薄弱环节并给出可执行的提升建议。"
+    "所有结论必须引用输入数据中的具体证据，禁止编造数据中不存在的数字与知识点；"
+    "提问内容只用于推断理解障碍，不得复述嘲讽；口吻鼓励、具体，禁止说教与空话；"
+    "严格只输出规范的 JSON（不要解释文字、不要 Markdown 代码块）。"
+)
+
+
+def _chapter_summary_messages(profile: dict) -> list[dict]:
+    """章节总结 user prompt（单轮：画像 JSON + schema + 约束）。"""
+    ctx_json = json.dumps(profile, ensure_ascii=False)
+    user = (
+        f"课程：{profile['chapter']['course']}　章节：{profile['chapter']['title']}\n"
+        f"本章学习数据（代码预聚合，权威口径）：{ctx_json}\n\n"
+        "请生成本章学习总结。严格只输出 JSON，格式：\n"
+        '{"overview": "...", '
+        '"knowledge_points": [{"name": "...", "status": "weak|solid", "evidence": "..."}], '
+        '"weak_points": ["..."], "highlights": ["..."], "qa_insight": "...", '
+        '"suggestions": ["..."], "next_step": "..."}\n'
+        "要求：\n"
+        "1. overview：150~250 字，引用学习行为与各维度数据；\n"
+        "2. knowledge_points：基于「知识点预聚合（knowledge_agg）」逐条给出本章知识点"
+        "掌握判断（错误率 ≥60% 记 weak，否则 solid），每条必须引用证据"
+        "（如「练习 2/5 错，作业第3题错」）；\n"
+        "3. weak_points：薄弱点按严重度排序，最多 3 条；highlights：掌握较好的知识点"
+        "或行为亮点，最多 5 条；\n"
+        "4. qa_insight：从提问内容推断理解障碍（如「询问了 X，反映对 Y 的机制不清晰」）；"
+        "本章无提问则输出空字符串；不得点名列提问、不得嘲讽；\n"
+        "5. suggestions：具体提升动作（重看第X页讲解、重练某知识点、完成某作业/实验），"
+        "最多 5 条；\n"
+        "6. next_step：一句话下一步行动指引；\n"
+        "7. 若 visibility 中有未发布成绩计数，用一句话说明「成绩尚未发布」，"
+        "严禁透露任何分值或批改内容；\n"
+        "8. 语言具体自然，禁止「总体不错、有待加强」这类空话。"
+    )
+    return [
+        {"role": "system", "content": _SUMMARY_SYSTEM_PROMPT},
+        {"role": "user", "content": user},
+    ]
+
+
+def _fallback_chapter_summary(profile: dict) -> dict:
+    """LLM 不可用时的统计拼装（总结仍完整可用，degraded 标记）。"""
+    learning = profile.get("learning") or {}
+    practice = profile.get("practice") or {}
+    weak = [i for i in (profile.get("knowledge_agg") or []) if i.get("rate", 0) >= 60][:3]
+    watch_min = round((learning.get("watch_seconds") or 0) / 60)
+    suggestions = ["针对上述薄弱知识点重看讲解并重练对应习题。"]
+    if profile.get("homework"):
+        suggestions.append("完成本章作业并重点关注错题解析。")
+    if profile.get("exams"):
+        suggestions.append("回顾本章相关考试错题，整理正确解法。")
+    return {
+        "overview": (
+            f"本章学习了 {learning.get('pages_watched', '0/0')} 页，累计观看约 {watch_min} 分钟；"
+            f"章节练习正确率 {practice.get('accuracy') if practice.get('accuracy') is not None else '—'}%"
+            f"（{practice.get('correct')}/{practice.get('total')}）。（本节由统计数据自动生成）"
+        ),
+        "knowledge_points": [
+            {"name": i.get("tag"), "status": "weak",
+             "evidence": f"练习错 {i.get('wrong')}/{i.get('total')}"}
+            for i in weak
+        ],
+        "weak_points": [f"{i.get('tag')}：练习错 {i.get('wrong')}/{i.get('total')}" for i in weak],
+        "highlights": [],
+        "qa_insight": "",
+        "suggestions": suggestions,
+        "next_step": "先从错误率最高的知识点开始复习。",
+    }
+
+
+def _mock_chapter_summary(profile: dict) -> dict:
+    """Mock 确定性假总结（无 Key 环境演示用；由画像数字拼装）。"""
+    data = _fallback_chapter_summary(profile)
+    practice = profile.get("practice") or {}
+    data["overview"] = "【模拟数据】" + data["overview"]
+    if practice.get("accuracy") is not None and practice["accuracy"] >= 80:
+        data["highlights"] = [
+            f"【模拟数据】章节练习正确率 {practice['accuracy']}%，基础掌握扎实。"
+        ]
+    data["suggestions"] = ["【模拟数据】" + s for s in data["suggestions"]]
+    data["next_step"] = "【模拟数据】" + data["next_step"]
+    return data
+
+
+def _normalize_summary(data: dict, profile: dict) -> dict:
+    """schema 归一化：类型/条数/去重兜底（模型输出不稳定时的最后防线）。"""
+
+    def _str(v, limit=2000) -> str:
+        return str(v or "").strip()[:limit]
+
+    def _str_list(v, n) -> list:
+        if not isinstance(v, list):
+            return []
+        out = []
+        for item in v:
+            s = _str(item, 200)
+            if s and s not in out:
+                out.append(s)
+            if len(out) >= n:
+                break
+        return out
+
+    kps = []
+    for item in (data.get("knowledge_points") or [])[:8]:
+        if isinstance(item, dict) and _str(item.get("name")):
+            kps.append({
+                "name": _str(item.get("name"), 60),
+                "status": "weak" if _str(item.get("status")) != "solid" else "solid",
+                "evidence": _str(item.get("evidence"), 200),
+            })
+        elif _str(item):
+            kps.append({"name": _str(item, 60), "status": "weak", "evidence": ""})
+    overview = _str(data.get("overview"), 1200) or _fallback_chapter_summary(profile)["overview"]
+    return {
+        "overview": overview,
+        "knowledge_points": kps,
+        "weak_points": _str_list(data.get("weak_points"), 3),
+        "highlights": _str_list(data.get("highlights"), 5),
+        "qa_insight": _str(data.get("qa_insight"), 400),
+        "suggestions": _str_list(data.get("suggestions"), 5),
+        "next_step": _str(data.get("next_step"), 200),
+    }
+
+
 @scene_decorator(AICallLog.Scene.CHAPTER_SUMMARY, course_getter=lambda args, kwargs: getattr(args[0], "course_id", None))
 def run_chapter_summary(task: AITask) -> None:
-    raise NotImplementedError("章节学习总结将在 P2 阶段上线")
+    """章节学习总结：S0 画像聚合 → 单轮 LLM（重试一次）→ 归一化落库。"""
+    from apps.analytics.services import build_chapter_profile
+
+    # ---- S0：数据画像（纯 SQL，约 1s；学生口径：成绩可见性门控 F1）----
+    profile = build_chapter_profile(task.student, task.catalog, for_student=True)
+    task.progress = {
+        "stage": "analyze",
+        "done": 0,
+        "total": 1,
+        "message": "正在生成本章学习总结…",
+    }
+    _save(task, "progress")
+
+    provider = get_provider("chat")
+    timeout = _chat_timeout(provider)
+    is_mock = provider.name == "mock"
+
+    data = None
+    if is_mock:
+        data = _mock_chapter_summary(profile)
+    else:
+        for attempt in (1, 2):  # 单轮失败重试一次
+            try:
+                data = _chat_json(provider, _chapter_summary_messages(profile), timeout)
+                if isinstance(data, dict) and any(str(data.get(k) or "").strip() for k in _SUMMARY_KEYS):
+                    break
+                data = None
+            except Exception:
+                logger.exception("章节总结生成失败（第 %s 次）", attempt)
+                data = None
+    degraded = not (isinstance(data, dict) and any(str(data.get(k) or "").strip() for k in _SUMMARY_KEYS))
+    if degraded:
+        data = _fallback_chapter_summary(profile)
+
+    result = _normalize_summary(data, profile)
+    result["degraded"] = degraded
+    result["generated_at"] = _now_iso()
+    result["profile_snapshot"] = profile
+    task.result = result
+    task.progress = {"stage": "done", "done": 1, "total": 1, "message": "总结生成完成"}
+    task.status = AITask.Status.SUCCESS
+    task.finished_at = timezone.now()
+    _save(task, "progress", "result", "status", "finished_at")
