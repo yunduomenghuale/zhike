@@ -373,9 +373,8 @@
               <span class="days-label">天</span>
             </span>
             <el-button :icon="Refresh" @click="reloadQA">刷新</el-button>
-            <span class="toolbar-note">统计范围为平台全部知识库问答（含章节内提问与课程问答页提问）；纯图片提问跳过检索、不计入为空率分母。</span>
           </div>
-          <p v-if="qaWindowText" class="window-note">当前窗口 {{ qaWindowText }}</p>
+          <p v-if="qaWindowText" class="window-note">当前窗口 {{ qaWindowText }}<QaHelp text="统计范围为平台全部知识库问答（含章节内提问与课程问答页提问）；纯图片提问跳过检索、不计入为空率分母。" /></p>
 
           <div v-if="qa?.alerts?.length" class="alerts">
             <div v-for="(alert, i) in qa.alerts" :key="i" class="alert" :class="alert.level">

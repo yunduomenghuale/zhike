@@ -2,9 +2,7 @@
   <div class="qa-quality">
     <header class="page-head">
       <div>
-        <p class="eyebrow">教学质量</p>
-        <h1>问答质量</h1>
-        <p>学生向 AI 助手提问的检索命中、评价与上下文健康度——发现课程资料覆盖盲区，持续改进知识库。</p>
+        <h1>问答质量<QaHelp text="学生向 AI 助手提问的检索命中、评价与上下文健康度——发现课程资料覆盖盲区，持续改进知识库。" /></h1>
       </div>
     </header>
 
@@ -29,9 +27,8 @@
           <span class="days-label">天</span>
         </span>
         <el-button :icon="Refresh" @click="reloadAll">刷新</el-button>
-        <span class="toolbar-note">统计范围为本人负责课程的学生提问（含章节内提问与课程问答页提问）；纯图片提问跳过检索、不计入为空率分母。</span>
       </div>
-      <p v-if="qaWindowText" class="window-note">当前窗口 {{ qaWindowText }}</p>
+      <p v-if="qaWindowText" class="window-note">当前窗口 {{ qaWindowText }}<QaHelp text="统计范围为本人负责课程的学生提问（含章节内提问与课程问答页提问）；纯图片提问跳过检索、不计入为空率分母。" /></p>
 
       <div v-if="qa?.alerts?.length" class="alerts">
         <div v-for="(alert, i) in qa.alerts" :key="i" class="alert" :class="alert.level">
