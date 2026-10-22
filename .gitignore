@@ -37,6 +37,7 @@ staticfiles/
 # ===== 前端 =====
 node_modules/
 dist/
+frontend/dist-old-*/
 *.local
 
 # ===== 设计过程稿（正式 Logo 使用 public/smart-course-logo.svg） =====

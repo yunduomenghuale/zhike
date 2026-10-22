@@ -553,20 +553,22 @@
 <script setup>
 import { computed, defineComponent, h, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox, ElTooltip } from 'element-plus'
-import { ChatDotRound, Check, CircleCheck, CircleClose, Connection, Download, Files, InfoFilled, Lock, Microphone, Refresh, Right, Search, Sort, Timer, WarningFilled } from '@element-plus/icons-vue'
+import { ChatDotRound, Check, CircleCheck, CircleClose, Connection, Download, Files, InfoFilled, Lock, Microphone, QuestionFilled, Refresh, Right, Search, Sort, Timer, WarningFilled } from '@element-plus/icons-vue'
 import {
   getAdminAIConfiguration, saveAdminAIConfiguration, testAdminAIConnection,
   getAdminAICallStats, listAdminAICallLogs, exportAdminAICallLogs, listAdminActionLogs,
   getAdminQAQualityStats,
 } from '@/api/admin'
 
-// 指标说明气泡：统计字样右上角的小问号，悬停显示口径解释（问答质量看板）
+// 指标说明气泡：统计字样右上角的圆形小图标（SVG 问号，非文字字形），悬停显示口径解释
+// 坑：span 由 ElTooltip 默认插槽内的 h() 创建，拿不到本组件作用域 ID——
+// 普通 .qa-help 选择器（编译为 .qa-help[data-v-xxx]）永远匹配不上，样式必须用 :deep() 后代选择器
 const QaHelp = defineComponent({
   name: 'QaHelp',
   props: { text: { type: String, required: true } },
   setup(props) {
     return () => h(ElTooltip, { content: props.text, placement: 'top', 'show-after': 150 }, {
-      default: () => h('span', { class: 'qa-help' }, '?'),
+      default: () => h('span', { class: 'qa-help' }, [h(QuestionFilled)]),
     })
   },
 })
@@ -1239,7 +1241,8 @@ onMounted(load)
 .change-list{display:flex;flex-wrap:wrap;gap:6px 14px}.change-item{display:inline-flex;align-items:center;gap:5px;max-width:100%;font-size:12px;color:#334155;background:#f8fafc;border:1px solid #e8eef7;border-radius:8px;padding:3px 9px}.change-item em{font-style:normal;color:#64748b}.change-item .old{color:#dc2626;text-decoration:line-through}.change-item .new{color:#16a34a;font-weight:600}.change-item .el-icon{font-size:11px;color:#94a3b8}.change-item .old,.change-item .new{overflow-wrap:anywhere}
 .changes-card{padding:18px}.changes-card :deep(.el-table){font-size:13px}
 /* ---- 问答质量看板 ---- */
-.qa-help{display:inline-grid;place-items:center;width:15px;height:15px;margin-left:5px;border-radius:50%;border:1px solid #cbd5e1;color:#64748b;font-size:10px;font-weight:700;line-height:1;cursor:help;vertical-align:1px;flex:0 0 auto}.qa-help:hover{border-color:#2563eb;color:#2563eb}
+/* 圆形小图标徽章：QaHelp 的 span 无作用域 ID（见 script 注释），必须 :deep() */
+:deep(.qa-help){display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;margin-left:5px;border-radius:50%;background:#f1f5f9;color:#64748b;font-size:11px;cursor:help;vertical-align:-1px;flex:0 0 auto;transition:background .15s,color .15s}:deep(.qa-help:hover){background:#dbeafe;color:#2563eb}
 .qa-cards{grid-template-columns:repeat(3,minmax(0,1fr))}
 .chart-legend{display:flex;align-items:center;gap:18px;margin:10px 0 0;color:#64748b;font-size:12px}.chart-legend .dot{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:5px;vertical-align:-1px}.chart-legend .dot-red{background:#dc2626}.chart-legend .dot-green{background:#16a34a}
 .dist-static{border:0;background:transparent;cursor:default;text-align:left;font:inherit;color:inherit}.dist-static:hover{background:transparent}

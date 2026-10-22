@@ -275,18 +275,20 @@
 <script setup>
 import { computed, defineComponent, h, onMounted, reactive, ref } from 'vue'
 import { ElTooltip } from 'element-plus'
-import { InfoFilled, Refresh, WarningFilled } from '@element-plus/icons-vue'
+import { InfoFilled, QuestionFilled, Refresh, WarningFilled } from '@element-plus/icons-vue'
 import { getTeacherQAQualityStats, listTeacherQAIssues } from '@/api/knowledge'
 import CitedSources from '@/components/qa/CitedSources.vue'
 import { renderQaAnswer } from '@/utils/markdown'
 
-// 指标说明气泡：统计字样右上角的小问号，悬停显示口径解释（与管理端看板一致）
+// 指标说明气泡：统计字样右上角的圆形小图标（SVG 问号，非文字字形），悬停显示口径解释
+// 坑：span 由 ElTooltip 默认插槽内的 h() 创建，拿不到本组件作用域 ID——
+// 普通 .qa-help 选择器（编译为 .qa-help[data-v-xxx]）永远匹配不上，样式必须用 :deep() 后代选择器
 const QaHelp = defineComponent({
   name: 'QaHelp',
   props: { text: { type: String, required: true } },
   setup(props) {
     return () => h(ElTooltip, { content: props.text, placement: 'top', 'show-after': 150 }, {
-      default: () => h('span', { class: 'qa-help' }, '?'),
+      default: () => h('span', { class: 'qa-help' }, [h(QuestionFilled)]),
     })
   },
 })
@@ -502,7 +504,8 @@ onMounted(reloadAll)
 .dist-bar{height:8px;border-radius:5px;background:#eef3fa;overflow:hidden}.dist-bar i{display:block;height:100%;border-radius:5px}
 .dist-calls{font-size:13px;font-weight:700;text-align:right}.dist-pct{font-size:12px;color:#64748b;text-align:right}
 .logs-head{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:12px}.logs-filters{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.qa-help{display:inline-grid;place-items:center;width:15px;height:15px;margin-left:5px;border-radius:50%;border:1px solid #cbd5e1;color:#64748b;font-size:10px;font-weight:700;line-height:1;cursor:help;vertical-align:1px;flex:0 0 auto}.qa-help:hover{border-color:#2563eb;color:#2563eb}
+/* 圆形小图标徽章：QaHelp 的 span 无作用域 ID（见 script 注释），必须 :deep() */
+:deep(.qa-help){display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;margin-left:5px;border-radius:50%;background:#f1f5f9;color:#64748b;font-size:11px;cursor:help;vertical-align:-1px;flex:0 0 auto;transition:background .15s,color .15s}:deep(.qa-help:hover){background:#dbeafe;color:#2563eb}
 .muted{color:#64748b;font-size:12px}
 .qa-quality-table,.qa-issues-table{width:100%;font-size:13px}.qa-quality-table :deep(.el-table .cell),.qa-issues-table :deep(.el-table .cell){white-space:nowrap}
 /* 全局隐藏 EP 滚动条会让表格列总宽超容器时看不到横滚条（假截断）：本表需要时显式放行 */
