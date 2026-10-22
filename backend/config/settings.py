@@ -355,6 +355,9 @@ def _ai_env_float(name: str, default: float) -> float:
 AI_SCRIPT_TIMEOUT = _ai_env_int("AI_SCRIPT_TIMEOUT", 45)
 AI_TTS_TIMEOUT = _ai_env_int("AI_TTS_TIMEOUT", 120)
 AI_TTS_VOICE = os.getenv("AI_TTS_VOICE") or "Cherry"
+# AI 学情分析/章节总结超时（秒）：分析类调用输入长（约 6k tokens）、输出长，
+# 且跑在后台线程不占请求周期，超时口径比讲稿宽松——本地模型推理慢时调大。
+AI_ANALYTICS_TIMEOUT = _ai_env_int("AI_ANALYTICS_TIMEOUT", 120)
 # 讲稿批内小块页数：每批（batch_size*2 页）再按此切成小块并发调用，每个小块
 # 完成即落库（as_completed 增量保存）——前端轮询因此在请求进行中就能看到页数
 # 推进，不会「卡住一批、响应后跳一大截」。调大减少调用次数但进度粒度变粗。

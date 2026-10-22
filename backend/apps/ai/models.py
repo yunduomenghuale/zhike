@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 
 from apps.common.models import BaseModel
 
@@ -191,6 +192,7 @@ class AICallLog(BaseModel):
         QUESTION_GEN = "question_gen", "题目生成"
         GRADING = "grading", "作业批改"
         ANALYTICS = "analytics", "学情分析"
+        CHAPTER_SUMMARY = "chapter_summary", "章节学习总结"
         TTS_PREVIEW = "tts_preview", "配音试听"
         CONNECTION_TEST = "connection_test", "连接测试"
         VECTOR_REBUILD = "vector_rebuild", "向量重建"
@@ -257,6 +259,107 @@ class AICallLog(BaseModel):
 
     def __str__(self):
         return f"{self.get_capability_display()} · {self.get_scene_display()} · {'成功' if self.success else '失败'}"
+
+
+class AITask(BaseModel):
+    """AI 异步任务（班级学情分析 / 章节学习总结）。
+
+    两个长时 AI 功能（教师端班级学情分析、学生端章节学习总结）共用：
+    提交即返回 task_id，后台 daemon 线程执行（执行器见 apps/ai/tasks.py，
+    业务流水见 apps/ai/analytics_ai.py），进度与结果持久化在本行，
+    前端轮询 GET /api/ai-tasks/<id>/ 展示，刷新/重登不丢。
+
+    幂等口径（无全局唯一约束，与「force 重新生成新建一版」兼容）：
+    - 章节总结：同 (student, catalog) 递增 version，查询取最大版本；
+      进行中/排队中的任务由部分唯一索引 uniqi_active_chapter_summary 防并发双跑；
+    - 班级分析：version 恒为 1，提交频率由业务层 DB 判定（同班级 10 分钟 1 次）。
+    """
+
+    class TaskType(models.TextChoices):
+        CLASS_ANALYTICS = "class_analytics", "班级学情分析"
+        CHAPTER_SUMMARY = "chapter_summary", "章节学习总结"
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "排队中"
+        RUNNING = "running", "进行中"
+        SUCCESS = "success", "已完成"
+        FAILED = "failed", "失败"
+
+    task_type = models.CharField(
+        "任务类型", max_length=24, choices=TaskType.choices, db_index=True
+    )
+    status = models.CharField(
+        "状态", max_length=16, choices=Status.choices, default=Status.PENDING, db_index=True
+    )
+    version = models.IntegerField(
+        "版本", default=1, help_text="章节总结 force 重试递增进；班级分析恒为 1"
+    )
+    # {"stage": "...", "done": n, "total": n, "message": "..."}，随流水推进更新
+    progress = models.JSONField("进度", default=dict, blank=True)
+    result = models.JSONField("结果", default=dict, blank=True)
+    error = models.CharField("错误摘要", max_length=300, blank=True)
+    # 业务关联（按 task_type 使用其中一两个，均允许为空）
+    course = models.ForeignKey(
+        "courses.Course",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ai_tasks",
+        verbose_name="关联课程",
+    )
+    classroom = models.ForeignKey(
+        "classroom.ClassRoom",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="ai_tasks",
+        verbose_name="关联班级",
+    )
+    catalog = models.ForeignKey(
+        "courses.Catalog",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="ai_tasks",
+        verbose_name="关联章节",
+    )
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="ai_tasks",
+        verbose_name="总结对象学生",
+    )
+    triggered_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="triggered_ai_tasks",
+        verbose_name="触发人",
+    )
+    started_at = models.DateTimeField("开始时间", null=True, blank=True)
+    finished_at = models.DateTimeField("完成时间", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "AI 异步任务"
+        verbose_name_plural = verbose_name
+        indexes = [
+            models.Index(fields=["task_type", "status", "-created_at"]),
+            models.Index(fields=["student", "catalog", "-version"]),
+        ]
+        constraints = [
+            # 章节总结防并发双跑：同一学生同一章节只允许一条进行中/排队中任务
+            models.UniqueConstraint(
+                fields=["task_type", "student", "catalog"],
+                condition=Q(task_type="chapter_summary", status__in=["pending", "running"]),
+                name="uniqi_active_chapter_summary",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.get_task_type_display()} #{self.id} {self.get_status_display()}"
 
 
 class AICapabilityChangeLog(BaseModel):
