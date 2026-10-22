@@ -9,9 +9,22 @@ from rest_framework.test import APIClient
 from apps.courses.models import Catalog, Course, TeachingVideo, VideoWatchProgress
 from apps.classroom.models import ClassRoom, ClassStudent
 from apps.knowledge.models import QARecord
-from apps.questions.models import AnswerRecord, Question
+from apps.questions.models import AnswerRecord, Question, WrongNote, WrongMastery
+from apps.homework.models import (
+    Homework,
+    HomeworkAnswer,
+    HomeworkQuestion,
+    HomeworkSubmission,
+)
+from apps.exams.models import Exam, ExamSubmission, Paper
+from apps.labs.models import Lab, LabSubmission, LabTemplate
 
-from .services import WRONG_TOP_N, build_class_stats, build_class_stats_v2
+from .services import (
+    WRONG_TOP_N,
+    build_chapter_profile,
+    build_class_stats,
+    build_class_stats_v2,
+)
 
 User = get_user_model()
 
@@ -165,3 +178,218 @@ class BuildClassStatsV2Tests(TestCase):
         stats = build_class_stats_v2(self.classroom, self.course.id)
         row = next(r for r in stats["students"] if r["student_id"] == self.student_a.id)
         self.assertEqual(len(row["wrong_questions"]), WRONG_TOP_N)
+
+
+class BuildChapterProfileTests(TestCase):
+    """build_chapter_profile（章节学习总结画像）测试。
+
+    覆盖：练习证据链 / F1 成绩可见性门控（作业 RETURNED、考试 score_released）/
+    F8 考试乱序映射（复用 resolver）/ 实验·问答·错题本 / for_student 双口径。
+    """
+
+    def setUp(self):
+        self.teacher = User.objects.create_user(
+            username="t_ch", password="pw123456!", role=User.Role.TEACHER
+        )
+        self.student = User.objects.create_user(
+            username="s_ch", password="pw123456!", role=User.Role.STUDENT
+        )
+        self.course = Course.objects.create(name="章节课程", teacher=self.teacher)
+        self.classroom = ClassRoom.objects.create(name="章节班级", teacher=self.teacher)
+        self.classroom.courses.add(self.course)
+        ClassStudent.objects.create(classroom=self.classroom, student=self.student)
+        self.catalog = Catalog.objects.create(
+            course=self.course, title="第三章", order=3, is_published=True
+        )
+        self.other_catalog = Catalog.objects.create(
+            course=self.course, title="第四章", order=4, is_published=True
+        )
+        # 单选题：原始选项 A/B，正确答案 B（用于构造乱序映射）
+        self.question = Question.objects.create(
+            course=self.course,
+            catalog=self.catalog,
+            qtype=Question.QType.SINGLE,
+            stem="VLAN 隔离的是什么",
+            options=[{"key": "A", "text": "广播域"}, {"key": "B", "text": "冲突域"}],
+            answer={"key": "B"},
+            analysis="VLAN 隔离广播域，冲突域由交换机端口隔离",
+            knowledge_tags=["VLAN"],
+            status=Question.Status.PUBLISHED,
+        )
+        AnswerRecord.objects.create(
+            student=self.student,
+            question=self.question,
+            scene=AnswerRecord.Scene.PRACTICE,
+            student_answer={"key": "A"},  # 原始空间：选 A = 错
+            is_correct=False,
+        )
+        AnswerRecord.objects.create(
+            student=self.student,
+            question=self.question,
+            scene=AnswerRecord.Scene.PRACTICE,
+            student_answer={"key": "B"},
+            is_correct=True,
+        )
+        # 作业（题库选题模式）：一道本章错题（先建题目后发布，规避「已发布不能新增题目」校验）
+        self.homework = Homework.objects.create(
+            classroom=self.classroom,
+            course=self.course,
+            title="章节作业",
+            mode=Homework.Mode.QUESTIONS,
+            status=Homework.Status.DRAFT,
+            total_score=20,
+        )
+        hq = HomeworkQuestion.objects.create(homework=self.homework, question=self.question, score=10)
+        self.homework.status = Homework.Status.PUBLISHED
+        self.homework.save(update_fields=["status"])
+        self.hw_submission = HomeworkSubmission.objects.create(
+            homework=self.homework,
+            student=self.student,
+            score=10,
+            correct_status=HomeworkSubmission.CorrectStatus.SUBMITTED,
+        )
+        HomeworkAnswer.objects.create(
+            submission=self.hw_submission, homework_question=hq, is_correct=False
+        )
+        # 考试：试卷含本章题目；答卷开选项乱序 perm=[1,0]（展示位0=原始B）
+        self.exam = Exam.objects.create(
+            course=self.course, classroom=self.classroom, name="章节考试",
+            status=Exam.Status.PUBLISHED, shuffle_options=True,
+        )
+        self.paper = Paper.objects.create(
+            course=self.course, exam=self.exam,
+            question_items=[{"question_id": self.question.id, "score": 10, "order": 1}],
+            total_score=10,
+        )
+        self.exam_submission = ExamSubmission.objects.create(
+            exam=self.exam,
+            paper=self.paper,
+            student=self.student,
+            answers={str(self.question.id): {"key": "B"}},  # 展示空间：选展示位B=原始A=错
+            question_layout={"order": [self.question.id], "options": {str(self.question.id): [1, 0]}},
+            status=ExamSubmission.Status.SUBMITTED,
+            total_score=0,
+            score_released=False,
+        )
+        # 实验（挂本章，提交即出分无门控）
+        template = LabTemplate.objects.create(code="ch-lab", title="章节实验模板")
+        lab = Lab.objects.create(
+            template=template, course=self.course, catalog=self.catalog,
+            title="章节实验", status=Lab.Status.PUBLISHED, total_score=100,
+        )
+        LabSubmission.objects.create(
+            lab=lab, student=self.student, status=LabSubmission.Status.SUBMITTED,
+            total_score=88, passed_steps=4, total_steps=5,
+        )
+        # 问答：一条被点「无用」
+        QARecord.objects.create(
+            course=self.course, catalog=self.catalog, student=self.student,
+            question="VLAN 和子网有什么区别", answer="", feedback=-1,
+        )
+        # 手动错题：一条已巩固、一条未巩固（按 catalog 归属）
+        note_mastered = WrongNote.objects.create(
+            student=self.student, course=self.course, catalog=self.catalog, stem="错题1"
+        )
+        WrongNote.objects.create(
+            student=self.student, course=self.course, catalog=self.catalog, stem="错题2"
+        )
+        WrongMastery.objects.create(student=self.student, note=note_mastered)
+        # 视频进度（完成）
+        video = TeachingVideo.objects.create(
+            course=self.course, catalog=self.catalog, is_published=True
+        )
+        VideoWatchProgress.objects.create(
+            student=self.student, video=video,
+            status=VideoWatchProgress.Status.COMPLETED, watch_seconds=600,
+            last_page=7, page_count=10,
+        )
+
+    def test_practice_evidence_and_knowledge_agg(self):
+        profile = build_chapter_profile(self.student, self.catalog, for_student=True)
+        practice = profile["practice"]
+        self.assertEqual(practice["total"], 2)
+        self.assertEqual(practice["correct"], 1)
+        self.assertEqual(practice["accuracy"], 50)
+        self.assertEqual(len(practice["wrong"]), 1)
+        wrong = practice["wrong"][0]
+        self.assertEqual(wrong["my_answer"], "A")
+        self.assertEqual(wrong["correct_answer"], "B")
+        self.assertEqual(wrong["knowledge_tags"], ["VLAN"])
+        agg = {item["tag"]: item for item in profile["knowledge_agg"]}
+        self.assertEqual(agg["VLAN"]["wrong"], 1)
+        self.assertEqual(agg["VLAN"]["rate"], 50)
+
+    def test_learning_dimension(self):
+        profile = build_chapter_profile(self.student, self.catalog, for_student=True)
+        learning = profile["learning"]
+        self.assertTrue(learning["completed"])
+        self.assertEqual(learning["watch_seconds"], 600)
+        self.assertEqual(learning["pages_watched"], "8/10")
+
+    def test_homework_visibility_gate(self):
+        """F1：作业未发布成绩（SUBMITTED）时学生口径不出分，只进 visibility 计数。"""
+        profile = build_chapter_profile(self.student, self.catalog, for_student=True)
+        hw = profile["homework"]
+        self.assertEqual(len(hw), 1)
+        self.assertIsNone(hw[0]["score"])
+        self.assertEqual(len(hw[0]["wrong_points"]), 1)  # 客观题错题证据不受门控
+        self.assertEqual(profile["visibility"]["homework_pending_release"], 1)
+
+        self.hw_submission.correct_status = HomeworkSubmission.CorrectStatus.RETURNED
+        self.hw_submission.save(update_fields=["correct_status"])
+        profile = build_chapter_profile(self.student, self.catalog, for_student=True)
+        self.assertEqual(profile["homework"][0]["score"], 10)
+        self.assertEqual(profile["homework"][0]["rate"], 50)
+        self.assertEqual(profile["visibility"]["homework_pending_release"], 0)
+
+    def test_exam_visibility_and_shuffle_mapping(self):
+        """F1+F8：未发布成绩不出分（计数）；乱序答卷经 resolver 归回原始选项空间。"""
+        profile = build_chapter_profile(self.student, self.catalog, for_student=True)
+        exam = profile["exams"]
+        self.assertEqual(len(exam), 1)
+        self.assertIsNone(exam[0]["score"])  # score_released=False → 不出分
+        self.assertEqual(profile["visibility"]["exam_pending_release"], 1)
+        wp = exam[0]["wrong_points"]
+        self.assertEqual(len(wp), 1)
+        # 展示空间选「B」（=原始 A），unmap 后必须回到原始 key「A」才是错答
+        self.assertEqual(wp[0]["my_answer"], "A")
+        self.assertEqual(wp[0]["correct_answer"], "B")
+
+        self.exam_submission.score_released = True
+        self.exam_submission.save(update_fields=["score_released"])
+        profile = build_chapter_profile(self.student, self.catalog, for_student=True)
+        self.assertEqual(profile["exams"][0]["score"], 0)
+        self.assertEqual(profile["visibility"]["exam_pending_release"], 0)
+
+    def test_teacher_scope_sees_all(self):
+        """for_student=False（教师口径）：不受成绩门控限制。"""
+        profile = build_chapter_profile(self.student, self.catalog, for_student=False)
+        self.assertEqual(profile["homework"][0]["score"], 10)
+        self.assertEqual(profile["exams"][0]["score"], 0)
+        self.assertEqual(profile["visibility"], {})
+
+    def test_labs_qa_wrong_book(self):
+        profile = build_chapter_profile(self.student, self.catalog, for_student=True)
+        self.assertEqual(len(profile["labs"]), 1)
+        self.assertEqual(profile["labs"][0]["total_score"], 88)
+        self.assertEqual(profile["qa"]["count"], 1)
+        self.assertEqual(len(profile["qa"]["disliked"]), 1)
+        self.assertEqual(profile["wrong_book"], {"mastered": 1, "pending": 1})
+        self.assertEqual(profile["chapter"]["title"], "第三章")
+
+    def test_other_chapter_isolated(self):
+        """其它章节的数据不混入本章画像。"""
+        AnswerRecord.objects.create(
+            student=self.student,
+            question=Question.objects.create(
+                course=self.course, catalog=self.other_catalog, qtype=Question.QType.SINGLE,
+                stem="别章题", options=[{"key": "A", "text": "x"}, {"key": "B", "text": "y"}],
+                answer={"key": "A"}, status=Question.Status.PUBLISHED,
+            ),
+            scene=AnswerRecord.Scene.PRACTICE,
+            student_answer={"key": "B"},
+            is_correct=False,
+        )
+        profile = build_chapter_profile(self.student, self.catalog, for_student=True)
+        self.assertEqual(profile["practice"]["total"], 2)
+        self.assertEqual(profile["practice"]["wrong"][0]["stem"], "VLAN 隔离的是什么")

@@ -14,13 +14,15 @@
 import json
 import re
 import time
+from datetime import timedelta
 
 from django.contrib.auth import get_user_model
 from django.test import TransactionTestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 from unittest.mock import patch
 
-from apps.courses.models import Catalog, Course
+from apps.courses.models import Catalog, Course, TeachingVideo
 from apps.classroom.models import ClassRoom, ClassStudent
 from apps.questions.models import AnswerRecord, Question
 
@@ -75,6 +77,21 @@ class _ScriptedProvider(BaseAIProvider):
 
     def _script(self, messages):
         content = messages[-1]["content"] if messages else ""
+        if "本章学习数据" in content:
+            return json.dumps(
+                {
+                    "overview": "本章完成了视频学习与章节练习，整体节奏正常。",
+                    "knowledge_points": [
+                        {"name": "递归", "status": "weak", "evidence": "练习 1/2 错"}
+                    ],
+                    "weak_points": ["递归终止条件判断不熟练"],
+                    "highlights": ["练习完成率 100%"],
+                    "qa_insight": "",
+                    "suggestions": ["重看第 1 页讲解并重练递归习题"],
+                    "next_step": "先重练本章错题再进入下一章。",
+                },
+                ensure_ascii=False,
+            )
         if "学习简评" in content:
             ids = re.findall(r'"student_id": (\d+)', content)
             return json.dumps(
@@ -335,3 +352,235 @@ class AnalyticsTaskTests(TransactionTestCase):
         self.assertEqual(
             [s["student_id"] for s in task.result["no_data_students"]], [self.student_b.id]
         )
+
+
+class ChapterSummaryTaskTests(TransactionTestCase):
+    """章节学习总结任务测试（P2，设计 §4.1/§4.4）。
+
+    覆盖：提交幂等（pending/success 复用）/ force 版本递进与 5 分钟限频 /
+    FAILED 允许立即重提 / report_progress 完成自动触发 / 越权课程 404 /
+    GET 无记录返回 null / Mock 确定性 / 失败降级 degraded。
+    """
+
+    def setUp(self):
+        self.teacher = User.objects.create_user(
+            username="t_sum", password="pw123456!", role=User.Role.TEACHER
+        )
+        self.student = User.objects.create_user(
+            username="s_sum", password="pw123456!", role=User.Role.STUDENT
+        )
+        self.outsider = User.objects.create_user(
+            username="s_out", password="pw123456!", role=User.Role.STUDENT
+        )
+        self.course = Course.objects.create(name="总结课程", teacher=self.teacher)
+        self.other_course = Course.objects.create(name="校外课程", teacher=self.teacher)
+        self.classroom = ClassRoom.objects.create(name="总结班级", teacher=self.teacher)
+        self.classroom.courses.add(self.course)
+        ClassStudent.objects.create(classroom=self.classroom, student=self.student)
+        self.catalog = Catalog.objects.create(
+            course=self.course, title="第一章", order=1, is_published=True
+        )
+        self.other_catalog = Catalog.objects.create(
+            course=self.other_course, title="别课章节", order=1, is_published=True
+        )
+        self.video = TeachingVideo.objects.create(
+            course=self.course, catalog=self.catalog, is_published=True
+        )
+        # daemon 线程改同步执行（见 _InlineThread 说明）
+        thread_patcher = patch("apps.ai.tasks.threading", _FakeThreading)
+        thread_patcher.start()
+        self.addCleanup(thread_patcher.stop)
+
+    # -- 工具 -------------------------------------------------------------
+    def _wait(self, task_id, timeout=45):
+        task = AITask.objects.get(id=task_id)
+        for _ in range(timeout):
+            task.refresh_from_db()
+            if task.status in (AITask.Status.SUCCESS, AITask.Status.FAILED):
+                return task
+            time.sleep(1)
+        return task
+
+    def _patch_provider(self, provider):
+        patcher = patch("apps.ai.analytics_ai.get_provider", return_value=provider)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _post(self, client, *, force=None, catalog_id=None, course_id=None):
+        body = {
+            "course_id": course_id if course_id is not None else self.course.id,
+            "catalog_id": catalog_id if catalog_id is not None else self.catalog.id,
+        }
+        if force is not None:
+            body["force"] = force
+        return client.post("/api/analytics/chapter-summaries/", body, format="json")
+
+    def _latest(self):
+        return (
+            AITask.objects.filter(
+                task_type=AITask.TaskType.CHAPTER_SUMMARY,
+                student=self.student,
+                catalog=self.catalog,
+            )
+            .order_by("-version", "-id")
+            .first()
+        )
+
+    # -- 用例 -------------------------------------------------------------
+    def test_submit_returns_pending_and_completes(self):
+        client = APIClient()
+        client.force_authenticate(user=self.student)
+        self._patch_provider(_ScriptedProvider())
+        resp = self._post(client)
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertFalse(resp.data["data"]["cached"])
+        task = self._wait(resp.data["data"]["task_id"])
+        self.assertEqual(task.status, AITask.Status.SUCCESS, task.error)
+        self.assertEqual(task.version, 1)
+        self.assertEqual(task.progress["stage"], "done")
+        result = task.result
+        for key in ("overview", "knowledge_points", "weak_points", "highlights",
+                    "suggestions", "next_step"):
+            self.assertIn(key, result)
+        self.assertEqual(result["knowledge_points"][0]["name"], "递归")
+        self.assertEqual(result["knowledge_points"][0]["status"], "weak")
+        self.assertFalse(result["degraded"])
+        self.assertIn("profile_snapshot", result)
+
+    def test_duplicate_submit_reuses_task(self):
+        """幂等：已有 SUCCESS 记录 → 跳过，返回旧任务（cached=True）。"""
+        client = APIClient()
+        client.force_authenticate(user=self.student)
+        self._patch_provider(_ScriptedProvider())
+        first = self._post(client)
+        first_task = self._wait(first.data["data"]["task_id"])
+        second = self._post(client)
+        self.assertEqual(second.status_code, 200, second.data)
+        self.assertTrue(second.data["data"]["cached"])
+        self.assertEqual(second.data["data"]["task_id"], first_task.id)
+        self.assertEqual(AITask.objects.filter(
+            task_type=AITask.TaskType.CHAPTER_SUMMARY, student=self.student
+        ).count(), 1)
+
+    def test_force_creates_new_version(self):
+        """force=True → 新建一版（version 递进）；限频按 created_at 判 5 分钟。"""
+        client = APIClient()
+        client.force_authenticate(user=self.student)
+        self._patch_provider(_ScriptedProvider())
+        first = self._wait(self._post(client).data["data"]["task_id"])
+        # 回溯 created_at 绕限频（模拟 5 分钟前的旧版本）
+        AITask.objects.filter(id=first.id).update(
+            created_at=timezone.now() - timedelta(minutes=10)
+        )
+        second = self._post(client, force="1")
+        self.assertEqual(second.status_code, 200, second.data)
+        self.assertFalse(second.data["data"]["cached"])
+        task = self._wait(second.data["data"]["task_id"])
+        self.assertEqual(task.status, AITask.Status.SUCCESS, task.error)
+        self.assertEqual(task.version, 2)
+
+    def test_force_rate_limited_within_5_minutes(self):
+        """D8：force 限频 5 分钟 1 次 → 429。"""
+        client = APIClient()
+        client.force_authenticate(user=self.student)
+        self._patch_provider(_ScriptedProvider())
+        self._wait(self._post(client).data["data"]["task_id"])
+        resp = self._post(client, force="1")
+        self.assertEqual(resp.status_code, 429, resp.data)
+
+    def test_failed_task_allows_immediate_resubmit(self):
+        """上一次 FAILED → 允许立即重提（不消耗 force 限频）。"""
+        client = APIClient()
+        client.force_authenticate(user=self.student)
+        self._patch_provider(_ScriptedProvider())
+        first = self._wait(self._post(client).data["data"]["task_id"])
+        AITask.objects.filter(id=first.id).update(status=AITask.Status.FAILED)
+        resp = self._post(client)
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertFalse(resp.data["data"]["cached"])
+        task = self._wait(resp.data["data"]["task_id"])
+        self.assertEqual(task.version, 2)
+        self.assertEqual(task.status, AITask.Status.SUCCESS, task.error)
+
+    def test_report_progress_auto_trigger(self):
+        """视频学完自动触发章节总结；重复上报幂等（summary_task_id=null）。"""
+        client = APIClient()
+        client.force_authenticate(user=self.student)
+        self._patch_provider(_ScriptedProvider())
+        resp = client.post(
+            f"/api/videos/{self.video.id}/report-progress/",
+            {"last_page": 0, "completed": "1", "page_count": 1},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        task_id = resp.data["data"].get("summary_task_id")
+        self.assertIsNotNone(task_id, "学完章节应自动提交总结任务")
+        task = self._wait(task_id)
+        self.assertEqual(task.status, AITask.Status.SUCCESS, task.error)
+        # 再次上报完成：已有 SUCCESS → 不重复提交
+        again = client.post(
+            f"/api/videos/{self.video.id}/report-progress/",
+            {"last_page": 0, "completed": "1", "page_count": 1},
+            format="json",
+        )
+        self.assertEqual(again.status_code, 200, again.data)
+        self.assertIsNone(again.data["data"].get("summary_task_id"))
+
+    def test_post_unauthorized_course_404(self):
+        """越权：总结未选修课程的章节 → 404。"""
+        client = APIClient()
+        client.force_authenticate(user=self.outsider)
+        self._patch_provider(_ScriptedProvider())
+        resp = self._post(client)
+        self.assertEqual(resp.status_code, 404, resp.data)
+
+    def test_get_without_record_returns_null(self):
+        """无记录：GET 返回 summary=null（不报错，前端不弹错误 toast）。"""
+        client = APIClient()
+        client.force_authenticate(user=self.student)
+        resp = client.get(
+            "/api/analytics/chapter-summaries/",
+            {"course_id": self.course.id, "catalog_id": self.catalog.id},
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertIsNone(resp.data["data"]["summary"])
+
+    def test_get_returns_latest_success(self):
+        client = APIClient()
+        client.force_authenticate(user=self.student)
+        self._patch_provider(_ScriptedProvider())
+        self._wait(self._post(client).data["data"]["task_id"])
+        resp = client.get(
+            "/api/analytics/chapter-summaries/",
+            {"course_id": self.course.id, "catalog_id": self.catalog.id},
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        summary = resp.data["data"]["summary"]
+        self.assertIsNotNone(summary)
+        self.assertEqual(summary["version"], 1)
+        self.assertFalse(summary["degraded"])
+        self.assertEqual(summary["result"]["knowledge_points"][0]["name"], "递归")
+
+    def test_mock_provider_deterministic(self):
+        """Mock provider：确定性假总结（【模拟数据】前缀）。"""
+        client = APIClient()
+        client.force_authenticate(user=self.student)
+        self._patch_provider(MockProvider())
+        resp = self._post(client)
+        task = self._wait(resp.data["data"]["task_id"])
+        self.assertEqual(task.status, AITask.Status.SUCCESS, task.error)
+        self.assertTrue(task.result["overview"].startswith("【模拟数据】"))
+        self.assertTrue(
+            all(s.startswith("【模拟数据】") for s in task.result["suggestions"])
+        )
+
+    def test_fallback_when_provider_fails(self):
+        """LLM 两次均失败 → 统计拼装降级，status 仍 SUCCESS 且 degraded。"""
+        client = APIClient()
+        client.force_authenticate(user=self.student)
+        self._patch_provider(_FailingProvider())
+        resp = self._post(client)
+        task = self._wait(resp.data["data"]["task_id"])
+        self.assertEqual(task.status, AITask.Status.SUCCESS, task.error)
+        self.assertTrue(task.result["degraded"])
+        self.assertIn("（本节由统计数据自动生成）", task.result["overview"])

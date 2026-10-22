@@ -543,6 +543,13 @@ def build_chapter_profile(student, catalog, *, for_student: bool) -> dict:
             {"title": sub.homework.title, "score": None, "total_score": float(sub.homework.total_score),
              "rate": None, "wrong_points": []},
         )
+        # 客观题错题证据不受成绩门控（先收集，门控只挡分值）
+        snap = ans.homework_question.snapshot or {}
+        if ans.is_correct is False:
+            entry["wrong_points"].append({
+                "stem": snap.get("stem", ""),
+                "knowledge_tags": snap.get("knowledge_tags") or [],
+            })
         if for_student:
             if sub.correct_status != HomeworkSubmission.CorrectStatus.RETURNED:
                 homework_pending_release += 1
@@ -551,12 +558,6 @@ def build_chapter_profile(student, catalog, *, for_student: bool) -> dict:
             entry["score"] = float(sub.score)
             if sub.homework.total_score:
                 entry["rate"] = round(float(sub.score) / float(sub.homework.total_score) * 100)
-        snap = ans.homework_question.snapshot or {}
-        if ans.is_correct is False:
-            entry["wrong_points"].append({
-                "stem": snap.get("stem", ""),
-                "knowledge_tags": snap.get("knowledge_tags") or [],
-            })
     homework = list(homework_map.values())
 
     # ---- 考试（逐题对错复用 exams/resolver.py：乱序映射 + layout，F8）----
@@ -584,8 +585,8 @@ def build_chapter_profile(student, catalog, *, for_student: bool) -> dict:
         wrong_points = [
             {
                 "stem": e.get("stem", ""),
-                "correct_answer": "、".join(e.get("correct_answer") or []),
-                "my_answer": "、".join(e.get("student_answer") or []),
+                "correct_answer": _answer_text(e.get("correct_answer")),
+                "my_answer": _answer_text(e.get("student_answer")),
                 "my_score": e.get("my_score"),
             }
             for e in entries
