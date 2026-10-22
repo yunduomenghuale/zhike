@@ -3,17 +3,27 @@
 从 views.py 平移而来，保持纯函数语义：不感知请求与用户，
 行级权限由调用方 View 负责（教师端校验班级归属，平台端 IsPlatformAdmin 放行）。
 """
-from django.db.models import Avg, Count
+from datetime import timedelta
+
+from django.db.models import Avg, Count, Q, Sum
 from django.utils import timezone
 
 from apps.classroom.models import ClassStudent
+from apps.courses.models import Catalog, VideoWatchProgress
 from apps.exams.models import Exam, ExamSubmission
 from apps.homework.models import Homework, HomeworkSubmission
+from apps.knowledge.models import QARecord
 from apps.labs.models import Lab, LabSubmission
 from apps.questions.models import AnswerRecord
 
 INACTIVE_DAYS = 7
 LOW_ACCURACY = 60
+
+# AI 学情分析（build_class_stats_v2）输入裁剪硬规则：按 token 预算倒推，
+# 班级报告 prompt 控制在 6k tokens 内；本地小模型可调小条数。
+WRONG_TOP_N = 8           # 每生错题条数上限
+QA_TOP_N = 5              # 每生高频提问条数上限
+QA_DISLIKED_N = 3         # 每生被点「无用」的提问条数上限
 
 
 def build_class_stats(classroom, course_id) -> dict:
@@ -138,4 +148,291 @@ def build_class_stats(classroom, course_id) -> dict:
         "course_name": course.name,
         "summary": summary,
         "students": rows,
+    }
+
+
+# ---------------------------------------------------------------------------
+# AI 学情分析专用聚合（build_class_stats_v2）
+# ---------------------------------------------------------------------------
+def _answer_text(answer) -> str:
+    """把 JSON 结构的学生/标准答案压成紧凑文本（喂 prompt 用，截断防爆）。"""
+    if not answer:
+        return ""
+    if isinstance(answer, str):
+        return answer[:120]
+    if isinstance(answer, dict):
+        if answer.get("key"):
+            return str(answer["key"])
+        if answer.get("keys"):
+            return "、".join(str(k) for k in answer["keys"])
+        blanks = answer.get("blanks")
+        if isinstance(blanks, list):
+            parts = [
+                str(b.get("text", "")) if isinstance(b, dict) else str(b)
+                for b in blanks
+            ]
+            return " / ".join(p for p in parts if p)[:120]
+        if answer.get("text"):
+            return str(answer["text"])[:120]
+    return str(answer)[:120]
+
+
+def _chapter_maps(course_id):
+    """课程章节元数据：(parent_of, title_of, root_id 函数)。
+
+    root_id 归属逻辑与 ClassStudentDetailView 保持一致（沿 parent 上浮到顶层章节）。
+    """
+    catalogs = list(Catalog.objects.filter(course_id=course_id).only("id", "parent_id", "title"))
+    parent_of = {c.id: c.parent_id for c in catalogs}
+    title_of = {c.id: c.title for c in catalogs}
+
+    def root_id(cid):
+        seen = set()
+        while cid and parent_of.get(cid) and cid not in seen:
+            seen.add(cid)
+            cid = parent_of[cid]
+        return cid
+
+    return parent_of, title_of, root_id
+
+
+def build_class_stats_v2(classroom, course_id) -> dict:
+    """AI 学情分析专用聚合（build_class_stats 的超集，教师端全量口径）。
+
+    在基础统计（前端学生卡片同款字段）之上，新增喂给 LLD 的维度：
+    - has_data 标记（D6：六类行为记录全无即无数据，不分析不打简评）；
+    - 逐生错题 TOP N（题干/我的答案/正确答案/解析/知识点，截断）；
+    - 知识点预聚合（班级级 tag→错题数/总题数，纯计算先归因）；
+    - 章节正确率矩阵（班级级 + 逐生覆盖）；
+    - 作业/考试/实验得分明细（班级级汇总，教师视角不受成绩门控限制）；
+    - 提问热度（QARecord 按章节聚合 + 高频问题 + 被点「无用」）；
+    - 视频学习行为与时间趋势（近 7/30 天练习量）。
+
+    统计先于 AI：能 SQL 算的全部代码算好，LLM 只做归因解读（见设计方案 §3.2）。
+    """
+    base = build_class_stats(classroom, course_id)
+    course_id = base["course_id"]
+    rows = base["students"]
+    student_ids = [r["student_id"] for r in rows]
+    _parent_of, title_of, root_id = _chapter_maps(course_id)
+
+    def root_title(cid) -> str:
+        rid = root_id(cid)
+        return title_of.get(rid, "未分类章节") if rid else "未分类章节"
+
+    now = timezone.now()
+    practice_qs = AnswerRecord.objects.filter(
+        student_id__in=student_ids, scene=AnswerRecord.Scene.PRACTICE, question__course_id=course_id
+    )
+
+    # ---- 班级级：章节正确率矩阵 + 逐生章节覆盖（一次聚合查询）----
+    chapter_stat: dict = {}
+    per_student_cov: dict = {}
+    for item in (
+        practice_qs.values("student_id", "question__catalog_id").annotate(
+            practiced=Count("question", distinct=True),
+            total=Count("id"),
+            correct=Count("id", filter=Q(is_correct=True)),
+        )
+    ):
+        rid = root_id(item["question__catalog_id"])
+        if not rid:
+            continue
+        agg = chapter_stat.setdefault(rid, {"total": 0, "correct": 0})
+        agg["total"] += item["total"]
+        agg["correct"] += item["correct"]
+        cov = per_student_cov.setdefault(item["student_id"], {})
+        cagg = cov.setdefault(rid, {"practiced": 0, "total": 0, "correct": 0})
+        cagg["practiced"] += item["practiced"]
+        cagg["total"] += item["total"]
+        cagg["correct"] += item["correct"]
+    chapter_matrix = [
+        {
+            "chapter": title_of.get(cid, ""),
+            "total": s["total"],
+            "correct": s["correct"],
+            "accuracy": round(s["correct"] / s["total"] * 100) if s["total"] else None,
+        }
+        for cid, s in chapter_stat.items()
+    ]
+    chapter_matrix.sort(key=lambda x: x["accuracy"] if x["accuracy"] is not None else 101)
+
+    # ---- 班级级：知识点预聚合（tag → 错题数/总题数）----
+    tag_stat: dict = {}
+    for tags, is_correct in practice_qs.values_list("question__knowledge_tags", "is_correct"):
+        for tag in tags or []:
+            stat = tag_stat.setdefault(str(tag), {"wrong": 0, "total": 0})
+            stat["total"] += 1
+            if not is_correct:
+                stat["wrong"] += 1
+    knowledge_agg = sorted(
+        (
+            {
+                "tag": tag,
+                "wrong": s["wrong"],
+                "total": s["total"],
+                "rate": round(s["wrong"] / s["total"] * 100) if s["total"] else 0,
+            }
+            for tag, s in tag_stat.items()
+        ),
+        key=lambda x: -x["rate"],
+    )
+
+    # ---- 班级级：作业/考试/实验得分明细（教师视角，无成绩门控）----
+    homework_detail = []
+    for hw in Homework.objects.filter(
+        classroom=classroom, course_id=course_id, status=Homework.Status.PUBLISHED
+    ).order_by("id"):
+        subs = HomeworkSubmission.objects.filter(homework=hw)
+        submitted = subs.count()
+        avg_score = subs.filter(score__isnull=False).aggregate(a=Avg("score"))["a"]
+        homework_detail.append({
+            "title": hw.title,
+            "submitted": submitted,
+            "student_count": len(rows),
+            "avg_score": round(float(avg_score), 1) if avg_score is not None else None,
+        })
+    exam_detail = []
+    for exam in Exam.objects.filter(
+        classroom=classroom,
+        course_id=course_id,
+        status__in=[Exam.Status.PUBLISHED, Exam.Status.FINISHED],
+    ).order_by("id"):
+        subs = ExamSubmission.objects.filter(
+            exam=exam, status__in=[ExamSubmission.Status.SUBMITTED, ExamSubmission.Status.TIMEOUT]
+        )
+        taken = subs.count()
+        avg_score = subs.aggregate(a=Avg("total_score"))["a"]
+        exam_detail.append({
+            "name": exam.name,
+            "taken": taken,
+            "student_count": len(rows),
+            "avg_score": round(float(avg_score), 1) if avg_score is not None else None,
+        })
+    lab_detail = []
+    for lab in Lab.objects.filter(
+        course_id=course_id, status=Lab.Status.PUBLISHED, schedules__classroom=classroom
+    ).distinct().order_by("id"):
+        subs = LabSubmission.objects.filter(lab=lab, status=LabSubmission.Status.SUBMITTED)
+        done = subs.count()
+        avg_score = subs.aggregate(a=Avg("total_score"))["a"]
+        lab_detail.append({
+            "title": lab.title,
+            "done": done,
+            "student_count": len(rows),
+            "avg_score": round(float(avg_score), 1) if avg_score is not None else None,
+            "reviewed": subs.filter(reviewed=True).count(),
+        })
+
+    # ---- 班级级：提问热度 / 学习行为 / 时间趋势 ----
+    qa_course = QARecord.objects.filter(course_id=course_id, student_id__in=student_ids)
+    qa_by_chapter = [
+        {"chapter": title_of.get(item["catalog_id"], "课程级问答"), "count": item["n"]}
+        for item in qa_course.values("catalog_id").annotate(n=Count("id"))
+        if item["catalog_id"]
+    ]
+    qa_heat = {
+        "total": qa_course.count(),
+        "by_chapter": sorted(qa_by_chapter, key=lambda x: -x["count"]),
+        "top_questions": [
+            q[:60]
+            for q in qa_course.order_by("-created_at").values_list("question", flat=True)[:10]
+        ],
+        "disliked": [
+            q[:60]
+            for q in qa_course.filter(feedback=-1).order_by("-created_at").values_list("question", flat=True)[:5]
+        ],
+    }
+    video_qs = VideoWatchProgress.objects.filter(
+        video__course_id=course_id, student_id__in=student_ids
+    )
+    video_behavior = {
+        "students_with_progress": video_qs.values("student_id").distinct().count(),
+        "completed_chapters": video_qs.filter(status=VideoWatchProgress.Status.COMPLETED).count(),
+        "avg_watch_seconds": round(
+            float(video_qs.aggregate(a=Avg("watch_seconds"))["a"] or 0)
+        ),
+    }
+    time_trend = {
+        "practice_last_7d": practice_qs.filter(submitted_at__gte=now - timedelta(days=7)).count(),
+        "practice_last_30d": practice_qs.filter(submitted_at__gte=now - timedelta(days=30)).count(),
+    }
+
+    # ---- 逐生 enrichment：错题/提问/视频/章节覆盖/has_data ----
+    for row in rows:
+        stu_id = row["student_id"]
+        wrong = list(
+            AnswerRecord.objects.filter(
+                student_id=stu_id,
+                scene=AnswerRecord.Scene.PRACTICE,
+                is_correct=False,
+                question__course_id=course_id,
+            )
+            .select_related("question")
+            .order_by("-submitted_at")[:WRONG_TOP_N]
+        )
+        row["wrong_questions"] = [
+            {
+                "stem": (ar.question.stem or "")[:80],
+                "my_answer": _answer_text(ar.student_answer),
+                "correct_answer": _answer_text(ar.question.answer),
+                "analysis": (ar.question.analysis or "")[:120],
+                "knowledge_tags": ar.question.knowledge_tags or [],
+                "difficulty": ar.question.get_difficulty_display(),
+                "chapter": root_title(ar.question.catalog_id),
+            }
+            for ar in wrong
+        ]
+        qa_stu = QARecord.objects.filter(student_id=stu_id, course_id=course_id)
+        row["qa"] = {
+            "count": qa_stu.count(),
+            "top_questions": [
+                q[:60] for q in qa_stu.order_by("-created_at").values_list("question", flat=True)[:QA_TOP_N]
+            ],
+            "disliked": [
+                q[:60]
+                for q in qa_stu.filter(feedback=-1).order_by("-created_at").values_list("question", flat=True)[:QA_DISLIKED_N]
+            ],
+        }
+        video_stu = VideoWatchProgress.objects.filter(student_id=stu_id, video__course_id=course_id)
+        row["video"] = {
+            "watch_seconds": video_stu.aggregate(s=Sum("watch_seconds"))["s"] or 0,
+            "completed_chapters": video_stu.filter(status=VideoWatchProgress.Status.COMPLETED).count(),
+        }
+        row["chapter_coverage"] = [
+            {
+                "chapter": title_of.get(cid, ""),
+                "practiced": s["practiced"],
+                "correct": s["correct"],
+                "accuracy": round(s["correct"] / s["total"] * 100) if s["total"] else None,
+            }
+            for cid, s in sorted(
+                per_student_cov.get(stu_id, {}).items(), key=lambda kv: title_of.get(kv[0], "")
+            )
+        ]
+        # D6：六类行为记录（章节练习/作业/考试/实验/问答/视频进度）全无即无数据
+        row["has_data"] = bool(
+            row["practice_total"]
+            or row["homework_submitted"]
+            or row["exam_taken"]
+            or row["experiment_done"]
+            or row["qa"]["count"]
+            or video_stu.exists()
+        )
+
+    summary = base["summary"]
+    analyzed_count = sum(1 for r in rows if r["has_data"])
+    summary["analyzed_count"] = analyzed_count
+    summary["no_data_count"] = len(rows) - analyzed_count
+
+    return {
+        **base,
+        "knowledge_agg": knowledge_agg,
+        "chapter_matrix": chapter_matrix,
+        "homework_detail": homework_detail,
+        "exam_detail": exam_detail,
+        "lab_detail": lab_detail,
+        "qa_heat": qa_heat,
+        "video_behavior": video_behavior,
+        "time_trend": time_trend,
     }
