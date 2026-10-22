@@ -1,5 +1,5 @@
 <template>
-  <div class="qa-quality">
+  <div class="page-container qa-quality">
     <header class="page-head">
       <div>
         <h1>问答质量<QaHelp text="学生向 AI 助手提问的检索命中、评价与上下文健康度——发现课程资料覆盖盲区，持续改进知识库。" /></h1>
