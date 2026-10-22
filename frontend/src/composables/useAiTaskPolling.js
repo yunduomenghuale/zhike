@@ -67,9 +67,12 @@ export function useAiTaskPolling() {
    * @param {{ onSuccess?: Function, onFailed?: Function }} handlers
    */
   function start(taskId, handlers = {}) {
+    // 顺序要紧：先 stop() 停旧轮询（其递增的代数令在途 tick 的迟到响应作废），
+    // 再开新代数——若先取 mySeq 再 stop()，schedule 的代数守卫会永远成立，
+    // 首个 tick 永远不会被调度（轮询静默失效，P2f E2E 实证：后端零请求）。
+    stop()
     seq += 1
     const mySeq = seq
-    stop()
     task.value = null
     startedAt = Date.now()
     schedule(mySeq, taskId, handlers)

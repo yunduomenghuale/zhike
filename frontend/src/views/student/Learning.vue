@@ -351,6 +351,104 @@
       </div>
     </Teleport>
 
+    <!-- 章节 AI 学习总结抽屉（设计 §4.4） -->
+    <Teleport to="body">
+      <div v-if="summaryVisible" class="summary-mask" @click.self="closeSummaryDrawer">
+        <aside class="summary-drawer" @click.stop>
+          <header class="summary-head">
+            <div class="summary-head-copy">
+              <span class="summary-kicker">AI 章节学习总结</span>
+              <h2>{{ summaryCatalogTitle }}</h2>
+              <p>{{ activeCourseName }}</p>
+            </div>
+            <button class="summary-close" title="关闭" @click="closeSummaryDrawer">
+              <el-icon><Close /></el-icon>
+            </button>
+          </header>
+
+          <div class="summary-body">
+            <div v-if="summaryState === 'loading'" class="summary-state">
+              <el-icon class="is-loading" :size="26"><Loading /></el-icon>
+              <p>正在读取本章学习数据…</p>
+            </div>
+            <div v-else-if="summaryState === 'generating'" class="summary-state">
+              <el-icon class="is-loading" :size="30"><Loading /></el-icon>
+              <p class="summary-state-title">AI 正在生成本章学习总结</p>
+              <p class="summary-state-sub">{{ summaryProgressMsg }}</p>
+              <span class="summary-state-tip">通常需要十几秒，可以先离开去学习其他章节</span>
+            </div>
+            <div v-else-if="summaryState === 'failed'" class="summary-state">
+              <el-result icon="error" title="总结生成失败" :sub-title="summaryError || '请稍后重试'">
+                <template #extra>
+                  <el-button type="primary" :loading="summarySubmitting" @click="regenerateSummary">重新生成</el-button>
+                </template>
+              </el-result>
+            </div>
+            <template v-else-if="summaryResult">
+              <section class="summary-block">
+                <h3>本章概览</h3>
+                <div class="summary-text" v-html="renderMd(summaryResult.overview)"></div>
+              </section>
+
+              <section v-if="summaryResult.knowledge_points?.length" class="summary-block">
+                <h3>知识点掌握</h3>
+                <div class="kp-list">
+                  <div v-for="(kp, i) in summaryResult.knowledge_points" :key="i" class="kp-item" :class="kp.status">
+                    <div class="kp-head">
+                      <span class="kp-name">{{ kp.name }}</span>
+                      <span class="kp-badge" :class="kp.status">{{ kp.status === 'weak' ? '待加强' : '已掌握' }}</span>
+                    </div>
+                    <p v-if="kp.evidence" class="kp-evidence">{{ kp.evidence }}</p>
+                  </div>
+                </div>
+              </section>
+
+              <section v-if="summaryResult.weak_points?.length" class="summary-block">
+                <h3>薄弱点</h3>
+                <div class="weak-tags">
+                  <span v-for="(w, i) in summaryResult.weak_points" :key="i" class="weak-tag">{{ w }}</span>
+                </div>
+              </section>
+
+              <section v-if="summaryResult.highlights?.length" class="summary-block">
+                <h3>学习亮点</h3>
+                <ul class="summary-list">
+                  <li v-for="(h, i) in summaryResult.highlights" :key="i">{{ h }}</li>
+                </ul>
+              </section>
+
+              <section v-if="summaryResult.qa_insight" class="summary-block">
+                <h3>提问反映的理解障碍</h3>
+                <p class="summary-text">{{ summaryResult.qa_insight }}</p>
+              </section>
+
+              <section v-if="summaryResult.suggestions?.length" class="summary-block">
+                <h3>提升建议</h3>
+                <ol class="summary-list num">
+                  <li v-for="(s, i) in summaryResult.suggestions" :key="i">{{ s }}</li>
+                </ol>
+              </section>
+
+              <section class="summary-block next-step">
+                <h3>下一步</h3>
+                <p class="next-step-text">{{ summaryResult.next_step }}</p>
+              </section>
+
+              <p v-if="summaryData?.degraded" class="summary-degraded">AI 服务繁忙，本总结由学习统计数据自动生成，可稍后重新生成</p>
+            </template>
+            <div v-else class="summary-state">
+              <el-empty description="暂无总结数据" :image-size="90" />
+            </div>
+          </div>
+
+          <footer v-if="summaryState === 'ready'" class="summary-foot">
+            <span class="summary-time">生成于 {{ fmtDateTime(summaryData?.generated_at) }}</span>
+            <el-button :loading="summarySubmitting" @click="regenerateSummary">重新生成</el-button>
+          </footer>
+        </aside>
+      </div>
+    </Teleport>
+
     <div class="page-header">
       <div>
         <div class="page-title">课程学习</div>
@@ -393,6 +491,13 @@
                   effect="light"
                   round
                 >{{ progressInfo(row.node.id).label }}</el-tag>
+                <el-tag
+                  v-if="summaryPendingOf(row.node.id)"
+                  size="small"
+                  type="warning"
+                  effect="light"
+                  round
+                >总结生成中</el-tag>
               </div>
             </div>
             <div class="node-actions">
@@ -401,6 +506,9 @@
                 <el-button class="node-action-btn" :icon="Microphone" @click.stop="openChapter(row.node, 'script')">讲稿</el-button>
                 <el-button class="node-action-btn" :icon="EditPen" @click.stop="openPracticePanel(row.node)">章节练习</el-button>
                 <el-button class="node-action-btn" :icon="ChatDotRound" @click.stop="openChapter(row.node, 'chat')">AI 问答</el-button>
+                <el-button class="node-action-btn" :icon="MagicStick" @click.stop="openChapterSummary(row.node)">{{
+                  summaryPendingOf(row.node.id) ? '生成中' : (summaryReadyOf(row.node.id) ? '查看总结' : 'AI 总结')
+                }}</el-button>
               </div>
             </div>
           </div>
@@ -429,6 +537,8 @@ import { renderQaAnswer } from '@/utils/markdown'
 import CitedSources from '@/components/qa/CitedSources.vue'
 import QaFeedback from '@/components/qa/QaFeedback.vue'
 import { listQaSessions, listQaSessionRecords } from '@/api/knowledge'
+import { submitChapterSummary, getChapterSummary } from '@/api/chapter-summary'
+import { useAiTaskPolling } from '@/composables/useAiTaskPolling'
 import { blankAnswerText } from '@/utils/blank-answer'
 
 const courses = ref([])
@@ -497,6 +607,8 @@ async function loadTree() {
   chatMessages.value = []
   chatSessionId.value = null
   chatSessions.value = []
+  summaryData.value = null
+  summaryVisible.value = false
   stopPlayer()
   const data = await listCatalogs({ course: courseId.value, tree: 1 })
   tree.value = data.results ?? data
@@ -540,7 +652,7 @@ async function loadWatchProgress() {
 async function flushProgress(completed = false) {
   if (!currentVideoId.value || !lectureVisible.value) {
     watchAccum = 0
-    return
+    return null
   }
   const delta = Math.round(watchAccum)
   watchAccum = 0
@@ -561,9 +673,16 @@ async function flushProgress(completed = false) {
     const saved = await reportVideoProgress(currentVideoId.value, payload)
     if (saved && current.value) {
       progressMap.value = { ...progressMap.value, [current.value.id]: saved }
+      // 学完章节：后端幂等提交 AI 总结任务（F13 加性字段），前端接管轮询与行内徽标
+      if (saved.summary_task_id) {
+        watchSummaryTask(saved.summary_task_id, current.value.id)
+        ElMessage.success('本章学习完成！AI 总结生成中')
+      }
     }
+    return saved
   } catch {
     // 进度上报失败不打断学习
+    return null
   }
 }
 
@@ -939,7 +1058,7 @@ function onPlayerLoadedMeta(e) {
   resumePending = false
 }
 
-function onPlayerAudioEnded() {
+async function onPlayerAudioEnded() {
   flushProgress()
   const next = findNextAudioPage(playerPageIndex.value)
   if (next >= 0) {
@@ -947,9 +1066,10 @@ function onPlayerAudioEnded() {
     nextTick(() => playerAudioRef.value?.play?.())
   } else {
     // 整章连播结束，标记完成
-    flushProgress(true)
+    const saved = await flushProgress(true)
     stopPlayer()
-    ElMessage.success('本章讲解已学习完成')
+    // 已自动提交 AI 总结时 toast 由 flushProgress 给出（「总结生成中」），避免双弹窗
+    if (!saved?.summary_task_id) ElMessage.success('本章讲解已学习完成')
   }
 }
 
@@ -1242,6 +1362,135 @@ async function submitPractice() {
   } finally {
     submitting.value = false
   }
+}
+
+// ---- 章节 AI 学习总结（设计 §4.4） ----
+// 行内入口：有总结 → 抽屉直接看；无总结 → 自动提交生成（幂等，进行中/已成功均复用）；
+// 学完章节时后端自动提交（report_progress 响应 summary_task_id），前端接管轮询与徽标。
+const summaryVisible = ref(false)
+const summaryCatalogId = ref(null)
+const summaryData = ref(null) // {task_id, version, degraded, generated_at, result}
+const summaryState = ref('idle') // idle | loading | generating | ready | failed
+const summaryError = ref('')
+const summarySubmitting = ref(false)
+const summaryPendingMap = ref({}) // catalog_id -> true（生成中：行内徽标）
+const summaryReadyMap = ref({}) // catalog_id -> true（已有总结：行内「查看总结」）
+const { task: summaryTask, start: startSummaryPolling, stop: stopSummaryPolling } = useAiTaskPolling()
+
+const summaryResult = computed(() => summaryData.value?.result || null)
+const summaryCatalogTitle = computed(() => {
+  const row = chapterRows.value.find((r) => r.node.id === summaryCatalogId.value)
+  return row?.node.title || '章节学习总结'
+})
+const summaryProgressMsg = computed(() => summaryTask.value?.progress?.message || 'AI 正在分析本章学习数据…')
+
+function summaryPendingOf(catalogId) {
+  return Boolean(summaryPendingMap.value[catalogId])
+}
+function summaryReadyOf(catalogId) {
+  return Boolean(summaryReadyMap.value[catalogId])
+}
+
+// 读服务端最新成功总结（抽屉打开 / 任务完成刷新用）
+async function loadSummaryFromServer() {
+  const catalogId = summaryCatalogId.value
+  try {
+    const res = await getChapterSummary({ course_id: courseId.value, catalog_id: catalogId })
+    if (summaryCatalogId.value !== catalogId) return null // 竞态守卫：已切章节
+    const summary = res?.summary || null
+    summaryData.value = summary
+    if (summary) {
+      summaryState.value = 'ready'
+      summaryReadyMap.value = { ...summaryReadyMap.value, [catalogId]: true }
+      // 自愈：上次被轮询替换而残留的「生成中」徽标，读到成功总结即清除
+      summaryPendingMap.value = { ...summaryPendingMap.value, [catalogId]: false }
+    }
+    return summary
+  } catch {
+    return null
+  }
+}
+
+// 轮询总结任务（抽屉开关均持续：行内徽标依赖终态回调清理）
+function watchSummaryTask(taskId, catalogId) {
+  summaryPendingMap.value = { ...summaryPendingMap.value, [catalogId]: true }
+  if (summaryVisible.value && summaryCatalogId.value === catalogId) {
+    summaryState.value = 'generating'
+    summaryError.value = ''
+  }
+  startSummaryPolling(taskId, {
+    onSuccess: async () => {
+      summaryPendingMap.value = { ...summaryPendingMap.value, [catalogId]: false }
+      if (!summaryVisible.value || summaryCatalogId.value !== catalogId) return
+      await loadSummaryFromServer()
+      if (!summaryData.value) {
+        summaryState.value = 'failed'
+        summaryError.value = '总结已生成但读取失败，请重新打开'
+      }
+    },
+    onFailed: (task) => {
+      summaryPendingMap.value = { ...summaryPendingMap.value, [catalogId]: false }
+      if (!summaryVisible.value || summaryCatalogId.value !== catalogId) return
+      summaryState.value = 'failed'
+      summaryError.value = task?.error || '生成失败，请重试'
+    },
+  })
+}
+
+// 提交总结任务（无记录自动生成 / 用户主动重新生成）
+async function submitSummary(catalogId, { force = false } = {}) {
+  summarySubmitting.value = true
+  try {
+    const res = await submitChapterSummary({
+      course_id: courseId.value,
+      catalog_id: catalogId,
+      ...(force ? { force: 1 } : {}),
+    })
+    if (summaryCatalogId.value !== catalogId) return
+    if (res?.cached) {
+      // 复用旧任务：已成功直接展示，进行中继续轮询
+      const summary = await loadSummaryFromServer()
+      if (summary) return
+    }
+    if (res?.task_id) watchSummaryTask(res.task_id, catalogId)
+  } catch {
+    // 429 限频等：请求拦截器已提示；无旧数据可展示时转入失败态
+    if (summaryCatalogId.value === catalogId && !summaryData.value) {
+      summaryState.value = 'failed'
+      summaryError.value = '暂时无法生成总结，请稍后再试'
+    }
+  } finally {
+    summarySubmitting.value = false
+  }
+}
+
+// 章节行「AI 总结」入口
+async function openChapterSummary(node) {
+  summaryCatalogId.value = node.id
+  summaryVisible.value = true
+  summaryState.value = 'loading'
+  summaryError.value = ''
+  const summary = await loadSummaryFromServer()
+  if (summaryCatalogId.value !== node.id) return
+  if (summary) return
+  await submitSummary(node.id)
+}
+
+function closeSummaryDrawer() {
+  summaryVisible.value = false
+}
+
+function regenerateSummary() {
+  if (summaryCatalogId.value == null) return
+  submitSummary(summaryCatalogId.value, { force: true })
+}
+
+function fmtDateTime(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 watch(fixedCourseId, (id) => {
@@ -2562,5 +2811,272 @@ onUnmounted(() => {
     align-items: flex-start;
     flex-direction: column;
   }
+}
+
+/* ---- 章节 AI 学习总结抽屉 ---- */
+.summary-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 3100;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(15, 23, 42, 0.32);
+}
+
+.summary-drawer {
+  width: min(480px, 94vw);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  box-shadow: -18px 0 48px rgba(15, 23, 42, 0.14);
+  animation: summary-slide 0.24s ease;
+}
+
+@keyframes summary-slide {
+  from {
+    transform: translateX(26px);
+    opacity: 0.6;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.summary-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid #e5eaf3;
+}
+
+.summary-kicker {
+  font-size: 12px;
+  font-weight: 800;
+  color: #2563eb;
+  letter-spacing: 0.04em;
+}
+
+.summary-head h2 {
+  margin: 4px 0 0;
+  font-size: 19px;
+  font-weight: 850;
+  color: #0f172a;
+}
+
+.summary-head p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.summary-close {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #64748b;
+  background: rgba(148, 163, 184, 0.14);
+  cursor: pointer;
+}
+
+.summary-close:hover {
+  color: #0f172a;
+  background: rgba(148, 163, 184, 0.24);
+}
+
+.summary-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 22px 28px;
+}
+
+.summary-state {
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+  color: #64748b;
+}
+
+.summary-state-title {
+  margin: 6px 0 0;
+  font-size: 15px;
+  font-weight: 750;
+  color: #0f172a;
+}
+
+.summary-state-sub {
+  margin: 0;
+  font-size: 13px;
+}
+
+.summary-state-tip {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.summary-block {
+  margin-bottom: 22px;
+}
+
+.summary-block h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 800;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.summary-block h3::before {
+  content: "";
+  width: 4px;
+  height: 14px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #60a5fa, #2563eb);
+}
+
+.summary-text {
+  font-size: 14px;
+  line-height: 1.85;
+  color: var(--el-text-color-regular);
+}
+
+.summary-text :deep(p) {
+  margin: 0 0 8px;
+}
+
+.summary-text :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.summary-list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.summary-list li {
+  margin-bottom: 8px;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--el-text-color-regular);
+}
+
+.summary-list.num {
+  list-style: decimal;
+}
+
+.kp-list {
+  display: grid;
+  gap: 10px;
+}
+
+.kp-item {
+  padding: 12px 14px;
+  border: 1px solid #e5eaf3;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+
+.kp-item.weak {
+  border-color: rgba(220, 38, 38, 0.26);
+  background: #fef6f6;
+}
+
+.kp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.kp-name {
+  font-size: 14px;
+  font-weight: 750;
+  color: #0f172a;
+}
+
+.kp-badge {
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #16a34a;
+  background: #f0fdf4;
+}
+
+.kp-badge.weak {
+  color: #dc2626;
+  background: #fef2f2;
+}
+
+.kp-evidence {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #64748b;
+}
+
+.weak-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.weak-tag {
+  padding: 5px 12px;
+  border: 1px solid rgba(220, 38, 38, 0.24);
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 650;
+  color: #dc2626;
+  background: #fef2f2;
+}
+
+.next-step {
+  padding: 14px 16px;
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  border-radius: 14px;
+  background: linear-gradient(135deg, #eff6ff, #ffffff);
+}
+
+.next-step-text {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.8;
+  color: #1d4ed8;
+}
+
+.summary-degraded {
+  margin: 0;
+  font-size: 12px;
+  color: #b45309;
+}
+
+.summary-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 22px;
+  border-top: 1px solid #e5eaf3;
+}
+
+.summary-time {
+  font-size: 12px;
+  color: #94a3b8;
 }
 </style>
