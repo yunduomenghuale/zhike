@@ -24,10 +24,12 @@
     </template>
 
     <div class="import-body">
+      <!-- 课程上下文：导入操作已在某课程下，自动关联无需选择（原「目标课程」字段已移除） -->
+      <div class="import-course-hint">
+        <el-icon><School /></el-icon>
+        <span>导入到课程：<b>{{ courseName || '当前课程' }}</b>（自动关联当前课程）</span>
+      </div>
       <el-form label-position="top" class="import-form">
-        <el-form-item label="目标课程">
-          <el-input :model-value="courseName" disabled />
-        </el-form-item>
         <el-form-item label="目标章节（可选）">
           <el-select v-model="catalog" class="module-select" popper-class="module-select-popper" placeholder="可稍后在预览中设置，不影响解析" style="width: 100%" clearable>
             <el-option v-for="c in catalogs" :key="c.id" :label="c.label" :value="c.id" />
@@ -76,7 +78,7 @@
 <script setup>
 import { ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Close, InfoFilled, UploadFilled } from '@element-plus/icons-vue'
+import { Close, InfoFilled, School, UploadFilled } from '@element-plus/icons-vue'
 import { importQuestions } from '@/api/question'
 
 const SUPPORTED_EXT = ['.pdf', '.doc', '.docx', '.txt', '.md']
@@ -185,7 +187,29 @@ async function doImport() {
   line-height: 1.2;
 }
 
-.import-uploader :deep(.el-upload) {
+/* 课程提示行（导入到课程，自动关联） */
+.import-course-hint {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 12px;
+  padding: 9px 13px;
+  border-radius: 10px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 13px;
+}
+.import-course-hint b {
+  color: #0f172a;
+  font-weight: 700;
+}
+.import-course-hint .el-icon {
+  flex: 0 0 auto;
+  font-size: 15px;
+  color: var(--primary-600);
+}
+
+.import-uploader {
   width: 100%;
 }
 .import-uploader :deep(.el-upload-dragger) {

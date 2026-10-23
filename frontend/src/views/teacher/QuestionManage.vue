@@ -119,9 +119,10 @@
         </div>
       </template>
 
-      <el-form :model="form" label-position="top" class="question-creation-form">
-        <QuestionFormFields ref="formFields" v-model="form" :catalogs="flatCatalogs" show-catalog />
-      </el-form>
+      <!-- 表单字段组件化（与草稿预览共用）；el-form 容器已内置，此处仅作滚动区 -->
+      <div class="question-creation-form">
+        <QuestionFormFields ref="formFields" :model="form" :catalogs="flatCatalogs" show-catalog label-position="top" />
+      </div>
       <template #footer>
         <div class="creation-dialog-footer">
           <el-button @click="editVisible = false">取消</el-button>
@@ -260,17 +261,15 @@ function sourceTag(s) {
 }
 
 async function loadCourses() {
-  if (fixedCourseId.value) {
-    courseId.value = fixedCourseId.value
-    load()
-    loadCatalogs()
-    refreshBatchCount()
-    return
-  }
+  // 两个分支都加载课程列表：课程工作台视图（fixedCourseId）也要取课程名（导入提示行等场景）
   const data = await listCourses()
   courses.value = data.results ?? data
-  if (courses.value.length) {
+  if (fixedCourseId.value) {
+    courseId.value = fixedCourseId.value
+  } else if (courses.value.length) {
     courseId.value = courses.value[0].id
+  }
+  if (courseId.value) {
     load()
     loadCatalogs()
     refreshBatchCount()
@@ -674,46 +673,11 @@ watch(
   background: rgba(226, 232, 240, 0.7);
 }
 
+/* 新建/编辑题目弹窗滚动区（表单字段布局与控件皮肤已内置于 QuestionFormFields） */
 .question-creation-form {
   max-height: calc(100vh - 200px);
   padding: 16px 22px 18px;
   overflow-y: auto;
-}
-
-.question-creation-form :deep(.el-form-item) {
-  margin-bottom: 12px;
-}
-
-.question-creation-form :deep(.el-form-item__label) {
-  height: auto;
-  padding: 0 0 7px;
-  color: #475569;
-  font-size: 13px;
-  font-weight: 650;
-  line-height: 1.2;
-}
-
-.question-creation-form :deep(.el-input__wrapper),
-.question-creation-form :deep(.el-select__wrapper),
-.question-creation-form :deep(.el-input-number) {
-  min-height: 38px;
-  border-radius: 10px;
-  background: #f8fbff;
-  box-shadow: inset 0 0 0 1px #dbe5f2;
-}
-
-.question-creation-form :deep(.el-textarea__inner) {
-  padding: 11px 13px;
-  border: 1px solid #dbe5f2;
-  border-radius: 11px;
-  background: #f8fbff;
-  box-shadow: none;
-}
-
-.question-creation-form :deep(.el-textarea__inner:focus) {
-  border-color: var(--primary-500);
-  background: #fff;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
 }
 
 .creation-dialog-footer {
