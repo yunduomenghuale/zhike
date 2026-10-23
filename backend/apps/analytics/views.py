@@ -202,6 +202,112 @@ class ChapterSummaryView(APIView):
         })
 
 
+class ClassChapterSummariesView(APIView):
+    """教师端查看班级学生的章节学习 AI 总结（设计 §4.4 P3，for_student=False 全量口径）。
+
+    作为学情分析的细粒度输入：按章节聚合班级每生的最新成功总结，
+    不经学生端成绩门控（教师看全量）。学生姓名取实时 Users 表。
+    """
+
+    permission_classes = [IsTeacher]
+    serializer_class = AnalyticsResponseSerializer
+
+    def get(self, request, class_id):
+        from apps.ai.models import AITask
+
+        classroom, course, error = _resolve_classroom_course(request, class_id)
+        if error:
+            return error
+
+        catalog_id = request.query_params.get("catalog_id")
+        if not catalog_id:
+            return api_response(message="缺少 catalog_id 参数", code=400, status=400)
+        catalog = Catalog.objects.filter(id=catalog_id, course_id=course.id).first()
+        if not catalog:
+            return api_response(message="章节不存在或不属于该课程", code=404, status=404)
+
+        student_ids = list(
+            ClassStudent.objects.filter(classroom=classroom).values_list("student_id", flat=True)
+        )
+        tasks = (
+            AITask.objects.filter(
+                task_type=AITask.TaskType.CHAPTER_SUMMARY,
+                student_id__in=student_ids,
+                catalog_id=catalog.id,
+                status=AITask.Status.SUCCESS,
+            )
+            .select_related("student")
+            .order_by("student_id", "-version", "-id")
+        )
+        latest_of = {}
+        for t in tasks:
+            latest_of.setdefault(t.student_id, t)  # 已按 version 倒序，首条即最新版
+
+        items = []
+        for t in sorted(latest_of.values(), key=lambda x: x.student_id):
+            result = t.result or {}
+            items.append({
+                "student_id": t.student_id,
+                "student_name": (t.student.real_name or t.student.username) if t.student else "",
+                "task_id": t.id,
+                "version": t.version,
+                "degraded": bool(result.get("degraded")),
+                "generated_at": result.get("generated_at"),
+                "result": result,
+            })
+        return api_response({
+            "catalog": {"id": catalog.id, "title": catalog.title},
+            "course_id": course.id,
+            "total": len(items),
+            "summaries": items,
+        })
+
+
+class ClassAIReportHistoryView(APIView):
+    """班级 AI 学情分析报告历史列表（P3，按 AITask 查）。
+
+    旧同步接口无产物留存；异步化后每次分析落 AITask(class_analytics)，
+    教师可回看过往报告（完整 result 经 GET /api/ai-tasks/<id>/ 获取，
+    可见性规则：班级归属教师放行）。重新生成入口见 ClassAIReportView.post。
+    """
+
+    permission_classes = [IsTeacher]
+    serializer_class = AnalyticsResponseSerializer
+    HISTORY_LIMIT = 20
+
+    def get(self, request, class_id):
+        from apps.ai.models import AITask
+
+        classroom = ClassRoom.objects.filter(id=class_id, teacher=request.user).first()
+        if not classroom:
+            return api_response(message="班级不存在或无权查看", code=404, status=404)
+
+        tasks = (
+            AITask.objects.filter(
+                task_type=AITask.TaskType.CLASS_ANALYTICS,
+                classroom=classroom,
+            )
+            .order_by("-id")[: self.HISTORY_LIMIT]
+        )
+        reports = []
+        for t in tasks:
+            result = t.result or {}
+            snapshot = result.get("stats_snapshot") or {}
+            reports.append({
+                "task_id": t.id,
+                "status": t.status,
+                "degraded": bool(result.get("degraded")),
+                "generated_at": result.get("generated_at"),
+                "created_at": t.created_at,
+                "finished_at": t.finished_at,
+                "error": t.error,
+                "analyzed_count": snapshot.get("analyzed_count"),
+                "comment_count": len(result.get("comments") or {}),
+                "report_excerpt": (result.get("report") or "")[:120],
+            })
+        return api_response({"class_id": classroom.id, "total": len(reports), "reports": reports})
+
+
 class ClassStudentDetailView(APIView):
     """教师查看班级内单个学生的学习详情（练习/作业/考试/预警）。"""
 

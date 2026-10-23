@@ -393,3 +393,166 @@ class BuildChapterProfileTests(TestCase):
         profile = build_chapter_profile(self.student, self.catalog, for_student=True)
         self.assertEqual(profile["practice"]["total"], 2)
         self.assertEqual(profile["practice"]["wrong"][0]["stem"], "VLAN 隔离的是什么")
+
+
+class TeacherChapterSummaryApiTests(TestCase):
+    """教师端章节总结列表 / 班级报告历史（P3）测试。"""
+
+    def setUp(self):
+        from apps.ai.models import AITask
+
+        self.AITask = AITask
+        self.teacher = User.objects.create_user(
+            username="t_p3", password="pw123456!", role=User.Role.TEACHER
+        )
+        self.outsider = User.objects.create_user(
+            username="t_p3_out", password="pw123456!", role=User.Role.TEACHER
+        )
+        self.student = User.objects.create_user(
+            username="s_p3", password="pw123456!", role=User.Role.STUDENT
+        )
+        self.other_student = User.objects.create_user(
+            username="s_p3_other", password="pw123456!", role=User.Role.STUDENT
+        )
+        self.course = Course.objects.create(name="P3课程", teacher=self.teacher)
+        self.classroom = ClassRoom.objects.create(name="P3班级", teacher=self.teacher)
+        self.classroom.courses.add(self.course)
+        ClassStudent.objects.create(classroom=self.classroom, student=self.student)
+        self.catalog = Catalog.objects.create(
+            course=self.course, title="第五章", order=5, is_published=True
+        )
+        self.other_catalog = Catalog.objects.create(
+            course=self.course, title="第六章", order=6, is_published=True
+        )
+        self.client = APIClient()
+
+    def _summary_task(self, student, catalog, version, **kw):
+        defaults = dict(
+            task_type=self.AITask.TaskType.CHAPTER_SUMMARY,
+            student=student,
+            catalog=catalog,
+            course=catalog.course,
+            version=version,
+            status=self.AITask.Status.SUCCESS,
+            triggered_by=student,
+            result={
+                "overview": f"第{version}版总结",
+                "weak_points": ["递归"],
+                "generated_at": "2026-10-22 10:00:00",
+            },
+        )
+        defaults.update(kw)
+        return self.AITask.objects.create(**defaults)
+
+    def test_teacher_sees_class_students_latest_version(self):
+        """教师看本班学生本章总结：每生取最大版本，全量口径原样返回 result。"""
+        self._summary_task(self.student, self.catalog, version=1, result={"overview": "旧版"})
+        self._summary_task(
+            self.student,
+            self.catalog,
+            version=2,
+            result={"overview": "新版", "generated_at": "2026-10-22 10:00:00"},
+        )
+        # 非本班学生 / 别章总结不应出现
+        self._summary_task(self.other_student, self.catalog, version=1)
+        self._summary_task(self.student, self.other_catalog, version=1)
+
+        self.client.force_authenticate(user=self.teacher)
+        resp = self.client.get(
+            f"/api/analytics/class/{self.classroom.id}/chapter-summaries/",
+            {"catalog_id": self.catalog.id},
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        data = resp.data["data"]
+        self.assertEqual(data["total"], 1)
+        item = data["summaries"][0]
+        self.assertEqual(item["student_id"], self.student.id)
+        self.assertEqual(item["student_name"], "s_p3")
+        self.assertEqual(item["version"], 2)
+        self.assertEqual(item["result"]["overview"], "新版")
+        self.assertEqual(item["generated_at"], "2026-10-22 10:00:00")
+
+    def test_teacher_sees_unreleased_scores_full_caliber(self):
+        """for_student=False 全量口径：未发布成绩的总结内容也返回（无门控）。"""
+        self._summary_task(
+            self.student,
+            self.catalog,
+            version=1,
+            result={"overview": "含未发布作业分", "homework": [{"title": "作业1", "score": 18}]},
+        )
+        self.client.force_authenticate(user=self.teacher)
+        resp = self.client.get(
+            f"/api/analytics/class/{self.classroom.id}/chapter-summaries/",
+            {"catalog_id": self.catalog.id},
+        )
+        item = resp.data["data"]["summaries"][0]
+        self.assertEqual(item["result"]["homework"][0]["score"], 18)
+
+    def test_non_class_teacher_forbidden(self):
+        """非本班教师 404（不暴露存在性）。"""
+        self._summary_task(self.student, self.catalog, version=1)
+        self.client.force_authenticate(user=self.outsider)
+        resp = self.client.get(
+            f"/api/analytics/class/{self.classroom.id}/chapter-summaries/",
+            {"catalog_id": self.catalog.id},
+        )
+        self.assertEqual(resp.status_code, 404, resp.data)
+
+    def test_catalog_not_in_course_404(self):
+        """章节不属于该班级课程时 404。"""
+        other_course = Course.objects.create(name="别校课程", teacher=self.teacher)
+        foreign_catalog = Catalog.objects.create(course=other_course, title="外章", order=1)
+        self.client.force_authenticate(user=self.teacher)
+        resp = self.client.get(
+            f"/api/analytics/class/{self.classroom.id}/chapter-summaries/",
+            {"catalog_id": foreign_catalog.id},
+        )
+        self.assertEqual(resp.status_code, 404, resp.data)
+
+    def test_missing_catalog_id_400(self):
+        self.client.force_authenticate(user=self.teacher)
+        resp = self.client.get(
+            f"/api/analytics/class/{self.classroom.id}/chapter-summaries/"
+        )
+        self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_report_history_lists_recent_first(self):
+        """班级报告历史：按 id 倒序，含状态/摘要/简评数。"""
+        self.AITask.objects.create(
+            task_type=self.AITask.TaskType.CLASS_ANALYTICS,
+            classroom=self.classroom,
+            course=self.course,
+            triggered_by=self.teacher,
+            status=self.AITask.Status.SUCCESS,
+            result={
+                "report": "## 整体学情\n报告正文……",
+                "comments": {"1": "简评甲", "2": "简评乙"},
+                "stats_snapshot": {"analyzed_count": 2},
+                "generated_at": "2026-10-22 09:00:00",
+            },
+        )
+        self.AITask.objects.create(
+            task_type=self.AITask.TaskType.CLASS_ANALYTICS,
+            classroom=self.classroom,
+            course=self.course,
+            triggered_by=self.teacher,
+            status=self.AITask.Status.FAILED,
+            error="provider timeout",
+        )
+        self.client.force_authenticate(user=self.teacher)
+        resp = self.client.get(f"/api/analytics/class/{self.classroom.id}/ai-reports/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        reports = resp.data["data"]["reports"]
+        self.assertEqual(len(reports), 2)
+        self.assertEqual(reports[0]["status"], "failed")
+        self.assertEqual(reports[0]["error"], "provider timeout")
+        self.assertEqual(reports[1]["status"], "success")
+        self.assertEqual(reports[1]["analyzed_count"], 2)
+        self.assertEqual(reports[1]["comment_count"], 2)
+        self.assertIn("整体学情", reports[1]["report_excerpt"])
+        self.assertEqual(reports[1]["generated_at"], "2026-10-22 09:00:00")
+
+    def test_report_history_outsider_404(self):
+        self.client.force_authenticate(user=self.outsider)
+        resp = self.client.get(f"/api/analytics/class/{self.classroom.id}/ai-reports/")
+        self.assertEqual(resp.status_code, 404, resp.data)

@@ -8,6 +8,9 @@
         </el-select>
       </div>
       <div class="an-toolbar-actions">
+        <el-button class="an-history-btn" :icon="Clock" :disabled="!classId" @click="openHistory">
+          历史报告
+        </el-button>
         <el-button class="an-primary-btn" type="primary" :icon="MagicStick" :loading="aiBusy" :disabled="!classId" @click="generateReport">
           {{ aiReport ? '重新生成报告' : '生成分析报告' }}
         </el-button>
@@ -17,9 +20,9 @@
     <el-empty v-if="!classId" description="请先选择班级" />
 
     <template v-else>
-      <!-- AI 学情分析报告（异步任务：生成中渐进展示，失败可重试） -->
+      <!-- AI 学情分析报告（异步任务：生成中渐进展示，失败可重试；可回看历史报告） -->
       <div v-if="aiBusy || aiReport || aiFailed" class="ai-card" :class="{ 'is-loading': aiBusy }">
-        <div v-if="aiBusy" class="ai-body">
+        <div v-if="aiBusy && !historyTask" class="ai-body">
           <div class="ai-loading-tip">
             <el-icon class="is-loading" :size="15"><Loading /></el-icon>
             {{ aiProgressMsg }}
@@ -34,7 +37,7 @@
           <el-skeleton v-if="!aiReport" :rows="4" animated />
           <div v-else class="ai-md" v-html="renderMd(aiReport)"></div>
         </div>
-        <div v-else-if="aiFailed" class="ai-body">
+        <div v-else-if="aiFailed && !historyTask" class="ai-body">
           <div class="ai-failed-tip">
             <el-icon :size="15"><WarningFilled /></el-icon>
             分析失败：{{ aiError || '未知错误' }}
@@ -49,6 +52,13 @@
             <span class="ai-head-title">AI 学情分析</span>
             <el-tag v-if="aiDegraded" type="warning" size="small" effect="light" round>部分内容降级</el-tag>
             <span class="ai-head-time">生成于 {{ fmtDateTime(aiGeneratedAt) }}</span>
+            <el-button v-if="historyTask" size="small" text class="ai-back-btn" @click="exitHistory">
+              返回当前报告
+            </el-button>
+          </div>
+          <div v-if="historyTask" class="ai-history-banner">
+            <el-icon :size="13"><Clock /></el-icon>
+            正在查看历史报告 · 生成于 {{ fmtDateTime(aiGeneratedAt) }}
           </div>
           <div class="ai-body ai-md" v-html="renderMd(aiReport)"></div>
         </template>
@@ -137,18 +147,46 @@
         </div>
       </div>
     </template>
+
+    <!-- 历史报告列表（按 AITask 查，点击回看完整报告） -->
+    <el-dialog v-model="historyVisible" title="历史报告" width="640px" class="an-history-dialog">
+      <div v-loading="historyLoading" class="history-list">
+        <el-empty v-if="!historyLoading && !historyList.length" description="暂无历史报告" :image-size="60" />
+        <div
+          v-for="r in historyList"
+          :key="r.task_id"
+          class="history-item"
+          :class="{ 'is-failed': r.status !== 'success' }"
+          @click="viewHistory(r)"
+        >
+          <div class="history-item-head">
+            <el-tag :type="statusType(r.status)" size="small" effect="light" round>{{ statusText(r.status) }}</el-tag>
+            <el-tag v-if="r.degraded" type="warning" size="small" effect="light" round>部分降级</el-tag>
+            <span class="history-time">{{ fmtDateTime(r.generated_at || r.created_at) }}</span>
+          </div>
+          <div class="history-item-meta">
+            <span v-if="r.analyzed_count != null">分析 {{ r.analyzed_count }} 人</span>
+            <span v-if="r.comment_count">简评 {{ r.comment_count }} 条</span>
+          </div>
+          <div v-if="r.report_excerpt" class="history-excerpt">{{ r.report_excerpt }}…</div>
+          <div v-else-if="r.error" class="history-error">{{ r.error }}</div>
+          <div v-else class="history-excerpt muted">暂无报告内容</div>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { MagicStick, Loading, Notebook, Files, Medal, Cpu, WarningFilled } from '@element-plus/icons-vue'
+import { MagicStick, Loading, Notebook, Files, Medal, Cpu, WarningFilled, Clock } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { renderAiMarkdown } from '@/utils/markdown'
 import { sortedCourseNames } from '@/utils/course-sort'
 import { listClasses } from '@/api/classroom'
-import { getClassStats, generateClassAiReport } from '@/api/analytics'
+import { getClassStats, generateClassAiReport, getClassAiReportHistory } from '@/api/analytics'
+import { getAiTask } from '@/api/ai-task'
 import { useAiTaskPolling } from '@/composables/useAiTaskPolling'
 
 const renderMd = renderAiMarkdown
@@ -160,7 +198,13 @@ const students = ref([])
 // AI 学情分析：异步任务（submit → 轮询 /ai-tasks/<id>/ → 终态渲染）
 const { task: aiTask, start: startPolling, stop: stopPolling } = useAiTaskPolling()
 const aiSubmitting = ref(false)
-const aiResult = computed(() => aiTask.value?.result || null)
+// 历史报告（P3）：查看历史时以历史任务为展示口径，否则用当前任务
+const historyVisible = ref(false)
+const historyLoading = ref(false)
+const historyList = ref([])
+const historyTask = ref(null)
+const displayTask = computed(() => historyTask.value || aiTask.value)
+const aiResult = computed(() => displayTask.value?.result || null)
 const aiReport = computed(() => aiResult.value?.report || '')
 const aiComments = computed(() => aiResult.value?.comments || {})
 const aiGeneratedAt = computed(() => aiResult.value?.generated_at || null)
@@ -249,6 +293,57 @@ function fmtDateTime(t) {
 function resetAi() {
   stopPolling()
   aiTask.value = null
+  historyTask.value = null
+}
+
+// ---- 历史报告（P3）----
+const REPORT_STATUS = {
+  success: { text: '已完成', type: 'success' },
+  failed: { text: '失败', type: 'danger' },
+  running: { text: '进行中', type: 'warning' },
+  pending: { text: '排队中', type: 'info' },
+}
+function statusText(s) {
+  return REPORT_STATUS[s]?.text || s
+}
+function statusType(s) {
+  return REPORT_STATUS[s]?.type || 'info'
+}
+
+async function openHistory() {
+  if (!classId.value) return
+  historyVisible.value = true
+  historyLoading.value = true
+  try {
+    const data = await getClassAiReportHistory(classId.value)
+    historyList.value = data.reports ?? []
+  } catch {
+    historyList.value = []
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+async function viewHistory(item) {
+  if (item.status !== 'success') {
+    ElMessage.warning('该报告未生成成功，无法查看')
+    return
+  }
+  try {
+    const task = await getAiTask(item.task_id)
+    if (!task?.result?.report) {
+      ElMessage.warning('该报告暂无内容')
+      return
+    }
+    historyTask.value = task
+    historyVisible.value = false
+  } catch {
+    // 拉取失败已由响应拦截器统一提示
+  }
+}
+
+function exitHistory() {
+  historyTask.value = null
 }
 
 async function loadClasses() {
@@ -284,6 +379,7 @@ function onClassChange() {
 
 async function generateReport() {
   if (!classId.value || aiBusy.value) return
+  historyTask.value = null // 生成新报告即退出历史查看，回到当前任务口径
   aiSubmitting.value = true
   try {
     // D5 异步化：提交即返回 task_id，轮询任务终态（S1 报告 / S2 简评增量落库，渐进渲染）
@@ -333,6 +429,94 @@ onMounted(loadClasses)
 .an-primary-btn:hover {
   transform: translateY(-1px);
   box-shadow: 0 6px 14px rgba(37, 99, 235, 0.2);
+}
+.an-history-btn {
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 12px;
+  font-weight: 600;
+  color: var(--primary-600);
+  border-color: rgba(37, 99, 235, 0.25);
+  background: #fff;
+}
+.an-history-btn:hover {
+  color: var(--primary-500);
+  border-color: var(--primary-500);
+  background: var(--primary-50);
+}
+
+/* ===== 历史报告 ===== */
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 480px;
+  overflow-y: auto;
+}
+.history-item {
+  padding: 12px 14px;
+  border: 1px solid var(--gray-200);
+  border-radius: 12px;
+  background: #fff;
+  cursor: pointer;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.history-item:hover {
+  border-color: rgba(96, 165, 250, 0.5);
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.08);
+}
+.history-item.is-failed {
+  opacity: 0.75;
+}
+.history-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.history-time {
+  margin-left: auto;
+  color: var(--gray-400);
+  font-size: 12px;
+}
+.history-item-meta {
+  display: flex;
+  gap: 14px;
+  margin-top: 6px;
+  color: var(--gray-500);
+  font-size: 12.5px;
+}
+.history-excerpt {
+  margin-top: 6px;
+  color: var(--gray-600);
+  font-size: 13px;
+  line-height: 1.6;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.history-excerpt.muted {
+  color: var(--gray-300);
+}
+.history-error {
+  margin-top: 6px;
+  color: var(--danger);
+  font-size: 12.5px;
+}
+.ai-history-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 20px 8px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  color: var(--primary-600);
+  font-size: 12.5px;
+  background: var(--primary-50);
+}
+.ai-back-btn {
+  margin-left: 8px;
+  color: var(--primary-600);
 }
 
 /* ===== AI 学情分析报告 ===== */

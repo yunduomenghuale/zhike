@@ -156,7 +156,11 @@ async function flushProgress(completed = false) {
   if (Object.keys(pageDurations.value).length) payload.page_durations = pageDurations.value
   if (Object.keys(pageWatched.value).length) payload.page_watched = pageWatched.value
   try {
-    await reportVideoProgress(videoId.value, payload)
+    const res = await reportVideoProgress(videoId.value, payload)
+    // F13：后端自动提交章节总结任务时带回 summary_task_id（旧版无此字段，undefined 即忽略）
+    if (res?.summary_task_id) {
+      uni.showToast({ title: '本章学习完成！AI 总结生成中', icon: 'none' })
+    }
   } catch {
     // 进度上报失败不打断学习
   }

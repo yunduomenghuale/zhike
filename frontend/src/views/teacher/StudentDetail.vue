@@ -92,6 +92,64 @@
           <div v-else class="section-empty">暂无章节练习数据</div>
         </div>
 
+        <!-- AI 章节总结（P3：教师查看学生的章节学习总结，for_student=False 全量口径） -->
+        <div class="data-card section-card">
+          <div class="section-title">
+            AI 章节总结
+            <span class="section-sub">学生完成章节学习后自动生成，教师可查看全文</span>
+          </div>
+          <div class="sum-toolbar">
+            <el-select
+              v-model="summaryCatalogId"
+              class="sum-chapter-select"
+              placeholder="选择章节"
+              :disabled="!chapters.length"
+              @change="loadChapterSummary"
+            >
+              <el-option v-for="ch in chapters" :key="ch.catalog_id" :label="ch.title" :value="ch.catalog_id" />
+            </el-select>
+            <el-tag v-if="summaryMeta?.degraded" type="warning" size="small" effect="light" round>部分内容降级</el-tag>
+            <span v-if="summaryMeta" class="sum-time">生成于 {{ fmtDateTime(summaryMeta.generated_at) }}</span>
+          </div>
+          <div v-loading="summaryLoading" class="sum-wrap">
+            <el-empty v-if="!chapters.length" description="该课程暂无章节" :image-size="60" />
+            <el-empty v-else-if="!summaryLoading && !summaryData" description="该生尚未生成本章 AI 总结" :image-size="60" />
+            <div v-else-if="summaryData" class="sum-body">
+              <div class="sum-overview" v-html="renderMd(summaryData.overview)"></div>
+              <template v-if="summaryData.knowledge_points?.length">
+                <div class="sum-subtitle">知识点掌握</div>
+                <div class="kp-list">
+                  <span v-for="(kp, i) in summaryData.knowledge_points" :key="i" class="kp-item" :class="kp.status">
+                    <span class="kp-name">{{ kp.name }}</span>
+                    <el-tag :type="kp.status === 'weak' ? 'danger' : 'success'" size="small" effect="plain" round>
+                      {{ kp.status === 'weak' ? '薄弱' : '扎实' }}
+                    </el-tag>
+                    <span v-if="kp.evidence" class="kp-evidence" :title="kp.evidence">{{ kp.evidence }}</span>
+                  </span>
+                </div>
+              </template>
+              <template v-if="summaryData.weak_points?.length">
+                <div class="sum-subtitle">薄弱点</div>
+                <div class="weak-tags">
+                  <span v-for="(w, i) in summaryData.weak_points" :key="i" class="weak-tag">{{ w }}</span>
+                </div>
+              </template>
+              <template v-if="summaryData.highlights?.length">
+                <div class="sum-subtitle">学习亮点</div>
+                <ul class="sum-list"><li v-for="(h, i) in summaryData.highlights" :key="i">{{ h }}</li></ul>
+              </template>
+              <template v-if="summaryData.suggestions?.length">
+                <div class="sum-subtitle">提升建议</div>
+                <ol class="sum-list"><li v-for="(s, i) in summaryData.suggestions" :key="i">{{ s }}</li></ol>
+              </template>
+              <div v-if="summaryData.next_step" class="sum-next">
+                <el-icon :size="14"><Aim /></el-icon>
+                <span><strong>下一步：</strong>{{ summaryData.next_step }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- 作业 / 考试 -->
         <el-row :gutter="16">
           <el-col :md="12" :xs="24">
@@ -184,10 +242,13 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowLeft, TrendCharts, Notebook, Files, Medal, Trophy, Flag, Cpu,
-  CircleCheckFilled, CircleCloseFilled,
+  CircleCheckFilled, CircleCloseFilled, Aim,
 } from '@element-plus/icons-vue'
 import { listClasses } from '@/api/classroom'
-import { getClassStudentDetail } from '@/api/analytics'
+import { getClassStudentDetail, getClassChapterSummaries } from '@/api/analytics'
+import { renderAiMarkdown } from '@/utils/markdown'
+
+const renderMd = renderAiMarkdown
 
 const route = useRoute()
 const router = useRouter()
@@ -200,6 +261,12 @@ const loading = ref(false)
 const detail = ref(null)
 const courseId = ref(Number(route.query.course) || null)
 const courseOptions = ref([])
+// AI 章节总结（P3）：按章节拉取该生的最新成功总结（教师全量口径）
+const chapters = computed(() => detail.value?.progress?.chapters || [])
+const summaryCatalogId = ref(null)
+const summaryLoading = ref(false)
+const summaryData = ref(null)
+const summaryMeta = ref(null)
 
 const cards = computed(() => {
   const s = detail.value?.summary || {}
@@ -308,8 +375,41 @@ async function load() {
     nextTick(() => {
       barsReady.value = true
     })
+    // 默认选中第一章并加载该生的章节总结
+    if (chapters.value.length) {
+      summaryCatalogId.value = chapters.value[0].catalog_id
+      loadChapterSummary()
+    } else {
+      summaryCatalogId.value = null
+      summaryData.value = null
+      summaryMeta.value = null
+    }
   } finally {
     loading.value = false
+  }
+}
+
+async function loadChapterSummary() {
+  if (!summaryCatalogId.value) {
+    summaryData.value = null
+    summaryMeta.value = null
+    return
+  }
+  summaryLoading.value = true
+  try {
+    const data = await getClassChapterSummaries(classId, {
+      catalog_id: summaryCatalogId.value,
+    })
+    const mine = (data.summaries || []).find((s) => Number(s.student_id) === studentId)
+    summaryData.value = mine?.result || null
+    summaryMeta.value = mine
+      ? { degraded: mine.degraded, generated_at: mine.generated_at }
+      : null
+  } catch {
+    summaryData.value = null
+    summaryMeta.value = null
+  } finally {
+    summaryLoading.value = false
   }
 }
 
@@ -587,6 +687,108 @@ onMounted(async () => {
   text-align: right;
   font-size: 13px;
   font-weight: 700;
+}
+
+/* ===== AI 章节总结（P3） ===== */
+.sum-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.sum-chapter-select {
+  width: 220px;
+}
+.sum-time {
+  margin-left: auto;
+  color: var(--gray-400);
+  font-size: 12px;
+}
+.sum-wrap {
+  min-height: 120px;
+}
+.sum-body {
+  font-size: 13.5px;
+  line-height: 1.75;
+  color: var(--gray-700);
+}
+.sum-overview :deep(p) {
+  margin: 0 0 8px;
+}
+.sum-overview :deep(strong) {
+  color: var(--gray-900);
+}
+.sum-subtitle {
+  margin: 14px 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--gray-900);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sum-subtitle::before {
+  content: '';
+  width: 4px;
+  height: 13px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #3b82f6, #8b5cf6);
+}
+.kp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.kp-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--gray-50, #f8fafc);
+}
+.kp-name {
+  font-weight: 650;
+  color: var(--gray-800);
+}
+.kp-evidence {
+  color: var(--gray-500);
+  font-size: 12.5px;
+}
+.weak-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.weak-tag {
+  padding: 3px 12px;
+  border-radius: 999px;
+  color: #b91c1c;
+  font-size: 12.5px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+}
+.sum-list {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--gray-700);
+}
+.sum-list li {
+  margin-bottom: 4px;
+}
+.sum-next {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  color: var(--primary-700, #1d4ed8);
+  background: var(--primary-50);
+}
+.sum-next strong {
+  color: var(--gray-900);
 }
 
 @media (max-width: 768px) {
