@@ -65,6 +65,8 @@ export function useAiTaskPolling() {
 
   /**
    * 开始轮询一个任务。重复调用会取消上一轮的轮询。
+   * 会立即把 task 置为 { id, status: 'pending' } 占位（非 null），
+   * 保证调用方提交态复位后加载 UI 不出现空窗；首个 tick 在 POLL_INTERVAL 后。
    * @param {number} taskId
    * @param {{ onSuccess?: Function, onFailed?: Function }} handlers
    * @param {{ staleAfterMs?: number, createdAt?: string }} [opts]
@@ -92,7 +94,13 @@ export function useAiTaskPolling() {
     }
     seq += 1
     const mySeq = seq
-    task.value = null
+    // 必须同步挂上 pending 占位而不是置 null：start() 返回后调用方的「提交中」
+    // 标志往往随即复位（如 Analytics generateReport 的 finally），Vue 批量渲染
+    // 会把这批同步修改合并为「task=null +  submitting=false」一帧——加载条件
+    // （aiBusy/aiLoading）假 false，过程卡片直接卸载，直到 1.5s 后首个 tick
+    // 回来才重现（用户可见：闪一下 → 消失约 1 秒 → 又显示）。占位任务让
+    // 「提交中 → 任务进度」状态连续、无空窗；progress 缺失时各调用方均有兜底文案。
+    task.value = { id: taskId, status: 'pending' }
     startedAt = Date.now()
     schedule(mySeq, taskId, handlers)
   }
