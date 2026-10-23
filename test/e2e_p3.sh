@@ -1,8 +1,9 @@
 #!/bin/bash
 # P3 E2E：教师端历史报告回看 + 学生详情页 AI 章节总结查看
-# 覆盖：学生卡片布局（指标 grid + 预警竖滚不重叠）→ 历史报告弹窗（excerpt markdown 渲染）
+# 覆盖：刷新恢复进行中分析任务（挂载即见进度 UI + reload 后仍在）→ 学生卡片布局
+#       （指标 grid + 预警竖滚不重叠）→ 历史报告弹窗（excerpt markdown 渲染）
 #       → 点击回看（banner+正文）→ 返回当前 → 学生卡片进详情 → 章节总结六区渲染 → 切换章节空态。
-# fixtures：backend/make_p3_fixtures.py（class 1 历史报告 + 每生 catalog 5 总结）
+# fixtures：backend/make_p3_fixtures.py（class 1 进行中任务 + 历史报告 + 每生 catalog 5 总结）
 set -u
 cd /d/Claude_Code/智课系统V2 || exit 1
 LOG=test/e2e_p3.log
@@ -33,6 +34,18 @@ $AB open http://127.0.0.1:5273/teacher/analytics >>"$LOG" 2>&1
 OUT=$(eval_retry "(async function(){for(var i=0;i<60;i++){if(document.querySelectorAll('.stu-card').length) return 'STU_OK count='+document.querySelectorAll('.stu-card').length; await new Promise(r=>setTimeout(r,300))} return 'STU_TIMEOUT'})()" 'STU_OK')
 echo "[students] $OUT"
 echo "$OUT" | grep -q 'STU_OK' || { echo "E2E_FAIL students"; exit 1; }
+
+# ---- 0.5 刷新恢复：挂载即恢复进行中任务（无需点生成即见进度 UI）----
+OUT=$(eval_retry "(async function(){for(var i=0;i<40;i++){var tip=document.querySelector('.ai-loading-tip'); if(tip && tip.getBoundingClientRect().height>0) return 'RESUME_OK tip='+tip.innerText.trim(); await new Promise(r=>setTimeout(r,300))} return 'RESUME_TIMEOUT'})()" 'RESUME_OK')
+echo "[resume-active] $OUT"
+echo "$OUT" | grep -q 'RESUME_OK' || { echo "E2E_FAIL resume-active"; exit 1; }
+echo "$OUT" | grep -q 'E2E-P3 恢复任务' || { echo "E2E_FAIL resume-tip-text"; exit 1; }
+
+# ---- 0.6 刷新页面后进度 UI 仍在（reload 后重新拉起轮询）----
+$AB eval "location.reload()" >>"$LOG" 2>&1
+OUT=$(eval_retry "(async function(){for(var i=0;i<40;i++){var tip=document.querySelector('.ai-loading-tip'); if(tip && tip.getBoundingClientRect().height>0 && tip.innerText.indexOf('E2E-P3 恢复任务')>=0) return 'AFTER_RELOAD_OK'; await new Promise(r=>setTimeout(r,300))} return 'RELOAD_TIMEOUT'})()" 'AFTER_RELOAD_OK')
+echo "[resume-after-reload] $OUT"
+echo "$OUT" | grep -q 'AFTER_RELOAD_OK' || { echo "E2E_FAIL resume-after-reload"; exit 1; }
 
 # ---- 0. 学生卡片布局：指标 grid + 预警竖排滚动 + 两区不重叠 ----
 OUT=$(eval_retry "(function(){var card=document.querySelector('.stu-card'); if(!card) return 'NO_CARD'; var m=card.querySelector('.stu-metrics'); var w=card.querySelector('.stu-warnings'); if(!m||!w) return 'NO_ZONE'; var cs=getComputedStyle(m), cw=getComputedStyle(w); var mr=m.getBoundingClientRect(), wr=w.getBoundingClientRect(); var overlap=mr.right>wr.left+0.5 && wr.right>mr.left+0.5 && mr.bottom>wr.top+0.5 && wr.bottom>mr.top+0.5; return 'LAYOUT_OK disp='+cs.display+' warnDir='+cw.flexDirection+' warnOverflow='+cw.overflowY+' metrics='+card.querySelectorAll('.stu-metrics .metric').length+' overlap='+overlap})()" 'LAYOUT_OK')

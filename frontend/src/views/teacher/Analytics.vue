@@ -405,7 +405,39 @@ async function generateReport() {
   }
 }
 
-onMounted(loadClasses)
+// 刷新页面后恢复进行中的分析任务（异步任务刷新续看）：
+// 任务行在服务端持久化，刷新丢失的只是前端的任务 ID——挂载时从历史报告
+// 接口找回本班、当前课程最新的 pending/running 任务，重新拉起轮询与进度 UI。
+// 陈旧保护：创建超过 12 分钟仍未终态，视为服务端已中断（后台线程已死、
+// 任务行停留在 running），直接展示失败+重试，避免对着死任务空轮 10 分钟。
+async function resumeActiveTask() {
+  if (!classId.value) return
+  try {
+    const data = await getClassAiReportHistory(classId.value)
+    const active = (data.reports || []).find(
+      (t) =>
+        ['pending', 'running'].includes(t.status) &&
+        (!t.course_id || t.course_id === activeCourseId())
+    )
+    if (!active) return
+    startPolling(
+      active.task_id,
+      {
+        onSuccess: () => {
+          if (!aiReport.value) ElMessage.warning('AI 暂未生成有效内容，请重试')
+        },
+      },
+      { staleAfterMs: 12 * 60 * 1000, createdAt: active.created_at }
+    )
+  } catch {
+    // 恢复失败不影响页面使用：教师可手动重新生成
+  }
+}
+
+onMounted(async () => {
+  await loadClasses()
+  resumeActiveTask()
+})
 </script>
 
 <style scoped>

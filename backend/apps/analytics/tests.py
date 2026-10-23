@@ -551,6 +551,8 @@ class TeacherChapterSummaryApiTests(TestCase):
         self.assertEqual(reports[1]["comment_count"], 2)
         self.assertIn("整体学情", reports[1]["report_excerpt"])
         self.assertEqual(reports[1]["generated_at"], "2026-10-22 09:00:00")
+        # course_id：前端刷新页面后按当前课程恢复进行中任务的轮询（多课程班级）
+        self.assertEqual(reports[1]["course_id"], self.course.id)
 
     def test_report_history_outsider_404(self):
         self.client.force_authenticate(user=self.outsider)

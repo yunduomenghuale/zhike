@@ -43,6 +43,23 @@ AITask.objects.filter(
     task_type="chapter_summary", student__in=[s.id for s in students], catalog=catalog
 ).delete()
 
+# 进行中的分析任务（刷新恢复轮询测试用；先建→id 小于下面的成功任务，
+# 保证历史列表 vis[0] 仍是成功任务）
+AITask.objects.create(
+    task_type="class_analytics",
+    classroom=cr,
+    course=course,
+    triggered_by=t,
+    status="running",
+    error="e2e-p3",
+    progress={
+        "stage": "analyzing",
+        "done": 1,
+        "total": 2,
+        "message": "E2E-P3 恢复任务：正在分析班级数据",
+    },
+)
+
 # 历史报告 fixture
 AITask.objects.create(
     task_type="class_analytics",

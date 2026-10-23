@@ -301,6 +301,8 @@ class ClassAIReportHistoryView(APIView):
                 "created_at": t.created_at,
                 "finished_at": t.finished_at,
                 "error": t.error,
+                # 课程归属：前端刷新页面后按当前课程恢复进行中任务的轮询（多课程班级）
+                "course_id": t.course_id,
                 "analyzed_count": snapshot.get("analyzed_count"),
                 "comment_count": len(result.get("comments") or {}),
                 # 保留 markdown 原文，前端 renderAiMarkdown 渲染（与报告正文同款样式）
