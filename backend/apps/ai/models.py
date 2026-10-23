@@ -278,6 +278,7 @@ class AITask(BaseModel):
     class TaskType(models.TextChoices):
         CLASS_ANALYTICS = "class_analytics", "班级学情分析"
         CHAPTER_SUMMARY = "chapter_summary", "章节学习总结"
+        QUESTION_GEN = "question_gen", "题目生成"
 
     class Status(models.TextChoices):
         PENDING = "pending", "排队中"
@@ -355,6 +356,13 @@ class AITask(BaseModel):
                 fields=["task_type", "student", "catalog"],
                 condition=Q(task_type="chapter_summary", status__in=["pending", "running"]),
                 name="uniqi_active_chapter_summary",
+            ),
+            # AI 生题防重复提交：同一教师同一课程只允许一条进行中/排队中任务
+            # （triggered_by/course 均为可空 SET_NULL，SQLite 下 NULL 互不冲突，语义可接受）
+            models.UniqueConstraint(
+                fields=["task_type", "triggered_by", "course"],
+                condition=Q(task_type="question_gen", status__in=["pending", "running"]),
+                name="uniq_active_question_gen",
             ),
         ]
 

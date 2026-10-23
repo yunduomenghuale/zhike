@@ -1,4 +1,6 @@
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
+from uuid import uuid4
 
 from django.conf import settings
 from django.db import models
@@ -44,6 +46,7 @@ class Question(BaseModel):
     class Source(models.TextChoices):
         AI = "ai", "AI 生成"
         MANUAL = "manual", "手动添加"
+        IMPORT = "import", "文档导入"
 
     course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="questions", verbose_name="课程")
     catalog = models.ForeignKey(
@@ -196,7 +199,6 @@ class WrongMastery(BaseModel):
     question 对应自动收录（答题记录派生）的错题，note 对应手动添加的错题，
     二者必居其一。
     """
-
     student = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="wrong_masteries", verbose_name="学生"
     )
@@ -215,3 +217,59 @@ class WrongMastery(BaseModel):
 
     def __str__(self):
         return f"{self.student} - Q{self.question_id or self.note_id}"
+
+
+def _import_file_path(instance, filename):
+    """导入文件 uuid 化：防枚举/猜测下载，原文件名仅存 file_name 字段展示。"""
+    return f"question_imports/{uuid4().hex}{Path(filename).suffix.lower()}"
+
+
+class QuestionDraftBatch(BaseModel):
+    """题目草稿批次：文档导入 / AI 生成共用的待入库题目池。
+
+    解析/生成结果先落批次（drafts JSON），教师预览编辑确认后批量入库。
+    批次是「离开页面不丢失」的持久化载体：预览编辑防抖回传 drafts，
+    刷新/重登/离开页面后均可经批次列表恢复继续处理。
+
+    drafts 元素结构（与 import_parser 输出、question_gen_ai 输出同构）：
+        {qtype, stem, options, answer, analysis, score, difficulty, _warnings:[...]}
+    save 成功的条目即时从 drafts 移除，批次始终等于「剩余待入库」。
+    """
+
+    class Origin(models.TextChoices):
+        IMPORT = "import", "文档导入"
+        AI_GEN = "ai_gen", "AI 生成"
+
+    class Status(models.TextChoices):
+        PARSED = "parsed", "待入库"
+        SAVED = "saved", "已入库"
+
+    origin = models.CharField("来源", max_length=16, choices=Origin.choices, default=Origin.IMPORT)
+    course = models.ForeignKey(
+        Course, on_delete=models.CASCADE, related_name="question_draft_batches", verbose_name="课程"
+    )
+    catalog = models.ForeignKey(
+        Catalog, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="question_draft_batches", verbose_name="目标章节",
+    )
+    creator = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True,
+        related_name="question_draft_batches", verbose_name="创建人",
+    )
+    file = models.FileField("文件", upload_to=_import_file_path, null=True, blank=True)  # 仅 import；入库即删
+    file_name = models.CharField("文件名称", max_length=255, blank=True)
+    raw_text = models.TextField("抽取原文", blank=True)  # 截断存储（见 views 常量），供排查
+    drafts = models.JSONField("题目草稿", default=list, blank=True)
+    stats = models.JSONField("统计", default=dict, blank=True)  # {"total":n,"warned":n,"truncated":bool}
+    task = models.ForeignKey(
+        "ai.AITask", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="draft_batches", verbose_name="关联任务",
+    )
+    status = models.CharField("状态", max_length=16, choices=Status.choices, default=Status.PARSED)
+
+    class Meta:
+        verbose_name = "题目草稿批次"
+        verbose_name_plural = verbose_name
+
+    def __str__(self):
+        return f"{self.get_origin_display()}批次 #{self.id}（{len(self.drafts or [])} 题待入库）"
