@@ -399,6 +399,9 @@ async function loadChapterSummary() {
   try {
     const data = await getClassChapterSummaries(classId, {
       catalog_id: summaryCatalogId.value,
+      // 班级可能关联多门课程：必须透传当前课程，否则后端回退解析为
+      // 班级下 id 最小的课程，章节校验会 404「章节不存在或不属于该课程」
+      course: courseId.value ?? undefined,
     })
     const mine = (data.summaries || []).find((s) => Number(s.student_id) === studentId)
     summaryData.value = mine?.result || null

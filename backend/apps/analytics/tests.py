@@ -556,3 +556,34 @@ class TeacherChapterSummaryApiTests(TestCase):
         self.client.force_authenticate(user=self.outsider)
         resp = self.client.get(f"/api/analytics/class/{self.classroom.id}/ai-reports/")
         self.assertEqual(resp.status_code, 404, resp.data)
+
+    def test_multi_course_class_needs_course_param(self):
+        """多课程班级：章节属于课程 B 时必须显式传 course=B。
+
+        回归：教师端学生详情页曾漏传 course，后端回退解析为班级下 id 最小的
+        课程 A，导致 B 课章节 404「章节不存在或不属于该课程」。
+        """
+        course_b = Course.objects.create(name="P3课程B", teacher=self.teacher)
+        self.classroom.courses.add(course_b)
+        catalog_b = Catalog.objects.create(
+            course=course_b, title="B课第一章", order=1, is_published=True
+        )
+        self._summary_task(self.student, catalog_b, version=1)
+
+        self.client.force_authenticate(user=self.teacher)
+        # 不传 course：回退到 id 较小的课程 A（setUp 创建），B 课章节 → 404
+        resp = self.client.get(
+            f"/api/analytics/class/{self.classroom.id}/chapter-summaries/",
+            {"catalog_id": catalog_b.id},
+        )
+        self.assertEqual(resp.status_code, 404, resp.data)
+
+        # 传 course=B：正常返回该生总结
+        resp = self.client.get(
+            f"/api/analytics/class/{self.classroom.id}/chapter-summaries/",
+            {"catalog_id": catalog_b.id, "course": course_b.id},
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        data = resp.data["data"]
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(data["summaries"][0]["result"]["overview"], "第1版总结")
