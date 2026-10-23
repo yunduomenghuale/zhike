@@ -3,6 +3,8 @@
 本模块无自有模型，纯聚合其它模块数据。
 班级统计逻辑收敛在 services.build_class_stats（教师端督管与平台端督管共用）。
 """
+import re
+
 from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework import serializers
@@ -263,6 +265,18 @@ class ClassChapterSummariesView(APIView):
         })
 
 
+def _report_excerpt(report, limit: int = 120) -> str:
+    """报告摘要（去 markdown 标记、压单行），供历史列表纯文本展示。
+
+    报告正文是 markdown（## 标题/**加粗**/- 列表），弹窗里直接切片会把
+    「##」等符号原样露出；先去标记再截断，保证列表可读。
+    """
+    text = re.sub(r"^\s*(#{1,6}\s*|[-*+]\s*|>\s*)", "", report or "", flags=re.M)
+    text = text.replace("**", "").replace("`", "")
+    text = re.sub(r"\s*\n+\s*", " ", text).strip()
+    return text[:limit]
+
+
 class ClassAIReportHistoryView(APIView):
     """班级 AI 学情分析报告历史列表（P3，按 AITask 查）。
 
@@ -303,7 +317,7 @@ class ClassAIReportHistoryView(APIView):
                 "error": t.error,
                 "analyzed_count": snapshot.get("analyzed_count"),
                 "comment_count": len(result.get("comments") or {}),
-                "report_excerpt": (result.get("report") or "")[:120],
+                "report_excerpt": _report_excerpt(result.get("report")),
             })
         return api_response({"class_id": classroom.id, "total": len(reports), "reports": reports})
 

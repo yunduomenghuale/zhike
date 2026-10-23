@@ -39,11 +39,13 @@ OUT=$(eval_retry "(function(){var b=document.querySelector('.an-history-btn'); i
 echo "[history-open] $OUT"
 echo "$OUT" | grep -q 'CLICKED' || { echo "E2E_FAIL history-open"; exit 1; }
 
-OUT=$(eval_retry "(async function(){for(var i=0;i<40;i++){var items=document.querySelectorAll('.history-item'); var vis=[]; items.forEach(function(it){if(it.getBoundingClientRect().height>0) vis.push(it)}); if(vis.length) return 'HIST_OK n='+vis.length+' head='+vis[0].querySelector('.history-item-head').innerText.replace(/\\n/g,'|')+' meta='+vis[0].querySelector('.history-item-meta').innerText.replace(/\\n/g,'|'); await new Promise(r=>setTimeout(r,300))} return 'HIST_TIMEOUT'})()" 'HIST_OK')
+OUT=$(eval_retry "(async function(){for(var i=0;i<40;i++){var items=document.querySelectorAll('.history-item'); var vis=[]; items.forEach(function(it){if(it.getBoundingClientRect().height>0) vis.push(it)}); if(vis.length){var ex=vis[0].querySelector('.history-excerpt'); return 'HIST_OK n='+vis.length+' head='+vis[0].querySelector('.history-item-head').innerText.replace(/\\n/g,'|')+' meta='+vis[0].querySelector('.history-item-meta').innerText.replace(/\\n/g,'|')+' excerptHasHash='+(ex?ex.innerText.indexOf('#')>=0:'NA')} await new Promise(r=>setTimeout(r,300))} return 'HIST_TIMEOUT'})()" 'HIST_OK')
 echo "[history-list] $OUT"
 echo "$OUT" | grep -q 'HIST_OK' || { echo "E2E_FAIL history-list"; exit 1; }
 echo "$OUT" | grep -q '已完成' || { echo "E2E_FAIL history-status-tag"; exit 1; }
 echo "$OUT" | grep -q '分析 2 人' || { echo "E2E_FAIL history-meta"; exit 1; }
+# excerpt 为去 markdown 标记的纯文本（防止 ## 符号直接露出）
+echo "$OUT" | grep -q 'excerptHasHash=false' || { echo "E2E_FAIL history-excerpt-markdown"; exit 1; }
 $AB screenshot test/screenshots/ai-p3-history-dialog.png >>"$LOG" 2>&1
 echo "[shot] ai-p3-history-dialog.png"
 

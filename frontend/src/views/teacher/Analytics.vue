@@ -133,8 +133,22 @@
             </div>
 
             <div class="stu-warnings">
-              <el-tag v-for="w in row.warnings" :key="w" type="danger" size="small" effect="light" round class="warn-pulse">{{ w }}</el-tag>
-              <el-tag v-if="!row.warnings.length" type="success" size="small" effect="light" round>正常</el-tag>
+              <template v-if="row.warnings.length">
+                <el-tag
+                  v-for="(w, i) in row.warnings.slice(0, 3)"
+                  :key="w"
+                  type="danger"
+                  size="small"
+                  effect="light"
+                  round
+                  class="warn-pulse"
+                  :title="row.warnings.length > 3 && i === 2 ? row.warnings.join('、') : undefined"
+                >{{ w }}</el-tag>
+                <span v-if="row.warnings.length > 3" class="warn-more" :title="row.warnings.join('、')">
+                  +{{ row.warnings.length - 3 }}
+                </span>
+              </template>
+              <el-tag v-else type="success" size="small" effect="light" round>正常</el-tag>
             </div>
           </div>
 
@@ -706,6 +720,7 @@ onMounted(loadClasses)
   gap: 26px;
   flex: 1;
   min-width: 0;
+  flex-wrap: wrap; /* 标签挤压时指标换行而非被 overflow:hidden 裁掉 */
 }
 .metric {
   display: grid;
@@ -793,6 +808,14 @@ onMounted(loadClasses)
   flex-wrap: wrap;
   justify-content: flex-end;
   max-width: 220px;
+}
+.warn-more {
+  padding: 0 8px;
+  border-radius: 999px;
+  color: var(--gray-500);
+  font-size: 12px;
+  background: var(--gray-100);
+  cursor: default;
 }
 
 /* AI 简评条 */
