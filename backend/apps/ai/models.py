@@ -262,17 +262,22 @@ class AICallLog(BaseModel):
 
 
 class AITask(BaseModel):
-    """AI 异步任务（班级学情分析 / 章节学习总结）。
+    """AI 异步任务（班级学情分析 / 章节学习总结 / AI 多类型生题）。
 
-    两个长时 AI 功能（教师端班级学情分析、学生端章节学习总结）共用：
-    提交即返回 task_id，后台 daemon 线程执行（执行器见 apps/ai/tasks.py，
-    业务流水见 apps/ai/analytics_ai.py），进度与结果持久化在本行，
-    前端轮询 GET /api/ai-tasks/<id>/ 展示，刷新/重登不丢。
+    三个长时 AI 功能共用：教师端班级学情分析、学生端章节学习总结、
+    教师端 AI 生题（question_gen_ai.run_question_gen）。提交即返回
+    task_id，后台 daemon 线程执行（执行器见 apps/ai/tasks.py，
+    业务流水见 apps/ai/analytics_ai.py 与 apps/questions/question_gen_ai.py），
+    进度与结果持久化在本行，前端轮询 GET /api/ai-tasks/<id>/ 展示，
+    刷新/重登不丢。
 
     幂等口径（无全局唯一约束，与「force 重新生成新建一版」兼容）：
     - 章节总结：同 (student, catalog) 递增 version，查询取最大版本；
       进行中/排队中的任务由部分唯一索引 uniqi_active_chapter_summary 防并发双跑；
-    - 班级分析：version 恒为 1，提交频率由业务层 DB 判定（同班级 10 分钟 1 次）。
+    - 班级分析：version 恒为 1，提交频率由业务层 DB 判定（同班级 10 分钟 1 次）；
+    - AI 生题：同 (triggered_by, course) 只允许一条 pending/running
+      （uniq_active_question_gen），生成配置（groups/objective）存 progress，
+      完成后 result.batch_id 指向 QuestionDraftBatch 待入库池。
     """
 
     class TaskType(models.TextChoices):

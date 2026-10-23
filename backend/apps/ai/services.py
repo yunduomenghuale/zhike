@@ -1842,62 +1842,9 @@ def knowledge_qa_stream(
 
 
 # ---------------------------------------------------------------------------
-# 章节题目生成（需求 T-Q-01）
+# 章节题目生成（需求 T-Q-01）—— 已迁移至 apps/questions/question_gen_ai.py
+# （多类型分组异步生成：generate 端点提交 AITask 后由后台线程逐组执行）
 # ---------------------------------------------------------------------------
-@scene_decorator(
-    AICallLog.Scene.QUESTION_GEN,
-    course_getter=lambda args, kwargs: args[0] if args else kwargs.get("course_id"),
-)
-def generate_questions(course_id: int, catalog_id, count: int, qtype: str, objective: str = "") -> list[dict]:
-    """基于章节 PPT + 知识库资料 + 教学目标生成题目（需求 T-Q-01 / 7.1）。"""
-    provider = get_provider("chat")
-    from apps.courses.models import Catalog, PPTResource
-    from apps.knowledge.models import KnowledgeChunk
-
-    parts: list[str] = []
-    catalog_title = ""
-    if catalog_id:
-        cat = Catalog.objects.filter(id=catalog_id).first()
-        catalog_title = cat.title if cat else ""
-        ppt = (
-            PPTResource.objects.filter(catalog_id=catalog_id, is_active=True)
-            .order_by("-version")
-            .first()
-        )
-        if ppt and ppt.parsed_pages:
-            for pg in ppt.parsed_pages[:25]:
-                seg = f"{pg.get('title', '')} {pg.get('body', '')}".strip()
-                if seg:
-                    parts.append(seg)
-
-    # 知识库资料补充
-    parts += [
-        c for c in KnowledgeChunk.objects.filter(course_id=course_id).values_list("content", flat=True)[:5]
-    ]
-    context = "\n".join(p for p in parts if p).strip()
-
-    qtype_hint = (
-        "判断题 options 固定为 [{\"key\":\"A\",\"text\":\"正确\"},{\"key\":\"B\",\"text\":\"错误\"}]，answer={\"key\":\"A\"或\"B\"}；"
-        "单选 answer={\"key\":\"X\"}；多选 answer={\"keys\":[...]}；"
-        "填空 options=[]，answer={\"blanks\":[{\"text\":\"答案\",\"score\":2},...]}（每个空单独赋分，score 为该空分值）；"
-        "简答 options=[]，answer={}。"
-    )
-    user_prompt = (
-        f"请依据下面的课程内容出题。\n"
-        f"章节：{catalog_title or '（未指定）'}\n"
-        f"教学目标/出题要求：{objective or '覆盖本章核心知识点，难度适中'}\n"
-        f"题型={qtype}，数量={count}。\n"
-        f"严格只输出 JSON 数组（不要任何解释文字），每个元素含字段："
-        f"qtype, stem, options([{{key,text}}]), answer, analysis, difficulty(easy/medium/hard), knowledge_tags(数组)。\n"
-        f"{qtype_hint}\n\n"
-        f"课程内容：\n{context[:3000] if context else '（暂无课件与资料，请基于该章节标题的常见知识点合理出题）'}"
-    )
-    messages = [
-        {"role": "system", "content": "你是严谨的高校命题老师，只输出规范的 JSON，不输出多余文字。"},
-        {"role": "user", "content": user_prompt},
-    ]
-    result = _safe_json(provider.chat(messages), default=[])
-    return result if isinstance(result, list) else []
 
 
 # ---------------------------------------------------------------------------

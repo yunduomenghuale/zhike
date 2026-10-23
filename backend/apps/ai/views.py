@@ -88,7 +88,7 @@ def _task_visible(task, user) -> bool:
 
 
 class AITaskDetailView(APIView):
-    """AI 异步任务轮询（班级学情分析 / 章节学习总结通用）。
+    """AI 异步任务轮询（班级学情分析 / 章节学习总结 / AI 生题通用）。
 
     前端 2.5s 轮询（与讲稿生成同款）：{status, progress, result, error}；
     进度与结果全程落 AITask 行，刷新/重登后轮询同一 task_id 继续。
@@ -114,3 +114,41 @@ class AITaskDetailView(APIView):
             "created_at": task.created_at,
             "finished_at": task.finished_at,
         })
+
+
+class AITaskActiveView(APIView):
+    """当前用户进行中的 AI 任务列表（「离开页面不丢失」的恢复入口）。
+
+    生题任务提交后前端开始轮询；离开页面/刷新/重登后凭本端点取回
+    pending/running 任务继续轮询（默认 question_gen 类型，
+    ?task_type=all 可查全部）。只返回本人发起的任务（triggered_by）。
+    """
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = AITaskSerializer
+
+    def get(self, request):
+        from .models import AITask
+
+        task_type = request.query_params.get("task_type", AITask.TaskType.QUESTION_GEN)
+        qs = AITask.objects.filter(
+            triggered_by=request.user,
+            status__in=[AITask.Status.PENDING, AITask.Status.RUNNING],
+        ).select_related("course", "catalog").order_by("-created_at")
+        if task_type and task_type != "all":
+            qs = qs.filter(task_type=task_type)
+        return api_response([
+            {
+                "id": t.id,
+                "task_type": t.task_type,
+                "status": t.status,
+                "version": t.version,
+                "progress": t.progress,
+                "course": t.course_id,
+                "course_name": t.course.name if t.course_id else "",
+                "catalog": t.catalog_id,
+                "catalog_title": t.catalog.title if t.catalog_id else "",
+                "created_at": t.created_at,
+            }
+            for t in qs[:10]
+        ])

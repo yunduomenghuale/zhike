@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""题库填空题按空赋分 + 文档导入规则解析测试（2026-10）。
+"""题库填空题按空赋分 + 文档导入规则解析 + AI 多类型生题测试（2026-10）。
 
 覆盖：
 - Question.save() 答案规范化：旧版纯字符串数组均分补分、score=Σ空分、非填空题不受影响
@@ -9,20 +9,32 @@
   仅 PATCH status 等字段时不触发答案校验（不破坏旧题操作）
 - import_parser.parse_questions 规则解析：五种题型各 ≥3 种格式变体、
   残缺输入告警、特殊格式（甲乙丙丁/圈号/括号选项归一、表格列兜底、
-  尾部分值、卷末速查行跳过、跨页续接、选项换行、无标题结构推断）
+  尾部分值、卷末速查行跳过、跨页续接、选项换行、无标题结构推断、表格题目行）
+- 导入 API / 草稿批次 API：安全校验、行级隔离、save 入库管道（查重/留批/入库即删）
+- AI 多类型生题（阶段 4）：generate 端点 groups 校验与防重复提交、
+  run_question_gen 流水线（mock 建批次 / 部分失败 degraded / 全失败）、
+  ai-tasks/active 恢复入口、教师端 AI 限流分档
 """
+import json
 from decimal import Decimal
 from types import SimpleNamespace
+from unittest.mock import patch
 
-from django.test import SimpleTestCase
+from django.core.cache import cache as django_cache
+from django.test import SimpleTestCase, override_settings
 
 from rest_framework.test import APIClient, APITestCase, APIRequestFactory
 from rest_framework.test import force_authenticate
 
+from apps.ai.models import AITask
+from apps.ai.providers.base import BaseAIProvider
+from apps.ai.providers.mock import MockProvider
+from apps.ai.tests_ai_task import _FakeThreading
 from apps.courses.models import Catalog, Course
 from apps.questions.grading import blank_items, grade_objective
 from apps.questions.import_parser import parse_questions
 from apps.questions.models import Question, QuestionDraftBatch
+from apps.questions.question_gen_ai import run_question_gen
 from apps.questions.serializers import QuestionSerializer
 from apps.users.models import User
 
@@ -1121,3 +1133,460 @@ class QuestionDraftBatchApiTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(QuestionDraftBatch.objects.filter(pk=batch.id).exists())
         self.assertFalse(batch.file.storage.exists(name))
+
+
+# ---------------------------------------------------------------------------
+# AI 多类型生题（阶段 4）
+# ---------------------------------------------------------------------------
+_QGEN_LABELS = (
+    ("single", "单选题"),
+    ("multi", "多选题"),
+    ("judge", "判断题"),
+    ("blank", "填空题"),
+    ("short", "简答题"),
+)
+
+
+def _qgen_items(qtype: str, n: int = 2) -> list[dict]:
+    """按题型契约生成确定性合规题（供 _QGenProvider 脚本化返回）。"""
+    items = []
+    for i in range(1, n + 1):
+        base = {
+            "qtype": qtype,
+            "stem": f"测试{qtype}第{i}题",
+            "analysis": "本题考查核心概念。",
+            "difficulty": "medium",
+            "knowledge_tags": ["标签甲"],
+        }
+        if qtype in ("single", "multi"):
+            base["options"] = [
+                {"key": "A", "text": "甲"}, {"key": "B", "text": "乙"},
+                {"key": "C", "text": "丙"}, {"key": "D", "text": "丁"},
+            ]
+            base["answer"] = {"key": "AB"[(i - 1) % 2]} if qtype == "single" else {"keys": ["A", "C"]}
+        elif qtype == "judge":
+            base["answer"] = {"key": "A" if i % 2 else "B"}
+        elif qtype == "blank":
+            base["options"] = []
+            base["answer"] = {"blanks": [{"text": f"答案{i}"}]}
+        else:  # short
+            base["options"] = []
+            base["answer"] = {"text": "参考答案"}
+        items.append(base)
+    return items
+
+
+class _QGenProvider(BaseAIProvider):
+    """生题测试替身：按 prompt 中的题型返回确定性 JSON；fail_qtypes 中的题型调用抛错。
+
+    dirty=True 时额外混入 2 条不合规题（缺选项 / 空题干），验证丢弃与告警。
+    """
+
+    name = "stub"
+
+    def __init__(self, fail_qtypes=(), dirty=False):
+        self.fail_qtypes = set(fail_qtypes)
+        self.dirty = dirty
+        self.calls: list[str] = []
+
+    def chat(self, messages, **kwargs):
+        content = messages[-1]["content"] if messages else ""
+        for qtype, label in _QGEN_LABELS:
+            if f"题型={label}" in content:
+                self.calls.append(qtype)
+                if qtype in self.fail_qtypes:
+                    raise RuntimeError(f"模拟{label}生成失败")
+                items = _qgen_items(qtype)
+                if self.dirty and qtype == "single":
+                    items = items + [
+                        {"qtype": "single", "stem": "缺选项",
+                         "options": [{"key": "A", "text": "甲"}], "answer": {"key": "A"}},
+                        {"qtype": "single", "stem": "",
+                         "options": [{"key": "A", "text": "甲"}, {"key": "B", "text": "乙"}],
+                         "answer": {"key": "A"}},
+                    ]
+                return json.dumps(items, ensure_ascii=False)
+        return "[]"
+
+    def embed(self, texts):
+        raise NotImplementedError
+
+
+def _patch_pipeline_provider(provider):
+    """patch 生题流水线的 Provider 并保活到测试结束（同步线程模式下随请求同步执行）。"""
+    patcher = patch("apps.questions.question_gen_ai.get_provider", return_value=provider)
+    patcher.start()
+    return patcher
+
+
+class QuestionAiGenApiTests(APITestCase):
+    """generate 端点：groups 校验 / 课程章节归属 / 防重复提交 / 学生禁入。"""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.teacher = User.objects.create_user(username="t_aigen", password="pw123456!", role=User.Role.TEACHER)
+        cls.outsider = User.objects.create_user(username="t_aigen2", password="pw123456!", role=User.Role.TEACHER)
+        cls.student = User.objects.create_user(username="s_aigen", password="pw123456!", role=User.Role.STUDENT)
+        cls.course = Course.objects.create(name="Java程序设计", teacher=cls.teacher)
+        cls.catalog = Catalog.objects.create(course=cls.course, title="第一章")
+        cls.outsider_course = Course.objects.create(name="他人课程", teacher=cls.outsider)
+        cls.outsider_catalog = Catalog.objects.create(course=cls.outsider_course, title="第一章")
+
+    def setUp(self):
+        # daemon 线程改同步执行 + mock provider：提交即完整跑完，断言确定性
+        thread_patcher = patch("apps.ai.tasks.threading", _FakeThreading)
+        thread_patcher.start()
+        self.addCleanup(thread_patcher.stop)
+        provider_patcher = _patch_pipeline_provider(MockProvider())
+        self.addCleanup(provider_patcher.stop)
+
+    def _post(self, payload, user=None):
+        self.client.force_authenticate(user=user or self.teacher)
+        return self.client.post("/api/questions/generate/", payload, format="json")
+
+    def _groups(self):
+        return [
+            {"qtype": "single", "count": 2, "score": 2},
+            {"qtype": "judge", "count": 1, "score": 2},
+        ]
+
+    def test_generate_requires_catalog(self):
+        response = self._post({"course": self.course.id, "groups": self._groups()})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["message"], "请先选择题目所属章节")
+
+    def test_generate_rejects_foreign_catalog(self):
+        response = self._post({
+            "course": self.outsider_course.id, "catalog": self.outsider_catalog.id,
+            "groups": self._groups(),
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["message"], "所选章节不属于当前课程")
+
+    def test_generate_rejects_empty_groups(self):
+        response = self._post({"course": self.course.id, "catalog": self.catalog.id, "groups": []})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["message"], "请至少选择一个题型并设置数量")
+
+    def test_generate_rejects_missing_groups(self):
+        response = self._post({"course": self.course.id, "catalog": self.catalog.id})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["message"], "请至少选择一个题型并设置数量")
+
+    def test_generate_rejects_unknown_qtype(self):
+        response = self._post({
+            "course": self.course.id, "catalog": self.catalog.id,
+            "groups": [{"qtype": "essay", "count": 2, "score": 2}],
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["message"], "不支持的题型：essay")
+
+    def test_generate_rejects_count_out_of_range(self):
+        response = self._post({
+            "course": self.course.id, "catalog": self.catalog.id,
+            "groups": [{"qtype": "single", "count": 21, "score": 2}],
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["message"], "每种题型数量需在 1-20 之间")
+
+    def test_generate_rejects_score_out_of_range(self):
+        response = self._post({
+            "course": self.course.id, "catalog": self.catalog.id,
+            "groups": [{"qtype": "single", "count": 2, "score": 0}],
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["message"], "每题分值需在 0.5-100 之间")
+
+    def test_generate_rejects_too_many_groups(self):
+        groups = [{"qtype": q, "count": 1, "score": 2} for q, _ in Question.QType.choices] + [
+            {"qtype": "single", "count": 1, "score": 2}
+        ]
+        response = self._post({"course": self.course.id, "catalog": self.catalog.id, "groups": groups})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["message"], "一次最多同时生成 5 种题型")
+
+    def test_generate_rejects_total_over_limit(self):
+        # 单组合法（20），3 组合计 60 > 50 → 总数上限拦截
+        response = self._post({
+            "course": self.course.id, "catalog": self.catalog.id,
+            "groups": [
+                {"qtype": "single", "count": 20, "score": 2},
+                {"qtype": "multi", "count": 20, "score": 3},
+                {"qtype": "judge", "count": 20, "score": 2},
+            ],
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["message"], "一次生成题目总数不可超过 50")
+
+    def test_generate_rejects_non_numeric_count(self):
+        response = self._post({
+            "course": self.course.id, "catalog": self.catalog.id,
+            "groups": [{"qtype": "single", "count": "两份", "score": 2}],
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["message"], "题型数量与分值必须是数字")
+
+    def test_generate_submits_task_and_builds_batch(self):
+        response = self._post({
+            "course": self.course.id, "catalog": self.catalog.id,
+            "objective": "覆盖核心知识点", "groups": self._groups(),
+        })
+        self.assertEqual(response.status_code, 200)
+        task_id = response.data["data"]["task_id"]
+        task = AITask.objects.get(id=task_id)
+        # 同步线程模式下任务已跑完（mock provider）
+        self.assertEqual(task.status, AITask.Status.SUCCESS, task.error)
+        self.assertEqual(task.triggered_by, self.teacher)
+        self.assertEqual(task.course_id, self.course.id)
+        self.assertEqual(task.catalog_id, self.catalog.id)
+        self.assertEqual(task.progress["groups"], [
+            {"qtype": "single", "count": 2, "score": 2.0},
+            {"qtype": "judge", "count": 1, "score": 2.0},
+        ])
+        batch = QuestionDraftBatch.objects.get(id=task.result["batch_id"])
+        self.assertEqual(batch.origin, "ai_gen")
+        self.assertEqual(batch.catalog_id, self.catalog.id)
+        self.assertEqual(batch.creator, self.teacher)
+        self.assertEqual(len(batch.drafts), 3)  # 单选 2 + 判断 1
+
+    def test_generate_rejects_duplicate_submit(self):
+        # 同教师同课程已有一条 pending 任务（模型层部分唯一索引）→ 友好文案
+        AITask.objects.create(
+            task_type=AITask.TaskType.QUESTION_GEN, status=AITask.Status.PENDING,
+            triggered_by=self.teacher, course=self.course, catalog=self.catalog,
+        )
+        response = self._post({
+            "course": self.course.id, "catalog": self.catalog.id, "groups": self._groups(),
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["message"], "已有进行中的生题任务，请等待完成后再试")
+
+    def test_generate_rejects_student(self):
+        response = self._post(
+            {"course": self.course.id, "catalog": self.catalog.id, "groups": self._groups()},
+            user=self.student,
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_generate_after_finished_allows_new_task(self):
+        """上一任务终态（success）后约束解除，可再次提交。"""
+        first = AITask.objects.create(
+            task_type=AITask.TaskType.QUESTION_GEN, status=AITask.Status.SUCCESS,
+            triggered_by=self.teacher, course=self.course, catalog=self.catalog,
+        )
+        response = self._post({
+            "course": self.course.id, "catalog": self.catalog.id, "groups": self._groups(),
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertNotEqual(response.data["data"]["task_id"], first.id)
+
+
+class QuestionGenPipelineTests(APITestCase):
+    """run_question_gen 流水线：mock 建批次 / 部分失败 degraded / 全失败抛错 / 不合规丢弃。"""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.teacher = User.objects.create_user(username="t_qgen", password="pw123456!", role=User.Role.TEACHER)
+        cls.course = Course.objects.create(name="Java程序设计", teacher=cls.teacher)
+        cls.catalog = Catalog.objects.create(course=cls.course, title="第一章")
+
+    def _task(self, groups, **kwargs):
+        return AITask.objects.create(
+            task_type=AITask.TaskType.QUESTION_GEN,
+            status=AITask.Status.PENDING,
+            triggered_by=self.teacher,
+            course=self.course,
+            catalog=self.catalog,
+            progress={"stage": "queued", "groups": groups, "objective": "覆盖核心知识点"},
+            **kwargs,
+        )
+
+    def test_mock_groups_build_batch(self):
+        """provider=mock：按组确定性出题，全部落 AI 草稿批次，分值按组指定。"""
+        task = self._task([
+            {"qtype": "single", "count": 2, "score": 2},
+            {"qtype": "blank", "count": 2, "score": 4},
+        ])
+        with patch("apps.questions.question_gen_ai.get_provider", return_value=MockProvider()):
+            run_question_gen(task)
+        task.refresh_from_db()
+        self.assertEqual(task.status, AITask.Status.SUCCESS)
+        self.assertFalse(task.result["degraded"])
+        self.assertEqual(task.result["failed_groups"], [])
+        batch = QuestionDraftBatch.objects.get(id=task.result["batch_id"])
+        self.assertEqual(batch.origin, "ai_gen")
+        self.assertEqual(batch.task_id, task.id)
+        self.assertEqual(len(batch.drafts), 4)
+        by_type = {d["qtype"]: d for d in batch.drafts}
+        self.assertEqual(by_type["single"]["score"], 2)
+        self.assertEqual(by_type["blank"]["score"], 4)
+        # 填空未逐空赋分：留待入库管道按每题总分均分
+        self.assertNotIn("score", by_type["blank"]["answer"]["blanks"][0])
+        self.assertEqual(task.progress["stage"], "done")
+
+    def test_partial_group_failure_marks_degraded(self):
+        """单组失败不整批失败：成功组照常建批次，failed_groups 记原因。"""
+        provider = _QGenProvider(fail_qtypes={"judge"})
+        task = self._task([
+            {"qtype": "single", "count": 2, "score": 2},
+            {"qtype": "judge", "count": 1, "score": 2},
+        ])
+        with patch("apps.questions.question_gen_ai.get_provider", return_value=provider):
+            run_question_gen(task)
+        task.refresh_from_db()
+        self.assertEqual(task.status, AITask.Status.SUCCESS)
+        self.assertTrue(task.result["degraded"])
+        self.assertEqual(len(task.result["failed_groups"]), 1)
+        self.assertEqual(task.result["failed_groups"][0]["qtype"], "judge")
+        self.assertIn("RuntimeError", task.result["failed_groups"][0]["error"])
+        self.assertEqual(task.result["total"], 2)  # 仅单选 2 题
+        batch = QuestionDraftBatch.objects.get(id=task.result["batch_id"])
+        self.assertEqual(len(batch.drafts), 2)
+        self.assertTrue(batch.stats["degraded"])
+
+    def test_all_groups_failed_raises(self):
+        """全部组失败：抛 ValueError（上层 _execute 捕获后标 FAILED + error）。"""
+        task = self._task([{"qtype": "single", "count": 1, "score": 2}])
+        with patch("apps.questions.question_gen_ai.get_provider", return_value=_QGenProvider(fail_qtypes={"single"})):
+            with self.assertRaises(ValueError):
+                run_question_gen(task)
+
+    def test_all_groups_failed_marks_task_failed_via_executor(self):
+        """经 _execute 的全失败路径：任务落 FAILED，error 带组失败原因。"""
+        import contextvars
+
+        from apps.ai.tasks import _execute
+
+        task = self._task([{"qtype": "judge", "count": 1, "score": 2}])
+        with patch("apps.questions.question_gen_ai.get_provider", return_value=_QGenProvider(fail_qtypes={"judge"})):
+            _execute(task.id, contextvars.copy_context())
+        task.refresh_from_db()
+        self.assertEqual(task.status, AITask.Status.FAILED)
+        self.assertIn("判断题", task.error)
+        self.assertIsNotNone(task.finished_at)
+
+    def test_invalid_items_dropped_with_group_note(self):
+        """LLM 混入不合规题（缺选项/空题干）：丢弃并计入 failed_groups，合规题保留。"""
+        provider = _QGenProvider(dirty=True)
+        task = self._task([{"qtype": "single", "count": 2, "score": 2}])
+        with patch("apps.questions.question_gen_ai.get_provider", return_value=provider):
+            run_question_gen(task)
+        task.refresh_from_db()
+        self.assertEqual(task.status, AITask.Status.SUCCESS)
+        batch = QuestionDraftBatch.objects.get(id=task.result["batch_id"])
+        self.assertEqual(len(batch.drafts), 2)
+        self.assertTrue(task.result["degraded"])
+        self.assertEqual(task.result["failed_groups"][0]["qtype"], "single")
+        self.assertIn("2 条生成结果不合规已丢弃", task.result["failed_groups"][0]["error"])
+
+    def test_generated_batch_flows_into_save_pipeline(self):
+        """生题批次可直接走 save 入库管道（与文档导入共用），查重/分值均分生效。"""
+        from apps.questions.draft_pipeline import save_batch_drafts
+
+        task = self._task([
+            {"qtype": "single", "count": 1, "score": 2},
+            {"qtype": "blank", "count": 1, "score": 4},
+        ])
+        with patch("apps.questions.question_gen_ai.get_provider", return_value=MockProvider()):
+            run_question_gen(task)
+        task.refresh_from_db()
+        batch = QuestionDraftBatch.objects.get(id=task.result["batch_id"])
+        result = save_batch_drafts(batch, batch.drafts, self.teacher)
+        self.assertEqual(len(result["saved"]), 2)
+        self.assertEqual(result["failed"], [])
+        questions = Question.objects.filter(course=self.course).order_by("id")
+        self.assertEqual(questions.count(), 2)
+        blank_q = questions.get(qtype="blank")
+        # 每题 4 分按 2 空均分（mock 填空题 2 空），Σ=4
+        self.assertEqual([b["score"] for b in blank_q.answer["blanks"]], [2.0, 2.0])
+        self.assertEqual(blank_q.score, 4)
+        self.assertEqual(blank_q.source, "ai")
+        batch.refresh_from_db()
+        self.assertEqual(batch.status, "saved")
+
+
+class AITaskActiveApiTests(APITestCase):
+    """ai-tasks/active：恢复入口只列本人进行中的生题任务。"""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.teacher = User.objects.create_user(username="t_active", password="pw123456!", role=User.Role.TEACHER)
+        cls.outsider = User.objects.create_user(username="t_active2", password="pw123456!", role=User.Role.TEACHER)
+        cls.course = Course.objects.create(name="Java程序设计", teacher=cls.teacher)
+
+    def test_active_lists_own_pending_question_gen_only(self):
+        mine = AITask.objects.create(
+            task_type=AITask.TaskType.QUESTION_GEN, status=AITask.Status.RUNNING,
+            triggered_by=self.teacher, course=self.course,
+        )
+        mine_chapter = AITask.objects.create(
+            task_type=AITask.TaskType.CHAPTER_SUMMARY, status=AITask.Status.PENDING,
+            triggered_by=self.teacher,
+        )
+        mine_done = AITask.objects.create(
+            task_type=AITask.TaskType.QUESTION_GEN, status=AITask.Status.SUCCESS,
+            triggered_by=self.teacher, course=self.course,
+        )
+        outsider_task = AITask.objects.create(
+            task_type=AITask.TaskType.QUESTION_GEN, status=AITask.Status.PENDING,
+            triggered_by=self.outsider,
+        )
+        self.client.force_authenticate(user=self.teacher)
+        response = self.client.get("/api/ai-tasks/active/")
+        self.assertEqual(response.status_code, 200)
+        ids = [t["id"] for t in response.data["data"]]
+        self.assertIn(mine.id, ids)
+        self.assertNotIn(mine_chapter.id, ids)   # 默认只 question_gen
+        self.assertNotIn(mine_done.id, ids)      # 终态不列
+        self.assertNotIn(outsider_task.id, ids)  # 只列本人
+        row = next(t for t in response.data["data"] if t["id"] == mine.id)
+        self.assertEqual(row["course"], self.course.id)
+        self.assertEqual(row["course_name"], self.course.name)
+        self.assertEqual(row["status"], "running")
+
+    def test_active_all_type_includes_other_task_types(self):
+        mine_chapter = AITask.objects.create(
+            task_type=AITask.TaskType.CHAPTER_SUMMARY, status=AITask.Status.PENDING,
+            triggered_by=self.teacher,
+        )
+        self.client.force_authenticate(user=self.teacher)
+        response = self.client.get("/api/ai-tasks/active/?task_type=all")
+        ids = [t["id"] for t in response.data["data"]]
+        self.assertIn(mine_chapter.id, ids)
+
+    def test_active_requires_auth(self):
+        response = self.client.get("/api/ai-tasks/active/")
+        self.assertEqual(response.status_code, 401)
+
+
+# 本类用 override_settings 重新开启小额度进行验证（默认 test 运行整体关闭）。
+@override_settings(TEACHER_AI_THROTTLE_RATES={"teacher_ai_generate": "1/min", "teacher_ai_import": None})
+class TeacherAiThrottleTests(APITestCase):
+    """教师端 AI 限流：generate 挂 teacher_ai_generate 档；未声明动作（列表）放行。"""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.teacher = User.objects.create_user(username="t_throttle", password="pw123456!", role=User.Role.TEACHER)
+        cls.course = Course.objects.create(name="Java程序设计", teacher=cls.teacher)
+        cls.catalog = Catalog.objects.create(course=cls.course, title="第一章")
+
+    def setUp(self):
+        self.client.force_authenticate(user=self.teacher)
+        django_cache.clear()  # 清掉历史计数，保证用例间独立
+
+    def test_generate_throttled_after_first_request(self):
+        url = "/api/questions/generate/"
+        # 限流先于业务校验：第一次计入配额（业务 400），第二次 429
+        first = self.client.post(url, {}, format="json")
+        second = self.client.post(url, {}, format="json")
+        self.assertEqual(first.status_code, 400)
+        self.assertEqual(second.status_code, 429)
+        self.assertEqual(second.data["code"], 429)
+        self.assertIn("操作过于频繁", second.data["message"])
+        self.assertIn("Retry-After", second.headers)
+
+    def test_list_action_not_throttled(self):
+        # list 未声明 action_scopes → 放行（连续多次均 200）
+        for _ in range(3):
+            response = self.client.get("/api/questions/")
+            self.assertEqual(response.status_code, 200)

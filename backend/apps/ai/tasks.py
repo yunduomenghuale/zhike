@@ -7,8 +7,9 @@
 - 入口 close_old_connections()：daemon 线程复用进程内 DB 连接前先清理残留（F11）；
 - 全局 BoundedSemaphore(2) 限制并发分析任务数（LLM 端 QPS 有限），超限任务
   保持 PENDING，由前端轮询自然排队；
-- 执行体按 task_type 分发到 apps/ai/analytics_ai.py（懒加载防环），
-  单任务失败只落自身 error，不影响其它任务；
+- 执行体按 task_type 分发到 apps/ai/analytics_ai.py（学情分析/章节总结）
+   或 apps/questions/question_gen_ai.py（AI 多类型生题）（懒加载防环），
+   单任务失败只落自身 error，不影响其它任务；
 - 不上 Celery：当前无任务队列基础设施，daemon 线程 + 进度轮询与项目现有
   形态（讲稿/配音分批）一致；规模化后把 _run_task 换成队列 consumer 即可，
   对外接口不变。
@@ -101,6 +102,11 @@ def _dispatch(task: AITask) -> None:
         from .analytics_ai import run_chapter_summary
 
         run_chapter_summary(task)
+        return
+    if task.task_type == AITask.TaskType.QUESTION_GEN:
+        from apps.questions.question_gen_ai import run_question_gen
+
+        run_question_gen(task)
         return
     _mark_failed(task.id, f"未知任务类型：{task.task_type}")
 

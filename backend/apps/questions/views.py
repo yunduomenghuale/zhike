@@ -2,12 +2,14 @@ import os
 import tempfile
 import time
 
+from django.db import IntegrityError
 from rest_framework.decorators import action
 from rest_framework.views import APIView
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 
-from apps.ai.services import generate_questions
+from apps.ai.models import AITask
+from apps.ai.tasks import submit_ai_task
 from apps.common.access import courses_for_user, is_platform_admin
 from apps.common.permissions import IsStudent, IsTeacher, IsTeacherOrAdmin, IsTeacherOrReadOnly
 from apps.common.response import api_response
@@ -26,6 +28,7 @@ from .serializers import (
     QuestionSerializer,
     StudentQuestionSerializer,
 )
+from .throttles import TeacherAiScopedThrottle
 
 # 文档导入约束（设计方案 §2.4 / 附录 B-5~B-7）
 IMPORT_SUPPORTED_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt", ".md"}
@@ -37,6 +40,11 @@ _IMPORT_MAGIC = {
     ".doc": b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",  # OLE2 复合文档
     ".docx": b"PK\x03\x04",  # ZIP/OOXML
 }
+# AI 多类型生题约束（阶段 4）：一次提交的题型数/单组数量/总数/分值上限
+AI_GEN_MAX_GROUPS = 5
+AI_GEN_MAX_COUNT = 20
+AI_GEN_MAX_TOTAL = 50
+AI_GEN_MAX_SCORE = 100
 
 
 class QuestionViewSet(BaseModelViewSet):
@@ -44,6 +52,9 @@ class QuestionViewSet(BaseModelViewSet):
     permission_classes = [IsTeacherOrReadOnly]
     filterset_fields = ["course", "catalog", "qtype", "difficulty", "status", "source"]
     search_fields = ["stem"]
+    # 教师端 AI 重操作限流（throttles.py 按 action_scopes 分档，未声明的动作放行）
+    throttle_classes = [TeacherAiScopedThrottle]
+    action_scopes = {"generate": "teacher_ai_generate", "import": "teacher_ai_import"}
 
     def get_queryset(self):
         user = self.request.user
@@ -107,9 +118,15 @@ class QuestionViewSet(BaseModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="generate", permission_classes=[IsTeacher])
     def generate(self, request):
-        """基于章节 PPT / 知识库自动生成题目（需求 T-Q-01）。
+        """AI 多类型生题（异步，需求 T-Q-01 阶段 4）：提交即返回 task_id。
 
-        生成结果为草稿，教师审核编辑后再发布。
+        请求：{"course":1,"catalog":2,"objective":"...","groups":[
+            {"qtype":"single","count":5,"score":2}, {"qtype":"blank","count":3,"score":4}]}
+        生成配置（groups/objective）随任务落 AITask.progress，后台线程逐组
+        生成（question_gen_ai.run_question_gen），全部草稿落 QuestionDraftBatch
+        （origin=AI_GEN），教师预览编辑后走 save 管道入库（与文档导入共用）。
+        前端轮询 /api/ai-tasks/<id>/；完成后 result.batch_id 即草稿批次 id。
+        防重复提交：同教师同课程同时只允许一条进行中任务（模型层唯一索引）。
         """
         course_id = request.data.get("course")
         catalog_id = request.data.get("catalog")
@@ -122,34 +139,67 @@ class QuestionViewSet(BaseModelViewSet):
         ).first()
         if not catalog:
             return api_response(message="所选章节不属于当前课程", code=400, status=400)
-        count = int(request.data.get("count", 5))
-        qtype = request.data.get("qtype", "single")
-        objective = request.data.get("objective", "")
-        drafts = generate_questions(
-            course_id=course_id, catalog_id=catalog_id, count=count, qtype=qtype, objective=objective
+
+        groups, err = self._validate_groups(request.data.get("groups"))
+        if err:
+            return api_response(message=err, code=400, status=400)
+        objective = str(request.data.get("objective") or "")[:500]
+
+        try:
+            task = submit_ai_task(
+                AITask.TaskType.QUESTION_GEN,
+                user=request.user,
+                course=catalog.course,
+                catalog=catalog,
+                progress={
+                    "stage": "queued",
+                    "done": 0,
+                    "total": len(groups),
+                    "groups": groups,
+                    "objective": objective,
+                    "message": "排队中…",
+                },
+            )
+        except IntegrityError:
+            # uniq_active_question_gen：同教师同课程已有 pending/running 任务
+            return api_response(message="已有进行中的生题任务，请等待完成后再试", code=400, status=400)
+        return api_response(
+            {"task_id": task.id, "groups": groups},
+            message="生题任务已提交，生成过程中离开页面也不会丢失",
         )
 
-        created = []
-        for d in drafts:
-            q = Question.objects.create(
-                course_id=course_id,
-                catalog=catalog,
-                qtype=d.get("qtype", qtype),
-                stem=d.get("stem", ""),
-                options=d.get("options", []),
-                answer=d.get("answer", {}),
-                analysis=d.get("analysis", ""),
-                difficulty=d.get("difficulty", "medium"),
-                knowledge_tags=d.get("knowledge_tags", []),
-                source=Question.Source.AI,
-                status=Question.Status.DRAFT,
-                creator=request.user,
-            )
-            created.append(q)
-        return api_response(
-            QuestionSerializer(created, many=True).data,
-            message=f"已生成 {len(created)} 道题目（草稿），请审核后发布",
-        )
+    @staticmethod
+    def _validate_groups(raw):
+        """groups 校验：题型合法、数量/分值有界、总数受控。
+
+        返回 (groups, None) 或 (None, 中文错误文案)。
+        """
+        qtypes = {q for q, _ in Question.QType.choices}
+        if not isinstance(raw, list) or not raw:
+            return None, "请至少选择一个题型并设置数量"
+        if len(raw) > AI_GEN_MAX_GROUPS:
+            return None, f"一次最多同时生成 {AI_GEN_MAX_GROUPS} 种题型"
+        groups, total = [], 0
+        for g in raw:
+            if not isinstance(g, dict):
+                return None, "题型配置格式不正确"
+            qtype = str(g.get("qtype") or "").strip()
+            if qtype not in qtypes:
+                return None, f"不支持的题型：{qtype or '空'}"
+            try:
+                count = int(g.get("count"))
+                score = float(g.get("score"))
+            except (TypeError, ValueError):
+                return None, "题型数量与分值必须是数字"
+            if count < 1 or count > AI_GEN_MAX_COUNT:
+                return None, f"每种题型数量需在 1-{AI_GEN_MAX_COUNT} 之间"
+            if score < 0.5 or score > AI_GEN_MAX_SCORE:
+                return None, f"每题分值需在 0.5-{AI_GEN_MAX_SCORE} 之间"
+            total += count
+            groups.append({"qtype": qtype, "count": count, "score": score})
+        if total > AI_GEN_MAX_TOTAL:
+            return None, f"一次生成题目总数不可超过 {AI_GEN_MAX_TOTAL}"
+        return groups, None
 
     @action(detail=False, methods=["post"], url_path="import", permission_classes=[IsTeacherOrAdmin])
     def import_questions(self, request):

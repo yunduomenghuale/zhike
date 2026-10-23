@@ -191,6 +191,18 @@ ADMIN_THROTTLE_RATES = {
 if "test" in sys.argv:
     ADMIN_THROTTLE_RATES = {scope: None for scope in ADMIN_THROTTLE_RATES}
 
+# 教师端 AI 重操作限流档位（questions/throttles.py 按 action 分档，仅题库
+# 导入/AI 生题生效，不动全局节流）
+# teacher_ai_generate AI 生题提交（后台 LLM 逐组生成）/ teacher_ai_import 文档导入解析
+TEACHER_AI_THROTTLE_RATES = {
+    "teacher_ai_generate": "5/min",
+    "teacher_ai_import": "10/min",
+}
+
+# 测试运行同样关闭教师端 AI 限流（行为由 questions 测试专项用 override_settings 覆盖验证）
+if "test" in sys.argv:
+    TEACHER_AI_THROTTLE_RATES = {scope: None for scope in TEACHER_AI_THROTTLE_RATES}
+
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=12),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),

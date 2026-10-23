@@ -4,14 +4,15 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
-from apps.ai.views import AITaskDetailView
+from apps.ai.views import AITaskActiveView, AITaskDetailView
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 api_patterns = [
     path("auth/", include("apps.users.urls")),
     path("", include("apps.users.notify_urls")),
     path("ai/", include("apps.ai.urls")),
-    # AI 异步任务轮询（班级学情分析/章节学习总结通用，设计方案 §2.3）
+    # AI 异步任务轮询（班级学情分析/章节学习总结/AI 生题通用，设计方案 §2.3）
+    path("ai-tasks/active/", AITaskActiveView.as_view(), name="ai-task-active"),
     path("ai-tasks/<int:task_id>/", AITaskDetailView.as_view(), name="ai-task-detail"),
     path("analytics/", include("apps.analytics.urls")),
     path("admin-panel/", include("apps.platform_admin.urls")),
