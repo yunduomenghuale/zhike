@@ -22,7 +22,7 @@ from rest_framework.test import force_authenticate
 from apps.courses.models import Catalog, Course
 from apps.questions.grading import blank_items, grade_objective
 from apps.questions.import_parser import parse_questions
-from apps.questions.models import Question
+from apps.questions.models import Question, QuestionDraftBatch
 from apps.questions.serializers import QuestionSerializer
 from apps.users.models import User
 
@@ -356,6 +356,44 @@ class ImportParserTests(SimpleTestCase):
         self.assertEqual(d["answer"], {"key": "A"})
         self.assertIn("选项来自无标签表格列", "".join(d["_warnings"]))
 
+    def test_table_header_row_skipped(self):
+        """docx 表头行（题号/题干/选项/答案）被跳过，不起题。"""
+        text = "题号\t题干\tA\tB\tC\tD\t答案\n1\t中国的首都\t北京\t上海\t广州\t深圳\tA"
+        d = parse_questions(text)
+        self.assertEqual(len(d), 1)
+        self.assertEqual(d[0]["stem"], "中国的首都")
+        self.assertEqual([o["text"] for o in d[0]["options"]], ["北京", "上海", "广州", "深圳"])
+        self.assertEqual(d[0]["answer"], {"key": "A"})
+
+    def test_table_row_number_cell_starts_question(self):
+        """表格题目行：题号列起新题，末列答案样式摘出为 answer。"""
+        text = "1\tJava 中 int 占用的字节数是？\t2\t4\t8\t16\tB"
+        d = parse_questions(text)
+        self.assertEqual(len(d), 1)
+        self.assertEqual(d[0]["stem"], "Java 中 int 占用的字节数是？")
+        self.assertEqual([o["text"] for o in d[0]["options"]], ["2", "4", "8", "16"])
+        self.assertEqual(d[0]["answer"], {"key": "B"})
+        self.assertEqual(d[0]["qtype"], "single")
+
+    def test_table_row_judge_answer_cell(self):
+        """表格判断题行：末列「对」摘出 → 题型判 judge、答案归一 A。"""
+        text = "1\tJava 是编译型语言。\t对"
+        d = parse_questions(text)
+        self.assertEqual(len(d), 1)
+        self.assertEqual(d[0]["qtype"], "judge")
+        self.assertEqual(d[0]["answer"], {"key": "A"})
+        self.assertEqual(d[0]["options"], [])
+
+    def test_table_row_without_answer_column_warns(self):
+        """表格题目行无答案列：末列按选项处理，缺答案与无标签列双告警。"""
+        text = "1\t中国的首都\t北京\t上海\t广州\t深圳"
+        d = parse_questions(text)
+        self.assertEqual(len(d), 1)
+        self.assertEqual(d[0]["qtype"], "single")
+        self.assertEqual([o["text"] for o in d[0]["options"]], ["北京", "上海", "广州", "深圳"])
+        self.assertIn("未识别到答案，请核对", d[0]["_warnings"])
+        self.assertIn("选项来自无标签表格列", "".join(d[0]["_warnings"]))
+
     def test_single_choice_combined_marker_feeds_both(self):
         """「答案与解析：」合并标记：答案与解析都入账（不丢半截信息）。"""
         text = (
@@ -665,3 +703,421 @@ class ImportParserTests(SimpleTestCase):
         d = parse_questions(text)[0]
         self.assertEqual(d["options"], [])
         self.assertIn("选项不足（识别到 0 个）", "".join(d["_warnings"]))
+
+
+# ---------------------------------------------------------------------------
+# 文档导入 API（设计方案 §2.4）
+# ---------------------------------------------------------------------------
+
+_IMPORT_TXT = (
+    "一、单选题\n"
+    "1. Java 中 int 占用的字节数是？\n"
+    "A. 2\nB. 4\nC. 8\nD. 16\n"
+    "答案：B\n"
+    "解析：int 为 4 字节。\n"
+    "二、判断题\n"
+    "1. Java 是编译型语言。\n"
+    "答案：对"
+)
+
+
+class QuestionImportApiTests(APITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.teacher = User.objects.create_user(username="t_import", password="pw123456!", role=User.Role.TEACHER)
+        cls.outsider = User.objects.create_user(username="t_import2", password="pw123456!", role=User.Role.TEACHER)
+        cls.student = User.objects.create_user(username="s_import", password="pw123456!", role=User.Role.STUDENT)
+        cls.course = Course.objects.create(name="Java程序设计", teacher=cls.teacher)
+        cls.catalog = Catalog.objects.create(course=cls.course, title="第一章")
+        cls.outsider_course = Course.objects.create(name="他人课程", teacher=cls.outsider)
+
+    def _upload(self, content, filename="题库.txt", course=None, catalog=None):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        upload = SimpleUploadedFile(filename, content.encode("utf-8"), content_type="text/plain")
+        return self.client.post(
+            "/api/questions/import/",
+            {
+                "file": upload,
+                "course": course or self.course.id,
+                "catalog": self.catalog.id if catalog is None else catalog,
+            },
+            format="multipart",
+        )
+
+    def test_import_txt_creates_batch_with_drafts(self):
+        self.client.force_authenticate(user=self.teacher)
+        response = self._upload(_IMPORT_TXT)
+        self.assertEqual(response.status_code, 200)
+        data = response.data["data"]
+        self.assertEqual(data["origin"], "import")
+        self.assertEqual(data["status"], "parsed")
+        self.assertEqual(data["file_name"], "题库.txt")
+        self.assertEqual(len(data["drafts"]), 2)
+        self.assertEqual(data["stats"]["total"], 2)
+        self.assertEqual(data["stats"]["warned"], 0)
+        batch = QuestionDraftBatch.objects.get(pk=data["id"])
+        self.assertTrue(batch.file.name.startswith("question_imports/"))
+        self.assertEqual(batch.catalog_id, self.catalog.id)
+        self.assertIn("int 为 4 字节", batch.raw_text)
+
+    def test_import_without_catalog_allowed(self):
+        """catalog 可选：导入时不选章节，后续 PATCH 补（决策：一篇文档一个目标章节）。"""
+        self.client.force_authenticate(user=self.teacher)
+        response = self._upload(_IMPORT_TXT, catalog="")
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.data["data"]["catalog"])
+
+    def test_import_rejects_unsupported_extension(self):
+        self.client.force_authenticate(user=self.teacher)
+        response = self._upload(_IMPORT_TXT, filename="题库.exe")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("暂不支持该文件格式", response.data["message"])
+
+    def test_import_rejects_magic_mismatch(self):
+        """扩展名 .pdf 但内容是文本 → 魔数复检拒绝（附录 B-5 防伪造/损坏）。"""
+        self.client.force_authenticate(user=self.teacher)
+        response = self._upload(_IMPORT_TXT, filename="题库.pdf")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("文件内容与扩展名不符", response.data["message"])
+
+    def test_import_rejects_oversize(self):
+        self.client.force_authenticate(user=self.teacher)
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        big = SimpleUploadedFile("大文件.txt", b"x" * (10 * 1024 * 1024 + 1), content_type="text/plain")
+        response = self.client.post(
+            "/api/questions/import/", {"file": big, "course": self.course.id}, format="multipart"
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("10MB", response.data["message"])
+
+    def test_import_rejects_no_questions(self):
+        self.client.force_authenticate(user=self.teacher)
+        response = self._upload("这是一段没有任何题目结构的说明文字。")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("未能识别出题目", response.data["message"])
+
+    def test_import_rejects_empty_text(self):
+        self.client.force_authenticate(user=self.teacher)
+        response = self._upload("   \n\n  ")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("未能提取到文本内容", response.data["message"])
+
+    def test_import_rejects_other_teacher_course(self):
+        self.client.force_authenticate(user=self.outsider)
+        response = self._upload(_IMPORT_TXT, course=self.course.id)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("只能导入到自己负责课程", response.data["message"])
+
+    def test_import_rejects_catalog_of_other_course(self):
+        self.client.force_authenticate(user=self.teacher)
+        other_catalog = Catalog.objects.create(course=self.outsider_course, title="外课程章节")
+        response = self._upload(_IMPORT_TXT, catalog=other_catalog.id)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("所选章节不属于当前课程", response.data["message"])
+
+    def test_import_student_forbidden(self):
+        """学生不可见导入端点（批次含答案解析，附录 B-2）。"""
+        self.client.force_authenticate(user=self.student)
+        response = self._upload(_IMPORT_TXT)
+        self.assertEqual(response.status_code, 403)
+
+    def test_import_platform_admin_allowed(self):
+        admin = User.objects.create_user(username="admin_imp", password="pw123456!", role=User.Role.ADMIN)
+        self.client.force_authenticate(user=admin)
+        response = self._upload(_IMPORT_TXT, course=self.course.id)
+        self.assertEqual(response.status_code, 200)
+
+
+# ---------------------------------------------------------------------------
+# 草稿批次 API + 入库管道（设计方案 §2.4 / 附录 B-2/B-3/B-4）
+# ---------------------------------------------------------------------------
+
+
+def _draft(qtype="single", stem="1+1=?", **kw):
+    base = {
+        "qtype": qtype, "stem": stem, "options": [], "answer": {}, "analysis": "",
+        "score": 2, "difficulty": "medium", "knowledge_tags": [], "_warnings": [],
+    }
+    base.update(kw)
+    return base
+
+
+class QuestionDraftBatchApiTests(APITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.teacher = User.objects.create_user(username="t_batch", password="pw123456!", role=User.Role.TEACHER)
+        cls.outsider = User.objects.create_user(username="t_batch2", password="pw123456!", role=User.Role.TEACHER)
+        cls.student = User.objects.create_user(username="s_batch", password="pw123456!", role=User.Role.STUDENT)
+        cls.course = Course.objects.create(name="Java程序设计", teacher=cls.teacher)
+        cls.catalog = Catalog.objects.create(course=cls.course, title="第一章")
+        cls.catalog2 = Catalog.objects.create(course=cls.course, title="第二章")
+        cls.outsider_course = Course.objects.create(name="他人课程", teacher=cls.outsider)
+
+    def _make_batch(self, drafts=None, catalog="__default__", with_file=False, **kw):
+        batch = QuestionDraftBatch.objects.create(
+            origin=kw.pop("origin", QuestionDraftBatch.Origin.IMPORT),
+            course=kw.pop("course", self.course),
+            catalog=self.catalog if catalog == "__default__" else catalog,
+            creator=kw.pop("creator", self.teacher),
+            drafts=drafts if drafts is not None else [],
+            **kw,
+        )
+        if with_file:
+            from django.core.files.base import ContentFile
+
+            batch.file.save("question_imports/test.txt", ContentFile(b"raw"), save=True)
+        return batch
+
+    def _full_drafts(self):
+        return [
+            _draft(qtype="single", stem="1+1=?",
+                   options=[{"key": "A", "text": "2"}, {"key": "B", "text": "3"}],
+                   answer={"key": "A"}),
+            _draft(qtype="judge", stem="Java 是编译型语言。", answer={"key": "对"}),
+            _draft(qtype="blank", stem="三大特征是____、____、____。", score=4,
+                   answer={"blanks": [{"text": "封装"}, {"text": "继承"}, {"text": "多态"}]}),
+            _draft(qtype="multi", stem="哪些是基本类型？", score=3,
+                   options=[{"key": "A", "text": "int"}, {"key": "B", "text": "String"},
+                            {"key": "C", "text": "double"}, {"key": "D", "text": "Object"}],
+                   answer={"keys": ["A", "C"]}),
+            _draft(qtype="short", stem="简述进程与线程的区别。", score=10,
+                   answer={"text": "进程是资源分配单位，线程是调度单位。"}),
+        ]
+
+    # ------------------------------------------------------------- 列表/详情
+    def test_list_scoped_to_own_courses(self):
+        mine = self._make_batch()
+        self._make_batch(course=self.outsider_course, creator=self.outsider)
+        self.client.force_authenticate(user=self.teacher)
+        response = self.client.get("/api/question-draft-batches/")
+        self.assertEqual(response.status_code, 200)
+        ids = [b["id"] for b in response.data["data"]["results"]]
+        self.assertIn(mine.id, ids)
+        self.assertEqual(len(ids), 1)
+
+    def test_list_filters_by_course_and_status(self):
+        batch = self._make_batch()
+        self.client.force_authenticate(user=self.teacher)
+        response = self.client.get(f"/api/question-draft-batches/?course={self.course.id}&status=parsed")
+        self.assertEqual([b["id"] for b in response.data["data"]["results"]], [batch.id])
+        response = self.client.get("/api/question-draft-batches/?status=saved")
+        self.assertEqual(response.data["data"]["results"], [])
+
+    def test_student_forbidden_on_batch_endpoints(self):
+        batch = self._make_batch(self._full_drafts())
+        self.client.force_authenticate(user=self.student)
+        self.assertEqual(self.client.get("/api/question-draft-batches/").status_code, 403)
+        self.assertEqual(self.client.get(f"/api/question-draft-batches/{batch.id}/").status_code, 403)
+
+    def test_other_teacher_gets_404(self):
+        batch = self._make_batch(self._full_drafts())
+        self.client.force_authenticate(user=self.outsider)
+        response = self.client.get(f"/api/question-draft-batches/{batch.id}/")
+        self.assertEqual(response.status_code, 404)
+
+    # ------------------------------------------------------------- PATCH
+    def test_patch_drafts_persisted(self):
+        batch = self._make_batch(self._full_drafts())
+        drafts = self._full_drafts()
+        drafts[0]["stem"] = "1+1 等于几？"
+        self.client.force_authenticate(user=self.teacher)
+        response = self.client.patch(
+            f"/api/question-draft-batches/{batch.id}/", {"drafts": drafts}, format="json"
+        )
+        self.assertEqual(response.status_code, 200)
+        batch.refresh_from_db()
+        self.assertEqual(batch.drafts[0]["stem"], "1+1 等于几？")
+
+    def test_patch_catalog_switches_target(self):
+        batch = self._make_batch()
+        self.client.force_authenticate(user=self.teacher)
+        response = self.client.patch(
+            f"/api/question-draft-batches/{batch.id}/", {"catalog": self.catalog2.id}, format="json"
+        )
+        self.assertEqual(response.status_code, 200)
+        batch.refresh_from_db()
+        self.assertEqual(batch.catalog_id, self.catalog2.id)
+
+    def test_patch_catalog_of_other_course_rejected(self):
+        batch = self._make_batch()
+        other_catalog = Catalog.objects.create(course=self.outsider_course, title="外课程章节")
+        self.client.force_authenticate(user=self.teacher)
+        response = self.client.patch(
+            f"/api/question-draft-batches/{batch.id}/", {"catalog": other_catalog.id}, format="json"
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("所选章节不属于当前课程", response.data["message"])
+
+    def test_patch_readonly_fields_ignored(self):
+        batch = self._make_batch()
+        self.client.force_authenticate(user=self.teacher)
+        self.client.patch(
+            f"/api/question-draft-batches/{batch.id}/",
+            {"status": "saved", "origin": "ai_gen"}, format="json",
+        )
+        batch.refresh_from_db()
+        self.assertEqual(batch.status, "parsed")
+        self.assertEqual(batch.origin, "import")
+
+    # ------------------------------------------------------------- save 管道
+    def test_save_all_drafts_normalizes_and_creates_questions(self):
+        batch = self._make_batch(self._full_drafts())
+        self.client.force_authenticate(user=self.teacher)
+        response = self.client.post(
+            f"/api/question-draft-batches/{batch.id}/save/",
+            {"items": self._full_drafts()}, format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        result = response.data["data"]
+        self.assertEqual(len(result["saved"]), 5)
+        self.assertEqual(result["skipped"], 0)
+        self.assertEqual(result["failed"], [])
+        self.assertEqual(result["remaining"], 0)
+
+        questions = {q.id: q for q in Question.objects.filter(course=self.course)}
+        self.assertEqual(len(questions), 5)
+        # 判断题：答案归一 A/B + 补对错选项
+        judge = next(q for q in questions.values() if q.qtype == "judge")
+        self.assertEqual(judge.answer, {"key": "A"})
+        self.assertEqual([o["key"] for o in judge.options], ["A", "B"])
+        # 填空题：按空均分，Σ=每题总分
+        blank = next(q for q in questions.values() if q.qtype == "blank")
+        self.assertEqual([b["score"] for b in blank.answer["blanks"]], [1.4, 1.3, 1.3])
+        self.assertEqual(blank.score, Decimal("4"))
+        # source=文档导入、状态=草稿
+        self.assertTrue(all(q.source == "import" and q.status == "draft" for q in questions.values()))
+
+        batch.refresh_from_db()
+        self.assertEqual(batch.drafts, [])
+        self.assertEqual(batch.status, "saved")
+        self.assertFalse(batch.file)  # 入库即删
+
+    def test_save_partial_failure_keeps_failed_draft(self):
+        drafts = self._full_drafts()
+        drafts[1]["answer"] = {"key": "可能是"}  # 判断题无法归一 → failed
+        batch = self._make_batch(drafts)
+        self.client.force_authenticate(user=self.teacher)
+        response = self.client.post(
+            f"/api/question-draft-batches/{batch.id}/save/", {"items": drafts}, format="json"
+        )
+        self.assertEqual(response.status_code, 200)
+        result = response.data["data"]
+        self.assertEqual(len(result["saved"]), 4)
+        self.assertEqual(len(result["failed"]), 1)
+        self.assertEqual(result["failed"][0]["index"], 1)
+        self.assertIn("判断题答案", result["failed"][0]["error"])
+        self.assertEqual(result["remaining"], 1)
+        batch.refresh_from_db()
+        self.assertEqual(len(batch.drafts), 1)  # 失败项留批次内可修正重试
+        self.assertEqual(batch.status, "parsed")
+
+    def test_save_dedup_skips_existing_stem(self):
+        batch = self._make_batch(self._full_drafts())
+        Question.objects.create(
+            course=self.course, catalog=self.catalog, qtype="single",
+            stem="1+1=?", options=[{"key": "A", "text": "2"}], answer={"key": "A"}, score=2,
+        )
+        self.client.force_authenticate(user=self.teacher)
+        response = self.client.post(
+            f"/api/question-draft-batches/{batch.id}/save/",
+            {"items": [self._full_drafts()[0]]}, format="json",
+        )
+        result = response.data["data"]
+        self.assertEqual(result["saved"], [])
+        self.assertEqual(result["skipped"], 1)
+        batch.refresh_from_db()
+        self.assertEqual(len(batch.drafts), 5)  # 跳过项保留，可改题干后重试
+
+    def test_save_repeat_submit_no_duplicates(self):
+        """响应丢失后重试：精确查重保证不产生重复入库（附录 B-3）。"""
+        drafts = self._full_drafts()
+        batch = self._make_batch(drafts)
+        self.client.force_authenticate(user=self.teacher)
+        url = f"/api/question-draft-batches/{batch.id}/save/"
+        first = self.client.post(url, {"items": [drafts[0]]}, format="json")
+        self.assertEqual(len(first.data["data"]["saved"]), 1)
+        second = self.client.post(url, {"items": [drafts[0]]}, format="json")
+        self.assertEqual(second.data["data"]["saved"], [])
+        self.assertEqual(second.data["data"]["skipped"], 1)
+        self.assertEqual(Question.objects.filter(course=self.course, stem="1+1=?").count(), 1)
+
+    def test_save_requires_catalog(self):
+        batch = self._make_batch(self._full_drafts(), catalog=None)
+        self.client.force_authenticate(user=self.teacher)
+        response = self.client.post(
+            f"/api/question-draft-batches/{batch.id}/save/",
+            {"items": [self._full_drafts()[0]]}, format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("请先为批次选择目标章节", response.data["message"])
+
+    def test_save_rejects_empty_items(self):
+        batch = self._make_batch(self._full_drafts())
+        self.client.force_authenticate(user=self.teacher)
+        response = self.client.post(
+            f"/api/question-draft-batches/{batch.id}/save/", {"items": []}, format="json"
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("提交内容不能为空", response.data["message"])
+
+    def test_save_saved_batch_rejected(self):
+        batch = self._make_batch(self._full_drafts())
+        batch.status = QuestionDraftBatch.Status.SAVED
+        batch.save()
+        self.client.force_authenticate(user=self.teacher)
+        response = self.client.post(
+            f"/api/question-draft-batches/{batch.id}/save/",
+            {"items": [self._full_drafts()[0]]}, format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("已全部入库", response.data["message"])
+
+    def test_save_single_missing_options_failed(self):
+        drafts = [_draft(stem="没有选项的题", answer={"key": "A"})]
+        batch = self._make_batch(drafts)
+        self.client.force_authenticate(user=self.teacher)
+        response = self.client.post(
+            f"/api/question-draft-batches/{batch.id}/save/", {"items": drafts}, format="json"
+        )
+        result = response.data["data"]
+        self.assertEqual(result["saved"], [])
+        self.assertIn("至少需要 2 个选项", result["failed"][0]["error"])
+
+    def test_save_multi_answer_not_in_options_failed(self):
+        drafts = [_draft(
+            qtype="multi", stem="越界答案",
+            options=[{"key": "A", "text": "甲"}, {"key": "B", "text": "乙"}],
+            answer={"keys": ["A", "Z"]},
+        )]
+        batch = self._make_batch(drafts)
+        self.client.force_authenticate(user=self.teacher)
+        response = self.client.post(
+            f"/api/question-draft-batches/{batch.id}/save/", {"items": drafts}, format="json"
+        )
+        self.assertIn("不在选项中", response.data["data"]["failed"][0]["error"])
+
+    def test_save_ai_gen_batch_marks_source_ai(self):
+        batch = QuestionDraftBatch.objects.create(
+            origin=QuestionDraftBatch.Origin.AI_GEN, course=self.course,
+            catalog=self.catalog, creator=self.teacher, drafts=self._full_drafts(),
+        )
+        self.client.force_authenticate(user=self.teacher)
+        self.client.post(
+            f"/api/question-draft-batches/{batch.id}/save/",
+            {"items": [self._full_drafts()[0]]}, format="json",
+        )
+        q = Question.objects.get(course=self.course, stem="1+1=?")
+        self.assertEqual(q.source, "ai")
+
+    # ------------------------------------------------------------- DELETE
+    def test_destroy_deletes_file_then_row(self):
+        batch = self._make_batch(self._full_drafts(), with_file=True)
+        name = batch.file.name
+        self.assertTrue(batch.file.storage.exists(name))
+        self.client.force_authenticate(user=self.teacher)
+        response = self.client.delete(f"/api/question-draft-batches/{batch.id}/")
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(QuestionDraftBatch.objects.filter(pk=batch.id).exists())
+        self.assertFalse(batch.file.storage.exists(name))

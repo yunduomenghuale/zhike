@@ -92,6 +92,12 @@ _SCORE_TAIL_RE = re.compile(r"[（(]\s*(\d+(?:\.\d+)?)\s*分\s*[）)]\s*$")
 # 简答题分值说明（题干中部，「（共10分）」不摘，只摘尾部）
 _SCORE_ANY_RE = re.compile(r"[（(]\s*(\d+(?:\.\d+)?)\s*分\s*[）)]")
 
+# docx 表格行（extract_text_with_tables 产物，单元格以制表符连接）
+_TABLE_HEADER_WORDS = {"题干", "题目", "题号", "题型", "选项", "答案", "正确答案", "解析", "分值", "分数", "难度", "知识点"}
+_QNUM_CELL_RE = re.compile(r"\d{1,2}|第\s*\d{1,2}\s*题|[（(]\d{1,2}[）)]")
+# 表格末列答案样式：裸值（A / 对 / √）或「答案：A」单元格
+_ANSWER_CELL_RE = re.compile(r"[A-Ha-h]|对|错|正确|错误|√|×|[TtFf]|是|否")
+
 _CN_LABELS = "甲乙丙丁戊己庚辛"
 _NEW_KEYS = "ABCDEFGH"
 
@@ -196,6 +202,42 @@ def _match_option_line(line: str) -> tuple[str, str] | None:
     if m:
         return m.group("label"), m.group("text").strip()
     return None
+
+
+def _table_cells(line: str) -> list[str]:
+    return [c.strip() for c in line.split("\t") if c.strip()]
+
+
+def _is_table_header_row(line: str) -> bool:
+    """表格表头行（题干/选项/答案…）→ 跳过，不并入任何题目。"""
+    if "\t" not in line:
+        return False
+    cells = _table_cells(line)
+    if len(cells) < 3 or not all(len(c) <= 8 for c in cells):
+        return False
+    return any(c in _TABLE_HEADER_WORDS for c in cells)
+
+
+def _table_row_head(line: str) -> str | None:
+    """一题一行的表格题目行：「1\\t题干\\tA\\tB」→ 去掉题号列后的制表符串。
+
+    首列是题号样式（纯数字/第N题/(N)）才认，避免把普通制表符文本当题目行。
+    """
+    if "\t" not in line:
+        return None
+    cells = _table_cells(line)
+    if len(cells) < 3 or not _QNUM_CELL_RE.fullmatch(cells[0]):
+        return None
+    return "\t".join(cells[1:])
+
+
+def _answer_cell_value(cell: str) -> str | None:
+    """表格末列是答案样式时返回答案文本（支持「答案：A」单元格），否则 None。"""
+    t = (cell or "").strip()
+    m = re.fullmatch(r"(?:正确答案|答案)\s*[：:]\s*(.+)", t)
+    if m:
+        t = m.group(1).strip()
+    return t if _ANSWER_CELL_RE.fullmatch(t) else None
 
 
 # ---------------------------------------------------------------------------
@@ -305,20 +347,30 @@ def parse_questions(raw_text: str) -> list[dict]:
             continue
         if _ANSWER_SUMMARY_RE.match(line):
             continue  # 卷末答案速查行（整行仅「序号 + 选项字母」，不作题干并入）
+        if _is_table_header_row(line):
+            continue  # 表格表头行
 
-        section_type = _match_section_type(line)
+        # 表格题目行优先于标记切分（行内单元格可能含「答案：A」）
+        row_head = _table_row_head(line)
+        is_row = row_head is not None
+        if is_row:
+            content, marker_parts = line, []
+        else:
+            content, marker_parts = _split_markers(line)
+
+        section_type = _match_section_type(content)
         if section_type:
             _finalize()
             section = section_type
             continue
 
-        content, marker_parts = _split_markers(line)
-
         if current is None:
             head = _match_question_start(content)
             if head is None:
-                continue  # 卷首说明/标题等前导内容，跳过
-            current = _new_question(section)
+                if not is_row:
+                    continue  # 卷首说明/标题等前导内容，跳过
+                head = row_head
+            current = _new_question(None if is_row else section, table_row=is_row)
             _absorb(current, head)
         else:
             start_head = _match_question_start(content)
@@ -326,6 +378,10 @@ def parse_questions(raw_text: str) -> list[dict]:
                 _finalize()
                 current = _new_question(section)
                 _absorb(current, start_head)
+            elif is_row:
+                _finalize()
+                current = _new_question(None, table_row=True)
+                _absorb(current, row_head)
             else:
                 _absorb(current, content)
 
@@ -344,13 +400,14 @@ def parse_questions(raw_text: str) -> list[dict]:
     return questions
 
 
-def _new_question(section: str | None) -> dict:
+def _new_question(section: str | None, table_row: bool = False) -> dict:
     return {
         "section": section,
         "stem_parts": [],
-        "options": [],          # [(原始标签, 文本)]
+        "options": [],           # [(原始标签, 文本)]
         "answer_raw": "",
         "analysis_parts": [],
+        "_table_row": table_row,  # 一题一行的表格题目行（题型按结构推断）
     }
 
 
@@ -374,14 +431,27 @@ def _absorb(q: dict, content: str) -> None:
         q["_last_opt"] = True
         return
 
-    # 无标签表格列兜底：章节为选择类、含制表符、≥3 列 → 首列题干其余为选项
-    if q["section"] in ("single", "multi") and "\t" in content and not q["options"]:
-        cells = [c.strip() for c in content.split("\t") if c.strip()]
-        if len(cells) >= 3:
+    # 表格行：首列题干、其余列选项（docx 表格抽取产物）。
+    # 普通行要求章节为选择类；表格题目行（题号列起题）不限章节。
+    min_cells = 2 if q.get("_table_row") else 3
+    if "\t" in content and not q["options"] and (
+        q["section"] in ("single", "multi") or q.get("_table_row")
+    ):
+        cells = _table_cells(content)
+        if len(cells) >= min_cells:
+            answer_cell = None
+            if q.get("_table_row"):
+                # 末列是答案样式（A / 对 / 「答案：A」）→ 摘出，余下按 题干+选项 处理
+                ans = _answer_cell_value(cells[-1])
+                if ans is not None:
+                    answer_cell = ans
+                    cells = cells[:-1]
             q["stem_parts"].append(cells[0])
             for i, cell in enumerate(cells[1:]):
                 q["options"].append((_NEW_KEYS[i], cell))
             q["_table_options"] = True
+            if answer_cell and not q["answer_raw"]:
+                q["answer_raw"] = answer_cell
             return
 
     # 选项换行续接：选项已开始且上一行是选项 → 并入最后一个选项，避免污染题干
@@ -443,6 +513,9 @@ def _infer_type(stem: str, options: list, answer_raw: str) -> str:
         return "multi" if len(_parse_choice_answer(answer_raw)) > 1 else "single"
     if _count_blank_markers(stem) >= 1:
         return "blank"
+    # 答案是「对/错/√/×」样式 → 判断题（表格行与无标题场景都受益）
+    if re.fullmatch(r"\s*(对|错|正确|错误|√|×|[TtFf]|是|否)\s*", str(answer_raw or "")):
+        return "judge"
     return "short"
 
 

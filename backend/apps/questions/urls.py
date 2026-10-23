@@ -1,9 +1,10 @@
 from rest_framework.routers import DefaultRouter
 
-from .views import AnswerRecordViewSet, QuestionViewSet, WrongNoteViewSet
+from .views import AnswerRecordViewSet, QuestionDraftBatchViewSet, QuestionViewSet, WrongNoteViewSet
 
 router = DefaultRouter()
 router.register("questions", QuestionViewSet, basename="question")
+router.register("question-draft-batches", QuestionDraftBatchViewSet, basename="question-draft-batch")
 router.register("answer-records", AnswerRecordViewSet, basename="answer-record")
 router.register("wrong-notes", WrongNoteViewSet, basename="wrong-note")
 

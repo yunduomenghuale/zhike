@@ -1,3 +1,7 @@
+import os
+import tempfile
+import time
+
 from rest_framework.decorators import action
 from rest_framework.views import APIView
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -5,19 +9,34 @@ from rest_framework.permissions import IsAuthenticated
 
 from apps.ai.services import generate_questions
 from apps.common.access import courses_for_user, is_platform_admin
-from apps.common.permissions import IsStudent, IsTeacher, IsTeacherOrReadOnly
+from apps.common.permissions import IsStudent, IsTeacher, IsTeacherOrAdmin, IsTeacherOrReadOnly
 from apps.common.response import api_response
 from apps.common.viewsets import BaseModelViewSet
+from apps.courses.models import Catalog, Course
 from django.db.models import Q
-from apps.courses.models import Catalog
+from apps.knowledge.extractor import extract_text_with_tables
 
+from .draft_pipeline import save_batch_drafts
 from .grading import grade_objective
-from .models import AnswerRecord, Question, WrongMastery, WrongNote
+from .import_parser import parse_questions
+from .models import AnswerRecord, Question, QuestionDraftBatch, WrongMastery, WrongNote
 from .serializers import (
     AnswerRecordSerializer,
+    QuestionDraftBatchSerializer,
     QuestionSerializer,
     StudentQuestionSerializer,
 )
+
+# 文档导入约束（设计方案 §2.4 / 附录 B-5~B-7）
+IMPORT_SUPPORTED_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt", ".md"}
+IMPORT_MAX_SIZE = 10 * 1024 * 1024  # 10MB
+RAW_TEXT_LIMIT = 100_000  # raw_text 截断字符数（防撑爆行）
+# 扩展名 → 文件头魔数（txt/md 纯文本不复检）
+_IMPORT_MAGIC = {
+    ".pdf": b"%PDF",
+    ".doc": b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",  # OLE2 复合文档
+    ".docx": b"PK\x03\x04",  # ZIP/OOXML
+}
 
 
 class QuestionViewSet(BaseModelViewSet):
@@ -131,6 +150,149 @@ class QuestionViewSet(BaseModelViewSet):
             QuestionSerializer(created, many=True).data,
             message=f"已生成 {len(created)} 道题目（草稿），请审核后发布",
         )
+
+    @action(detail=False, methods=["post"], url_path="import", permission_classes=[IsTeacherOrAdmin])
+    def import_questions(self, request):
+        """上传题目文档 → 规则解析 → 建草稿批次（需求 T-Q-01 导入链路）。
+
+        multipart：file + course（+ catalog 可选，后续可 PATCH 改目标章节）。
+        权限：教师且课程归属本人，平台管理员除外（附录 B-2）；批次含答案解析，
+        学生绝不可见。解析出 0 题 / 无文本 → 400 明确文案。
+        """
+        upload = request.FILES.get("file")
+        if not upload:
+            return api_response(message="请上传题目文件", code=400, status=400)
+        ext = os.path.splitext(upload.name)[1].lower()
+        if ext not in IMPORT_SUPPORTED_EXTENSIONS:
+            supported = "、".join(sorted(IMPORT_SUPPORTED_EXTENSIONS))
+            return api_response(message=f"暂不支持该文件格式，支持：{supported}", code=400, status=400)
+        if upload.size > IMPORT_MAX_SIZE:
+            return api_response(message="文件超过 10MB 上限，请压缩或拆分后重试", code=400, status=400)
+
+        course = Course.objects.filter(id=request.data.get("course")).first()
+        if not course:
+            return api_response(message="请选择目标课程", code=400, status=400)
+        if not is_platform_admin(request.user) and course.teacher_id != request.user.id:
+            return api_response(message="只能导入到自己负责课程的题目", code=400, status=400)
+
+        catalog = None
+        catalog_id = request.data.get("catalog") or None
+        if catalog_id:
+            catalog = Catalog.objects.filter(id=catalog_id, course_id=course.id).first()
+            if not catalog:
+                return api_response(message="所选章节不属于当前课程", code=400, status=400)
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+            for chunk in upload.chunks():
+                tmp.write(chunk)
+            tmp_path = tmp.name
+
+        try:
+            magic = _IMPORT_MAGIC.get(ext)
+            if magic:
+                with open(tmp_path, "rb") as f:
+                    if not f.read(len(magic)).startswith(magic):
+                        return api_response(
+                            message="文件内容与扩展名不符，请确认文件未损坏且格式正确",
+                            code=400, status=400,
+                        )
+            started = time.monotonic()
+            text = extract_text_with_tables(tmp_path)
+            parse_ms = int((time.monotonic() - started) * 1000)
+        finally:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+        if not text.strip():
+            return api_response(
+                message="未能提取到文本内容（扫描件/图片型文档暂不支持，或文件已损坏），请转换后可重试",
+                code=400, status=400,
+            )
+        drafts = parse_questions(text)
+        if not drafts:
+            return api_response(
+                message="未能识别出题目，请确认文档包含题号、选项、答案等结构（可下载导入模板参考格式）",
+                code=400, status=400,
+            )
+
+        batch = QuestionDraftBatch(
+            origin=QuestionDraftBatch.Origin.IMPORT,
+            course=course,
+            catalog=catalog,
+            creator=request.user,
+            file_name=upload.name[:255],
+            drafts=drafts,
+            raw_text=text[:RAW_TEXT_LIMIT],
+            stats={
+                "total": len(drafts),
+                "warned": sum(1 for d in drafts if d.get("_warnings")),
+                "truncated": len(text) > RAW_TEXT_LIMIT,
+                "parse_ms": parse_ms,
+            },
+        )
+        batch.save()
+        # 上传文件转入 FileField 存储（upload_to 自动 uuid 化命名，入库即删时清理）
+        batch.file.save(upload.name, upload, save=True)
+
+        return api_response(
+            QuestionDraftBatchSerializer(batch).data,
+            message=f"已识别 {len(drafts)} 道题目，请预览编辑后入库",
+        )
+
+
+class QuestionDraftBatchViewSet(BaseModelViewSet):
+    """题目草稿批次：导入/AI 生成共用的待入库池（恢复入口 + 防抖回传 + 批量入库）。
+
+    权限：IsTeacherOrAdmin；行级过滤 course__teacher=user（平台管理员全量），
+    不用 courses_for_user（其包含学生 enrolled 课程，会泄露答案解析，附录 B-2）。
+    """
+
+    serializer_class = QuestionDraftBatchSerializer
+    permission_classes = [IsTeacherOrAdmin]
+    filterset_fields = ["course", "status", "origin"]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = QuestionDraftBatch.objects.select_related("course", "catalog")
+        if is_platform_admin(user):
+            return qs.order_by("-id")
+        return qs.filter(course__teacher=user).order_by("-id")
+
+    def perform_update(self, serializer):
+        drafts = serializer.validated_data.get("drafts")
+        if drafts is not None and not all(isinstance(d, dict) for d in drafts):
+            raise ValidationError({"drafts": "草稿数据格式不正确"})
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        # 放弃批次：先删文件再删行（入库即删的同款清理）
+        if instance.file:
+            instance.file.delete(save=False)
+        instance.delete()
+
+    @action(detail=True, methods=["post"], url_path="save")
+    def save_drafts(self, request, pk=None):
+        """批量入库：body {items:[草稿...]}（教师勾选/编辑后的子集）。
+
+        流水线见 draft_pipeline.save_batch_drafts；部分失败不整批回滚，
+        失败项留批次内可修正重试；精确查重防重复入库（附录 B-3）。
+        """
+        batch = self.get_object()
+        try:
+            result = save_batch_drafts(batch, request.data.get("items"), request.user)
+        except ValidationError as exc:
+            detail = exc.detail[0] if isinstance(exc.detail, list) and exc.detail else exc.detail
+            return api_response(message=str(detail), code=400, status=400)
+        saved_n = len(result["saved"])
+        message = f"已入库 {saved_n} 题"
+        if result["skipped"]:
+            message += f"，跳过 {result['skipped']} 题（题库已存在相同题干）"
+        if result["failed"]:
+            message += f"，{len(result['failed'])} 题待修正"
+        return api_response(result, message=message)
 
 
 class AnswerRecordViewSet(BaseModelViewSet):

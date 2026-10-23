@@ -7,7 +7,7 @@ from rest_framework import serializers
 
 from apps.courses.models import Catalog
 
-from .models import AnswerRecord, Question
+from .models import AnswerRecord, Question, QuestionDraftBatch
 
 
 class QuestionSerializer(serializers.ModelSerializer):
@@ -67,6 +67,40 @@ class QuestionSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({"answer": f"第{i}空的分值必须是数字"})
             if score <= 0:
                 raise serializers.ValidationError({"answer": f"第{i}空的分值必须大于 0"})
+
+
+class QuestionDraftBatchSerializer(serializers.ModelSerializer):
+    """题目草稿批次：导入/AI 生成共用的待入库池。
+
+    drafts 可写（PATCH 防抖回传编辑后的草稿）；origin/course/file_name/stats/status
+    只读（服务端流转字段，前端不可直改）。
+    """
+
+    origin_display = serializers.CharField(source="get_origin_display", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    course_name = serializers.CharField(source="course.name", read_only=True)
+    catalog_title = serializers.CharField(source="catalog.title", read_only=True, default="")
+
+    class Meta:
+        model = QuestionDraftBatch
+        fields = [
+            "id", "origin", "origin_display", "course", "course_name", "catalog", "catalog_title",
+            "file_name", "drafts", "stats", "status", "status_display", "created_at",
+        ]
+        read_only_fields = ["origin", "course", "file_name", "stats", "status"]
+
+    def validate_drafts(self, value):
+        if not isinstance(value, list) or not all(isinstance(d, dict) for d in value):
+            raise serializers.ValidationError("草稿数据格式不正确")
+        return value
+
+    def validate(self, attrs):
+        instance = self.instance
+        course = attrs.get("course", getattr(instance, "course", None))
+        catalog = attrs.get("catalog", getattr(instance, "catalog", None))
+        if catalog is not None and course and catalog.course_id != course.id:
+            raise serializers.ValidationError({"catalog": "所选章节不属于当前课程"})
+        return attrs
 
 
 class StudentQuestionSerializer(serializers.ModelSerializer):

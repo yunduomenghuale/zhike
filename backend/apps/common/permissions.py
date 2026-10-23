@@ -27,6 +27,18 @@ class IsPlatformAdmin(BasePermission):
         )
 
 
+class IsTeacherOrAdmin(BasePermission):
+    """教师或平台管理员可操作（平台管理系统内享有全量数据访问）。"""
+
+    message = "仅教师或平台管理员可操作"
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not (user and user.is_authenticated):
+            return False
+        return bool(user.is_teacher or user.role == "admin" or user.is_superuser)
+
+
 class IsTeacherOrReadOnly(BasePermission):
     """教师可写，其余登录用户只读。"""
 
