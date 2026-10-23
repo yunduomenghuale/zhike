@@ -1,6 +1,29 @@
 <template>
   <div class="page-container">
     <el-card shadow="never" class="data-card q-card">
+      <!-- AI 生题进行中恢复横幅（离开页面不丢失：轮询继续，仅隐藏横幅） -->
+      <el-alert
+        v-if="aiTask && !isTerminal(aiTask.status) && !bannerHidden"
+        class="ai-active-banner"
+        type="info"
+        :closable="true"
+        @close="bannerHidden = true"
+      >
+        <template #title>
+          <span class="ai-active-title">AI 生题进行中</span>
+          <span class="ai-active-msg">{{ aiTask.progress?.message || '任务排队中…' }}</span>
+        </template>
+        <div class="ai-active-progress">
+          <el-progress
+            :percentage="progressPercent"
+            :stroke-width="8"
+            :show-text="true"
+            :text-inside="true"
+          />
+          <span class="ai-active-tip">生成过程中离开页面不会丢失，完成后自动打开预览</span>
+        </div>
+      </el-alert>
+
       <div class="q-toolbar">
         <div class="q-toolbar-left">
           <el-select v-if="!inCourseWorkspace" v-model="courseId" size="large" class="module-select" popper-class="module-select-popper" placeholder="选择课程" style="width: 220px" @change="handleCourseChange">
@@ -19,7 +42,11 @@
           </el-select>
         </div>
         <div class="q-toolbar-actions">
-          <el-button v-if="courseId" class="q-btn-ai" :icon="MagicStick" @click="openAi">AI 生成</el-button>
+          <el-button v-if="courseId" class="q-btn-batch" :icon="Files" @click="openBatches">
+            草稿批次<el-badge v-if="batchCount" :value="batchCount" class="q-batch-badge" type="primary" />
+          </el-button>
+          <el-button v-if="courseId" class="q-btn-ai" :icon="MagicStick" @click="aiGenVisible = true">AI 生成</el-button>
+          <el-button v-if="courseId" class="q-btn-import" :icon="UploadFilled" @click="importVisible = true">导入题目</el-button>
           <el-button v-if="courseId" class="q-btn-primary" type="primary" :icon="Plus" @click="openEdit()">新建题目</el-button>
         </div>
       </div>
@@ -35,7 +62,7 @@
         <el-empty v-else-if="!rows.length" :image-size="110">
           <template #description>
             <div class="empty-text">还没有题目</div>
-            <div class="empty-tip">点击右上角「新建题目」或「AI 生成」开始建题</div>
+            <div class="empty-tip">点击右上角「新建题目」「导入题目」或「AI 生成」开始建题</div>
           </template>
         </el-empty>
         <div v-else class="q-list animate-list">
@@ -49,8 +76,8 @@
                   <el-tag size="small" effect="plain" round>{{ row.catalog_title }}</el-tag>
                   <span class="q-score">{{ row.score }} 分</span>
                   <el-tag size="small" :type="statusTag(row.status)" effect="light" round>{{ row.status_display }}</el-tag>
-                  <el-tag size="small" :type="row.source === 'ai' ? 'primary' : 'info'" effect="plain" round>
-                    {{ row.source === 'ai' ? 'AI 生成' : '手动录入' }}
+                  <el-tag size="small" :type="sourceTag(row.source)[1]" effect="plain" round>
+                    {{ sourceTag(row.source)[0] }}
                   </el-tag>
                 </div>
               </div>
@@ -79,7 +106,7 @@
       </template>
     </el-card>
 
-    <!-- 新建/编辑题目 -->
+    <!-- 新建/编辑题目（表单字段组件化，与草稿预览共用） -->
     <el-dialog v-model="editVisible" width="760px" align-center :show-close="false" class="question-form-dialog">
       <template #header>
         <div class="creation-dialog-header">
@@ -93,81 +120,7 @@
       </template>
 
       <el-form :model="form" label-position="top" class="question-creation-form">
-        <div class="form-row">
-          <el-form-item label="题型" class="question-type-field">
-            <el-select v-model="form.qtype" class="module-select" popper-class="module-select-popper" style="width: 160px" @change="onTypeChange">
-              <el-option v-for="t in qtypes" :key="t.value" :label="t.label" :value="t.value" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="所属章节（必选）" class="form-row-grow">
-            <el-select v-model="form.catalog" class="module-select" popper-class="module-select-popper" placeholder="请选择题目所属章节" style="width: 100%">
-              <el-option v-for="c in flatCatalogs" :key="c.id" :label="c.label" :value="c.id" />
-            </el-select>
-          </el-form-item>
-        </div>
-        <el-form-item label="题干">
-          <el-input v-model="form.stem" type="textarea" :rows="2" placeholder="请输入题干" />
-        </el-form-item>
-
-        <!-- 选项（单选/多选） -->
-        <el-form-item v-if="form.qtype === 'single' || form.qtype === 'multi'" label="选项">
-          <div class="opt-editor">
-            <div v-for="(opt, i) in form.options" :key="opt.key" class="opt-row">
-              <el-tag>{{ opt.key }}</el-tag>
-              <el-input v-model="opt.text" placeholder="选项内容" />
-              <el-button
-                size="small"
-                :type="isCorrect(opt.key) ? 'success' : ''"
-                :plain="!isCorrect(opt.key)"
-                @click="toggleCorrect(opt.key)"
-              >{{ isCorrect(opt.key) ? '✓ 正确答案' : '设为答案' }}</el-button>
-              <el-button link type="danger" :icon="Delete" @click="form.options.splice(i, 1)" />
-            </div>
-            <el-button link type="primary" :icon="Plus" @click="addOption">添加选项</el-button>
-          </div>
-        </el-form-item>
-
-        <!-- 判断题答案 -->
-        <el-form-item v-else-if="form.qtype === 'judge'" label="答案">
-          <el-radio-group v-model="form.answerKey">
-            <el-radio value="A">正确</el-radio>
-            <el-radio value="B">错误</el-radio>
-          </el-radio-group>
-        </el-form-item>
-
-        <!-- 填空答案（按空单独赋分） -->
-        <el-form-item v-else-if="form.qtype === 'blank'" label="答案">
-          <div class="opt-editor">
-            <div v-for="(b, i) in form.blanks" :key="i" class="opt-row blank-row">
-              <span class="blank-idx">第{{ i + 1 }}空</span>
-              <el-input v-model="b.text" placeholder="正确答案" />
-              <el-input-number v-model="b.score" class="blank-score-input" :min="1" :max="100" :controls="false" placeholder="分值" />
-              <span class="blank-score-unit">分</span>
-              <el-button link type="danger" :icon="Delete" @click="form.blanks.splice(i, 1)" />
-            </div>
-            <el-button link type="primary" :icon="Plus" @click="addBlank">添加空</el-button>
-          </div>
-        </el-form-item>
-
-        <!-- 简答题参考答案（主观题无唯一标准答案，供学生作答与教师批改参考） -->
-        <el-form-item v-else-if="form.qtype === 'short'" label="参考答案">
-          <el-input v-model="form.answerText" type="textarea" :rows="2" placeholder="选填：本题的参考要点，学生端以「参考答案」展示" />
-        </el-form-item>
-
-        <el-form-item label="解析">
-          <el-input v-model="form.analysis" type="textarea" :rows="2" placeholder="选填" />
-        </el-form-item>
-        <el-form-item label="分值/难度">
-          <span v-if="form.qtype === 'blank'" class="blank-total-score">
-            合计 <b>{{ blankScoreTotal }}</b> 分<em>（按空自动累计）</em>
-          </span>
-          <el-input-number v-else v-model="form.score" :min="1" :max="100" />
-          <el-select v-model="form.difficulty" class="module-select" popper-class="module-select-popper" style="width: 120px; margin-left: 12px">
-            <el-option label="简单" value="easy" />
-            <el-option label="中等" value="medium" />
-            <el-option label="困难" value="hard" />
-          </el-select>
-        </el-form-item>
+        <QuestionFormFields ref="formFields" v-model="form" :catalogs="flatCatalogs" show-catalog />
       </el-form>
       <template #footer>
         <div class="creation-dialog-footer">
@@ -189,59 +142,80 @@
       @confirm="confirmDelete"
     />
 
-    <!-- AI 生成 -->
-    <el-dialog v-model="aiVisible" width="560px" align-center class="ai-dialog" :show-close="false">
+    <!-- 草稿批次列表（文档导入 / AI 生题待入库池） -->
+    <el-dialog v-model="batchesVisible" width="680px" align-center class="batch-dialog" :show-close="false">
       <template #header>
         <div class="creation-dialog-header">
-          <span class="creation-dialog-icon ai-create-icon"><el-icon><MagicStick /></el-icon></span>
+          <span class="creation-dialog-icon batch-create-icon"><el-icon><Files /></el-icon></span>
           <div class="creation-dialog-heading">
-            <div class="creation-dialog-title">AI 自动出题</div>
-            <div class="creation-dialog-subtitle">智能生成题目</div>
+            <div class="creation-dialog-title">草稿批次</div>
+            <div class="creation-dialog-subtitle">导入 / AI 生成的待入库题目，离开页面也不会丢失</div>
           </div>
-          <el-button text circle class="creation-dialog-close" :icon="Close" @click="aiVisible = false" />
+          <el-button text circle class="creation-dialog-close" :icon="Close" @click="batchesVisible = false" />
         </div>
       </template>
-
-      <div class="ai-hint">
-        <el-icon class="ai-hint-icon"><InfoFilled /></el-icon>
-        <span>生成的题目为<b>草稿</b>，可先编辑再发布。未配置真实大模型时返回示例题。</span>
+      <div v-if="batchesLoading" class="batch-body"><el-skeleton :rows="3" animated /></div>
+      <el-empty v-else-if="!batches.length" description="暂无待入库的草稿批次" :image-size="90" />
+      <div v-else class="batch-list">
+        <div v-for="b in batches" :key="b.id" class="batch-row">
+          <div class="batch-row-main">
+            <el-tag size="small" :type="b.origin === 'ai_gen' ? 'primary' : 'info'" effect="light" round>
+              {{ b.origin === 'ai_gen' ? 'AI 生成' : '文档导入' }}
+            </el-tag>
+            <span class="batch-row-title">{{ b.catalog_title || '未设置章节' }}</span>
+            <span class="batch-row-meta">{{ b.drafts?.length || 0 }} 题待入库</span>
+            <span v-if="b.file_name" class="batch-row-meta" :title="b.file_name">{{ b.file_name }}</span>
+          </div>
+          <div class="batch-row-actions">
+            <el-button link type="primary" @click="openPreview(b.id)">预览并入库</el-button>
+            <el-button link type="danger" @click="discardBatch(b)">放弃</el-button>
+          </div>
+        </div>
       </div>
-
-      <el-form label-position="top" class="ai-form">
-        <el-form-item label="章节">
-          <el-select v-model="ai.catalog" class="module-select" popper-class="module-select-popper" placeholder="选择章节（基于其 PPT 出题）" style="width: 100%">
-            <el-option v-for="c in flatCatalogs" :key="c.id" :label="c.label" :value="c.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="题型">
-          <el-select v-model="ai.qtype" class="module-select" popper-class="module-select-popper" style="width: 200px">
-            <el-option v-for="t in qtypes" :key="t.value" :label="t.label" :value="t.value" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="数量">
-          <el-input-number v-model="ai.count" :min="1" :max="20" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <div class="creation-dialog-footer">
-          <el-button @click="aiVisible = false">取消</el-button>
-          <el-button class="q-btn-primary" type="primary" :icon="MagicStick" :loading="aiLoading" @click="doGenerate">生成题目</el-button>
-        </div>
-      </template>
     </el-dialog>
+
+    <!-- 导入题目 -->
+    <QuestionImportDialog
+      v-model:visible="importVisible"
+      :course-id="courseId"
+      :course-name="currentCourseName"
+      :catalogs="flatCatalogs"
+      @imported="onImported"
+    />
+
+    <!-- AI 多类型生题 -->
+    <QuestionAiGenerateDialog
+      v-model:visible="aiGenVisible"
+      :course-id="courseId"
+      :catalogs="flatCatalogs"
+      @submitted="onAiSubmitted"
+    />
+
+    <!-- 草稿批次预览编辑与入库（导入 / AI 共用） -->
+    <QuestionDraftPreview
+      v-model:visible="previewVisible"
+      :batch-id="previewBatchId"
+      :catalogs="flatCatalogs"
+      @saved="onBatchSaved"
+    />
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { Plus, Delete, EditPen, MagicStick, Promotion, Remove, InfoFilled, Close } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { Plus, Delete, EditPen, MagicStick, Promotion, Remove, Close, Files, UploadFilled } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
+import QuestionFormFields from '@/components/QuestionFormFields.vue'
+import QuestionDraftPreview from '@/components/QuestionDraftPreview.vue'
+import QuestionImportDialog from '@/components/QuestionImportDialog.vue'
+import QuestionAiGenerateDialog from '@/components/QuestionAiGenerateDialog.vue'
+import { useAiTaskPolling } from '@/composables/useAiTaskPolling'
+import { listActiveAiTasks } from '@/api/ai-task'
 import { listCourses, listCatalogs } from '@/api/course'
-import {
-  listQuestions, createQuestion, updateQuestion, deleteQuestion, generateQuestions,
-} from '@/api/question'
+import { listQuestions, createQuestion, updateQuestion, deleteQuestion, listDraftBatches } from '@/api/question'
+import { draftToForm } from '@/utils/questionDraft'
 
 const qtypes = [
   { value: 'single', label: '单选题' },
@@ -270,6 +244,7 @@ const deleteTarget = ref(null)
 const deleting = ref(false)
 
 const flatCatalogs = ref([]) // 扁平化章节：[{id, label}]
+const currentCourseName = computed(() => courses.value.find((c) => c.id === courseId.value)?.name || '')
 
 function difficultyTag(d) {
   return { easy: 'success', medium: 'warning', hard: 'danger' }[d] || 'info'
@@ -277,12 +252,19 @@ function difficultyTag(d) {
 function statusTag(s) {
   return { published: 'success', disabled: 'info', draft: 'warning', pending: 'warning' }[s] || 'info'
 }
+// 题目来源三态：AI 生成 / 文档导入 / 手动录入
+function sourceTag(s) {
+  if (s === 'ai') return ['AI 生成', 'primary']
+  if (s === 'import') return ['文档导入', 'warning']
+  return ['手动录入', 'info']
+}
 
 async function loadCourses() {
   if (fixedCourseId.value) {
     courseId.value = fixedCourseId.value
     load()
     loadCatalogs()
+    refreshBatchCount()
     return
   }
   const data = await listCourses()
@@ -291,6 +273,7 @@ async function loadCourses() {
     courseId.value = courses.value[0].id
     load()
     loadCatalogs()
+    refreshBatchCount()
   }
 }
 
@@ -311,6 +294,7 @@ function handleCourseChange() {
   page.value = 1
   loadCatalogs()
   load()
+  refreshBatchCount()
 }
 
 async function load() {
@@ -329,9 +313,10 @@ async function load() {
   }
 }
 
-// ---- 新建/编辑 ----
+// ---- 新建/编辑（表单字段由 QuestionFormFields 组件渲染） ----
 const editVisible = ref(false)
 const saving = ref(false)
+const formFields = ref(null)
 const form = reactive({})
 
 function blankForm() {
@@ -343,105 +328,35 @@ function blankForm() {
   }
 }
 
-/** 载入既有填空题答案：旧版字符串按题库总分均分预填（与后端 _split_score 同口径：余数补给前几个空） */
-function loadBlanks(blanks, totalScore) {
-  const list = Array.isArray(blanks) && blanks.length ? blanks : ['']
-  const n = list.length
-  const tenths = Math.round(Number(totalScore || 0) * 10)
-  const base = Math.floor(tenths / n)
-  const rem = tenths % n
-  return list.map((b, i) => {
-    if (typeof b === 'string') return { text: b, score: (base + (i < rem ? 1 : 0)) / 10 || 1 }
-    return { text: b?.text || '', score: Number(b?.score) || 1 }
-  })
-}
-
 function openEdit(row) {
   if (!row && !flatCatalogs.value.length) return ElMessage.warning('请先在课程目录中创建章节')
   Object.assign(form, blankForm())
   if (row) {
+    Object.assign(form, draftToForm({
+      qtype: row.qtype, stem: row.stem, options: row.options,
+      answer: row.answer, analysis: row.analysis, score: row.score, difficulty: row.difficulty,
+    }))
     form.id = row.id
     form.catalog = row.catalog
-    form.qtype = row.qtype
-    form.stem = row.stem
-    form.options = (row.options && row.options.length) ? JSON.parse(JSON.stringify(row.options)) : form.options
-    form.answerKey = row.answer?.key || ''
-    form.answerKeys = row.answer?.keys || []
-    form.blanks = loadBlanks(row.answer?.blanks, row.score)
-    form.answerText = row.answer?.text || ''
-    form.analysis = row.analysis || ''
-    form.score = Number(row.score) || 5
-    form.difficulty = row.difficulty || 'medium'
     form.status = row.status || 'draft'
   }
   editVisible.value = true
 }
 
-function onTypeChange() {
-  form.answerKey = ''
-  form.answerKeys = []
-  form.answerText = ''
-}
-
-function isCorrect(key) {
-  return form.qtype === 'single' ? form.answerKey === key : form.answerKeys.includes(key)
-}
-function toggleCorrect(key) {
-  if (form.qtype === 'single') {
-    form.answerKey = key
-  } else {
-    const idx = form.answerKeys.indexOf(key)
-    if (idx >= 0) form.answerKeys.splice(idx, 1)
-    else form.answerKeys.push(key)
-  }
-}
-function addOption() {
-  const key = String.fromCharCode(65 + form.options.length)
-  form.options.push({ key, text: '' })
-}
-function addBlank() {
-  form.blanks.push({ text: '', score: 1 })
-}
-
-const blankScoreTotal = computed(() =>
-  form.blanks.reduce((sum, b) => sum + (Number(b?.score) || 0), 0)
-)
-
-function buildAnswer() {
-  if (form.qtype === 'single' || form.qtype === 'judge') return { key: form.answerKey }
-  if (form.qtype === 'multi') return { keys: form.answerKeys }
-  // 填空题：按空赋分，总分由后端按 Σ空分重算
-  if (form.qtype === 'blank') {
-    return {
-      blanks: form.blanks
-        .filter((b) => b.text && b.text.trim())
-        .map((b) => ({ text: b.text.trim(), score: Number(b.score) || 0 })),
-    }
-  }
-  // 简答题：参考答案（answer.text），学生端/教师端批改页以「参考答案」展示
-  if (form.qtype === 'short') return form.answerText.trim() ? { text: form.answerText.trim() } : {}
-  return {}
-}
-function buildOptions() {
-  if (form.qtype === 'single' || form.qtype === 'multi') return form.options.filter((o) => o.text !== '')
-  if (form.qtype === 'judge') return [{ key: 'A', text: '正确' }, { key: 'B', text: '错误' }]
-  return []
-}
-
 async function save(publish = false) {
-  if (!form.stem) return ElMessage.warning('请填写题干')
+  if (!form.stem?.trim()) return ElMessage.warning('请填写题干')
   if (!form.catalog) return ElMessage.warning('请选择题目所属章节')
+  const normalized = formFields.value?.normalize() || {}
   if (form.qtype === 'blank') {
-    const filled = form.blanks.filter((b) => b.text && b.text.trim())
+    const filled = normalized.answer?.blanks || []
     if (!filled.length) return ElMessage.warning('请至少填写一个空的答案')
     if (filled.some((b) => !(Number(b.score) > 0))) return ElMessage.warning('每个空的分值必须大于 0')
   }
-  // 新建默认草稿；“创建并发布/保存并发布”直接发布，减少后续单独点发布的操作
+  // 新建默认草稿；“创建并发布/保存并发布”直接发布，减少后续单独点发布操作
   const status = publish ? 'published' : (form.id ? form.status || 'draft' : 'draft')
   const payload = {
-    course: courseId.value, catalog: form.catalog, qtype: form.qtype, stem: form.stem,
-    options: buildOptions(), answer: buildAnswer(), analysis: form.analysis,
-    score: form.score, difficulty: form.difficulty, status,
+    course: courseId.value, catalog: form.catalog,
+    ...normalized, status,
   }
   saving.value = true
   try {
@@ -490,39 +405,117 @@ async function confirmDelete() {
   }
 }
 
-// ---- AI 生成 ----
-const aiVisible = ref(false)
-const aiLoading = ref(false)
-const ai = reactive({ qtype: 'single', count: 5, catalog: null })
-function openAi() {
-  if (!flatCatalogs.value.length) return ElMessage.warning('请先在课程目录中创建章节')
-  ai.qtype = 'single'
-  ai.count = 5
-  ai.catalog = null
-  aiVisible.value = true
-}
-async function doGenerate() {
-  if (!ai.catalog) return ElMessage.warning('请选择题目所属章节')
-  aiLoading.value = true
+// ---- 草稿批次 ----
+const batchesVisible = ref(false)
+const batchesLoading = ref(false)
+const batches = ref([])
+const batchCount = ref(0)
+const importVisible = ref(false) // 文档导入弹窗
+const aiGenVisible = ref(false) // AI 多类型生题弹窗
+
+async function refreshBatchCount() {
+  if (!courseId.value) return
   try {
-    const res = await generateQuestions({
-      course: courseId.value, catalog: ai.catalog, count: ai.count,
-      qtype: ai.qtype,
-    })
-    const generatedCount = Array.isArray(res) ? res.length : 0
-    if (generatedCount > 0) {
-      ElMessage.success(`已生成 ${generatedCount} 道草稿题目，请审核后发布`)
-    } else {
-      ElMessage.warning('AI 未返回可用题目，请调整章节资料或题型后重试')
-    }
-    aiVisible.value = false
-    load()
-  } finally {
-    aiLoading.value = false
+    const data = await listDraftBatches({ course: courseId.value, status: 'parsed' })
+    batchCount.value = Number(data.count ?? data.total ?? (data.results || []).length)
+  } catch {
+    batchCount.value = 0
   }
 }
 
-onMounted(loadCourses)
+async function openBatches() {
+  batchesVisible.value = true
+  batchesLoading.value = true
+  try {
+    const data = await listDraftBatches({ course: courseId.value, status: 'parsed' })
+    batches.value = data.results ?? data
+  } finally {
+    batchesLoading.value = false
+  }
+}
+
+async function discardBatch(b) {
+  try {
+    await ElMessageBox.confirm(
+      '放弃后批次内未入库的题目将一并删除，此操作无法撤销。',
+      '放弃该草稿批次？',
+      { type: 'warning', confirmButtonText: '放弃', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  const { deleteDraftBatch } = await import('@/api/question')
+  await deleteDraftBatch(b.id)
+  ElMessage.success('已放弃该批次')
+  batches.value = batches.value.filter((item) => item.id !== b.id)
+  refreshBatchCount()
+}
+
+// ---- 预览（导入 / AI 生题共用入口） ----
+const previewVisible = ref(false)
+const previewBatchId = ref(null)
+
+function openPreview(batchId) {
+  previewBatchId.value = batchId
+  previewVisible.value = true
+  batchesVisible.value = false
+}
+function onImported(batch) {
+  openPreview(batch.id)
+  refreshBatchCount()
+}
+function onBatchSaved() {
+  load()
+  refreshBatchCount()
+  if (batchesVisible.value) openBatches()
+}
+
+// ---- AI 多类型生题（异步轮询 + 离开页面恢复） ----
+const { task: aiTask, start: startPolling } = useAiTaskPolling()
+const bannerHidden = ref(false)
+const TERMINAL_STATUS = new Set(['success', 'failed'])
+const isTerminal = (s) => TERMINAL_STATUS.has(s)
+const progressPercent = computed(() => {
+  const p = aiTask.value?.progress
+  if (!p || !p.total) return 0
+  return Math.round(((p.done || 0) / p.total) * 100)
+})
+
+function handleAiTask(taskId) {
+  bannerHidden.value = false
+  startPolling(taskId, {
+    onSuccess: (t) => {
+      if (t.result?.degraded) {
+        ElMessage.warning('部分题型生成失败，已生成的题目可继续预览入库')
+      }
+      if (t.result?.batch_id) openPreview(t.result.batch_id)
+      refreshBatchCount()
+    },
+    onFailed: (t) => {
+      ElMessage.error(t.error || 'AI 生题失败，请重试')
+    },
+  })
+}
+function onAiSubmitted({ taskId }) {
+  handleAiTask(taskId)
+}
+
+// 恢复入口：进入页面时如有进行中的生题任务，自动续轮询（进度横幅展示）
+async function checkActiveAiTasks() {
+  try {
+    const list = await listActiveAiTasks()
+    if (Array.isArray(list) && list.length) {
+      handleAiTask(list[0].id)
+    }
+  } catch {
+    // 恢复检查失败不阻塞页面（任务仍在后台执行，稍后可从草稿批次/再次进入恢复）
+  }
+}
+
+onMounted(() => {
+  loadCourses()
+  checkActiveAiTasks()
+})
 
 watch(
   () => route.query.search,
@@ -567,10 +560,35 @@ watch(
   flex-wrap: wrap;
 }
 
+/* AI 生题进行中横幅 */
+.ai-active-banner {
+  margin-bottom: 12px;
+  border-radius: 14px;
+}
+.ai-active-title {
+  font-weight: 700;
+  margin-right: 10px;
+}
+.ai-active-msg {
+  color: var(--gray-600);
+}
+.ai-active-progress {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 6px;
+}
+.ai-active-progress :deep(.el-progress) {
+  flex: 1;
+  max-width: 320px;
+}
+.ai-active-tip {
+  color: #94a3b8;
+  font-size: 12.5px;
+}
+
 .question-form-dialog :deep(.el-dialog),
-.ai-dialog :deep(.el-dialog),
-:global(.question-form-dialog.el-dialog),
-:global(.ai-dialog.el-dialog) {
+.batch-dialog :deep(.el-dialog) {
   overflow: hidden;
   border: 1px solid rgba(147, 197, 253, 0.45);
   border-radius: 22px;
@@ -579,22 +597,18 @@ watch(
 }
 
 .question-form-dialog :deep(.el-dialog__header),
-.ai-dialog :deep(.el-dialog__header),
-:global(.question-form-dialog.el-dialog .el-dialog__header),
-:global(.ai-dialog.el-dialog .el-dialog__header) {
+.batch-dialog :deep(.el-dialog__header) {
   margin: 0;
   padding: 0;
 }
 
 .question-form-dialog :deep(.el-dialog__body),
-:global(.question-form-dialog.el-dialog .el-dialog__body) {
+.batch-dialog :deep(.el-dialog__body) {
   padding: 0;
 }
 
 .question-form-dialog :deep(.el-dialog__footer),
-.ai-dialog :deep(.el-dialog__footer),
-:global(.question-form-dialog.el-dialog .el-dialog__footer),
-:global(.ai-dialog.el-dialog .el-dialog__footer) {
+.batch-dialog :deep(.el-dialog__footer) {
   padding: 0;
 }
 
@@ -624,10 +638,10 @@ watch(
   box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.11);
 }
 
-.ai-create-icon {
-  color: #fff;
-  background: linear-gradient(140deg, #60a5fa, #2563eb);
-  box-shadow: 0 10px 20px rgba(37, 99, 235, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+.batch-create-icon {
+  color: #7c3aed;
+  background: #f5f3ff;
+  box-shadow: inset 0 0 0 1px rgba(124, 58, 237, 0.12);
 }
 
 .creation-dialog-heading {
@@ -666,24 +680,11 @@ watch(
   overflow-y: auto;
 }
 
-/* 题型 + 章节 并排一行，压缩纵向高度 */
-.form-row {
-  display: flex;
-  gap: 14px;
-  flex-wrap: wrap;
-}
-.form-row-grow {
-  flex: 1;
-  min-width: 200px;
-}
-
-.question-creation-form :deep(.el-form-item),
-.ai-form :deep(.el-form-item) {
+.question-creation-form :deep(.el-form-item) {
   margin-bottom: 12px;
 }
 
-.question-creation-form :deep(.el-form-item__label),
-.ai-form :deep(.el-form-item__label) {
+.question-creation-form :deep(.el-form-item__label) {
   height: auto;
   padding: 0 0 7px;
   color: #475569;
@@ -694,10 +695,7 @@ watch(
 
 .question-creation-form :deep(.el-input__wrapper),
 .question-creation-form :deep(.el-select__wrapper),
-.question-creation-form :deep(.el-input-number),
-.ai-form :deep(.el-input__wrapper),
-.ai-form :deep(.el-select__wrapper),
-.ai-form :deep(.el-input-number) {
+.question-creation-form :deep(.el-input-number) {
   min-height: 38px;
   border-radius: 10px;
   background: #f8fbff;
@@ -716,11 +714,6 @@ watch(
   border-color: var(--primary-500);
   background: #fff;
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
-}
-
-.question-type-field {
-  width: 160px;
-  flex: 0 0 160px;
 }
 
 .creation-dialog-footer {
@@ -742,11 +735,15 @@ watch(
   box-shadow: 0 9px 18px rgba(37, 99, 235, 0.22);
 }
 
-.q-btn-ai {
+.q-btn-ai,
+.q-btn-batch,
+.q-btn-import {
   height: 40px;
   padding: 0 18px;
   border-radius: 12px;
   font-weight: 700;
+}
+.q-btn-ai {
   color: var(--primary-600);
   border-color: rgba(37, 99, 235, 0.24);
   background: rgba(255, 255, 255, 0.9);
@@ -756,6 +753,31 @@ watch(
   color: var(--primary-600);
   border-color: rgba(37, 99, 235, 0.5);
   background: var(--primary-50);
+}
+.q-btn-batch {
+  color: #7c3aed;
+  border-color: rgba(124, 58, 237, 0.24);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05);
+}
+.q-btn-batch:hover {
+  color: #7c3aed;
+  border-color: rgba(124, 58, 237, 0.5);
+  background: #f5f3ff;
+}
+.q-btn-import {
+  color: #059669;
+  border-color: rgba(5, 150, 105, 0.24);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05);
+}
+.q-btn-import:hover {
+  color: #059669;
+  border-color: rgba(5, 150, 105, 0.5);
+  background: #ecfdf5;
+}
+.q-batch-badge {
+  margin-left: 6px;
 }
 .q-btn-primary {
   height: 40px;
@@ -877,6 +899,50 @@ watch(
 .q-action-btn.muted { color: var(--gray-500); }
 .q-action-btn.danger { color: var(--danger); }
 
+/* 草稿批次列表 */
+.batch-body {
+  padding: 16px 22px 18px;
+}
+.batch-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 22px 18px;
+}
+.batch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 16px;
+  border: 1px solid var(--gray-100);
+  border-radius: 14px;
+  background: #fff;
+}
+.batch-row-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.batch-row-title {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--gray-900);
+}
+.batch-row-meta {
+  color: #94a3b8;
+  font-size: 12.5px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.batch-row-actions {
+  flex: none;
+}
+
 @media (max-width: 768px) {
   .q-row {
     flex-direction: column;
@@ -886,71 +952,5 @@ watch(
   .q-action-group {
     justify-content: space-between;
   }
-}
-
-/* AI 出题内容区沿用创建弹窗骨架。 */
-.ai-dialog :deep(.el-dialog__body) {
-  padding: 18px 24px 4px;
-}
-.ai-hint {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  margin-bottom: 18px;
-  padding: 11px 14px;
-  border: 1px solid rgba(37, 99, 235, 0.12);
-  border-radius: 12px;
-  background: linear-gradient(180deg, rgba(239, 246, 255, 0.9), rgba(219, 234, 254, 0.5));
-  color: var(--gray-600);
-  font-size: 13px;
-  line-height: 1.6;
-}
-.ai-hint b { color: var(--primary-700); font-weight: 700; }
-.ai-hint-icon { flex: 0 0 auto; font-size: 17px; color: var(--primary-600); }
-
-.opt-editor {
-  width: 100%;
-}
-.opt-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-.blank-idx {
-  color: #64748b;
-  font-size: 13px;
-  white-space: nowrap;
-}
-.blank-row .el-input {
-  flex: 1;
-  min-width: 0;
-}
-.blank-score-input {
-  width: 72px;
-  flex: none;
-}
-.blank-score-input :deep(.el-input__wrapper) {
-  padding: 0 8px;
-}
-.blank-score-unit {
-  color: #64748b;
-  font-size: 13px;
-  flex: none;
-}
-.blank-total-score {
-  color: #1e293b;
-  font-size: 14px;
-}
-.blank-total-score b {
-  color: #2563eb;
-  font-size: 16px;
-  margin: 0 2px;
-}
-.blank-total-score em {
-  color: #94a3b8;
-  font-size: 12px;
-  font-style: normal;
-  margin-left: 6px;
 }
 </style>
