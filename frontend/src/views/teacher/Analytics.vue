@@ -133,22 +133,17 @@
             </div>
 
             <div class="stu-warnings">
-              <template v-if="row.warnings.length">
-                <el-tag
-                  v-for="(w, i) in row.warnings.slice(0, 3)"
-                  :key="w"
-                  type="danger"
-                  size="small"
-                  effect="light"
-                  round
-                  class="warn-pulse"
-                  :title="row.warnings.length > 3 && i === 2 ? row.warnings.join('、') : undefined"
-                >{{ w }}</el-tag>
-                <span v-if="row.warnings.length > 3" class="warn-more" :title="row.warnings.join('、')">
-                  +{{ row.warnings.length - 3 }}
-                </span>
-              </template>
-              <el-tag v-else type="success" size="small" effect="light" round>正常</el-tag>
+              <el-tag
+                v-for="w in row.warnings"
+                :key="w"
+                type="danger"
+                size="small"
+                effect="light"
+                round
+                class="warn-pulse"
+                >{{ w }}</el-tag
+              >
+              <el-tag v-if="!row.warnings.length" type="success" size="small" effect="light" round>正常</el-tag>
             </div>
           </div>
 
@@ -182,7 +177,7 @@
             <span v-if="r.analyzed_count != null">分析 {{ r.analyzed_count }} 人</span>
             <span v-if="r.comment_count">简评 {{ r.comment_count }} 条</span>
           </div>
-          <div v-if="r.report_excerpt" class="history-excerpt">{{ r.report_excerpt }}…</div>
+          <div v-if="r.report_excerpt" class="history-excerpt" v-html="renderMd(r.report_excerpt)"></div>
           <div v-else-if="r.error" class="history-error">{{ r.error }}</div>
           <div v-else class="history-excerpt muted">暂无报告内容</div>
         </div>
@@ -505,9 +500,28 @@ onMounted(loadClasses)
   font-size: 13px;
   line-height: 1.6;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+/* 摘要按 markdown 渲染：标题/加粗 compact 化，配合外层 3 行夹取 */
+.history-excerpt :deep(h2),
+.history-excerpt :deep(h3) {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--gray-900);
+}
+.history-excerpt :deep(p) {
+  margin: 0;
+}
+.history-excerpt :deep(strong) {
+  color: var(--gray-900);
+}
+.history-excerpt :deep(ul),
+.history-excerpt :deep(ol) {
+  margin: 0;
+  padding-left: 18px;
 }
 .history-excerpt.muted {
   color: var(--gray-300);
@@ -715,22 +729,17 @@ onMounted(loadClasses)
   font-size: 12px;
 }
 .stu-metrics {
-  display: flex;
-  align-items: center;
-  gap: 26px;
   flex: 1;
   min-width: 0;
-  flex-wrap: wrap; /* 标签挤压时指标换行而非被 overflow:hidden 裁掉 */
+  display: grid;
+  grid-template-columns: repeat(2, minmax(140px, 1fr));
+  gap: 10px 26px;
+  align-content: center;
 }
 .metric {
   display: grid;
   gap: 5px;
-  flex: 1;
-  min-width: 74px;
-}
-.metric-practice {
-  flex: 1.8;
-  min-width: 150px;
+  min-width: 0;
 }
 .metric-label {
   display: inline-flex;
@@ -800,22 +809,36 @@ onMounted(loadClasses)
   color: var(--gray-300);
   font-size: 13px;
 }
+/* 预警区：定宽竖排滚动，标签再多也不挤压指标列 */
 .stu-warnings {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-end;
   gap: 6px;
   flex-shrink: 0;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  max-width: 220px;
+  width: 150px;
+  max-height: 100px;
+  overflow-y: auto;
+  padding: 2px 2px 2px 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--gray-300) transparent;
 }
-.warn-more {
-  padding: 0 8px;
-  border-radius: 999px;
-  color: var(--gray-500);
-  font-size: 12px;
-  background: var(--gray-100);
-  cursor: default;
+.stu-warnings::-webkit-scrollbar {
+  width: 4px;
+}
+.stu-warnings::-webkit-scrollbar-thumb {
+  border-radius: 2px;
+  background: var(--gray-300);
+}
+.stu-warnings::-webkit-scrollbar-track {
+  background: transparent;
+}
+/* 长文案预警允许在竖排列内换行，防 nowrap 溢出被卡片裁切 */
+.stu-warnings :deep(.el-tag) {
+  max-width: 100%;
+  height: auto;
+  white-space: normal;
+  text-align: left;
 }
 
 /* AI 简评条 */
@@ -849,12 +872,12 @@ onMounted(loadClasses)
     flex-basis: auto;
   }
   .stu-metrics {
-    flex-wrap: wrap;
-    gap: 14px 22px;
+    gap: 12px 16px;
   }
   .stu-warnings {
-    justify-content: flex-start;
-    max-width: none;
+    align-items: flex-start;
+    width: 100%;
+    max-height: 112px;
   }
 }
 </style>

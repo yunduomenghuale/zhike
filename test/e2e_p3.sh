@@ -1,8 +1,8 @@
 #!/bin/bash
 # P3 E2E：教师端历史报告回看 + 学生详情页 AI 章节总结查看
-# 覆盖：历史报告弹窗（字段/状态）→ 点击回看（banner+正文）→ 返回当前 →
-#       学生卡片进详情 → 章节总结六区渲染 → 切换章节空态。
-# fixtures：backend/make_p3_fixtures.py（class 1 历史报告 + 学生 12 的 catalog 5 总结）
+# 覆盖：学生卡片布局（指标 grid + 预警竖滚不重叠）→ 历史报告弹窗（excerpt markdown 渲染）
+#       → 点击回看（banner+正文）→ 返回当前 → 学生卡片进详情 → 章节总结六区渲染 → 切换章节空态。
+# fixtures：backend/make_p3_fixtures.py（class 1 历史报告 + 每生 catalog 5 总结）
 set -u
 cd /d/Claude_Code/智课系统V2 || exit 1
 LOG=test/e2e_p3.log
@@ -34,18 +34,30 @@ OUT=$(eval_retry "(async function(){for(var i=0;i<60;i++){if(document.querySelec
 echo "[students] $OUT"
 echo "$OUT" | grep -q 'STU_OK' || { echo "E2E_FAIL students"; exit 1; }
 
+# ---- 0. 学生卡片布局：指标 grid + 预警竖排滚动 + 两区不重叠 ----
+OUT=$(eval_retry "(function(){var card=document.querySelector('.stu-card'); if(!card) return 'NO_CARD'; var m=card.querySelector('.stu-metrics'); var w=card.querySelector('.stu-warnings'); if(!m||!w) return 'NO_ZONE'; var cs=getComputedStyle(m), cw=getComputedStyle(w); var mr=m.getBoundingClientRect(), wr=w.getBoundingClientRect(); var overlap=mr.right>wr.left+0.5 && wr.right>mr.left+0.5 && mr.bottom>wr.top+0.5 && wr.bottom>mr.top+0.5; return 'LAYOUT_OK disp='+cs.display+' warnDir='+cw.flexDirection+' warnOverflow='+cw.overflowY+' metrics='+card.querySelectorAll('.stu-metrics .metric').length+' overlap='+overlap})()" 'LAYOUT_OK')
+echo "[stu-layout] $OUT"
+echo "$OUT" | grep -q 'LAYOUT_OK' || { echo "E2E_FAIL stu-layout"; exit 1; }
+echo "$OUT" | grep -q 'disp=grid' || { echo "E2E_FAIL stu-metrics-grid"; exit 1; }
+echo "$OUT" | grep -q 'warnDir=column' || { echo "E2E_FAIL stu-warnings-column"; exit 1; }
+echo "$OUT" | grep -q 'warnOverflow=auto' || { echo "E2E_FAIL stu-warnings-scroll"; exit 1; }
+echo "$OUT" | grep -q 'overlap=false' || { echo "E2E_FAIL stu-overlap"; exit 1; }
+$AB screenshot test/screenshots/ai-p3-stu-card-layout.png >>"$LOG" 2>&1
+echo "[shot] ai-p3-stu-card-layout.png"
+
 # ---- 1. 历史报告弹窗：打开 + 列表字段 ----
 OUT=$(eval_retry "(function(){var b=document.querySelector('.an-history-btn'); if(!b) return 'NO_BTN'; b.click(); return 'CLICKED'})()" 'CLICKED')
 echo "[history-open] $OUT"
 echo "$OUT" | grep -q 'CLICKED' || { echo "E2E_FAIL history-open"; exit 1; }
 
-OUT=$(eval_retry "(async function(){for(var i=0;i<40;i++){var items=document.querySelectorAll('.history-item'); var vis=[]; items.forEach(function(it){if(it.getBoundingClientRect().height>0) vis.push(it)}); if(vis.length){var ex=vis[0].querySelector('.history-excerpt'); return 'HIST_OK n='+vis.length+' head='+vis[0].querySelector('.history-item-head').innerText.replace(/\\n/g,'|')+' meta='+vis[0].querySelector('.history-item-meta').innerText.replace(/\\n/g,'|')+' excerptHasHash='+(ex?ex.innerText.indexOf('#')>=0:'NA')} await new Promise(r=>setTimeout(r,300))} return 'HIST_TIMEOUT'})()" 'HIST_OK')
+OUT=$(eval_retry "(async function(){for(var i=0;i<40;i++){var items=document.querySelectorAll('.history-item'); var vis=[]; items.forEach(function(it){if(it.getBoundingClientRect().height>0) vis.push(it)}); if(vis.length){var ex=vis[0].querySelector('.history-excerpt'); return 'HIST_OK n='+vis.length+' head='+vis[0].querySelector('.history-item-head').innerText.replace(/\\n/g,'|')+' meta='+vis[0].querySelector('.history-item-meta').innerText.replace(/\\n/g,'|')+' excerptRendered='+(ex? !!ex.querySelector('h2') : 'NA')+' excerptHasHash='+(ex?ex.innerText.indexOf('#')>=0:'NA')} await new Promise(r=>setTimeout(r,300))} return 'HIST_TIMEOUT'})()" 'HIST_OK')
 echo "[history-list] $OUT"
 echo "$OUT" | grep -q 'HIST_OK' || { echo "E2E_FAIL history-list"; exit 1; }
 echo "$OUT" | grep -q '已完成' || { echo "E2E_FAIL history-status-tag"; exit 1; }
 echo "$OUT" | grep -q '分析 2 人' || { echo "E2E_FAIL history-meta"; exit 1; }
-# excerpt 为去 markdown 标记的纯文本（防止 ## 符号直接露出）
-echo "$OUT" | grep -q 'excerptHasHash=false' || { echo "E2E_FAIL history-excerpt-markdown"; exit 1; }
+# excerpt 按 markdown 渲染：标题转为 h2 元素，且正文不再露出 ## 符号
+echo "$OUT" | grep -q 'excerptRendered=true' || { echo "E2E_FAIL history-excerpt-markdown"; exit 1; }
+echo "$OUT" | grep -q 'excerptHasHash=false' || { echo "E2E_FAIL history-excerpt-hash"; exit 1; }
 $AB screenshot test/screenshots/ai-p3-history-dialog.png >>"$LOG" 2>&1
 echo "[shot] ai-p3-history-dialog.png"
 
