@@ -3,7 +3,9 @@ import { getAiTask } from '@/api/ai-task'
 
 // AI 异步任务轮询：提交后由本 composable 以固定间隔拉取任务状态，
 // 终态（success/failed）或超时后自动停止。组件卸载时停止，避免泄漏。
-const POLL_INTERVAL = 2500
+// 1.5s：报告生成 2-4 分钟，密一点的轮询让阶段进度更快可见（提交/刷新
+// 恢复后用户对「过程」的感知更及时）。
+const POLL_INTERVAL = 1500
 const POLL_TIMEOUT = 10 * 60 * 1000
 const TERMINAL = new Set(['success', 'failed'])
 

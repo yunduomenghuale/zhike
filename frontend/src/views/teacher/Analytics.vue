@@ -21,8 +21,8 @@
 
     <template v-else>
       <!-- AI 学情分析报告（异步任务：生成中渐进展示，失败可重试；可回看历史报告） -->
-      <div v-if="aiBusy || aiReport || aiFailed" class="ai-card" :class="{ 'is-loading': aiBusy }">
-        <div v-if="aiBusy && !historyTask" class="ai-body">
+      <div v-if="aiLoading || aiReport || aiFailed" class="ai-card" :class="{ 'is-loading': aiLoading }">
+        <div v-if="aiLoading && !historyTask" class="ai-body">
           <div class="ai-loading-tip">
             <el-icon class="is-loading" :size="15"><Loading /></el-icon>
             {{ aiProgressMsg }}
@@ -64,118 +64,167 @@
         </template>
       </div>
 
-      <!-- 学生卡片列表 -->
-      <TableSkeleton v-if="loading" :cols="6" />
+      <!-- 学生列表：表格（密度优先；筛选 + 排序 + 行展开看 AI 简评/全部预警） -->
+      <TableSkeleton v-if="loading" :cols="7" />
       <el-empty v-else-if="!students.length" description="班级暂无学生" />
-      <div v-else class="stu-list animate-list">
-        <div v-for="row in students" :key="row.student_id" class="stu-card" @click="goDetail(row)">
-          <div class="stu-main">
-            <div class="stu-left">
-              <span class="stu-avatar" :style="{ background: avatarBg(row.name) }">
-                {{ row.name.charAt(0) }}
-              </span>
-              <div class="stu-id">
-                <div class="stu-name">{{ row.name }}</div>
-                <div class="stu-last">最近学习：{{ fmtRelative(row.last_active) }}</div>
-              </div>
-            </div>
-
-            <div class="stu-metrics">
-              <div class="metric metric-practice">
-                <span class="metric-label">
-                  <span class="metric-ico blue"><el-icon :size="13"><Notebook /></el-icon></span>
-                  章节练习
-                </span>
-                <template v-if="row.practice_total">
-                  <div class="metric-practice-line">
-                    <span class="metric-text">{{ row.practice_correct }}/{{ row.practice_total }} 题</span>
-                    <span class="metric-acc" :style="{ color: accColor(row.accuracy) }">{{ row.accuracy }}%</span>
-                  </div>
-                  <el-progress
-                    :percentage="row.accuracy"
-                    :stroke-width="6"
-                    :color="accColor(row.accuracy)"
-                    :show-text="false"
-                    class="metric-bar"
-                  />
-                </template>
-                <span v-else class="metric-none">未做练习</span>
-              </div>
-              <div class="metric">
-                <span class="metric-label">
-                  <span class="metric-ico purple"><el-icon :size="13"><Files /></el-icon></span>
-                  作业
-                </span>
-                <strong class="metric-value" :class="{ warn: row.homework_submitted < row.homework_total }">
-                  {{ row.homework_submitted }}/{{ row.homework_total }}
-                </strong>
-              </div>
-              <div class="metric">
-                <span class="metric-label">
-                  <span class="metric-ico orange"><el-icon :size="13"><Medal /></el-icon></span>
-                  考试
-                </span>
-                <strong class="metric-value">
-                  {{ row.exam_taken }}/{{ row.exam_total }}
-                  <span v-if="row.avg_exam_score !== null" class="metric-score">· 均分 {{ row.avg_exam_score }}</span>
-                </strong>
-              </div>
-              <div v-if="row.experiment_total" class="metric">
-                <span class="metric-label">
-                  <span class="metric-ico teal"><el-icon :size="13"><Cpu /></el-icon></span>
-                  实验
-                </span>
-                <strong class="metric-value" :class="{ warn: row.experiment_done < row.experiment_total }">
-                  {{ row.experiment_done }}/{{ row.experiment_total }}
-                  <span v-if="row.avg_experiment_score !== null" class="metric-score">· 均分 {{ row.avg_experiment_score }}</span>
-                </strong>
-              </div>
-            </div>
-
-            <div class="stu-warnings">
-              <el-tag
-                v-for="w in row.warnings"
-                :key="w"
-                type="danger"
-                size="small"
-                effect="light"
-                round
-                class="warn-pulse"
-                >{{ w }}</el-tag
-              >
-              <el-tag v-if="!row.warnings.length" type="success" size="small" effect="light" round>正常</el-tag>
-            </div>
+      <template v-else>
+        <div class="stu-toolbar">
+          <div class="stu-toolbar-left">
+            <el-input
+              v-model="stuKeyword"
+              class="stu-search"
+              placeholder="搜索学生姓名"
+              :prefix-icon="Search"
+              clearable
+            />
+            <el-select v-model="warnFilter" class="stu-filter">
+              <el-option label="全部学生" value="all" />
+              <el-option label="有预警" value="warned" />
+              <el-option label="状态正常" value="normal" />
+            </el-select>
           </div>
-
-          <div v-if="aiComments[row.student_id]" class="stu-ai">
-            <el-icon :size="13" class="stu-ai-icon"><MagicStick /></el-icon>
-            <span>{{ aiComments[row.student_id] }}</span>
-          </div>
-          <div v-else-if="isNoDataStudent(row)" class="stu-ai muted">暂无学习数据，未参与本次分析</div>
-          <div v-else-if="aiBusy" class="stu-ai muted">AI 简评生成中…</div>
+          <span class="stu-count">共 {{ studentsView.length }} 人</span>
         </div>
-      </div>
+
+        <el-empty v-if="!studentsView.length" description="没有符合条件的学生" :image-size="60" />
+        <el-table
+          v-else
+          :data="studentsView"
+          class="stu-table"
+          scrollbar-always-on
+          row-key="student_id"
+          @row-click="onStuRowClick"
+        >
+          <!-- 展开行：AI 简评 / 无数据说明 / 全部预警（表格内放不下的信息） -->
+          <el-table-column type="expand">
+            <template #default="{ row }">
+              <div class="stu-expand">
+                <template v-if="aiComments[row.student_id]">
+                  <el-icon class="stu-expand-ico" :size="13"><MagicStick /></el-icon>
+                  <span>{{ aiComments[row.student_id] }}</span>
+                </template>
+                <span v-else-if="isNoDataStudent(row)" class="muted">暂无学习数据，未参与本次分析</span>
+                <span v-else-if="aiBusy" class="muted">AI 简评生成中…</span>
+                <span v-else class="muted">暂无 AI 简评</span>
+                <span v-if="row.warnings.length > 2" class="stu-expand-warns">
+                  全部预警：{{ row.warnings.join('、') }}
+                </span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="学生" min-width="160">
+            <template #default="{ row }">
+              <div class="stu-cell-name">
+                <span class="stu-avatar-sm" :style="{ background: avatarBg(row.name) }">
+                  {{ row.name.charAt(0) }}
+                </span>
+                <span class="stu-name-wrap">
+                  <span class="stu-name-t">{{ row.name }}</span>
+                  <small v-if="isNoDataStudent(row)" class="stu-nodata">无数据</small>
+                </span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="最近学习" width="110" sortable :sort-method="sortByLastActive">
+            <template #default="{ row }">
+              <span class="stu-dim" :title="fmtDateTime(row.last_active)">{{ fmtRelative(row.last_active) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="章节练习" width="170" sortable :sort-method="sortByAccuracy">
+            <template #default="{ row }">
+              <div v-if="row.practice_total" class="stu-prac">
+                <div class="stu-prac-line">
+                  <span class="stu-prac-num">{{ row.practice_correct }}/{{ row.practice_total }} 题</span>
+                  <span class="stu-prac-acc" :style="{ color: accColor(row.accuracy) }">{{ row.accuracy }}%</span>
+                </div>
+                <el-progress
+                  :percentage="row.accuracy"
+                  :stroke-width="5"
+                  :color="accColor(row.accuracy)"
+                  :show-text="false"
+                  class="stu-prac-bar"
+                />
+              </div>
+              <span v-else class="stu-none">未做练习</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="作业" width="92" align="center" sortable :sort-method="sortByRate('homework')">
+            <template #default="{ row }">
+              <strong class="stu-val" :class="{ warn: row.homework_submitted < row.homework_total }">
+                {{ row.homework_submitted }}/{{ row.homework_total }}
+              </strong>
+            </template>
+          </el-table-column>
+          <el-table-column label="考试" width="132" sortable :sort-method="sortByRate('exam')">
+            <template #default="{ row }">
+              <strong class="stu-val">
+                {{ row.exam_taken }}/{{ row.exam_total }}
+                <span v-if="row.avg_exam_score !== null" class="stu-score">· 均分 {{ row.avg_exam_score }}</span>
+              </strong>
+            </template>
+          </el-table-column>
+          <el-table-column label="实验" width="126" sortable :sort-method="sortByRate('experiment')">
+            <template #default="{ row }">
+              <strong class="stu-val" :class="{ warn: row.experiment_done < row.experiment_total }">
+                {{ row.experiment_done }}/{{ row.experiment_total }}
+                <span v-if="row.avg_experiment_score !== null" class="stu-score">· 均分 {{ row.avg_experiment_score }}</span>
+              </strong>
+            </template>
+          </el-table-column>
+          <el-table-column label="预警" min-width="150">
+            <template #default="{ row }">
+              <div v-if="row.warnings.length" class="stu-warn-cell" :title="row.warnings.join('、')">
+                <el-tag
+                  v-for="w in row.warnings.slice(0, 2)"
+                  :key="w"
+                  type="danger"
+                  size="small"
+                  effect="light"
+                  round
+                  class="warn-pulse"
+                  >{{ w }}</el-tag
+                >
+                <el-tag v-if="row.warnings.length > 2" type="info" size="small" effect="light" round>
+                  +{{ row.warnings.length - 2 }}
+                </el-tag>
+              </div>
+              <el-tag v-else type="success" size="small" effect="light" round>正常</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column width="52" align="center">
+            <template #default>
+              <el-icon class="stu-go" :size="15"><ArrowRight /></el-icon>
+            </template>
+          </el-table-column>
+        </el-table>
+      </template>
     </template>
 
     <!-- 历史报告列表（按 AITask 查，点击回看完整报告） -->
-    <el-dialog v-model="historyVisible" title="历史报告" width="640px" class="an-history-dialog">
+    <el-dialog v-model="historyVisible" title="历史报告" width="720px" class="an-history-dialog">
       <div v-loading="historyLoading" class="history-list">
+        <div v-if="!historyLoading && historyList.length" class="history-hint">
+          共 {{ historyList.length }} 份报告，点击任意一条可回看全文
+        </div>
         <el-empty v-if="!historyLoading && !historyList.length" description="暂无历史报告" :image-size="60" />
         <div
           v-for="r in historyList"
           :key="r.task_id"
           class="history-item"
-          :class="{ 'is-failed': r.status !== 'success' }"
+          :class="{ 'is-failed': r.status !== 'success', 'is-clickable': r.status === 'success' }"
           @click="viewHistory(r)"
         >
           <div class="history-item-head">
-            <el-tag :type="statusType(r.status)" size="small" effect="light" round>{{ statusText(r.status) }}</el-tag>
-            <el-tag v-if="r.degraded" type="warning" size="small" effect="light" round>部分降级</el-tag>
-            <span class="history-time">{{ fmtDateTime(r.generated_at || r.created_at) }}</span>
+            <div class="history-item-tags">
+              <el-tag :type="statusType(r.status)" size="small" effect="light" round>{{ statusText(r.status) }}</el-tag>
+              <el-tag v-if="r.degraded" type="warning" size="small" effect="light" round>部分降级</el-tag>
+            </div>
+            <span class="history-time" :title="fmtDateTime(r.generated_at || r.created_at)">{{ fmtRelative(r.generated_at || r.created_at) }}</span>
+            <el-icon v-if="r.status === 'success'" class="history-item-go" :size="14"><ArrowRight /></el-icon>
           </div>
           <div class="history-item-meta">
-            <span v-if="r.analyzed_count != null">分析 {{ r.analyzed_count }} 人</span>
-            <span v-if="r.comment_count">简评 {{ r.comment_count }} 条</span>
+            <span v-if="r.analyzed_count != null" class="history-chip">分析 {{ r.analyzed_count }} 人</span>
+            <span v-if="r.comment_count" class="history-chip">简评 {{ r.comment_count }} 条</span>
           </div>
           <div v-if="r.report_excerpt" class="history-excerpt" v-html="renderMd(r.report_excerpt)"></div>
           <div v-else-if="r.error" class="history-error">{{ r.error }}</div>
@@ -189,7 +238,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { MagicStick, Loading, Notebook, Files, Medal, Cpu, WarningFilled, Clock } from '@element-plus/icons-vue'
+import { MagicStick, Loading, WarningFilled, Clock, Search, ArrowRight } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { renderAiMarkdown } from '@/utils/markdown'
 import { sortedCourseNames } from '@/utils/course-sort'
@@ -223,8 +272,16 @@ const aiError = computed(() => aiTask.value?.error || '')
 const aiBusy = computed(
   () => aiSubmitting.value || (aiTask.value ? ['pending', 'running'].includes(aiTask.value.status) : false)
 )
-const aiProgressMsg = computed(() => aiTask.value?.progress?.message || 'AI 正在分析班级数据，请稍候…')
+// 恢复中：刷新/切班后正在从服务端找回进行中的任务，先展示占位过程，别留空白
+const aiRestoring = ref(false)
+const aiLoading = computed(() => aiBusy.value || aiRestoring.value)
+const aiProgressMsg = computed(() => {
+  if (aiSubmitting.value) return '正在提交分析任务…'
+  if (aiRestoring.value) return '正在恢复分析进度…'
+  return aiTask.value?.progress?.message || 'AI 正在分析班级数据，请稍候…'
+})
 const aiProgressPct = computed(() => {
+  if (aiSubmitting.value || aiRestoring.value) return null
   const p = aiTask.value?.progress
   if (!p || !p.total) return null
   return Math.round(((p.done || 0) / p.total) * 100)
@@ -234,6 +291,42 @@ const noDataIds = computed(
 )
 function isNoDataStudent(row) {
   return noDataIds.value.has(Number(row.student_id))
+}
+
+// ---- 学生列表筛选/排序（表格化后本地处理，班级数据量小） ----
+const stuKeyword = ref('')
+const warnFilter = ref('all')
+const studentsView = computed(() => {
+  const kw = stuKeyword.value.trim()
+  return students.value.filter((s) => {
+    if (kw && !String(s.name || '').includes(kw)) return false
+    if (warnFilter.value === 'warned' && !s.warnings.length) return false
+    if (warnFilter.value === 'normal' && s.warnings.length) return false
+    return true
+  })
+})
+// 从未学习排最后：时间列 null 记 0，倒序时自然沉底
+function sortByLastActive(a, b) {
+  const ta = a.last_active ? new Date(a.last_active).getTime() : 0
+  const tb = b.last_active ? new Date(b.last_active).getTime() : 0
+  return ta - tb
+}
+function sortByAccuracy(a, b) {
+  return (a.accuracy ?? -1) - (b.accuracy ?? -1)
+}
+// 完成率排序；无对应数据（total=0）记 -1 沉底
+function sortByRate(key) {
+  const pick = {
+    homework: (s) => (s.homework_total ? s.homework_submitted / s.homework_total : -1),
+    exam: (s) => (s.exam_total ? s.exam_taken / s.exam_total : -1),
+    experiment: (s) => (s.experiment_total ? s.experiment_done / s.experiment_total : -1),
+  }[key]
+  return (a, b) => pick(a) - pick(b)
+}
+// 行点击进详情；展开图标只切换展开不跳转
+function onStuRowClick(row, _column, event) {
+  if (event?.target?.closest?.('.el-table__expand-icon')) return
+  goDetail(row)
 }
 const route = useRoute()
 const router = useRouter()
@@ -364,6 +457,7 @@ async function loadClasses() {
   if (classes.value.length) {
     classId.value = classes.value[0].id
     load()
+    resumeActiveTask() // 不 await：与 stats 并行，尽早恢复进度 UI
   } else {
     classId.value = null
     students.value = []
@@ -384,6 +478,7 @@ async function load() {
 function onClassChange() {
   resetAi()
   load()
+  resumeActiveTask() // 切班也可能有进行中的任务，同样恢复
 }
 
 async function generateReport() {
@@ -405,15 +500,19 @@ async function generateReport() {
   }
 }
 
-// 刷新页面后恢复进行中的分析任务（异步任务刷新续看）：
-// 任务行在服务端持久化，刷新丢失的只是前端的任务 ID——挂载时从历史报告
-// 接口找回本班、当前课程最新的 pending/running 任务，重新拉起轮询与进度 UI。
+// 刷新页面/切换班级后恢复进行中的分析任务（异步任务刷新续看）：
+// 任务行在服务端持久化，刷新丢失的只是前端的任务 ID——从历史报告接口
+// 找回该班、当前课程最新的 pending/running 任务，重新拉起轮询与进度 UI。
+// 请求在途期间展示「正在恢复分析进度…」占位，避免刷新后一两秒的空白。
 // 陈旧保护：创建超过 12 分钟仍未终态，视为服务端已中断（后台线程已死、
 // 任务行停留在 running），直接展示失败+重试，避免对着死任务空轮 10 分钟。
 async function resumeActiveTask() {
-  if (!classId.value) return
+  const myClassId = classId.value
+  if (!myClassId) return
+  aiRestoring.value = true
   try {
-    const data = await getClassAiReportHistory(classId.value)
+    const data = await getClassAiReportHistory(myClassId)
+    if (classId.value !== myClassId) return // 期间用户切了班：丢弃
     const active = (data.reports || []).find(
       (t) =>
         ['pending', 'running'].includes(t.status) &&
@@ -431,13 +530,12 @@ async function resumeActiveTask() {
     )
   } catch {
     // 恢复失败不影响页面使用：教师可手动重新生成
+  } finally {
+    if (classId.value === myClassId) aiRestoring.value = false
   }
 }
 
-onMounted(async () => {
-  await loadClasses()
-  resumeActiveTask()
-})
+onMounted(loadClasses)
 </script>
 
 <style scoped>
@@ -508,23 +606,52 @@ onMounted(async () => {
 }
 .history-item.is-failed {
   opacity: 0.75;
+  cursor: default;
+}
+.history-hint {
+  color: var(--gray-400);
+  font-size: 12px;
+  line-height: 1.5;
 }
 .history-item-head {
   display: flex;
   align-items: center;
   gap: 8px;
 }
+.history-item-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
 .history-time {
   margin-left: auto;
   color: var(--gray-400);
   font-size: 12px;
+  white-space: nowrap;
+}
+.history-item-go {
+  flex: none;
+  color: var(--gray-300);
+  transition: color 0.18s ease, transform 0.18s ease;
+}
+.history-item.is-clickable:hover .history-item-go {
+  color: var(--primary-500);
+  transform: translateX(2px);
 }
 .history-item-meta {
   display: flex;
-  gap: 14px;
-  margin-top: 6px;
-  color: var(--gray-500);
-  font-size: 12.5px;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.history-chip {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--gray-100);
+  color: var(--gray-600);
+  font-size: 12px;
+  line-height: 1.7;
 }
 .history-excerpt {
   margin-top: 6px;
@@ -532,11 +659,11 @@ onMounted(async () => {
   font-size: 13px;
   line-height: 1.6;
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-/* 摘要按 markdown 渲染：标题/加粗 compact 化，配合外层 3 行夹取 */
+/* 摘要按 markdown 渲染：标题/加粗 compact 化，配合外层 2 行夹取 */
 .history-excerpt :deep(h2),
 .history-excerpt :deep(h3) {
   margin: 0;
@@ -687,229 +814,162 @@ onMounted(async () => {
 .ai-md :deep(ul), .ai-md :deep(ol) { margin: 0 0 8px; padding-left: 20px; }
 .ai-md :deep(strong) { color: var(--gray-900); }
 
-/* ===== 学生卡片列表（与知识库资料行一致） ===== */
-.stu-list {
+/* ===== 学生列表（表格：密度优先，筛选 / 排序 / 行展开） ===== */
+.stu-toolbar {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
   gap: 12px;
+  margin-bottom: 12px;
 }
-.stu-card {
-  position: relative;
-  overflow: hidden;
-  border: 1px solid rgba(37, 99, 235, 0.09);
-  border-radius: 16px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(248, 251, 255, 0.9));
-  box-shadow: 0 8px 22px rgba(37, 99, 235, 0.06);
+.stu-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.stu-search {
+  width: 200px;
+}
+.stu-filter {
+  width: 128px;
+}
+.stu-count {
+  color: var(--gray-400);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.stu-table {
+  width: 100%;
+}
+/* 窄列 nowrap + 悬停 title（与项目表格口径一致）；展开行内容不受影响 */
+.stu-table :deep(.cell) {
+  white-space: nowrap;
+}
+.stu-table :deep(.el-table__row) {
   cursor: pointer;
-  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
 }
-.stu-card::before {
-  content: '';
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 3px;
-  background: linear-gradient(180deg, #3b82f6, #8b5cf6);
-  opacity: 0;
-  transition: opacity 0.18s ease;
+.stu-table :deep(.el-table__expand-icon) {
+  cursor: pointer;
 }
-.stu-card:hover {
-  transform: translateY(-2px);
-  border-color: rgba(96, 165, 250, 0.45);
-  box-shadow: 0 14px 32px rgba(37, 99, 235, 0.12);
-}
-.stu-card:hover::before {
-  opacity: 1;
-}
-.stu-main {
+/* 学生名列 */
+.stu-cell-name {
   display: flex;
   align-items: center;
-  gap: 18px;
-  padding: 14px 18px;
-}
-.stu-left {
-  display: flex;
-  align-items: center;
-  gap: 13px;
+  gap: 9px;
   min-width: 0;
-  flex: 0 0 220px;
 }
-.stu-avatar {
-  width: 42px;
-  height: 42px;
+.stu-avatar-sm {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
   display: flex;
-  flex: 0 0 42px;
   align-items: center;
   justify-content: center;
   border-radius: 50%;
   color: #fff;
-  font-size: 16px;
+  font-size: 12px;
   font-weight: 700;
-  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.14);
-  transition: transform 0.18s ease;
 }
-.stu-card:hover .stu-avatar {
-  transform: scale(1.05);
+.stu-name-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
-.stu-name {
+.stu-name-t {
   color: var(--gray-900);
-  font-size: 15px;
+  font-size: 13.5px;
   font-weight: 650;
 }
-.stu-last {
-  margin-top: 3px;
+.stu-nodata {
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--gray-100);
   color: var(--gray-400);
-  font-size: 12px;
+  font-size: 11px;
+  font-style: normal;
 }
-.stu-metrics {
-  flex: 1;
-  min-width: 0;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(140px, 1fr));
-  gap: 10px 26px;
-  align-content: center;
+/* 指标列 */
+.stu-dim {
+  color: var(--gray-500);
+  font-size: 12.5px;
 }
-.metric {
-  display: grid;
-  gap: 5px;
-  min-width: 0;
+.stu-none {
+  color: var(--gray-300);
+  font-size: 12.5px;
 }
-.metric-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--gray-400);
-  font-size: 12px;
-}
-.metric-ico {
-  width: 22px;
-  height: 22px;
-  display: inline-grid;
-  place-items: center;
-  border-radius: 7px;
-}
-.metric-ico.blue {
-  color: var(--primary-600);
-  background: var(--primary-50);
-}
-.metric-ico.purple {
-  color: #8b5cf6;
-  background: #f5f3ff;
-}
-.metric-ico.orange {
-  color: var(--warning);
-  background: #fff7ed;
-}
-.metric-ico.teal {
-  color: #0d9488;
-  background: #f0fdfa;
-}
-.metric-value {
+.stu-val {
   color: var(--gray-800);
-  font-size: 14.5px;
+  font-size: 13.5px;
   font-weight: 700;
 }
-.metric-value.warn {
+.stu-val.warn {
   color: var(--danger);
 }
-.metric-score {
-  margin-left: 4px;
+.stu-score {
+  margin-left: 2px;
   color: var(--primary-600);
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 600;
 }
-.metric-practice-line {
+.stu-prac {
+  display: grid;
+  gap: 3px;
+  min-width: 132px;
+}
+.stu-prac-line {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
 }
-.metric-text {
+.stu-prac-num {
   color: var(--gray-700);
-  font-size: 13px;
+  font-size: 12.5px;
 }
-.metric-acc {
-  font-size: 13px;
+.stu-prac-acc {
+  font-size: 12.5px;
   font-weight: 700;
 }
-.metric-bar {
+.stu-prac-bar {
   width: 100%;
 }
-.metric-bar :deep(.el-progress-bar__outer) {
+.stu-prac-bar :deep(.el-progress-bar__outer) {
   background: var(--gray-100);
 }
-.metric-none {
-  color: var(--gray-300);
-  font-size: 13px;
-}
-/* 预警区：定宽竖排滚动，标签再多也不挤压指标列 */
-.stu-warnings {
+/* 预警列：横排最多 2 个 +N，全部悬停/展开可见 */
+.stu-warn-cell {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 6px;
-  flex-shrink: 0;
-  width: 150px;
-  max-height: 100px;
-  overflow-y: auto;
-  padding: 2px 2px 2px 0;
-  scrollbar-width: thin;
-  scrollbar-color: var(--gray-300) transparent;
+  align-items: center;
+  gap: 5px;
 }
-.stu-warnings::-webkit-scrollbar {
-  width: 4px;
+/* 行尾箭头 */
+.stu-go {
+  color: var(--gray-300);
+  transition: color 0.15s ease;
 }
-.stu-warnings::-webkit-scrollbar-thumb {
-  border-radius: 2px;
-  background: var(--gray-300);
+.stu-table :deep(.el-table__row):hover .stu-go {
+  color: var(--primary-500);
 }
-.stu-warnings::-webkit-scrollbar-track {
-  background: transparent;
-}
-/* 长文案预警允许在竖排列内换行，防 nowrap 溢出被卡片裁切 */
-.stu-warnings :deep(.el-tag) {
-  max-width: 100%;
-  height: auto;
-  white-space: normal;
-  text-align: left;
-}
-
-/* AI 简评条 */
-.stu-ai {
+/* 展开行：AI 简评 / 无数据说明 / 全部预警 */
+.stu-expand {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  margin: 0 18px;
-  padding: 10px 14px 12px;
-  border-top: 1px dashed var(--gray-200);
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  padding: 2px 16px 8px 52px;
   color: var(--gray-600);
   font-size: 13px;
   line-height: 1.65;
 }
-.stu-ai-icon {
+.stu-expand-ico {
   flex-shrink: 0;
-  margin-top: 3px;
+  margin-top: 4px;
   color: #8b5cf6;
 }
-.stu-ai.muted {
+.stu-expand .muted {
   color: var(--gray-400);
 }
-
-@media (max-width: 900px) {
-  .stu-main {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
-  }
-  .stu-left {
-    flex-basis: auto;
-  }
-  .stu-metrics {
-    gap: 12px 16px;
-  }
-  .stu-warnings {
-    align-items: flex-start;
-    width: 100%;
-    max-height: 112px;
-  }
+.stu-expand-warns {
+  color: var(--danger);
 }
 </style>
