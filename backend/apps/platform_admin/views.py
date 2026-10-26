@@ -216,6 +216,45 @@ class AdminUserDetailView(AdminThrottleMixin, APIView):
         return api_response(AdminUserSerializer(user).data, message="用户资料已更新")
 
 
+class AdminPlatformSettingsView(AdminThrottleMixin, APIView):
+    """平台系统设置（当前仅注册通道开关 register_open）。
+
+    GET 返回全部设置项；PATCH 逐项更新并落审计（变更前后值）。
+    公开侧读取走 /api/auth/config/（AllowAny），不暴露本端点。
+    """
+
+    method_scopes = {"PATCH": "admin_write"}
+    permission_classes = [IsPlatformAdmin]
+
+    def get(self, request):
+        from .models import register_open
+
+        return api_response({"register_open": register_open()})
+
+    def patch(self, request):
+        from .models import REGISTER_OPEN_KEY, register_open, set_setting
+
+        if "register_open" not in request.data:
+            return api_response(message="没有可更新的设置项", code=400, status=400)
+        raw = request.data.get("register_open")
+        if not isinstance(raw, bool):
+            return api_response(message="register_open 必须是布尔值", code=400, status=400)
+        old = register_open()
+        set_setting(REGISTER_OPEN_KEY, raw, "注册通道开关：关闭后注册接口拒绝、登录页隐藏注册入口")
+        log_admin_action(
+            request.user,
+            AdminActionLog.Action.SETTINGS_UPDATE,
+            target_type="platform_setting",
+            target_label="注册通道开关(register_open)",
+            old_value={"register_open": old},
+            new_value={"register_open": raw},
+        )
+        return api_response(
+            {"register_open": raw},
+            message="注册通道已开放" if raw else "注册通道已关闭",
+        )
+
+
 class AdminPasswordResetView(AdminThrottleMixin, APIView):
     method_scopes = {"POST": "admin_write"}
     permission_classes = [IsPlatformAdmin]

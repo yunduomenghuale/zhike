@@ -53,12 +53,15 @@
             </template>
             <h2>{{ registerPrompt.title }}</h2>
             <p>{{ registerPrompt.description }}</p>
-            <button type="button" class="split-auth__toggle-button" @click="showRegister">
+            <button v-if="registerEnabled" type="button" class="split-auth__toggle-button" @click="showRegister">
               {{ registerPrompt.action }}
               <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path d="M12 4L10.59 5.41L16.17 11H4V13H16.17L10.59 18.59L12 20L20 12L12 4Z" fill="currentColor" />
               </svg>
             </button>
+            <div v-else class="split-auth__register-closed" role="note">
+              注册通道已暂时关闭，请联系管理员开通账号
+            </div>
           </div>
         </div>
 
@@ -108,6 +111,8 @@ const props = defineProps({
       action: '立即注册',
     }),
   },
+  // 注册通道开关（/api/auth/config/ register_open）：false 时注册入口换为关闭提示
+  registerEnabled: { type: Boolean, default: true },
   loginPrompt: {
     type: Object,
     default: () => ({
@@ -395,6 +400,18 @@ defineExpose({ showLogin, showRegister })
   background: #fff;
   color: var(--split-auth-primary);
   box-shadow: 0 8px 24px rgb(0 0 0 / 15%);
+}
+
+/* 注册通道关闭提示（registerEnabled=false 时替换注册按钮） */
+.split-auth__register-closed {
+  max-width: 240px;
+  padding: 10px 14px;
+  border: 1px dashed rgb(255 255 255 / 55%);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 8%);
+  color: rgb(255 255 255 / 92%);
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .split-auth__toggle-button svg {

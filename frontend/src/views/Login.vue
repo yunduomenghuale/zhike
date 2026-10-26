@@ -10,6 +10,7 @@
     register-description=""
     :register-prompt="registerPrompt"
     :login-prompt="loginPrompt"
+    :register-enabled="registerOpen"
     @change="resetForm"
   >
     <template #background>
@@ -142,12 +143,12 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
 import { useUserStore } from '@/store/user'
-import { register } from '@/api/auth'
+import { getAuthConfig, register } from '@/api/auth'
 import LoginBackground from '@/components/LoginBackground.vue'
 import SplitAuthPanel from '@/components/SplitAuthPanel.vue'
 
@@ -170,7 +171,19 @@ const loginPrompt = {
 }
 
 const isRegister = ref(false)
+// 注册通道开关（管理端「用户管理 → 开放注册」控制）：拉取失败按开放兜底，关闭时隐藏注册入口
+const registerOpen = ref(true)
 const loading = ref(false)
+
+onMounted(async () => {
+  try {
+    const config = await getAuthConfig()
+    registerOpen.value = config?.register_open !== false
+  } catch {
+    registerOpen.value = true // 配置拉取失败不阻断登录页，注册被关时由后端 403 文案兜底
+  }
+  if (!registerOpen.value) isRegister.value = false
+})
 const passwordTouched = ref(false)
 const confirmationTouched = ref(false)
 const form = reactive({

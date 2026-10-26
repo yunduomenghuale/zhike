@@ -30,12 +30,22 @@ def tokens_for(user):
 
 
 class RegisterView(GenericAPIView):
-    """注册（教师 / 学生）。"""
+    """注册（教师 / 学生）。
+
+    注册通道可由管理端「用户管理 → 开放注册」开关关闭（PlatformSetting
+    register_open）：关闭后本接口 403，登录页隐藏注册入口（见 AuthConfigView）。
+    """
 
     permission_classes = [AllowAny]
     serializer_class = RegisterSerializer
 
     def post(self, request):
+        from apps.platform_admin.models import register_open
+
+        if not register_open():
+            return api_response(
+                message="注册通道已暂时关闭，请联系管理员开通账号", code=403, status=403
+            )
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
@@ -44,6 +54,17 @@ class RegisterView(GenericAPIView):
             message="注册成功",
             status=status.HTTP_201_CREATED,
         )
+
+
+class AuthConfigView(APIView):
+    """登录页公开配置（AllowAny）：注册通道开关等匿名可见的全局开关。"""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        from apps.platform_admin.models import register_open
+
+        return api_response({"register_open": register_open()})
 
 
 # 登录失败锁定：同一 用户名+IP 连续失败 5 次锁 15 分钟（仅对失败计数，

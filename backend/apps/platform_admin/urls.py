@@ -7,6 +7,7 @@ from .views import (
     AdminAIConfigChangeLogListView,
     AdminOverviewView,
     AdminPasswordResetView,
+    AdminPlatformSettingsView,
     AdminQAQualityStatsView,
     AdminRebuildVectorsView,
     AdminUserDetailView,
@@ -38,6 +39,7 @@ urlpatterns = [
     path("users/import-confirm/", AdminUserImportConfirmView.as_view(), name="admin-user-import-confirm"),
     path("users/<int:user_id>/", AdminUserDetailView.as_view(), name="admin-user-detail"),
     path("users/<int:user_id>/reset-password/", AdminPasswordResetView.as_view(), name="admin-reset-password"),
+    path("settings/", AdminPlatformSettingsView.as_view(), name="admin-settings"),
     # 课程监管（列表带资产计数；状态变更带影响预览 + 审计）
     path("courses/", AdminCourseViewSet.as_view({"get": "list"}), name="admin-courses"),
     path("courses/export/", AdminCourseViewSet.as_view({"get": "export"}), name="admin-courses-export"),

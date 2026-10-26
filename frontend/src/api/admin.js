@@ -2,6 +2,10 @@ import request from './request'
 
 export const getAdminOverview = () => request.get('/admin-panel/overview/')
 
+// 平台系统设置（当前仅 register_open 注册通道开关，变更落审计）
+export const getPlatformSettings = () => request.get('/admin-panel/settings/')
+export const updatePlatformSettings = (data) => request.patch('/admin-panel/settings/', data)
+
 export const listAdminUsers = (params) => request.get('/admin-panel/users/', { params })
 export const createAdminUser = (data) => request.post('/admin-panel/users/', data)
 export const updateAdminUser = (id, data) => request.patch(`/admin-panel/users/${id}/`, data)

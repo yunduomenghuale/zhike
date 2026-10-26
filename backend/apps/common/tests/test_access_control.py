@@ -392,3 +392,75 @@ class PasswordPolicyTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 400)
+
+
+class RegisterToggleTests(APITestCase):
+    """注册通道开关：管理端 PlatformSetting register_open 控制注册接口与登录页入口。"""
+
+    def _register_payload(self, username="toggle-user"):
+        return {"username": username, "password": "Passw0rd!", "role": "student"}
+
+    def test_register_open_by_default(self):
+        response = self.client.post("/api/auth/register/", self._register_payload(), format="json")
+        self.assertEqual(response.status_code, 201)
+
+    def test_register_rejected_when_closed(self):
+        from apps.platform_admin.models import REGISTER_OPEN_KEY, set_setting
+
+        set_setting(REGISTER_OPEN_KEY, False)
+        response = self.client.post("/api/auth/register/", self._register_payload(), format="json")
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data["message"], "注册通道已暂时关闭，请联系管理员开通账号")
+        self.assertFalse(User.objects.filter(username="toggle-user").exists())
+
+    def test_auth_config_reflects_toggle_and_is_anonymous(self):
+        from apps.platform_admin.models import REGISTER_OPEN_KEY, set_setting
+
+        resp = self.client.get("/api/auth/config/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.data["data"]["register_open"])  # 缺省开放
+
+        set_setting(REGISTER_OPEN_KEY, False)
+        resp = self.client.get("/api/auth/config/")
+        self.assertFalse(resp.data["data"]["register_open"])
+
+    def test_admin_settings_get_patch_and_audit(self):
+        from apps.platform_admin.models import AdminActionLog
+
+        admin = User.objects.create_user(username="p_admin", password="pw123456!", role=User.Role.ADMIN)
+        self.client.force_authenticate(user=admin)
+
+        resp = self.client.get("/api/admin-panel/settings/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.data["data"]["register_open"])
+
+        resp = self.client.patch("/api/admin-panel/settings/", {"register_open": False}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.data["data"]["register_open"])
+        # 关闭后注册拒绝；再开即恢复
+        self.assertEqual(
+            self.client.post("/api/auth/register/", self._register_payload(), format="json").status_code, 403
+        )
+        resp = self.client.patch("/api/admin-panel/settings/", {"register_open": True}, format="json")
+        self.assertTrue(resp.data["data"]["register_open"])
+        self.assertEqual(
+            self.client.post("/api/auth/register/", self._register_payload(), format="json").status_code, 201
+        )
+        logs = AdminActionLog.objects.filter(action=AdminActionLog.Action.SETTINGS_UPDATE)
+        self.assertEqual(logs.count(), 2)
+        self.assertEqual(logs.first().new_value, {"register_open": True})
+
+    def test_admin_settings_rejects_non_bool_and_forbidden_for_teacher(self):
+        teacher = User.objects.create_user(username="p_teacher", password="pw123456!", role=User.Role.TEACHER)
+        admin = User.objects.create_user(username="p_admin2", password="pw123456!", role=User.Role.ADMIN)
+
+        self.client.force_authenticate(user=admin)
+        resp = self.client.patch("/api/admin-panel/settings/", {"register_open": "关"}, format="json")
+        self.assertEqual(resp.status_code, 400)
+
+        self.client.force_authenticate(user=teacher)
+        self.assertEqual(self.client.get("/api/admin-panel/settings/").status_code, 403)
+        self.assertEqual(
+            self.client.patch("/api/admin-panel/settings/", {"register_open": False}, format="json").status_code,
+            403,
+        )

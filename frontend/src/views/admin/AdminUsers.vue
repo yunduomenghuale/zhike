@@ -18,6 +18,19 @@
       </el-select>
       <el-button :icon="Search" @click="applyFilters">查询</el-button>
       <span class="result-count">共 {{ total }} 个账号</span>
+      <!-- 注册通道开关：关闭后登录页隐藏注册入口、注册接口拒绝（变更落审计） -->
+      <span class="register-toggle" :title="registerOpen ? '当前允许新用户自助注册，点击关闭' : '当前注册已关闭，点击开放'">
+        <span class="register-toggle-label">开放注册</span>
+        <el-switch
+          :model-value="registerOpen"
+          :loading="registerToggling"
+          inline-prompt
+          active-text="开"
+          inactive-text="关"
+          @change="toggleRegisterOpen"
+        />
+        <span v-if="!registerOpen" class="register-toggle-hint">注册通道已关闭，新用户需由管理员在此页创建账号</span>
+      </span>
     </section>
 
     <section class="table-card">
@@ -138,10 +151,12 @@ import {
   confirmAdminUserImport,
   createAdminUser,
   downloadAdminUserImportTemplate,
+  getPlatformSettings,
   listAdminUsers,
   previewAdminUserImport,
   resetAdminUserPassword,
   updateAdminUser,
+  updatePlatformSettings,
 } from '@/api/admin'
 import { useUserStore } from '@/store/user'
 
@@ -149,6 +164,19 @@ const { profile } = storeToRefs(useUserStore())
 const loading = ref(false), saving = ref(false), resetting = ref(false)
 const rows = ref([]), total = ref(0), page = ref(1), pageSize = 10
 const filters = reactive({ search: '', role: '', status: '' })
+// 注册通道开关（平台设置 register_open）
+const registerOpen = ref(true), registerToggling = ref(false)
+async function loadSettings() {
+  try { const res = await getPlatformSettings(); registerOpen.value = res?.register_open !== false } catch { /* 拦截器已提示 */ }
+}
+async function toggleRegisterOpen(value) {
+  registerToggling.value = true
+  try {
+    const res = await updatePlatformSettings({ register_open: value })
+    registerOpen.value = res?.register_open !== false
+    ElMessage.success(value ? '注册通道已开放' : '注册通道已关闭，登录页注册入口已隐藏')
+  } catch { /* 拦截器已提示，开关状态保持原值（model-value 单向绑定不回写） */ } finally { registerToggling.value = false }
+}
 const editorVisible = ref(false), editorRef = ref(), editingId = ref(null)
 const resetVisible = ref(false), resetTarget = ref(null), resetPassword = ref('')
 const blankForm = () => ({ username: '', phone: '', real_name: '', role: 'student', is_active: true, password: '' })
@@ -247,12 +275,16 @@ async function submitImport() {
     if (Array.isArray(annotated)) importRows.value = annotated
   } finally { importing.value = false }
 }
-onMounted(load)
+onMounted(() => { load(); loadSettings() })
 </script>
 
 <style scoped>
 .admin-users{color:#0f172a}.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin-bottom:22px}.head-actions{display:flex;gap:10px;flex-shrink:0}.eyebrow{margin-bottom:6px;color:#2563eb;font-size:12px;font-weight:850;letter-spacing:.16em}h1,p{margin:0}h1{font-size:30px}.page-head p{margin-top:7px;color:#8190a8}
 .toolbar{min-height:70px;padding:13px 16px;border:1px solid #e5edf8;border-radius:18px 18px 0 0;background:rgba(255,255,255,.92);display:flex;align-items:center;gap:10px}.toolbar .search{width:min(380px,35vw)}.toolbar :deep(.el-select){width:130px}.result-count{margin-left:auto;color:#94a3b8;font-size:13px}
+/* 注册通道开关（result-count 已用 margin-left:auto 把自己推到最右，开关组紧随其后） */
+.register-toggle{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border:1px solid #e5edf8;border-radius:999px;background:#f8fafc;white-space:nowrap}
+.register-toggle-label{color:#475569;font-size:13px;font-weight:600}
+.register-toggle-hint{color:#b45309;font-size:12px}
 .table-card{overflow:hidden;border:1px solid #e5edf8;border-top:0;border-radius:0 0 20px 20px;background:#fff;box-shadow:0 18px 42px rgba(37,99,235,.07)}.user-table{min-height:480px}.identity{display:flex;align-items:center;gap:12px}.identity>div{min-width:0;display:grid;gap:3px}.identity strong,.identity span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.identity span{color:#94a3b8;font-size:12px}.pager{justify-content:flex-end;padding:16px 18px;border-top:1px solid #eef2f7}
 .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}.form-grid .full{grid-column:1/-1}.dialog-tip{margin-bottom:18px;color:#64748b;line-height:1.7}
 .import-steps{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px}.import-step{display:flex;gap:12px;padding:14px 16px;border:1px solid #e5edf8;border-radius:14px;background:#f8fafc}.import-step strong{display:block;margin-bottom:4px;color:#1e293b}.import-step p{margin:0 0 10px;color:#8190a8;font-size:12.5px;line-height:1.7}.step-no{flex-shrink:0;width:26px;height:26px;display:grid;place-items:center;border-radius:50%;background:#2563eb;color:#fff;font-size:13px;font-weight:700}
