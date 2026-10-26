@@ -10,10 +10,6 @@
 
     <view class="card">
       <view class="row">
-        <text class="row-label">手机号</text>
-        <text class="row-value">{{ user?.phone || '-' }}</text>
-      </view>
-      <view class="row">
         <text class="row-label">账号类型</text>
         <text class="row-value">{{ user?.role_display || '-' }}</text>
       </view>

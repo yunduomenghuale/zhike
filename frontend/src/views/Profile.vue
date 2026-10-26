@@ -70,7 +70,7 @@
             <span class="card-icon profile-icon"><EditPen /></span>
             <div>
               <h2>账号资料</h2>
-              <p>用户名是唯一登录标识，姓名和手机号用于完善个人资料。</p>
+              <p>用户名是唯一登录标识，姓名用于完善个人资料。</p>
             </div>
           </div>
 
@@ -86,9 +86,6 @@
                 <el-input v-model="profileForm.username" maxlength="150" placeholder="请输入唯一用户名">
                   <template #prefix><el-icon><User /></el-icon></template>
                 </el-input>
-              </el-form-item>
-              <el-form-item label="手机号" prop="phone">
-                <el-input v-model="profileForm.phone" maxlength="20" placeholder="请输入手机号" />
               </el-form-item>
               <el-form-item label="姓名" prop="real_name">
                 <el-input v-model="profileForm.real_name" maxlength="64" placeholder="请输入姓名" />
@@ -191,7 +188,6 @@ const avatarLoading = ref(false)
 const profileForm = reactive({
   username: '',
   real_name: '',
-  phone: '',
 })
 
 const passwordForm = reactive({
@@ -212,10 +208,6 @@ const profileRules = {
     { min: 2, max: 150, message: '用户名长度为 2–150 个字符', trigger: 'blur' },
     { pattern: /^[\p{L}\p{N}_@.+-]+$/u, message: '仅支持文字、字母、数字及 @ . + - _', trigger: 'blur' },
   ],
-  phone: [
-    { required: true, message: '请输入手机号', trigger: 'blur' },
-    { pattern: /^[+\d][\d -]{5,19}$/, message: '请输入正确的手机号', trigger: 'blur' },
-  ],
   real_name: [{ required: true, message: '请输入姓名', trigger: 'blur' }],
 }
 
@@ -234,7 +226,6 @@ watch(
     if (!value) return
     profileForm.username = value.username || ''
     profileForm.real_name = value.real_name || ''
-    profileForm.phone = value.phone || ''
   },
   { immediate: true },
 )

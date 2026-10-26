@@ -152,7 +152,7 @@ async function requireCompleteProfile() {
   if (isProfileComplete.value) return true
   try {
     await ElMessageBox.confirm(
-      '请先在个人中心填写姓名和手机号，完善资料后才能加入班级。',
+      '请先在个人中心填写姓名，完善资料后才能加入班级。',
       '请完善个人资料',
       {
         confirmButtonText: '去填写',

@@ -590,7 +590,6 @@ class AdminTeacherViewSet(AdminThrottleMixin, viewsets.ViewSet):
             "id": teacher.id,
             "username": teacher.username,
             "real_name": teacher.real_name,
-            "phone": teacher.phone,
             "is_active": teacher.is_active,
             "date_joined": teacher.date_joined,
             "last_login": teacher.last_login,
@@ -616,7 +615,7 @@ class AdminTeacherViewSet(AdminThrottleMixin, viewsets.ViewSet):
         response = _csv_response("teachers")
         writer = csv.writer(response)
         writer.writerow([
-            "教师ID", "用户名", "姓名", "手机号", "账号状态",
+            "教师ID", "用户名", "姓名", "账号状态",
             "课程", "班级", "覆盖学生", "AI调用次数", "AI消耗Token",
             "AI消耗字符", "最近登录", "最近活跃", "注册时间",
         ])
@@ -627,7 +626,7 @@ class AdminTeacherViewSet(AdminThrottleMixin, viewsets.ViewSet):
         for row in rows:
             writer.writerow([
                 row["id"], row["username"], row["real_name"] or "",
-                row["phone"] or "", "正常" if row["is_active"] else "停用",
+                "正常" if row["is_active"] else "停用",
                 row["course_count"], row["class_count"], row["student_count"],
                 row["ai_calls"], row["ai_tokens"], row["ai_chars"],
                 fmt(row["last_login"]), fmt(row["last_active"]),

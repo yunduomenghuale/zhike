@@ -147,7 +147,6 @@ class AdminUserListCreateView(AdminThrottleMixin, APIView):
             queryset = queryset.filter(
                 Q(username__icontains=keyword)
                 | Q(real_name__icontains=keyword)
-                | Q(phone__icontains=keyword)
             )
         if role:
             if role == User.Role.ADMIN:
@@ -196,12 +195,12 @@ class AdminUserDetailView(AdminThrottleMixin, APIView):
         # 变更前快照（仅审计关心的字段），用于 old→new 展示
         before = {
             field: getattr(user, field)
-            for field in ("username", "real_name", "phone", "role", "is_active")
+            for field in ("username", "real_name", "role", "is_active")
         }
         serializer.save()
         after = {
             field: getattr(user, field)
-            for field in ("username", "real_name", "phone", "role", "is_active")
+            for field in ("username", "real_name", "role", "is_active")
         }
         changed = {k: {"old": before[k], "new": after[k]} for k in after if before[k] != after[k]}
         if changed:

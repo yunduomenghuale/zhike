@@ -37,7 +37,7 @@ def build_template() -> bytes:
     tips.append(["2. 用户名为学生登录账号（如学号），4 位以上，平台内不可重复。"])
     tips.append(["3. 初始密码由系统自动生成，规则为：Lylg + 用户名后 6 位（不足 6 位取整个用户名）。"])
     tips.append(["4. 例如用户名 2024012345 的初始密码为 Lylg012345。"])
-    tips.append(["5. 学生首次登录后，系统会提示修改密码并补充手机号。"])
+    tips.append(["5. 学生首次登录后，系统会提示修改密码。"])
     tips.column_dimensions["A"].width = 90
 
     buf = BytesIO()
@@ -113,12 +113,6 @@ def annotate_rows(rows: list[dict]) -> list[dict]:
         .filter(lower_username__in=lowered)
         .values_list("lower_username", flat=True)
     ) if lowered else set()
-    # 用户名同时不能与其他账号的手机号冲突（对齐后台新建账号的交叉校验）
-    phone_clashes = set(
-        User.objects.exclude(phone__isnull=True).exclude(phone="")
-        .filter(phone__in=usernames)
-        .values_list("phone", flat=True)
-    ) if usernames else set()
 
     seen = {}
     duplicates = set()
@@ -151,8 +145,6 @@ def annotate_rows(rows: list[dict]) -> list[dict]:
             message = "与表内其他行用户名重复"
         elif username.lower() in existing_usernames:
             message = "该用户名已被使用"
-        elif username in phone_clashes:
-            message = "该用户名已被其他账号作为手机号使用"
 
         annotated.append({
             **item,

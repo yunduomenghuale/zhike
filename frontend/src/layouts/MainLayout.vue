@@ -199,8 +199,8 @@ const searchPlaceholder = computed(() => (
 const searchEnabled = computed(() => searchableRoutes.has(route.name))
 const profileReminderText = computed(() => (
   profile.value?.role === 'student'
-    ? '填写姓名和手机号后，才可以加入班级。'
-    : '请填写姓名和手机号，便于完善平台身份信息。'
+    ? '填写姓名后，才可以加入班级。'
+    : '请填写姓名，便于完善平台身份信息。'
 ))
 
 // 首次登录（批量导入/管理员重置密码后）提示修改密码，可跳过，下次登录再次提示

@@ -1,24 +1,9 @@
-import re
-
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password as django_validate_password
 from rest_framework import serializers
-
 User = get_user_model()
 PASSWORD_MIN_LENGTH = 8
 PASSWORD_MAX_LENGTH = 12
-
-
-def normalize_phone(value):
-    """统一手机号格式，避免空格或连字符绕过唯一校验。"""
-    if value is None:
-        return None
-    value = str(value).strip().replace(" ", "").replace("-", "")
-    if not value:
-        return None
-    if not re.fullmatch(r"\+?\d{6,20}", value):
-        raise serializers.ValidationError("请输入正确的手机号")
-    return value
 
 
 class LoginSerializer(serializers.Serializer):
@@ -44,7 +29,6 @@ class UserSerializer(serializers.ModelSerializer):
             "real_name",
             "role",
             "role_display",
-            "phone",
             "avatar",
             "is_active",
             "must_change_password",
@@ -89,11 +73,11 @@ class RegisterSerializer(serializers.ModelSerializer):
 
 
 class ProfileUpdateSerializer(serializers.ModelSerializer):
-    """当前用户可自行维护的基础资料。"""
+    """当前用户可自行维护的基础资料（手机号已停止采集，DB 列保留）。"""
 
     class Meta:
         model = User
-        fields = ["username", "phone", "real_name"]
+        fields = ["username", "real_name"]
 
     def validate_username(self, value):
         value = value.strip()
@@ -104,17 +88,6 @@ class ProfileUpdateSerializer(serializers.ModelSerializer):
             queryset = queryset.exclude(pk=self.instance.pk)
         if queryset.exists():
             raise serializers.ValidationError("该用户名已被使用")
-        return value
-
-    def validate_phone(self, value):
-        value = normalize_phone(value)
-        if value is None:
-            return None
-        queryset = User.objects.filter(phone=value)
-        if self.instance:
-            queryset = queryset.exclude(pk=self.instance.pk)
-        if queryset.exists():
-            raise serializers.ValidationError("该手机号已被使用")
         return value
 
 

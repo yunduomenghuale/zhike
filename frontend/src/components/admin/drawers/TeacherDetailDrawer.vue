@@ -9,7 +9,7 @@
           <el-avatar :size="42" :icon="UserFilled" class="teacher-avatar" />
           <div>
             <strong>{{ detail?.real_name || detail?.username || '教师详情' }}</strong>
-            <small v-if="detail">@{{ detail.username }} · {{ detail.phone || '未绑定手机号' }}</small>
+            <small v-if="detail">@{{ detail.username }}</small>
           </div>
         </div>
         <div class="drawer-head-actions">

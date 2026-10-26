@@ -129,8 +129,7 @@ class AccessControlTests(PlatformFixtureMixin, APITestCase):
         )
 
         self.student1.real_name = "Student One"
-        self.student1.phone = "13800000001"
-        self.student1.save(update_fields=["real_name", "phone"])
+        self.student1.save(update_fields=["real_name"])
         joined = self.client.post(
             "/api/classes/join/",
             {"invite_code": self.class2.invite_code},

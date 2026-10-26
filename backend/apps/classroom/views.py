@@ -11,8 +11,8 @@ from .serializers import ClassRoomSerializer, ClassStudentSerializer
 
 
 def has_complete_profile(user):
-    """入班前必须填写姓名和手机号。"""
-    return bool(user.real_name.strip() and user.phone and user.phone.strip())
+    """入班前必须填写姓名（手机号已停止采集，不再作为资料完整度条件）。"""
+    return bool(user.real_name.strip())
 
 
 class ClassRoomViewSet(BaseModelViewSet):
@@ -88,7 +88,7 @@ class ClassRoomViewSet(BaseModelViewSet):
         User = get_user_model()
         students = {u.username: u for u in User.objects.filter(username__in=usernames, role=User.Role.STUDENT)}
         added, skipped, not_found = 0, 0, []
-        incomplete_names = []  # 资料不全（缺姓名/手机号）：照加但标黄提示
+        incomplete_names = []  # 资料不全（缺姓名）：照加但标黄提示
         for name in usernames:
             stu = students.get(name)
             if not stu:
@@ -130,7 +130,7 @@ class ClassRoomViewSet(BaseModelViewSet):
             return api_response(message="未找到该学生账号", code=404, status=404)
         if not has_complete_profile(student):
             return api_response(
-                message="该学生尚未填写姓名和手机号，暂时无法加入班级",
+                message="该学生尚未填写姓名，暂时无法加入班级",
                 code=400,
                 status=400,
             )
@@ -148,7 +148,7 @@ class ClassRoomViewSet(BaseModelViewSet):
         """学生输入邀请码加入班级（需求 S-B-01）。"""
         if not has_complete_profile(request.user):
             return api_response(
-                message="请先在个人中心填写姓名和手机号，完善资料后才能加入班级",
+                message="请先在个人中心填写姓名，完善资料后才能加入班级",
                 code=400,
                 status=400,
             )

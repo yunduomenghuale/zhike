@@ -9,7 +9,7 @@
     </header>
 
     <section class="toolbar">
-      <el-input v-model="filters.search" class="search" clearable :prefix-icon="Search" placeholder="搜索用户名、姓名或手机号" @keyup.enter="applyFilters" @clear="applyFilters" />
+      <el-input v-model="filters.search" class="search" clearable :prefix-icon="Search" placeholder="搜索用户名或姓名" @keyup.enter="applyFilters" @clear="applyFilters" />
       <el-select v-model="filters.role" clearable placeholder="全部角色" @change="applyFilters">
         <el-option label="管理员" value="admin" /><el-option label="教师" value="teacher" /><el-option label="学生" value="student" />
       </el-select>
@@ -40,7 +40,6 @@
             <div class="identity"><el-avatar :size="40" :src="row.avatar || ''" :icon="UserFilled" /><div><strong>{{ row.real_name || '未填写姓名' }}</strong><span>@{{ row.username }}</span></div></div>
           </template>
         </el-table-column>
-        <el-table-column prop="phone" label="手机号" min-width="128"><template #default="{ row }">{{ row.phone || '—' }}</template></el-table-column>
         <el-table-column label="角色" width="100"><template #default="{ row }"><el-tag effect="light" :type="roleType(row.role)">{{ row.role_display }}</el-tag></template></el-table-column>
         <el-table-column label="创建时间" width="104"><template #default="{ row }">{{ formatDate(row.date_joined) }}</template></el-table-column>
         <el-table-column label="账号状态" width="110">
@@ -57,7 +56,6 @@
       <el-form ref="editorRef" :model="form" :rules="rules" label-position="top">
         <div class="form-grid">
           <el-form-item label="用户名" prop="username"><el-input v-model.trim="form.username" placeholder="用于登录，不能与其他账号重复" /></el-form-item>
-          <el-form-item label="手机号" prop="phone"><el-input v-model.trim="form.phone" placeholder="也可用于登录" maxlength="20" /></el-form-item>
           <el-form-item label="姓名" prop="real_name"><el-input v-model.trim="form.real_name" placeholder="请输入真实姓名" /></el-form-item>
           <el-form-item label="角色" prop="role"><el-select v-model="form.role" style="width:100%"><el-option label="学生" value="student" /><el-option label="教师" value="teacher" /><el-option label="管理员" value="admin" /></el-select></el-form-item>
           <el-form-item v-if="!editingId" label="初始密码" prop="password" class="full"><el-input v-model="form.password" type="password" show-password placeholder="8～12 位字符" maxlength="12" /></el-form-item>
@@ -179,11 +177,10 @@ async function toggleRegisterOpen(value) {
 }
 const editorVisible = ref(false), editorRef = ref(), editingId = ref(null)
 const resetVisible = ref(false), resetTarget = ref(null), resetPassword = ref('')
-const blankForm = () => ({ username: '', phone: '', real_name: '', role: 'student', is_active: true, password: '' })
+const blankForm = () => ({ username: '', real_name: '', role: 'student', is_active: true, password: '' })
 const form = reactive(blankForm())
 const rules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
-  phone: [{ required: true, message: '请输入手机号', trigger: 'blur' }, { pattern: /^\+?\d{6,20}$/, message: '请输入正确的手机号', trigger: 'blur' }],
   real_name: [{ required: true, message: '请输入姓名', trigger: 'blur' }],
   role: [{ required: true, message: '请选择角色', trigger: 'change' }],
   password: [{ required: true, message: '请输入初始密码', trigger: 'blur' }, { min: 8, max: 12, message: '密码长度应为 8～12 位', trigger: 'blur' }],
@@ -198,12 +195,12 @@ async function load() {
   try { const res = await listAdminUsers({ ...filters, page: page.value, page_size: pageSize }); rows.value = res.items; total.value = res.total } finally { loading.value = false }
 }
 function openCreate() { editingId.value = null; Object.assign(form, blankForm()); editorVisible.value = true }
-function openEdit(row) { editingId.value = row.id; Object.assign(form, { username: row.username, phone: row.phone || '', real_name: row.real_name || '', role: row.role, is_active: row.is_active, password: '' }); editorVisible.value = true }
+function openEdit(row) { editingId.value = row.id; Object.assign(form, { username: row.username, real_name: row.real_name || '', role: row.role, is_active: row.is_active, password: '' }); editorVisible.value = true }
 async function saveUser() {
   if (!(await editorRef.value?.validate().catch(() => false))) return
   saving.value = true
   try {
-    const payload = { username: form.username, phone: form.phone, real_name: form.real_name, role: form.role, is_active: form.is_active }
+    const payload = { username: form.username, real_name: form.real_name, role: form.role, is_active: form.is_active }
     if (editingId.value) await updateAdminUser(editingId.value, payload)
     else await createAdminUser({ ...payload, password: form.password })
     ElMessage.success(editingId.value ? '账号已更新' : '账号已创建'); editorVisible.value = false; load()

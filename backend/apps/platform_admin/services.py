@@ -422,7 +422,6 @@ def teacher_rows(search: str = "") -> list:
             "id": t.id,
             "username": t.username,
             "real_name": t.real_name,
-            "phone": t.phone,
             "is_active": t.is_active,
             "date_joined": t.date_joined,
             "last_login": t.last_login,

@@ -7,7 +7,7 @@
     :close-on-click-modal="false"
   >
     <p class="first-login-tip">
-      你的账号由管理员开通，当前使用的是初始密码。建议立即修改密码并补充手机号，保障账号安全。
+      你的账号由管理员开通，当前使用的是初始密码。建议立即修改密码，保障账号安全。
       也可以点击「以后再说」跳过，下次登录时会再次提示。
     </p>
     <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
@@ -22,9 +22,6 @@
           <el-input v-model="form.confirm_password" type="password" show-password placeholder="请再次输入新密码" maxlength="12" />
         </el-form-item>
       </div>
-      <el-form-item label="手机号（选填，用于完善资料）" prop="phone">
-        <el-input v-model.trim="form.phone" placeholder="请输入手机号" maxlength="20" />
-      </el-form-item>
     </el-form>
     <template #footer>
       <el-button @click="visible = false">以后再说</el-button>
@@ -50,7 +47,7 @@ const visible = computed({
 
 const formRef = ref()
 const submitting = ref(false)
-const form = reactive({ current_password: '', new_password: '', confirm_password: '', phone: '' })
+const form = reactive({ current_password: '', new_password: '', confirm_password: '' })
 
 const rules = {
   current_password: [{ required: true, message: '请输入当前密码', trigger: 'blur' }],
@@ -68,12 +65,11 @@ const rules = {
       trigger: 'blur',
     },
   ],
-  phone: [{ pattern: /^\+?\d{6,20}$/, message: '请输入正确的手机号', trigger: 'blur' }],
 }
 
 watch(visible, (value) => {
   if (value) {
-    Object.assign(form, { current_password: '', new_password: '', confirm_password: '', phone: '' })
+    Object.assign(form, { current_password: '', new_password: '', confirm_password: '' })
     formRef.value?.clearValidate()
   }
 })
@@ -87,9 +83,6 @@ async function submit() {
       new_password: form.new_password,
       confirm_password: form.confirm_password,
     })
-    if (form.phone) {
-      await userStore.updateProfile({ phone: form.phone })
-    }
     await userStore.fetchProfile() // 刷新 profile，清除 must_change_password 标志
     ElMessage.success('密码已更新，下次登录请使用新密码')
     visible.value = false

@@ -11,7 +11,8 @@ export const useUserStore = defineStore('user', () => {
   const token = ref(localStorage.getItem('access_token') || '')
   const profile = ref(null)
   const isProfileComplete = computed(() => Boolean(
-    profile.value?.real_name?.trim() && profile.value?.phone?.trim(),
+    // 手机号已停止采集，资料完整度只看姓名
+    profile.value?.real_name?.trim(),
   ))
 
   async function login(payload) {

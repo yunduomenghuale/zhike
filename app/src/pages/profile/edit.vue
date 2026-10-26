@@ -18,10 +18,6 @@
         <text class="label">真实姓名</text>
         <input v-model="form.real_name" class="input" placeholder="请输入真实姓名" placeholder-class="ph" />
       </view>
-      <view class="field">
-        <text class="label">手机号</text>
-        <input v-model="form.phone" class="input" type="number" maxlength="11" placeholder="请输入手机号" placeholder-class="ph" />
-      </view>
       <button class="primary-btn" :disabled="saving" :loading="saving" @click="saveProfile">保存资料</button>
     </view>
 
@@ -52,7 +48,7 @@ import { getMe, updateMe, changePassword, uploadAvatar } from '@/api/auth.js'
 import { mediaURL } from '@/config.js'
 
 const user = ref(null)
-const form = ref({ real_name: '', phone: '' })
+const form = ref({ real_name: '' })
 const pwd = ref({ current_password: '', new_password: '', confirm_password: '' })
 const saving = ref(false)
 const changing = ref(false)
@@ -62,10 +58,10 @@ onShow(async () => {
     const me = await getMe()
     user.value = me
     uni.setStorageSync('user', me)
-    form.value = { real_name: me.real_name || '', phone: me.phone || '' }
+    form.value = { real_name: me.real_name || '' }
   } catch {
     user.value = uni.getStorageSync('user') || null
-    form.value = { real_name: user.value?.real_name || '', phone: user.value?.phone || '' }
+    form.value = { real_name: user.value?.real_name || '' }
   }
 })
 
@@ -89,7 +85,7 @@ function pickAvatar() {
 async function saveProfile() {
   saving.value = true
   try {
-    const me = await updateMe({ real_name: form.value.real_name.trim(), phone: form.value.phone.trim() })
+    const me = await updateMe({ real_name: form.value.real_name.trim() })
     user.value = me
     uni.setStorageSync('user', me)
     uni.showToast({ title: '已保存', icon: 'success' })

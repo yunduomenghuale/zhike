@@ -6,7 +6,7 @@ from apps.classroom.models import ClassRoom
 from apps.courses.models import Course
 from apps.ai.models import AICallLog, AICapabilityChangeLog, AICapabilityConfig
 from apps.ai.providers.factory import get_env_config
-from apps.users.serializers import PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, normalize_phone
+from apps.users.serializers import PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH
 
 from .models import AdminActionLog
 
@@ -20,7 +20,7 @@ class AdminUserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            "id", "username", "real_name", "phone", "avatar", "role",
+            "id", "username", "real_name", "avatar", "role",
             "role_display", "is_active", "date_joined", "last_login",
         ]
 
@@ -38,11 +38,10 @@ class AdminUserWriteSerializer(serializers.ModelSerializer):
         min_length=PASSWORD_MIN_LENGTH,
         max_length=PASSWORD_MAX_LENGTH,
     )
-    phone = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
     class Meta:
         model = User
-        fields = ["username", "real_name", "phone", "role", "is_active", "password"]
+        fields = ["username", "real_name", "role", "is_active", "password"]
 
     def validate_username(self, value):
         value = value.strip()
@@ -51,27 +50,6 @@ class AdminUserWriteSerializer(serializers.ModelSerializer):
             queryset = queryset.exclude(pk=self.instance.pk)
         if queryset.exists():
             raise serializers.ValidationError("该用户名已被使用")
-
-        phone_queryset = User.objects.filter(phone=value)
-        if self.instance:
-            phone_queryset = phone_queryset.exclude(pk=self.instance.pk)
-        if phone_queryset.exists():
-            raise serializers.ValidationError("该用户名已被其他账号作为手机号使用")
-        return value
-
-    def validate_phone(self, value):
-        value = normalize_phone(value)
-        if value is None:
-            return None
-        queryset = User.objects.filter(phone=value)
-        username_queryset = User.objects.filter(username__iexact=value)
-        if self.instance:
-            queryset = queryset.exclude(pk=self.instance.pk)
-            username_queryset = username_queryset.exclude(pk=self.instance.pk)
-        if queryset.exists():
-            raise serializers.ValidationError("该手机号已被使用")
-        if username_queryset.exists():
-            raise serializers.ValidationError("该手机号已被其他账号作为用户名使用")
         return value
 
     def validate_password(self, value):

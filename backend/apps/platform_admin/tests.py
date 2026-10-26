@@ -1258,7 +1258,7 @@ class OversightAuditTests(OversightFixtureMixin, TestCase):
     def test_user_create_update_reset_audit(self):
         # 创建
         resp = self.client.post("/api/admin-panel/users/", {
-            "username": "s_audit", "real_name": "审计生", "phone": "13800000009",
+            "username": "s_audit", "real_name": "审计生",
             "role": "student", "password": "pw123456!",
         }, format="json")
         self.assertEqual(resp.status_code, 201, resp.data)

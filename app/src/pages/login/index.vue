@@ -12,11 +12,11 @@
 
     <view class="login-card">
       <view class="field">
-        <text class="field-label">用户名 / 手机号</text>
+        <text class="field-label">用户名</text>
         <input
           v-model="form.username"
           class="field-input"
-          placeholder="请输入用户名或手机号"
+          placeholder="请输入用户名"
           placeholder-class="ph"
         />
       </view>
