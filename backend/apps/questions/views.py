@@ -154,7 +154,8 @@ class QuestionViewSet(BaseModelViewSet):
                 progress={
                     "stage": "queued",
                     "done": 0,
-                    "total": len(groups),
+                    # 进度按题计数（与 run_question_gen 的逐块推进同口径）
+                    "total": sum(g["count"] for g in groups),
                     "groups": groups,
                     "objective": objective,
                     "message": "排队中…",

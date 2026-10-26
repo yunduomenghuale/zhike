@@ -101,7 +101,20 @@ echo "$OUT" | grep -q 'DRAWER_READY cards=7' || fail auto-import "$OUT"
 echo "$OUT" | grep -q 'sawProgress=true' || mark progress-note '小文件解析过快未捕获进度面板（非阻断）'
 $AB screenshot test/screenshots/e2e-import-publish-drawer.png >>"$LOG" 2>&1
 
-# ============ 3. 勾选「入库后立即发布」→ 选章节 → 全部入库 ============
+# ============ 3. 勾选「入库后立即发布」→ 选章节 → 入库勾选 ============
+# 按钮合并口径：footer 仅有「入库勾选的 N 题」（primary），无「全部入库」
+OUT=$(eval_retry "(function(){
+  var btns=Array.prototype.map.call(document.querySelectorAll('.dp-footer-actions .el-button'),function(b){return b.innerText.trim()});
+  var hasAll=btns.some(function(t){return t.indexOf('全部入库')>=0});
+  var checkedBtns=btns.filter(function(t){return t.indexOf('入库勾选')>=0});
+  var primary=document.querySelectorAll('.dp-footer-actions .el-button--primary').length;
+  return 'MERGE btns='+JSON.stringify(btns)+' hasAll='+hasAll+' checkedBtnCount='+checkedBtns.length+' primaryCount='+primary;
+})()" 'MERGE')
+mark merge "$OUT"
+echo "$OUT" | grep -q 'hasAll=false' || fail merge-all "$OUT"
+echo "$OUT" | grep -q 'checkedBtnCount=1' || fail merge-checked "$OUT"
+echo "$OUT" | grep -q 'primaryCount=1' || fail merge-primary "$OUT"
+
 OUT=$(eval_retry "(function(){
   var c=document.querySelector('.dp-publish-check');
   return 'PUBCHECK exists='+!!c+' text='+(c?c.innerText.trim():'');
@@ -119,7 +132,7 @@ OUT=$(eval_retry "(async function(){for(var i=0;i<30;i++){var items=document.que
 mark catalog "$OUT"
 echo "$OUT" | grep -q 'CATALOG_PICKED' || fail catalog "$OUT"
 
-# 全部入库（主按钮）
+# 入库勾选（合并后的唯一 primary 按钮，默认全选即全部入库）
 OUT=$(domclick '.dp-footer .el-button--primary')
 mark save-all "$OUT"
 # 等成功提示「已入库并发布」+ 抽屉关闭

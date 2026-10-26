@@ -1450,6 +1450,23 @@ class QuestionGenPipelineTests(APITestCase):
         self.assertNotIn("score", by_type["blank"]["answer"]["blanks"][0])
         self.assertEqual(task.progress["stage"], "done")
 
+    def test_chunked_generation_progress_per_question(self):
+        """按题分块实时进度：count=7 → 3+3+1 三次调用；progress 按题计数，终态 done=total=7。"""
+        from apps.questions import question_gen_ai
+
+        task = self._task([{"qtype": "single", "count": 7, "score": 2}])
+        with patch("apps.questions.question_gen_ai.get_provider", return_value=MockProvider()), \
+                patch("apps.questions.question_gen_ai._mock_group", wraps=question_gen_ai._mock_group) as m:
+            run_question_gen(task)
+        sizes = [c.args[1] for c in m.call_args_list]
+        self.assertEqual(sizes, [3, 3, 1])  # GEN_CHUNK=3 分块
+        task.refresh_from_db()
+        self.assertEqual(task.status, AITask.Status.SUCCESS)
+        self.assertEqual(task.progress["total"], 7)  # 单位=题（不再按组）
+        self.assertEqual(task.progress["done"], 7)
+        batch = QuestionDraftBatch.objects.get(id=task.result["batch_id"])
+        self.assertEqual(len(batch.drafts), 7)
+
     def test_partial_group_failure_marks_degraded(self):
         """单组失败不整批失败：成功组照常建批次，failed_groups 记原因。"""
         provider = _QGenProvider(fail_qtypes={"judge"})

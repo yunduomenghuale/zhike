@@ -11,8 +11,9 @@
   AITask 行，前端轮询 /api/ai-tasks/<id>/，离开页面/刷新不丢失；
 - 上下文收敛：章节 PPT（parsed_pages）+ 知识库 chunk，合计 CONTEXT_LIMIT
   字上限，多组题型共享一份（避免每组重复取材撑爆 token）；
-- 逐组生成、逐组落 progress（done/total 按组计）；单组失败不整批失败，
-  记 degraded + failed_groups 原因，成功组照常建批次；
+- 逐组生成；组内按 GEN_CHUNK（3 题/次）分块多次调用，progress 按题计数
+  （done/total 单位=题）逐块落库，前端轮询可见逐块实时推进；单组失败不整批
+  失败，记 degraded + failed_groups 原因，成功组照常建批次；
 - 全部组失败才抛异常（上层标 FAILED + error 摘要）；
 - 无 Key 环境（provider=mock）：生成确定性假题（【模拟】前缀），
   保证演示与联调链路可用；
@@ -35,6 +36,10 @@ logger = logging.getLogger(__name__)
 
 # 多组题型共享的上下文上限（旧同步版 generate_questions 为 3000，多组场景放宽）
 CONTEXT_LIMIT = 8000
+
+# 每次 LLM 调用生成的题数：按题分块多次调用，进度按题实时推进（前端 2.5s 轮询
+# 可见逐块推进），且小块 JSON 输出更稳（大块易截断/单条不合规整组丢弃）
+GEN_CHUNK = 3
 
 QTYPE_LABELS = {"single": "单选题", "multi": "多选题", "judge": "判断题", "blank": "填空题", "short": "简答题"}
 DIFFICULTIES = ("easy", "medium", "hard")
@@ -287,11 +292,14 @@ def run_question_gen(task: AITask) -> None:
 
     # ---- S0：上下文取材（多组共享一份，收敛 CONTEXT_LIMIT 字）----
     context, catalog_title = _gather_context(task.course_id, task.catalog_id)
+    # 进度按题计数（done/total 单位=题）：每组再按 GEN_CHUNK 分块多次调用，
+    # 每块落一次 progress，前端轮询可见「正在生成多选题（4/10）…」逐块推进
+    total_q = sum(int(g.get("count") or 0) for g in groups)
     # progress 全程保留 groups/objective 配置（失败排查与前端分组进度展示用）
     task.progress = {
         "stage": "gen",
         "done": 0,
-        "total": len(groups),
+        "total": total_q,
         "groups": groups,
         "objective": objective,
         "message": "正在生成题目…",
@@ -300,36 +308,42 @@ def run_question_gen(task: AITask) -> None:
 
     drafts: list[dict] = []
     failed_groups: list[dict] = []
-    for idx, group in enumerate(groups):
+    done_q = 0
+    for group in groups:
         qtype = str(group.get("qtype") or "").strip()
         count = int(group.get("count") or 0)
         score = group.get("score")
         label = QTYPE_LABELS.get(qtype, qtype)
-        task.progress = {
-            "stage": "gen",
-            "done": idx,
-            "total": len(groups),
-            "groups": groups,
-            "objective": objective,
-            "message": f"正在生成{label}（{idx + 1}/{len(groups)}）…",
-        }
-        _save(task, "progress")
-        try:
-            if is_mock:
-                items = _mock_group(qtype, count, score, catalog_title)
-            else:
-                items = _chat_group(provider, qtype, count, score, context, objective, catalog_title)
-        except Exception as exc:
-            logger.exception("AI 生题组失败（task_id=%s, qtype=%s）", task.id, qtype)
-            failed_groups.append({"qtype": qtype, "error": f"{type(exc).__name__}: {exc}"[:200]})
-            continue
         dropped = 0
-        for raw in items:
-            item = _sanitize_item(raw, qtype, score)
-            if item is None:
-                dropped += 1
-                continue
-            drafts.append(item)
+        remaining = count
+        while remaining > 0:
+            n = min(GEN_CHUNK, remaining)
+            task.progress = {
+                "stage": "gen",
+                "done": done_q,
+                "total": total_q,
+                "groups": groups,
+                "objective": objective,
+                "message": f"正在生成{label}（{done_q}/{total_q}）…",
+            }
+            _save(task, "progress")
+            try:
+                if is_mock:
+                    items = _mock_group(qtype, n, score, catalog_title)
+                else:
+                    items = _chat_group(provider, qtype, n, score, context, objective, catalog_title)
+            except Exception as exc:
+                logger.exception("AI 生题组失败（task_id=%s, qtype=%s）", task.id, qtype)
+                failed_groups.append({"qtype": qtype, "error": f"{type(exc).__name__}: {exc}"[:200]})
+                break  # 单块失败放弃该组余下块（同一调用大概率同样失败），进下一组
+            for raw in items:
+                item = _sanitize_item(raw, qtype, score)
+                if item is None:
+                    dropped += 1
+                    continue
+                drafts.append(item)
+            done_q += n  # 按请求题数推进：进度稳定只增，与实际产出差额在终态消息体现
+            remaining -= n
         if dropped:
             failed_groups.append({"qtype": qtype, "error": f"{dropped} 条生成结果不合规已丢弃"})
 
@@ -366,8 +380,8 @@ def run_question_gen(task: AITask) -> None:
     }
     task.progress = {
         "stage": "done",
-        "done": len(groups),
-        "total": len(groups),
+        "done": total_q,
+        "total": total_q,
         "groups": groups,
         "objective": objective,
         "message": f"已生成 {len(drafts)} 道题目，请预览编辑后入库",

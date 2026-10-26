@@ -96,11 +96,9 @@
           <el-tooltip content="勾选后题目入库即为「已发布」，学生端章节练习立即可见（章节需已发布），省去逐题点发布" placement="top">
             <el-checkbox v-model="publishOnSave" class="dp-publish-check">入库后立即发布</el-checkbox>
           </el-tooltip>
-          <el-button :disabled="!checkedCount || !batch.catalog" :loading="saving" @click="doSave(true)">
+          <!-- 单一入库入口：工具栏已有全选，勾选即全部，不再单设「全部入库」按钮 -->
+          <el-button type="primary" :disabled="!checkedCount || !batch.catalog" :loading="saving" @click="doSave">
             入库勾选的 {{ checkedCount }} 题
-          </el-button>
-          <el-button type="primary" :disabled="!forms.length || !batch.catalog" :loading="saving" @click="doSave(false)">
-            全部入库（{{ forms.length }}）
           </el-button>
         </div>
       </div>
@@ -199,9 +197,9 @@ function removeDraft(i) {
 }
 
 // ---- 入库 ----
-async function doSave(onlyChecked) {
+async function doSave() {
   if (!batch.value?.catalog) return ElMessage.warning('请先选择题目入库章节')
-  const picked = onlyChecked ? forms.value.filter((f) => f._checked) : forms.value
+  const picked = forms.value.filter((f) => f._checked)
   if (!picked.length) return ElMessage.warning('没有可入库的题目')
   saving.value = true
   try {
