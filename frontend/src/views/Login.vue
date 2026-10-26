@@ -171,16 +171,17 @@ const loginPrompt = {
 }
 
 const isRegister = ref(false)
-// 注册通道开关（管理端「用户管理 → 开放注册」控制）：拉取失败按开放兜底，关闭时隐藏注册入口
-const registerOpen = ref(true)
+// 注册通道开关（管理端「用户管理 → 开放注册」控制）：缺省/拉取失败均按关闭兜底（安全方向），
+// 管理端显式打开后才展示注册入口
+const registerOpen = ref(false)
 const loading = ref(false)
 
 onMounted(async () => {
   try {
     const config = await getAuthConfig()
-    registerOpen.value = config?.register_open !== false
+    registerOpen.value = config?.register_open === true
   } catch {
-    registerOpen.value = true // 配置拉取失败不阻断登录页，注册被关时由后端 403 文案兜底
+    registerOpen.value = false // 配置拉取失败按关闭兜底；实际开放时注册入口会在下次进页恢复
   }
   if (!registerOpen.value) isRegister.value = false
 })

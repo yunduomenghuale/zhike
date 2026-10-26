@@ -164,16 +164,16 @@ const { profile } = storeToRefs(useUserStore())
 const loading = ref(false), saving = ref(false), resetting = ref(false)
 const rows = ref([]), total = ref(0), page = ref(1), pageSize = 10
 const filters = reactive({ search: '', role: '', status: '' })
-// 注册通道开关（平台设置 register_open）
-const registerOpen = ref(true), registerToggling = ref(false)
+// 注册通道开关（平台设置 register_open，缺省关闭需管理员显式打开）
+const registerOpen = ref(false), registerToggling = ref(false)
 async function loadSettings() {
-  try { const res = await getPlatformSettings(); registerOpen.value = res?.register_open !== false } catch { /* 拦截器已提示 */ }
+  try { const res = await getPlatformSettings(); registerOpen.value = res?.register_open === true } catch { /* 拦截器已提示 */ }
 }
 async function toggleRegisterOpen(value) {
   registerToggling.value = true
   try {
     const res = await updatePlatformSettings({ register_open: value })
-    registerOpen.value = res?.register_open !== false
+    registerOpen.value = res?.register_open === true
     ElMessage.success(value ? '注册通道已开放' : '注册通道已关闭，登录页注册入口已隐藏')
   } catch { /* 拦截器已提示，开关状态保持原值（model-value 单向绑定不回写） */ } finally { registerToggling.value = false }
 }

@@ -92,5 +92,7 @@ def set_setting(key, value, description=""):
 
 
 def register_open() -> bool:
-    """注册通道开关：缺省开放（True）；管理端关闭后注册接口拒绝、登录页隐藏注册入口。"""
-    return bool(get_setting(REGISTER_OPEN_KEY, True))
+    """注册通道开关：**缺省关闭**（False）——新部署环境自助注册默认关停，
+    需管理员在「用户管理 → 开放注册」显式打开；关闭态注册接口 403、登录页隐藏注册入口。
+    """
+    return bool(get_setting(REGISTER_OPEN_KEY, False))

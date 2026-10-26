@@ -353,6 +353,12 @@ class ExamFlowTests(PlatformFixtureMixin, APITestCase):
 
 
 class PasswordPolicyTests(APITestCase):
+    def setUp(self):
+        # 注册通道缺省关闭（见 RegisterToggleTests）：密码策略用例先显式打开
+        from apps.platform_admin.models import REGISTER_OPEN_KEY, set_setting
+
+        set_setting(REGISTER_OPEN_KEY, True)
+
     def test_registration_accepts_twelve_character_password(self):
         response = self.client.post(
             "/api/auth/register/",
@@ -395,18 +401,29 @@ class PasswordPolicyTests(APITestCase):
 
 
 class RegisterToggleTests(APITestCase):
-    """注册通道开关：管理端 PlatformSetting register_open 控制注册接口与登录页入口。"""
+    """注册通道开关：管理端 PlatformSetting register_open 控制注册接口与登录页入口（缺省关闭）。"""
 
     def _register_payload(self, username="toggle-user"):
         return {"username": username, "password": "Passw0rd!", "role": "student"}
 
-    def test_register_open_by_default(self):
+    def test_register_closed_by_default(self):
+        """无任何设置行时缺省关闭：新部署环境自助注册默认关停。"""
+        response = self.client.post("/api/auth/register/", self._register_payload(), format="json")
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data["message"], "注册通道已暂时关闭，请联系管理员开通账号")
+        self.assertFalse(User.objects.filter(username="toggle-user").exists())
+
+    def test_register_accepted_when_opened(self):
+        from apps.platform_admin.models import REGISTER_OPEN_KEY, set_setting
+
+        set_setting(REGISTER_OPEN_KEY, True)
         response = self.client.post("/api/auth/register/", self._register_payload(), format="json")
         self.assertEqual(response.status_code, 201)
 
     def test_register_rejected_when_closed(self):
         from apps.platform_admin.models import REGISTER_OPEN_KEY, set_setting
 
+        set_setting(REGISTER_OPEN_KEY, True)  # 先开再关，覆盖显式关闭路径
         set_setting(REGISTER_OPEN_KEY, False)
         response = self.client.post("/api/auth/register/", self._register_payload(), format="json")
         self.assertEqual(response.status_code, 403)
@@ -418,11 +435,11 @@ class RegisterToggleTests(APITestCase):
 
         resp = self.client.get("/api/auth/config/")
         self.assertEqual(resp.status_code, 200)
-        self.assertTrue(resp.data["data"]["register_open"])  # 缺省开放
+        self.assertFalse(resp.data["data"]["register_open"])  # 缺省关闭
 
-        set_setting(REGISTER_OPEN_KEY, False)
+        set_setting(REGISTER_OPEN_KEY, True)
         resp = self.client.get("/api/auth/config/")
-        self.assertFalse(resp.data["data"]["register_open"])
+        self.assertTrue(resp.data["data"]["register_open"])
 
     def test_admin_settings_get_patch_and_audit(self):
         from apps.platform_admin.models import AdminActionLog
@@ -432,23 +449,26 @@ class RegisterToggleTests(APITestCase):
 
         resp = self.client.get("/api/admin-panel/settings/")
         self.assertEqual(resp.status_code, 200)
-        self.assertTrue(resp.data["data"]["register_open"])
+        self.assertFalse(resp.data["data"]["register_open"])  # 缺省关闭
 
-        resp = self.client.patch("/api/admin-panel/settings/", {"register_open": False}, format="json")
-        self.assertEqual(resp.status_code, 200)
-        self.assertFalse(resp.data["data"]["register_open"])
-        # 关闭后注册拒绝；再开即恢复
-        self.assertEqual(
-            self.client.post("/api/auth/register/", self._register_payload(), format="json").status_code, 403
-        )
+        # 打开后注册恢复；再关闭立即拒绝
         resp = self.client.patch("/api/admin-panel/settings/", {"register_open": True}, format="json")
+        self.assertEqual(resp.status_code, 200)
         self.assertTrue(resp.data["data"]["register_open"])
         self.assertEqual(
             self.client.post("/api/auth/register/", self._register_payload(), format="json").status_code, 201
         )
+        resp = self.client.patch("/api/admin-panel/settings/", {"register_open": False}, format="json")
+        self.assertFalse(resp.data["data"]["register_open"])
+        self.assertEqual(
+            self.client.post(
+                "/api/auth/register/", self._register_payload("toggle-user-2"), format="json"
+            ).status_code,
+            403,
+        )
         logs = AdminActionLog.objects.filter(action=AdminActionLog.Action.SETTINGS_UPDATE)
         self.assertEqual(logs.count(), 2)
-        self.assertEqual(logs.first().new_value, {"register_open": True})
+        self.assertEqual(logs.first().new_value, {"register_open": False})
 
     def test_admin_settings_rejects_non_bool_and_forbidden_for_teacher(self):
         teacher = User.objects.create_user(username="p_teacher", password="pw123456!", role=User.Role.TEACHER)

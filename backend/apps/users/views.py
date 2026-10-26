@@ -32,8 +32,9 @@ def tokens_for(user):
 class RegisterView(GenericAPIView):
     """注册（教师 / 学生）。
 
-    注册通道可由管理端「用户管理 → 开放注册」开关关闭（PlatformSetting
-    register_open）：关闭后本接口 403，登录页隐藏注册入口（见 AuthConfigView）。
+    注册通道由管理端「用户管理 → 开放注册」开关控制（PlatformSetting
+    register_open，**缺省关闭**：新部署环境需管理员显式打开）；
+    关闭后本接口 403，登录页隐藏注册入口（见 AuthConfigView）。
     """
 
     permission_classes = [AllowAny]
