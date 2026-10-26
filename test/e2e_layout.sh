@@ -67,13 +67,8 @@ mark import-dlg "$OUT"
 echo "$OUT" | grep -q 'DLG_READY' || fail import-dlg "$OUT"
 
 $AB upload '.import-uploader input[type=file]' 'D:/Claude_Code/智课系统V2/test/e2e/import-e2e-v1.txt' >>"$LOG" 2>&1
-OUT=$(eval_retry "(async function(){for(var i=0;i<30;i++){var n=document.querySelector('.import-uploader .el-upload-list__item-name'); if(n && n.innerText.indexOf('import-e2e-v1.txt')>=0) return 'FILE_OK'; await new Promise(r=>setTimeout(r,250));} return 'FILE_TIMEOUT'})()" 'FILE_OK')
-mark upload "$OUT"
-echo "$OUT" | grep -q 'FILE_OK' || fail upload "$OUT"
-
-OUT=$(domclick '.import-dialog .q-btn-primary')
-mark parse "$OUT"
-OUT=$(eval_retry "(async function(){for(var i=0;i<60;i++){var d=document.querySelector('.draft-preview-drawer'); if(d){var cards=document.querySelectorAll('.dp-card'); if(cards.length) return 'DRAWER_READY cards='+cards.length;} await new Promise(r=>setTimeout(r,300));} return 'DRAWER_TIMEOUT'})()" 'DRAWER_READY')
+# 选择即上传解析（无「解析并预览」按钮）：等预览抽屉自动打开
+OUT=$(eval_retry "(async function(){for(var i=0;i<80;i++){var d=document.querySelector('.draft-preview-drawer'); if(d){var cards=document.querySelectorAll('.dp-card'); if(cards.length) return 'DRAWER_READY cards='+cards.length;} await new Promise(r=>setTimeout(r,250));} return 'DRAWER_TIMEOUT'})()" 'DRAWER_READY')
 mark drawer "$OUT"
 echo "$OUT" | grep -q 'DRAWER_READY cards=7' || fail drawer "$OUT"
 

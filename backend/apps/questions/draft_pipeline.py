@@ -11,6 +11,8 @@
 ⑤ 成功条目从 drafts 移除（规范化 JSON 相等匹配，重复项按序移除首个，
    兜底按 题型+题干 匹配——前端编辑后未回传的旧版本也能移除）；
 ⑥ drafts 空 → status=saved 并删除上传文件（入库即删）。
+
+publish=True 时入库题目直接置「已发布」（导入/AI 生题共用，见 save 接口）。
 """
 from __future__ import annotations
 
@@ -79,7 +81,7 @@ def _normalize_options(raw_options) -> list[dict]:
     return options
 
 
-def _normalize_item(item, batch, source):
+def _normalize_item(item, batch, source, status=Question.Status.DRAFT):
     """单条草稿 → QuestionSerializer 入参；返回 (payload, None) 或 (None, 中文错误)。"""
     if not isinstance(item, dict):
         return None, "草稿数据格式不正确"
@@ -178,7 +180,7 @@ def _normalize_item(item, batch, source):
         "difficulty": difficulty,
         "knowledge_tags": [str(t) for t in tags][:10],
         "source": source,
-        "status": Question.Status.DRAFT,
+        "status": status,
     }, None
 
 
@@ -226,8 +228,12 @@ def _remove_drafts(remaining: list, consumed: list) -> list:
     return pool
 
 
-def save_batch_drafts(batch: QuestionDraftBatch, items, user) -> dict:
-    """批量入库入口；返回 {saved:[id...], skipped:n, failed:[{index,error}], remaining:n}。"""
+def save_batch_drafts(batch: QuestionDraftBatch, items, user, publish: bool = False) -> dict:
+    """批量入库入口；返回 {saved:[id...], skipped:n, failed:[{index,error}], remaining:n}。
+
+    publish=True 时题目直接置「已发布」（学生端章节练习可见，章节本身需已发布），
+    省去入库后逐题点发布的重复操作；默认仍为草稿。
+    """
     if not isinstance(items, list) or not items:
         raise ValidationError("提交内容不能为空")
     if batch.status == QuestionDraftBatch.Status.SAVED:
@@ -240,6 +246,7 @@ def save_batch_drafts(batch: QuestionDraftBatch, items, user) -> dict:
         if batch.origin == QuestionDraftBatch.Origin.AI_GEN
         else Question.Source.IMPORT
     )
+    status = Question.Status.PUBLISHED if publish else Question.Status.DRAFT
     shim = _UserShim(user)
     saved_ids: list[int] = []
     skipped = 0
@@ -247,7 +254,7 @@ def save_batch_drafts(batch: QuestionDraftBatch, items, user) -> dict:
     consumed: list[dict] = []
 
     for idx, item in enumerate(items):
-        payload, err = _normalize_item(item, batch, source)
+        payload, err = _normalize_item(item, batch, source, status)
         if err:
             failed.append({"index": idx, "error": err})
             continue

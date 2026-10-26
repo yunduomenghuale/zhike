@@ -93,6 +93,9 @@
       <div class="dp-footer">
         <el-button text type="danger" :icon="Delete" @click="discardBatch">放弃批次</el-button>
         <div class="dp-footer-actions">
+          <el-tooltip content="勾选后题目入库即为「已发布」，学生端章节练习立即可见（章节需已发布），省去逐题点发布" placement="top">
+            <el-checkbox v-model="publishOnSave" class="dp-publish-check">入库后立即发布</el-checkbox>
+          </el-tooltip>
           <el-button :disabled="!checkedCount || !batch.catalog" :loading="saving" @click="doSave(true)">
             入库勾选的 {{ checkedCount }} 题
           </el-button>
@@ -127,6 +130,7 @@ const forms = ref([]) // 与 batch.drafts 位置对齐的本地表单态（_chec
 const loading = ref(false)
 const saving = ref(false)
 const savingCatalog = ref(false)
+const publishOnSave = ref(false) // 入库后立即发布：入库题目直接置「已发布」
 let persistTimer = null
 
 watch(() => [props.visible, props.batchId], ([visible, id]) => {
@@ -206,9 +210,9 @@ async function doSave(onlyChecked) {
       const { _checked, ...rest } = f
       return formToDraft(rest)
     })
-    const res = await saveDraftBatch(batch.value.id, items)
+    const res = await saveDraftBatch(batch.value.id, items, publishOnSave.value)
     const parts = []
-    if (res.saved?.length) parts.push(`已入库 ${res.saved.length} 题`)
+    if (res.saved?.length) parts.push(publishOnSave.value ? `已入库并发布 ${res.saved.length} 题` : `已入库 ${res.saved.length} 题`)
     if (res.skipped) parts.push(`跳过 ${res.skipped} 题（题库已存在相同题干）`)
     if (res.failed?.length) parts.push(`${res.failed.length} 题待修正`)
     if (parts.length) ElMessage.success(parts.join('，'))
@@ -410,6 +414,16 @@ function qtypeLabel(v) {
 }
 .dp-footer-actions {
   display: flex;
+  align-items: center;
   gap: 10px;
+}
+/* 入库后立即发布：与按钮同行垂直居中（EP checkbox 默认高度与按钮不齐） */
+.dp-publish-check {
+  height: 32px;
+  margin-right: 2px;
+}
+.dp-publish-check :deep(.el-checkbox__label) {
+  font-size: 13px;
+  color: #475569;
 }
 </style>

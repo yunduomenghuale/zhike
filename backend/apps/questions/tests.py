@@ -1006,6 +1006,32 @@ class QuestionDraftBatchApiTests(APITestCase):
         self.assertEqual(batch.status, "saved")
         self.assertFalse(batch.file)  # 入库即删
 
+    def test_save_with_publish_marks_questions_published(self):
+        """publish=True：入库题目直接置「已发布」，省去逐题点发布（导入/AI 生题共用）。"""
+        batch = self._make_batch(self._full_drafts())
+        self.client.force_authenticate(user=self.teacher)
+        response = self.client.post(
+            f"/api/question-draft-batches/{batch.id}/save/",
+            {"items": self._full_drafts(), "publish": True}, format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        result = response.data["data"]
+        self.assertEqual(len(result["saved"]), 5)
+        questions = Question.objects.filter(course=self.course)
+        self.assertEqual(questions.count(), 5)
+        self.assertTrue(all(q.status == "published" for q in questions))
+        # 默认路径仍为草稿（回归保护：publish 缺省不改变原口径）
+        default_draft = {**self._full_drafts()[0], "stem": "默认路径回归保护题干（不与已发布题重复）"}
+        batch2 = self._make_batch([default_draft])
+        response = self.client.post(
+            f"/api/question-draft-batches/{batch2.id}/save/",
+            {"items": [default_draft]}, format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data["data"]["saved"]), 1)
+        draft_q = Question.objects.get(id=response.data["data"]["saved"][0])
+        self.assertEqual(draft_q.status, "draft")
+
     def test_save_partial_failure_keeps_failed_draft(self):
         drafts = self._full_drafts()
         drafts[1]["answer"] = {"key": "可能是"}  # 判断题无法归一 → failed

@@ -325,19 +325,21 @@ class QuestionDraftBatchViewSet(BaseModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="save")
     def save_drafts(self, request, pk=None):
-        """批量入库：body {items:[草稿...]}（教师勾选/编辑后的子集）。
+        """批量入库：body {items:[草稿...], publish:bool}（教师勾选/编辑后的子集）。
 
         流水线见 draft_pipeline.save_batch_drafts；部分失败不整批回滚，
         失败项留批次内可修正重试；精确查重防重复入库（附录 B-3）。
+        publish=True 时入库题目直接置「已发布」，省去逐题点发布（导入/AI 生题共用）。
         """
         batch = self.get_object()
+        publish = request.data.get("publish") in (True, "true", "1", 1)
         try:
-            result = save_batch_drafts(batch, request.data.get("items"), request.user)
+            result = save_batch_drafts(batch, request.data.get("items"), request.user, publish=publish)
         except ValidationError as exc:
             detail = exc.detail[0] if isinstance(exc.detail, list) and exc.detail else exc.detail
             return api_response(message=str(detail), code=400, status=400)
         saved_n = len(result["saved"])
-        message = f"已入库 {saved_n} 题"
+        message = f"已入库并发布 {saved_n} 题" if publish else f"已入库 {saved_n} 题"
         if result["skipped"]:
             message += f"，跳过 {result['skipped']} 题（题库已存在相同题干）"
         if result["failed"]:
