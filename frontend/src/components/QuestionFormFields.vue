@@ -38,7 +38,9 @@
     <el-form-item label="题图" class="qff-multiline">
       <div class="qimg-editor">
         <template v-if="model.image">
-          <img class="qimg-thumb" :src="imageUrl" alt="题图" title="点击放大预览" @click="previewVisible = true" />
+          <div class="qimg-thumb-slot" title="点击放大预览">
+            <QuestionImage :question="{ image: model.image }" />
+          </div>
           <div class="qimg-side">
             <el-button size="small" :loading="uploading" @click="pickFile">更换图片</el-button>
             <el-button size="small" type="danger" plain @click="model.image = ''">移除题图</el-button>
@@ -59,9 +61,6 @@
           @change="onFilePicked"
         />
       </div>
-      <el-dialog v-model="previewVisible" append-to-body width="auto" class="qimg-preview-dialog">
-        <img v-if="imageUrl" :src="imageUrl" alt="题图放大预览" style="max-width: 86vw; max-height: 80vh; display: block" />
-      </el-dialog>
     </el-form-item>
 
     <!-- 选项（单选/多选） -->
@@ -135,6 +134,7 @@ import { computed, ref } from 'vue'
 import { Plus, Delete } from '@element-plus/icons-vue'
 import { DEFAULT_QTYPES, blankScoreTotal, buildAnswer, buildOptions, formToDraft } from '@/utils/questionDraft'
 import { uploadQuestionImage } from '@/api/question'
+import QuestionImage from '@/components/QuestionImage.vue'
 
 const props = defineProps({
   // 受控表单对象（父层持有引用，字段直接变更；改题型时由本组件重置答案字段）
@@ -181,8 +181,6 @@ const blankTotal = computed(() => blankScoreTotal(props.model))
 // ---- 题图上传（选择即传，回传 path；展示走 /media/ 静态服务）----
 const fileInput = ref(null)
 const uploading = ref(false)
-const previewVisible = ref(false)
-const imageUrl = computed(() => (props.model.image ? `/media/${props.model.image}` : ''))
 function pickFile() {
   fileInput.value?.click()
 }
@@ -284,18 +282,16 @@ defineExpose({ normalize })
   flex-wrap: wrap;
   width: 100%;
 }
-.qimg-thumb {
-  width: 160px;
+/* 表单内缩略图槽：覆盖 QuestionImage 默认展示尺寸 */
+.qimg-thumb-slot :deep(.question-image),
+.qimg-thumb-slot :deep(.question-image img) {
+  max-width: 160px;
   max-height: 110px;
-  object-fit: contain;
-  border: 1px solid #dbe5f2;
-  border-radius: 10px;
-  background: #fff;
-  cursor: zoom-in;
 }
 /* 草稿预览紧凑态：缩略图进一步缩小，避免卡片被撑高 */
-.qff-compact .qimg-thumb {
-  width: 120px;
+.qff-compact .qimg-thumb-slot :deep(.question-image),
+.qff-compact .qimg-thumb-slot :deep(.question-image img) {
+  max-width: 120px;
   max-height: 84px;
 }
 .qff-compact .qimg-side {

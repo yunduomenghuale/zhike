@@ -7,7 +7,7 @@
   -->
   <el-drawer
     :model-value="visible"
-    @update:model-value="(v) => emit('update:visible', v)"
+    @update:model-value="onVisibleChange"
     size="780px"
     :show-close="false"
     class="draft-preview-drawer"
@@ -137,11 +137,25 @@ const loading = ref(false)
 const saving = ref(false)
 const savingCatalog = ref(false)
 const publishOnSave = ref(false) // 入库后立即发布：入库题目直接置「已发布」
+// 本次打开期间是否有成功入库的题：部分题被跳过（已存在）时批次仍有剩余草稿、
+// 不触发全量完成的 saved 事件；抽屉关闭时据此补发，否则父层列表看不到已入库的题
+const savedAny = ref(false)
 let persistTimer = null
 
 watch(() => [props.visible, props.batchId], ([visible, id]) => {
-  if (visible && id) loadBatch()
+  if (visible && id) {
+    savedAny.value = false
+    loadBatch()
+  }
 }, { immediate: false })
+
+function onVisibleChange(v) {
+  emit('update:visible', v)
+  if (!v && savedAny.value) {
+    savedAny.value = false
+    emit('saved')
+  }
+}
 
 async function loadBatch() {
   loading.value = true
@@ -217,6 +231,7 @@ async function doSave() {
       return formToDraft(rest)
     })
     const res = await saveDraftBatch(batch.value.id, items, publishOnSave.value)
+    if (res.saved?.length) savedAny.value = true
     const parts = []
     if (res.saved?.length) parts.push(publishOnSave.value ? `已入库并发布 ${res.saved.length} 题` : `已入库 ${res.saved.length} 题`)
     if (res.skipped) parts.push(`跳过 ${res.skipped} 题（题库已存在相同题干）`)
@@ -231,6 +246,7 @@ async function doSave() {
     }
     if (res.remaining === 0) {
       ElMessage.success('批次已全部入库')
+      savedAny.value = false // 即将全量 saved，避免关闭时再补发一次
       emit('saved')
       emit('update:visible', false)
       return
