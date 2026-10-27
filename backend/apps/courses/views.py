@@ -105,7 +105,9 @@ class CatalogViewSet(BaseModelViewSet):
             qs = qs.filter(parent__isnull=True)
         if course_id:
             qs = qs.filter(course_id=course_id)
-        return qs.order_by("id")
+        # 按排序号排列（模型 Meta 口径 order,id）：视图曾硬编码 order_by("id") 导致
+        # 章节的「排序号」字段保存后从不影响列表顺序
+        return qs.order_by("order", "id")
 
     def destroy(self, request, *args, **kwargs):
         catalog = self.get_object()

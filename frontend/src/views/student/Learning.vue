@@ -483,7 +483,14 @@
                 <span class="node-icon-wrap">
                   <el-icon class="node-icon"><Folder v-if="!row.isChild" /><Document v-else /></el-icon>
                 </span>
-                <span class="node-title">{{ row.node.title }}</span>
+                <span class="node-copy">
+                  <span class="node-title">{{ row.node.title }}</span>
+                  <span
+                    v-if="row.node.intro"
+                    class="node-intro"
+                    :title="row.node.intro"
+                  >{{ row.node.intro }}</span>
+                </span>
                 <el-tag
                   v-if="progressInfo(row.node.id)"
                   size="small"
@@ -1613,6 +1620,24 @@ onUnmounted(() => {
   font-size: 15px;
   font-weight: 650;
   color: var(--el-text-color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 章节简介：标题下一行单行省略，悬停 title 看全文 */
+.node-copy {
+  display: block;
+  min-width: 0;
+}
+
+.node-intro {
+  display: block;
+  margin-top: 2px;
+  max-width: 480px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: #94a3b8;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -176,6 +176,39 @@ class PptReplacementTests(APITestCase):
         self.assertIsNotNone(self.video.published_at)
 
 
+class CatalogOrderTests(APITestCase):
+    """章节列表按「排序号, id」排列（视图曾硬编码 order_by("id") 使排序号失效）。"""
+
+    def setUp(self):
+        self.teacher = User.objects.create_user(
+            username="order-teacher", password="StrongPass!123", role=User.Role.TEACHER
+        )
+        self.course = Course.objects.create(name="排序课程", teacher=self.teacher)
+        # 创建顺序与期望展示顺序相反，验证排序号而非 id 决定顺序
+        self.c_late = Catalog.objects.create(course=self.course, title="变量与常量", order=2)
+        self.c_first = Catalog.objects.create(course=self.course, title="概述", order=0)
+        self.c_mid = Catalog.objects.create(course=self.course, title="语法", order=1)
+
+    def test_tree_list_ordered_by_order_field(self):
+        self.client.force_authenticate(self.teacher)
+        res = self.client.get("/api/catalogs/", {"course": self.course.id, "tree": "1"})
+        self.assertEqual(res.status_code, 200, res.data)
+        titles = [item["title"] for item in res.data["data"]["results"]]
+        self.assertEqual(titles, ["概述", "语法", "变量与常量"])
+
+    def test_children_respect_order_field(self):
+        self.client.force_authenticate(self.teacher)
+        s_late = Catalog.objects.create(
+            course=self.course, parent=self.c_first, title="1.2 小节", order=1
+        )
+        s_early = Catalog.objects.create(
+            course=self.course, parent=self.c_first, title="1.1 小节", order=0
+        )
+        res = self.client.get("/api/catalogs/", {"course": self.course.id, "tree": "1"})
+        first = next(item for item in res.data["data"]["results"] if item["id"] == self.c_first.id)
+        self.assertEqual([c["title"] for c in first["children"]], ["1.1 小节", "1.2 小节"])
+
+
 class CourseResourceTests(APITestCase):
     """二期B：思维导图/交互演示挂课程资源。"""
 

@@ -317,6 +317,11 @@
                     <span class="node-title">{{ data.title }}</span>
                     <el-tag v-if="data.is_published" size="small" type="primary" effect="plain" round>已发布</el-tag>
                   </span>
+                  <span
+                    v-if="data.intro"
+                    class="node-intro"
+                    :title="data.intro"
+                  >{{ data.intro }}</span>
                 </span>
               </div>
               <div class="node-tags">
@@ -1023,7 +1028,10 @@ function openEdit(node, parentNode) {
     Object.assign(form, { id: node.id, parent: node.parent, title: node.title, order: node.order, intro: node.intro || '' })
   } else {
     editTitle.value = parentNode ? `在「${parentNode.title}」下加节` : '添加章'
-    Object.assign(form, { id: null, parent: parentNode?.id || null, title: '', order: 0, intro: '' })
+    // 排序号默认排到同级末尾（max+1），避免与既有章节同号并列、看不出追加效果
+    const siblings = parentNode ? (parentNode.children || []) : rawTree.value
+    const nextOrder = (siblings || []).reduce((max, s) => Math.max(max, Number(s.order) || 0), -1) + 1
+    Object.assign(form, { id: null, parent: parentNode?.id || null, title: '', order: nextOrder, intro: '' })
   }
   editVisible.value = true
 }
@@ -2205,6 +2213,19 @@ onUnmounted(() => {
   font-size: 15px;
   font-weight: 650;
   color: var(--el-text-color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 章节简介：标题下一行单行省略，悬停 title 看全文（此前 intro 仅用于搜索、无展示出口） */
+.node-intro {
+  display: block;
+  margin-top: 2px;
+  max-width: 520px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: #94a3b8;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
