@@ -693,6 +693,35 @@ class CourseOutlineContextTests(TestCase):
         )
         self.assertNotIn("【课程大纲】", context)
 
+    def test_course_level_widens_top_k_and_budget(self):
+        """课程级问题：检索条数放宽到 AI_QA_COURSE_TOP_K、预算按比例放大；
+        章节级问题保持 top_k=5 / 原预算。"""
+        from unittest.mock import patch
+
+        # 有片段才走检索编排（无片段时整个 step1 跳过，条数无从谈起）
+        KnowledgeChunk.objects.create(
+            ppt=None, course_id=self.course.id, content="片段", embedding=[0.1] * 4
+        )
+        seen = {}
+
+        def _fake_search(course_id, question, **kwargs):
+            seen.update(kwargs)
+            return []
+
+        with patch("apps.ai.services._search_relevant_chunks", side_effect=_fake_search):
+            _, _, snapshot_course = _gather_course_context(
+                self.course.id, "这门课主要讲哪些内容？"
+            )
+            self.assertEqual(seen.get("top_k"), 8)
+            self.assertGreater(snapshot_course["budgets"]["rag_tokens"], 3000)
+
+            seen.clear()
+            _, _, snapshot_chapter = _gather_course_context(
+                self.course.id, "本章重点？", catalog_id=self.ch1.id
+            )
+            self.assertEqual(seen.get("top_k"), 5)
+            self.assertEqual(snapshot_chapter["budgets"]["rag_tokens"], 3000)
+
 
 class IngestPptPagesTests(TestCase):
     """课件 PPT 逐页入向量库（ingest_ppt_pages）。

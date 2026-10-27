@@ -430,6 +430,13 @@ AI_RERANK_KEEP_RATIO = _ai_env_float("AI_RERANK_KEEP_RATIO", 0.5)
 AI_CHAT_CONTEXT_WINDOW = _ai_env_int("AI_CHAT_CONTEXT_WINDOW", 32768)
 AI_QA_RAG_TOKEN_BUDGET = _ai_env_int("AI_QA_RAG_TOKEN_BUDGET", 3000)
 AI_QA_OUTPUT_RESERVE = _ai_env_int("AI_QA_OUTPUT_RESERVE", 2048)
+# 课程级问答（未指定章节）的检索放宽：整体性问题（如「这门课主要讲哪些内容」）需要
+# 跨章细节，但单纯加 top_k 不解决漏章——向量相关性向概述章集中，多取的仍是同一章
+# 片段；且注入受 token 预算约束、预算不变加条数等于没加。故条数与预算同比例放宽，
+# 跨章覆盖面由课程大纲注入保证（_gather_course_context 第 0 步），两者互补：
+# 大纲保「每章都提到」，条数/预算保「每章有细节」。
+AI_QA_COURSE_TOP_K = _ai_env_int("AI_QA_COURSE_TOP_K", 8)  # 课程级检索条数（章节内仍 5）
+AI_QA_COURSE_BUDGET_RATIO = _ai_env_float("AI_QA_COURSE_BUDGET_RATIO", 1.5)  # 课程级预算倍率
 # 讲稿入检索体系的回滚开关：置 1 后讲稿片段不参与向量检索（QA 侧退回
 # 原文限量兜底）——检索结果分布异常时一键退回，无需回滚代码与数据。
 AI_QA_DISABLE_SCRIPT_SOURCE = os.getenv("AI_QA_DISABLE_SCRIPT_SOURCE", "").lower() in ("1", "true", "yes", "on")

@@ -1268,6 +1268,14 @@ def _gather_course_context(
     if token_budget is None:
         token_budget = int(getattr(settings, "AI_QA_RAG_TOKEN_BUDGET", 3000) or 3000)
 
+    # 课程级问题（未指定章节）：检索条数与预算同步放宽（见 settings 注释——
+    # 条数不加预算等于没加；覆盖面由下方大纲注入保证，条数保证细节深度）
+    top_k = 5
+    if not catalog_id:
+        top_k = max(int(getattr(settings, "AI_QA_COURSE_TOP_K", 8) or 8), 1)
+        ratio = float(getattr(settings, "AI_QA_COURSE_BUDGET_RATIO", 1.5) or 1.5)
+        token_budget = int(token_budget * max(ratio, 1.0))
+
     # 0) 课程级问题（未指定章节）先备课程大纲：不占编号引用位（无对应来源），
     #    但其 token 成本从预算中扣除，保证检索片段份额不被挤占
     outline = "" if catalog_id else _course_outline_text(course_id, student_access=student_access)
@@ -1304,6 +1312,7 @@ def _gather_course_context(
                 student_access=student_access,
                 classroom_ids=classroom_ids,
                 catalog_id=catalog_id,
+                top_k=top_k,
             ):
                 chunk = unit.chunk
                 source_key = "+".join(unit.sources)  # ppt / material / ppt+script
