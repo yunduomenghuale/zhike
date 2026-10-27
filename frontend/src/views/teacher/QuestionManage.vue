@@ -71,7 +71,9 @@
               <span class="q-type-badge" :class="'qt-' + row.qtype">{{ row.qtype_display }}</span>
               <div class="q-copy">
                 <div class="q-stem">{{ row.stem }}</div>
+                <QuestionImage :question="row" />
                 <div class="q-meta">
+                  <el-tag v-if="row.image || row.image_url" size="small" type="warning" effect="plain" round>带图</el-tag>
                   <el-tag size="small" :type="difficultyTag(row.difficulty)" effect="light" round>{{ row.difficulty_display }}</el-tag>
                   <el-tag size="small" effect="plain" round>{{ row.catalog_title }}</el-tag>
                   <span class="q-score">{{ row.score }} 分</span>
@@ -209,6 +211,7 @@ import { Plus, Delete, EditPen, MagicStick, Promotion, Remove, Close, Files, Upl
 import { ElMessage, ElMessageBox } from 'element-plus'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
 import QuestionFormFields from '@/components/QuestionFormFields.vue'
+import QuestionImage from '@/components/QuestionImage.vue'
 import QuestionDraftPreview from '@/components/QuestionDraftPreview.vue'
 import QuestionImportDialog from '@/components/QuestionImportDialog.vue'
 import QuestionAiGenerateDialog from '@/components/QuestionAiGenerateDialog.vue'
@@ -320,7 +323,7 @@ const form = reactive({})
 
 function blankForm() {
   return {
-    id: null, catalog: null, qtype: 'single', stem: '',
+    id: null, catalog: null, qtype: 'single', stem: '', image: '',
     options: [{ key: 'A', text: '' }, { key: 'B', text: '' }, { key: 'C', text: '' }, { key: 'D', text: '' }],
     answerKey: '', answerKeys: [], blanks: [{ text: '', score: 1 }], answerText: '',
     analysis: '', score: 5, difficulty: 'medium', status: 'draft',
@@ -332,7 +335,7 @@ function openEdit(row) {
   Object.assign(form, blankForm())
   if (row) {
     Object.assign(form, draftToForm({
-      qtype: row.qtype, stem: row.stem, options: row.options,
+      qtype: row.qtype, stem: row.stem, image: row.image, options: row.options,
       answer: row.answer, analysis: row.analysis, score: row.score, difficulty: row.difficulty,
     }))
     form.id = row.id

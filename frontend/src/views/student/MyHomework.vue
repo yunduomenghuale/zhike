@@ -90,6 +90,7 @@
                   </div>
                   <span class="question-score">{{ item.score }} 分</span>
                 </div>
+                <QuestionImage :question="item.snapshot" />
                 <el-radio-group v-if="['single', 'judge'].includes(item.snapshot.qtype)" v-model="answerOf(item.id).key">
                   <el-radio v-for="option in optionsOf(item)" :key="option.key" :value="option.key">
                     {{ option.key }}. {{ option.text }}
@@ -213,6 +214,7 @@
                     <span class="question-type-tag" :class="`qt-${item.snapshot.qtype}`">{{ abbrQtype(item.snapshot) }}</span>
                     <strong>{{ item.snapshot.stem }}</strong>
                   </div>
+                  <QuestionImage :question="item.snapshot" />
                   <div class="submitted-answer">我的答案：{{ formatAnswer(item.student_answer, item.snapshot) || '未作答' }}</div>
                   <!-- 提交即可学习：客观题答案/解析/得分即时可见；主观题得分待批改，解析同样开放 -->
                   <div v-if="correctAnswerText(item.snapshot)" class="correct-answer">{{ answerLabel(item) }}：{{ correctAnswerText(item.snapshot) }}</div>
@@ -305,6 +307,7 @@ import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, Check, Clock, Document, Download, Trophy, Upload, View } from '@element-plus/icons-vue'
 import PdfScrollPreview from '@/components/PdfScrollPreview.vue'
+import QuestionImage from '@/components/QuestionImage.vue'
 import { uploadWithProgress, isImageFile, fileNameFromUrl } from '@/utils/upload'
 import { abbrQtype } from '@/utils/question-abbr'
 import { blankAnswerText } from '@/utils/blank-answer'

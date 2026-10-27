@@ -37,6 +37,7 @@ export function draftToForm(d = {}) {
   return {
     qtype: d.qtype || 'single',
     stem: d.stem || '',
+    image: d.image || '', // 题图：媒体库相对路径（question_images/ 前缀），展示用 /media/ 拼 URL
     options: Array.isArray(d.options) && d.options.length
       ? d.options.map((o) => ({ key: o.key, text: o.text ?? '' }))
       : defaultOptions(),
@@ -83,6 +84,7 @@ export function formToDraft(form) {
   return {
     qtype: form.qtype,
     stem: (form.stem || '').trim(),
+    image: (form.image || '').trim(),
     options: buildOptions(form),
     answer: buildAnswer(form),
     analysis: (form.analysis || '').trim(),

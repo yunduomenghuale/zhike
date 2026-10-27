@@ -467,6 +467,7 @@
             <strong>{{ index + 1 }}. {{ item.snapshot.stem }}</strong>
             <span>{{ item.score ?? '待批' }} / {{ item.fullScore }} 分</span>
           </div>
+          <QuestionImage :question="item.snapshot" />
           <div class="student-answer">学生答案：{{ formatAnswer(item.student_answer, item.snapshot) || '未作答' }}</div>
           <div class="correct-answer">{{ item.snapshot.qtype === 'short' ? '参考答案' : '正确答案' }}：{{ correctAnswerLabel(item.snapshot) || '（未设置）' }}</div>
           <div v-if="item.snapshot.analysis" class="answer-analysis">解析：{{ item.snapshot.analysis }}</div>
@@ -533,6 +534,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
 import PdfScrollPreview from '@/components/PdfScrollPreview.vue'
 import QuestionDetailPopover from '@/components/QuestionDetailPopover.vue'
+import QuestionImage from '@/components/QuestionImage.vue'
 import { uploadWithProgress } from '@/utils/upload'
 import { sortedCourseNames } from '@/utils/course-sort'
 import { abbrQtype, abbrDifficulty } from '@/utils/question-abbr'

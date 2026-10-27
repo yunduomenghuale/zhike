@@ -477,6 +477,7 @@
             <strong>{{ i + 1 }}. {{ q.stem }}</strong>
             <span>{{ q.pending ? '待批' : (q.my_score ?? '-') }} / {{ q.score }} 分</span>
           </div>
+          <QuestionImage :question="q" />
           <div v-if="q.options?.length" class="q-options">
             <div v-for="opt in q.options" :key="String(opt.key)" class="q-opt" :class="optClass(q, opt.key)">
               <span class="opt-key">{{ opt.key }}.</span>
@@ -523,6 +524,7 @@
             <QuestionDetailPopover v-bind="questionDetailOf(q)">
               <span class="paper-q-stem">{{ q.stem }}</span>
             </QuestionDetailPopover>
+            <QuestionImage :question="q" />
             <el-tag size="small" effect="plain" round class="paper-q-type">{{ q.qtype_display }}</el-tag>
             <span class="paper-q-score">{{ q.score }} 分</span>
           </div>
@@ -544,6 +546,7 @@ import {
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
+import QuestionImage from '@/components/QuestionImage.vue'
 import { listClasses } from '@/api/classroom'
 import { listExams, createExam, updateExam, deleteExam, composePaper, getExamPaper, monitorExam, releaseExamScores, examGradingDetail, gradeExamSubmission, releaseExamScore } from '@/api/exam'
 import { listCatalogs } from '@/api/course'

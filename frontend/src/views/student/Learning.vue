@@ -293,6 +293,7 @@
                 <span>{{ q.stem }}</span>
                 <span class="practice-score">（{{ q.score }} 分）</span>
               </div>
+              <QuestionImage :question="q" />
 
               <el-radio-group v-if="q.qtype === 'single' || q.qtype === 'judge'" v-model="answers[q.id]" :disabled="submitted">
                 <el-radio v-for="opt in q.options" :key="opt.key" :value="opt.key" class="opt">
@@ -542,6 +543,7 @@ import { listQuestions, practiceSubmit } from '@/api/question'
 import { listMaterials, getQaVisionCapability } from '@/api/knowledge'
 import { renderQaAnswer } from '@/utils/markdown'
 import CitedSources from '@/components/qa/CitedSources.vue'
+import QuestionImage from '@/components/QuestionImage.vue'
 import QaFeedback from '@/components/qa/QaFeedback.vue'
 import { listQaSessions, listQaSessionRecords } from '@/api/knowledge'
 import { submitChapterSummary, getChapterSummary } from '@/api/chapter-summary'

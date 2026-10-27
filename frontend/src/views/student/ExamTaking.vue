@@ -59,6 +59,7 @@
                 <span>{{ q.stem }}</span>
                 <span class="q-score">（{{ q.score }} 分）</span>
               </div>
+              <QuestionImage :question="q" />
 
               <!-- 单选 / 判断 -->
               <el-radio-group v-if="q.qtype === 'single' || q.qtype === 'judge'" v-model="answers[q.question_id]">
@@ -164,6 +165,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Document, Clock, CircleCheck, Grid, View, ArrowLeft, Finished } from '@element-plus/icons-vue'
 import { startExam, saveExamAnswers, submitExam, reportCheat } from '@/api/exam'
+import QuestionImage from '@/components/QuestionImage.vue'
 
 const route = useRoute()
 const router = useRouter()

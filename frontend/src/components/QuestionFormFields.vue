@@ -34,6 +34,30 @@
       <el-input v-model="model.stem" type="textarea" :autosize="{ minRows: 2, maxRows: 8 }" placeholder="请输入题干" />
     </el-form-item>
 
+    <!-- 题图（题干配图，一张）：选择即上传，path 随表单回传 -->
+    <el-form-item label="题图" class="qff-multiline">
+      <div class="qimg-editor">
+        <div v-if="model.image" class="qimg-preview">
+          <img :src="imageUrl" alt="题图" />
+          <div class="qimg-bar">
+            <el-button size="small" text type="primary" :loading="uploading" @click="pickFile">更换</el-button>
+            <el-button size="small" text type="danger" @click="model.image = ''">移除</el-button>
+          </div>
+        </div>
+        <el-button v-else class="qimg-upload" :loading="uploading" @click="pickFile">
+          <el-icon><Plus /></el-icon> 上传题图
+        </el-button>
+        <span class="qimg-tip">选填 · PNG/JPG/GIF/WebP/BMP ≤5MB</span>
+        <input
+          ref="fileInput"
+          type="file"
+          accept="image/png,image/jpeg,image/gif,image/webp,image/bmp"
+          style="display: none"
+          @change="onFilePicked"
+        />
+      </div>
+    </el-form-item>
+
     <!-- 选项（单选/多选） -->
     <el-form-item v-if="model.qtype === 'single' || model.qtype === 'multi'" label="选项" class="qff-multiline">
       <div class="opt-editor">
@@ -101,9 +125,10 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { Plus, Delete } from '@element-plus/icons-vue'
 import { DEFAULT_QTYPES, blankScoreTotal, buildAnswer, buildOptions, formToDraft } from '@/utils/questionDraft'
+import { uploadQuestionImage } from '@/api/question'
 
 const props = defineProps({
   // 受控表单对象（父层持有引用，字段直接变更；改题型时由本组件重置答案字段）
@@ -146,6 +171,28 @@ function addBlank() {
 }
 
 const blankTotal = computed(() => blankScoreTotal(props.model))
+
+// ---- 题图上传（选择即传，回传 path；展示走 /media/ 静态服务）----
+const fileInput = ref(null)
+const uploading = ref(false)
+const imageUrl = computed(() => (props.model.image ? `/media/${props.model.image}` : ''))
+function pickFile() {
+  fileInput.value?.click()
+}
+async function onFilePicked(event) {
+  const file = event.target.files?.[0]
+  event.target.value = '' // 允许再次选择同一文件
+  if (!file) return
+  uploading.value = true
+  try {
+    const data = await uploadQuestionImage(file)
+    props.model.image = data.path
+  } catch {
+    // 失败消息由 request 拦截器统一提示
+  } finally {
+    uploading.value = false
+  }
+}
 
 /** 表单态 → 规范化草稿字段（供 save/预览回传合并进 drafts） */
 function normalize() {
@@ -220,6 +267,44 @@ defineExpose({ normalize })
 .qff-compact :deep(.el-textarea__inner) {
   padding: 8px 11px;
   font-size: 13px;
+}
+
+/* ---- 题图上传 ---- */
+.qimg-editor {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+.qimg-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.qimg-preview img {
+  max-width: 200px;
+  max-height: 120px;
+  border: 1px solid #dbe5f2;
+  border-radius: 10px;
+  background: #fff;
+  object-fit: contain;
+}
+.qimg-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.qimg-upload {
+  border: 1px dashed #c3d4ea;
+  border-radius: 10px;
+  background: #f8fbff;
+  color: #2563eb;
+}
+.qimg-tip {
+  color: #94a3b8;
+  font-size: 12px;
 }
 
 /* ---- 选项行：key 定宽 + input 占满 + 答案按钮等宽（两态文案不抖动） ---- */

@@ -38,6 +38,7 @@
         <!-- 展开内容 -->
         <div v-if="expandedKeys.has(q.key)" class="q-body">
           <div class="q-stem">{{ q.stem }}</div>
+          <QuestionImage :question="q" />
 
           <template v-if="q.source === 'auto'">
             <div v-if="q.options?.length" class="q-options">
@@ -195,6 +196,7 @@ import { getMyWrongQuestions } from '@/api/analytics'
 import { createWrongNote, deleteWrongNote, listWrongMastery, listWrongNotes, toggleWrongMastery } from '@/api/question'
 import { listCatalogs } from '@/api/course'
 import { blankAnswerText } from '@/utils/blank-answer'
+import QuestionImage from '@/components/QuestionImage.vue'
 
 const route = useRoute()
 const courses = ref([])
@@ -216,6 +218,7 @@ const mergedRows = computed(() => {
     key: `auto-${q.question_id}`,
     source: 'auto',
     stem: q.stem,
+    image_url: q.image_url || '',
     typeLabel: q.qtype_display,
     sceneLabel: q.scene,
     time: q.submitted_at,

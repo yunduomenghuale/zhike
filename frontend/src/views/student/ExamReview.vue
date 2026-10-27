@@ -69,6 +69,7 @@
             <span>{{ q.stem }}</span>
             <span class="q-score">（{{ q.score }} 分）</span>
           </div>
+          <QuestionImage :question="q" />
 
           <div v-if="q.options?.length" class="q-options">
             <div
@@ -108,6 +109,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import { listExamSubmissions, reviewExam } from '@/api/exam'
 import { blankItems } from '@/utils/blank-answer'
+import QuestionImage from '@/components/QuestionImage.vue'
 
 const route = useRoute()
 const router = useRouter()

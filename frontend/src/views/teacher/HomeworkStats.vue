@@ -143,6 +143,7 @@
           <el-table-column label="题干" min-width="220">
             <template #default="{ row }">
               <span class="stem-text" :title="row.stem">{{ row.stem }}</span>
+              <QuestionImage :question="row" />
             </template>
           </el-table-column>
           <el-table-column prop="score" label="分值" width="70" align="center" />
@@ -239,6 +240,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, Refresh } from '@element-plus/icons-vue'
 import { getHomeworkStats } from '@/api/homework'
+import QuestionImage from '@/components/QuestionImage.vue'
 
 const route = useRoute()
 const router = useRouter()

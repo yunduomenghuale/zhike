@@ -4,6 +4,12 @@ export const listQuestions = (params) => request.get('/questions/', { params })
 export const createQuestion = (data) => request.post('/questions/', data)
 export const updateQuestion = (id, data) => request.patch(`/questions/${id}/`, data)
 export const deleteQuestion = (id) => request.delete(`/questions/${id}/`)
+// 题目配图上传（教师）：选择即上传，返回 {path, url}；保存题目/草稿时回传 path
+export const uploadQuestionImage = (file) => {
+  const formData = new FormData()
+  formData.append('file', file)
+  return request.post('/question-images/upload/', formData)
+}
 // AI 多类型生题（异步）：提交 groups → 轮询 /ai-tasks/{id}/ → result.batch_id
 export const generateQuestions = (data) => request.post('/questions/generate/', data)
 

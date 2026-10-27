@@ -79,6 +79,7 @@
             <el-checkbox v-model="f._checked" />
             <span class="q-type-badge" :class="'qt-' + f.qtype">{{ qtypeLabel(f.qtype) }}</span>
             <span class="dp-card-index">#{{ i + 1 }}</span>
+            <el-tag v-if="f.image" size="small" type="warning" effect="plain" round class="dp-card-imgtag">带图</el-tag>
             <el-tooltip
               v-if="warningsOf(i).length"
               :raw-content="true"
@@ -397,6 +398,9 @@ function qtypeLabel(v) {
   color: #94a3b8;
   font-size: 12.5px;
   font-weight: 700;
+}
+.dp-card-imgtag {
+  flex: none;
 }
 .dp-card-warn {
   display: inline-flex;
