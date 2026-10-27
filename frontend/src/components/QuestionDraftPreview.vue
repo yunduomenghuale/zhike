@@ -79,9 +79,16 @@
             <el-checkbox v-model="f._checked" />
             <span class="q-type-badge" :class="'qt-' + f.qtype">{{ qtypeLabel(f.qtype) }}</span>
             <span class="dp-card-index">#{{ i + 1 }}</span>
-            <span v-if="warningsOf(i).length" class="dp-card-warn" :title="warningsOf(i).join('；')">
-              <el-icon><WarningFilled /></el-icon> {{ warningsOf(i).length }} 条告警
-            </span>
+            <el-tooltip
+              v-if="warningsOf(i).length"
+              :raw-content="true"
+              :content="warningsOf(i).map((w) => '• ' + w).join('<br>')"
+              placement="top"
+            >
+              <span class="dp-card-warn">
+                <el-icon><WarningFilled /></el-icon> {{ warningsOf(i).length }} 条告警
+              </span>
+            </el-tooltip>
             <el-button link type="danger" size="small" class="dp-card-remove" @click="removeDraft(i)">删除</el-button>
           </div>
           <QuestionFormFields :model="f" :compact="true" />

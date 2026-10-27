@@ -85,6 +85,12 @@ _MARKER_RE = re.compile(
 _COMBINED_WORDS = ("答案与解析", "试题解析", "答案解析")
 _ANALYSIS_WORDS = _COMBINED_WORDS + ("解析",)
 
+# 合并标记行首的答案令牌：「C」「AB」「A、B」「对/√」——长度限 3 且后随非字母，
+# 防「because…」这类英文解析被误吞（b-e-c 均在 a-h 区间）
+_COMBINED_LEAD_RE = re.compile(
+    r"^\s*(?:([A-Ha-h]{1,3}(?:\s*[、,，]\s*[A-Ha-h]{1,3})*)|(对|错|正确|错误|√|×))(?![A-Za-z])"
+)
+
 # 填空空位：2+ 下划线（半/全角）或空括号
 _BLANK_MARKER_RE = re.compile(r"_{2,}|＿{2,}|[（(]\s*[）)]")
 # 题干尾部分值：「（2分）」「(3.5分)」
@@ -388,13 +394,23 @@ def parse_questions(raw_text: str) -> list[dict]:
         for kind, text in marker_parts:
             if current is None:
                 break
+            # 标记行之后的内容不再是选项续行（防解析文本被并入最后一个选项），
+            # 后续裸行一律进解析
+            current["_last_opt"] = False
+            current["_in_analysis"] = True
             if kind == "analysis":
                 current["analysis_parts"].append(text)
                 continue
-            # answer / both：both 同时进答案解析，保留完整解析文本
-            current["answer_raw"] = (current["answer_raw"] + " " + text).strip() if current["answer_raw"] else text
             if kind == "both":
+                # 合并标记：解析全文入账；答案仅当尚未拿到时取行首令牌，
+                # 防整段解析混进 answer_raw 污染选项字母提取
                 current["analysis_parts"].append(text)
+                if not current["answer_raw"]:
+                    m = _COMBINED_LEAD_RE.match(text)
+                    current["answer_raw"] = (m.group(1) or m.group(2)) if m else text
+                continue
+            # answer：常规答案标记
+            current["answer_raw"] = (current["answer_raw"] + " " + text).strip() if current["answer_raw"] else text
 
     _finalize()
     return questions
@@ -408,6 +424,8 @@ def _new_question(section: str | None, table_row: bool = False) -> dict:
         "answer_raw": "",
         "analysis_parts": [],
         "_table_row": table_row,  # 一题一行的表格题目行（题型按结构推断）
+        "_last_opt": False,       # 上一行是选项（续行并入末选项）
+        "_in_analysis": False,    # 已出现答案/解析标记（后续裸行进解析）
     }
 
 
@@ -416,6 +434,11 @@ def _absorb(q: dict, content: str) -> None:
     content = content.strip()
     if not content or not re.search(r"\w", content):
         return  # 空行或纯符号行（「——」「（」等标记残留）
+
+    # 已进入解析区：裸行是解析的换行续接（防解析文本倒灌题干/选项）
+    if q.get("_in_analysis"):
+        q["analysis_parts"].append(content)
+        return
 
     head, inline_options = _extract_inline_options(content)
     if inline_options:

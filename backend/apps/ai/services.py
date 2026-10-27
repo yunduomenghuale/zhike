@@ -1202,6 +1202,42 @@ def _context_header(n: int, source: str, name: str, page=None) -> str:
     return f"【资料{n}｜{_SOURCE_LABELS.get(source, '课程资料')}｜{name}{page_part}】"
 
 
+def _course_outline_text(course_id, *, student_access: bool = False, max_pages_per_chapter: int = 8) -> str:
+    """课程级问答的课程大纲文本：全部章节标题 + 各章课件页标题。
+
+    top_k 检索只覆盖与问题最相关的少数片段，「这门课主要讲哪些内容」这类
+    整体性问题仅凭 2~3 个命中片段必然答不全（漏掉未被检索命中的章节）；
+    大纲给了模型完整章节结构，使其能逐章枚举、再借检索片段补细节。
+    """
+    from apps.courses.models import Catalog, PPTResource
+
+    catalogs = Catalog.objects.filter(course_id=course_id, parent__isnull=True)
+    if student_access:
+        catalogs = catalogs.filter(is_published=True)
+    lines: list[str] = []
+    for idx, catalog in enumerate(catalogs.order_by("order", "id"), 1):
+        lines.append(f"{idx}. {catalog.title}")
+        ppt = (
+            PPTResource.objects.filter(catalog_id=catalog.id, is_active=True)
+            .order_by("-version")
+            .first()
+        )
+        if ppt and ppt.parsed_pages:
+            titles: list[str] = []
+            for pg in ppt.parsed_pages[:max_pages_per_chapter]:
+                t = (pg.get("title") or "").strip()
+                if t and t not in titles:
+                    titles.append(t)
+            if titles:
+                lines.append("   " + "；".join(titles))
+    if not lines:
+        return ""
+    return (
+        "【课程大纲】本课程章节结构（供课程整体性问题参考，页标题取自各章课件，"
+        "细节仍以编号资料片段为准）：\n" + "\n".join(lines)
+    )
+
+
 def _gather_course_context(
     course_id,
     question: str,
@@ -1231,6 +1267,12 @@ def _gather_course_context(
 
     if token_budget is None:
         token_budget = int(getattr(settings, "AI_QA_RAG_TOKEN_BUDGET", 3000) or 3000)
+
+    # 0) 课程级问题（未指定章节）先备课程大纲：不占编号引用位（无对应来源），
+    #    但其 token 成本从预算中扣除，保证检索片段份额不被挤占
+    outline = "" if catalog_id else _course_outline_text(course_id, student_access=student_access)
+    if outline:
+        token_budget = max(token_budget - est_tokens(outline) - 20, 500)
 
     units: list[str] = []  # 注入单元（标头+内容），按优先级序
     cited: list[dict] = []
@@ -1357,7 +1399,11 @@ def _gather_course_context(
         ],
         "degraded_level": 0,
     }
-    return "\n\n".join(units), cited, snapshot
+    context = "\n\n".join(units)
+    if outline:
+        # 大纲作为无编号序言置于编号资料片段之前（不进 cited：模型不应对其标 [N]）
+        context = f"{outline}\n\n{context}" if context else outline
+    return context, cited, snapshot
 
 
 _HISTORY_ELLIPSIS = "……（中间省略）……"

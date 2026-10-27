@@ -35,7 +35,8 @@ export function renderAiMarkdown(text) {
 
 // 引用标注 [N] → 可点上标（配合问答参考来源编号 n，见 CitedSources 组件）：
 // - 上标点击后由消息容器委托处理（滚动到来源区并闪烁高亮）；
-// - 仅匹配独立出现的 [N]（前非单词字符、后非 (，避免误伤 [1](url) 等形态）；
+// - 仅匹配独立出现的 [N]（前非单词字符/非 [、后非 (，避免误伤 [1](url) 等形态）；
+// - 允许相邻引用 [3][4]：后者前是 ] 也必须命中（旧 lookbehind 把相邻引用的第二个漏掉）；
 // - 跳过代码段（与加粗兜底同一 CODE_SEGMENT 切分策略）。
 export function linkCitations(html) {
   return String(html || '')
@@ -44,7 +45,7 @@ export function linkCitations(html) {
       index % 2 === 1
         ? part
         : part.replace(
-            /(?<![\w\]/])\[(\d{1,2})\](?!\()/g,
+            /(?<![\w/\[])\[(\d{1,2})\](?!\()/g,
             '<sup class="cite-sup" data-cite="$1">[$1]</sup>'
           )
     )

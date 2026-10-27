@@ -1148,7 +1148,15 @@ async function importPlan() {
 }
 
 function buildPlanTreeForSave() {
-  if (planMode.value === 'manual') return onlyTopLevel(normalizeCatalogTree(manualPlanChapters.value))
+  if (planMode.value === 'manual') {
+    // 手动录入的章标题由教师自负文责：只做去空/去重，不再套「第X章/1.」识别规则
+    // （onlyTopLevel 的 isChapterTitle 过滤会把「概述」这类无前缀标题整行丢弃，
+    //  导致手动创建必须保留「第1章/第一章」前缀才能保存）
+    const seen = new Set()
+    return manualPlanChapters.value
+      .map((c) => ({ title: String(c.title || '').trim(), children: [] }))
+      .filter((c) => c.title && !seen.has(c.title) && seen.add(c.title))
+  }
   return planChapterTree.value
 }
 

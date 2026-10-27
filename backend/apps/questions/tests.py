@@ -419,6 +419,40 @@ class ImportParserTests(SimpleTestCase):
         self.assertEqual(d["analysis"], "选A，因为 2+2 等于 4。")
         self.assertEqual(d["_warnings"], [])
 
+    def test_analysis_lines_not_merged_into_last_option(self):
+        """「答案：C」+「答案解析：」后接多行解析：解析不得倒灌进末选项 D。"""
+        text = (
+            "1. （2010 年统考真题）若路由器 R 因为拥塞丢弃 IP 分组，则此时 R 可向发出该 IP 分组的源主机发送的 ICMP 报文类型是（ ）\n"
+            "A. 路由重定向\n"
+            "B. 目的不可达\n"
+            "C. 源抑制\n"
+            "D. 超时\n"
+            "答案：C\n"
+            "答案解析：差错报告报文常见有以下几类：\n"
+            "类型 3：终点不可达，当数据包不能发送到目标主机或路由时，就会丢弃该数据包。\n"
+            "类型 4：源点抑制，源点发送数据很快而目的地接收慢，造成拥塞。\n"
+            "类型 11：超时，当路由器收到 TTL 值为 0 的数据包时，会丢弃该数据包。\n"
+            "类型 5.路由重定向。"
+        )
+        d = parse_questions(text)[0]
+        self.assertEqual(d["options"][-1], {"key": "D", "text": "超时"})
+        self.assertEqual(d["answer"], {"key": "C"})
+        self.assertIn("类型 3：终点不可达", d["analysis"])
+        self.assertIn("类型 5.路由重定向", d["analysis"])
+        self.assertNotIn("类型 3", d["options"][-1]["text"])
+
+    def test_combined_marker_leading_token_not_swallow_analysis(self):
+        """「答案与解析：C。解析…」：行首答案令牌入账，解析不混进 answer_raw。"""
+        text = (
+            "一、单选题\n"
+            "1. 2+2=?\n"
+            "A. 4\nB. 5\nC. 6\nD. 7\n"
+            "答案与解析：C。因为 2+2 等于 4。"
+        )
+        d = parse_questions(text)[0]
+        self.assertEqual(d["answer"], {"key": "C"})
+        self.assertIn("因为 2+2 等于 4", d["analysis"])
+
     def test_single_choice_paren_wrapped_marker(self):
         """「（答案：A）」整行括号包裹：残留「（」不污染题干。"""
         text = "一、单选题\n1. 1+1=?\nA. 2\nB. 3\nC. 4\nD. 5\n（答案：A）"

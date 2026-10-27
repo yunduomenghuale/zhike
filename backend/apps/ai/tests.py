@@ -12,7 +12,9 @@ from pptx.util import Inches
 
 from apps.ai.providers.mock import MockProvider
 from apps.ai.services import (
+    _course_outline_text,
     _dedupe_page_body,
+    _gather_course_context,
     _local_script_for_page,
     _polish_script_text,
     generate_script_pages_batched,
@@ -627,6 +629,69 @@ class EmbedTimeoutTests(SimpleTestCase):
         with patch("apps.ai.providers.openai_compat.requests.post", side_effect=fake_post):
             provider.embed(["文本"])
         self.assertEqual(seen["timeout"], 180)
+
+
+class CourseOutlineContextTests(TestCase):
+    """课程级问答注入课程大纲（章节标题 + 各章课件页标题）。
+
+    「这门课主要讲哪些内容」这类整体性问题只靠 top_k 检索片段必然漏章，
+    大纲让模型拿到完整章节结构再逐章枚举；章节内问答（catalog_id 传入）
+    不注入，避免重复占用预算。
+    """
+
+    def setUp(self):
+        from apps.courses.models import Catalog, Course, PPTResource
+
+        self.teacher = User.objects.create_user(
+            username="outline-teacher", password="StrongPass!123", role=User.Role.TEACHER
+        )
+        self.course = Course.objects.create(name="计算机网络", teacher=self.teacher)
+        self.ch1 = Catalog.objects.create(
+            course=self.course, title="第一章 概述", order=1, is_published=True
+        )
+        self.ch2 = Catalog.objects.create(
+            course=self.course, title="第二章 物理层", order=2, is_published=False
+        )
+        PPTResource.objects.create(
+            course=self.course,
+            catalog=self.ch1,
+            file_name="c1.pptx",
+            version=1,
+            is_active=True,
+            parse_status=PPTResource.ParseStatus.DONE,
+            parsed_pages=[
+                {"page": 1, "title": "网络概述", "body": "..."},
+                {"page": 2, "title": "体系结构", "body": "..."},
+                {"page": 3, "title": "", "body": ""},  # 空白页跳过
+            ],
+        )
+
+    def test_outline_contains_all_chapters_and_page_titles(self):
+        text = _course_outline_text(self.course.id)
+        self.assertIn("1. 第一章 概述", text)
+        self.assertIn("2. 第二章 物理层", text)
+        self.assertIn("网络概述", text)
+        self.assertIn("体系结构", text)
+
+    def test_outline_student_access_hides_unpublished_chapters(self):
+        text = _course_outline_text(self.course.id, student_access=True)
+        self.assertIn("第一章 概述", text)
+        self.assertNotIn("第二章 物理层", text)
+
+    def test_gather_context_prepends_outline_for_course_level_question(self):
+        # 无知识库片段：step1 跳过；课件无 chunks 走原文兜底，大纲仍应置于最前
+        context, cited, _ = _gather_course_context(self.course.id, "这门课主要讲哪些内容？")
+        self.assertTrue(context.startswith("【课程大纲】"))
+        self.assertIn("第二章 物理层", context)
+        # 大纲不占编号引用位：cited 编号从 1 开始且对应资料单元
+        if cited:
+            self.assertEqual(cited[0]["n"], 1)
+
+    def test_gather_context_skips_outline_for_chapter_question(self):
+        context, _, _ = _gather_course_context(
+            self.course.id, "本章重点是什么？", catalog_id=self.ch1.id
+        )
+        self.assertNotIn("【课程大纲】", context)
 
 
 class IngestPptPagesTests(TestCase):

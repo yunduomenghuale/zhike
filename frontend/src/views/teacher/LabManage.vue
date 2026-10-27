@@ -423,8 +423,9 @@ async function create() {
 async function openSchedule(row) {
   currentLab.value = row
   const res = await request.get('/classes/')
+  // 只保留本课程的班级（实验属于具体课程，排课不得跨课程选班）
   classes.value = (res.results ?? res).filter(
-    (c) => !c.courses || c.courses.some?.((cid) => cid === row.course) || true,
+    (c) => Array.isArray(c.courses) && c.courses.includes(row.course),
   )
   // 预填已有排课窗口（同班重排 = 更新窗口）
   let scheduleId = null
