@@ -467,6 +467,14 @@ function onImported(batch) {
   refreshBatchCount()
 }
 function onBatchSaved() {
+  // 入库的题目可能不命中当前筛选条件（章节/题型/状态/搜索词），重置筛选回第 1 页——
+  // 否则列表虽刷新、新题仍被过滤掉，表现为「入库后看不到、手动刷新页面才出现」
+  //（刷新页面恰好会清空这些内存筛选态）。筛选均为 @change 触发 load，这里重置不会重复请求。
+  filterType.value = ''
+  filterStatus.value = ''
+  filterCatalog.value = null
+  search.value = ''
+  page.value = 1
   load()
   refreshBatchCount()
   if (batchesVisible.value) openBatches()

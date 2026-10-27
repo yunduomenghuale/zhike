@@ -37,17 +37,20 @@
     <!-- 题图（题干配图，一张）：选择即上传，path 随表单回传 -->
     <el-form-item label="题图" class="qff-multiline">
       <div class="qimg-editor">
-        <div v-if="model.image" class="qimg-preview">
-          <img :src="imageUrl" alt="题图" />
-          <div class="qimg-bar">
-            <el-button size="small" text type="primary" :loading="uploading" @click="pickFile">更换</el-button>
-            <el-button size="small" text type="danger" @click="model.image = ''">移除</el-button>
+        <template v-if="model.image">
+          <img class="qimg-thumb" :src="imageUrl" alt="题图" title="点击放大预览" @click="previewVisible = true" />
+          <div class="qimg-side">
+            <el-button size="small" :loading="uploading" @click="pickFile">更换图片</el-button>
+            <el-button size="small" type="danger" plain @click="model.image = ''">移除题图</el-button>
+            <span class="qimg-tip">PNG / JPG / GIF / WebP / BMP，≤5MB</span>
           </div>
-        </div>
-        <el-button v-else class="qimg-upload" :loading="uploading" @click="pickFile">
-          <el-icon><Plus /></el-icon> 上传题图
-        </el-button>
-        <span class="qimg-tip">选填 · PNG/JPG/GIF/WebP/BMP ≤5MB</span>
+        </template>
+        <template v-else>
+          <el-button class="qimg-upload" :loading="uploading" @click="pickFile">
+            <el-icon><Plus /></el-icon> 上传题图
+          </el-button>
+          <span class="qimg-tip">选填 · PNG / JPG / GIF / WebP / BMP，≤5MB</span>
+        </template>
         <input
           ref="fileInput"
           type="file"
@@ -56,6 +59,9 @@
           @change="onFilePicked"
         />
       </div>
+      <el-dialog v-model="previewVisible" append-to-body width="auto" class="qimg-preview-dialog">
+        <img v-if="imageUrl" :src="imageUrl" alt="题图放大预览" style="max-width: 86vw; max-height: 80vh; display: block" />
+      </el-dialog>
     </el-form-item>
 
     <!-- 选项（单选/多选） -->
@@ -175,6 +181,7 @@ const blankTotal = computed(() => blankScoreTotal(props.model))
 // ---- 题图上传（选择即传，回传 path；展示走 /media/ 静态服务）----
 const fileInput = ref(null)
 const uploading = ref(false)
+const previewVisible = ref(false)
 const imageUrl = computed(() => (props.model.image ? `/media/${props.model.image}` : ''))
 function pickFile() {
   fileInput.value?.click()
@@ -269,32 +276,41 @@ defineExpose({ normalize })
   font-size: 13px;
 }
 
-/* ---- 题图上传 ---- */
+/* ---- 题图上传：缩略图 + 纵向操作列 + 独立提示行 ---- */
 .qimg-editor {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  align-items: flex-start;
+  gap: 14px;
   flex-wrap: wrap;
   width: 100%;
 }
-.qimg-preview {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.qimg-preview img {
-  max-width: 200px;
-  max-height: 120px;
+.qimg-thumb {
+  width: 160px;
+  max-height: 110px;
+  object-fit: contain;
   border: 1px solid #dbe5f2;
   border-radius: 10px;
   background: #fff;
-  object-fit: contain;
+  cursor: zoom-in;
 }
-.qimg-bar {
+/* 草稿预览紧凑态：缩略图进一步缩小，避免卡片被撑高 */
+.qff-compact .qimg-thumb {
+  width: 120px;
+  max-height: 84px;
+}
+.qff-compact .qimg-side {
+  gap: 6px;
+}
+.qimg-side {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
+  gap: 8px;
+  padding-top: 2px;
+}
+/* EP 相邻按钮默认带 12px 左间距，纵向排列须归零（与 flex gap 叠加会错位） */
+.qimg-side :deep(.el-button + .el-button) {
+  margin-left: 0;
 }
 .qimg-upload {
   border: 1px dashed #c3d4ea;
@@ -305,6 +321,7 @@ defineExpose({ normalize })
 .qimg-tip {
   color: #94a3b8;
   font-size: 12px;
+  line-height: 1.5;
 }
 
 /* ---- 选项行：key 定宽 + input 占满 + 答案按钮等宽（两态文案不抖动） ---- */
