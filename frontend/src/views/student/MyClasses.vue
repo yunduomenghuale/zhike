@@ -2,7 +2,7 @@
   <div class="page-container">
     <div v-loading="loading">
       <el-row :gutter="16" class="class-grid animate-list">
-        <el-col :xs="24" :sm="12" :lg="8">
+        <el-col :xs="24" :sm="12">
           <button type="button" class="join-add-card" @click="openJoinDialog">
             <span class="add-icon">
               <el-icon><Plus /></el-icon>
@@ -11,30 +11,30 @@
             <span class="add-sub">输入班级邀请码，加入班级开始学习</span>
           </button>
         </el-col>
-        <el-col :xs="24" :sm="12" :lg="8" v-for="c in filteredClasses" :key="`${c.classId}-${c.id}`">
+        <el-col :xs="24" :sm="12" v-for="c in filteredClasses" :key="`${c.classId}-${c.id}`">
           <article class="class-card" @click="openCourse(c, 'student-course-learning')">
             <span class="class-icon">
               <el-icon :size="26"><Reading /></el-icon>
             </span>
             <div class="class-main">
-              <div class="class-name">{{ c.courseName }}</div>
+              <div class="class-name" :title="c.courseName">{{ c.courseName }}</div>
               <div class="class-meta">
-                <span class="class-chip">{{ c.className }}</span>
-                <span v-if="courseProgress[c.id] != null" class="class-progress-inline">
-                  <el-progress
-                    :percentage="courseProgress[c.id]"
-                    :stroke-width="6"
-                    :show-text="false"
-                    color="#2563eb"
-                    class="class-progress-bar"
-                  />
-                  <span class="class-progress-text">学习进度 {{ courseProgress[c.id] }}%</span>
-                </span>
+                <span class="class-chip" :title="c.className">{{ c.className }}</span>
+                <el-tag :type="c.status === 'open' ? 'success' : 'info'" effect="light" round class="class-status">
+                  {{ c.status === 'open' ? '开课中' : '已结课' }}
+                </el-tag>
+              </div>
+              <div v-if="courseProgress[c.id] != null" class="class-progress-row">
+                <el-progress
+                  :percentage="courseProgress[c.id]"
+                  :stroke-width="6"
+                  :show-text="false"
+                  color="#2563eb"
+                  class="class-progress-bar"
+                />
+                <span class="class-progress-text">学习进度 {{ courseProgress[c.id] }}%</span>
               </div>
             </div>
-            <el-tag :type="c.status === 'open' ? 'success' : 'info'" effect="light" round class="class-status">
-              {{ c.status === 'open' ? '开课中' : '已结课' }}
-            </el-tag>
             <el-icon class="class-arrow"><ArrowRight /></el-icon>
           </article>
         </el-col>
@@ -212,7 +212,7 @@ onMounted(load)
 <style scoped>
 /* 加入班级虚线卡（与课程卡同高的紧凑版） */
 .join-add-card {
-  min-height: 108px;
+  min-height: 122px;
   width: 100%;
   height: 100%;
   display: grid;
@@ -370,7 +370,8 @@ onMounted(load)
   box-shadow: 0 9px 18px rgba(37, 99, 235, 0.22);
 }
 
-/* 课程卡片（横向紧凑布局，对齐教师端课程卡） */
+/* 课程卡片：一行两张，内部三行结构（课程名 / 班级+状态 / 进度），
+   名称完整可见（原一行三张列宽不足，课程名截断、班级名逐字竖排） */
 .class-grid {
   row-gap: 16px;
 }
@@ -378,7 +379,7 @@ onMounted(load)
   display: flex;
   align-items: center;
   gap: 15px;
-  min-height: 108px;
+  min-height: 122px;
   padding: 18px 20px;
   border: 1px solid rgba(37, 99, 235, 0.09);
   border-radius: 16px;
@@ -408,6 +409,9 @@ onMounted(load)
   transform: scale(1.08) rotate(-3deg);
 }
 .class-main {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   min-width: 0;
   flex: 1;
 }
@@ -423,25 +427,33 @@ onMounted(load)
 .class-meta {
   display: flex;
   align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin: 7px 0 0;
+  gap: 8px;
+  min-width: 0;
 }
 .class-chip {
+  max-width: 70%;
+  overflow: hidden;
   padding: 3px 10px;
   border-radius: 999px;
   background: var(--gray-100);
   color: var(--gray-500);
   font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.class-progress-inline {
-  display: inline-flex;
+.class-status {
+  flex-shrink: 0;
+}
+.class-progress-row {
+  display: flex;
   align-items: center;
-  gap: 8px;
-  min-width: 150px;
+  gap: 10px;
+  min-width: 0;
 }
 .class-progress-bar {
-  width: 72px;
+  width: 160px;
+  max-width: 45%;
+  flex-shrink: 0;
 }
 .class-progress-bar :deep(.el-progress-bar__outer) {
   background: var(--gray-100);
@@ -451,9 +463,6 @@ onMounted(load)
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
-}
-.class-status {
-  flex-shrink: 0;
 }
 .class-arrow {
   flex-shrink: 0;
