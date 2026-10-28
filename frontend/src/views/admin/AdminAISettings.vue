@@ -963,12 +963,12 @@ const qaDegradedRows = computed(() => {
   const d = qa.value?.degraded
   if (!d) return []
   const total = qa.value?.totals?.questions || 0
-  const max = Math.max(1, ...['L0', 'L1', 'L2', 'L4'].map(k => d[k] || 0))
+  // 条长按总量占比画（与右侧百分比同口径）；最小 2% 保证零星项可见
   return ['L0', 'L1', 'L2', 'L4'].map(k => ({
     key: k,
     label: qaDegradedLabels[k],
     count: d[k] || 0,
-    width: Math.max(2, ((d[k] || 0) / max) * 100),
+    width: Math.max(2, ((d[k] || 0) / (total || 1)) * 100),
     pct: total ? (((d[k] || 0) / total) * 100).toFixed(1) + '%' : '—',
     color: qaDegradedColors[k],
   }))
@@ -983,13 +983,12 @@ const qaSourceRows = computed(() => {
   const entries = Object.entries(src)
   if (!entries.length) return []
   const total = entries.reduce((a, [, c]) => a + c, 0)
-  const max = Math.max(...entries.map(([, c]) => c))
   return entries
     .map(([key, count]) => ({
       key,
       label: qaSourceLabels[key] || key,
       count,
-      width: Math.max(2, (count / max) * 100),
+      width: Math.max(2, (count / (total || 1)) * 100),
       pct: total ? ((count / total) * 100).toFixed(1) + '%' : '—',
       color: qaSourceColors[key] || qaSourceColors.unknown,
     }))
