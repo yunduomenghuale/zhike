@@ -107,11 +107,13 @@ class ClassRoomSerializer(serializers.ModelSerializer):
 class ClassStudentSerializer(serializers.ModelSerializer):
     student_name = serializers.CharField(source="student.real_name", read_only=True)
     username = serializers.CharField(source="student.username", read_only=True)
+    avatar = serializers.CharField(source="student.avatar", read_only=True)
+    last_login = serializers.DateTimeField(source="student.last_login", read_only=True)
 
     class Meta:
         model = ClassStudent
         fields = [
             "id", "classroom", "student", "student_name", "username",
-            "joined_at", "learn_status",
+            "avatar", "joined_at", "last_login", "learn_status",
         ]
         read_only_fields = ["classroom", "student", "joined_at"]

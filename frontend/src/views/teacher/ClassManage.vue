@@ -103,121 +103,13 @@
       </template>
     </el-dialog>
 
-    <!-- 学生名单 -->
-    <el-drawer v-model="studentsVisible" size="560px" :show-close="false" class="student-drawer">
-      <template #header>
-        <div class="stu-drawer-header">
-          <span class="stu-drawer-icon">
-            <el-icon><User /></el-icon>
-          </span>
-          <div class="stu-drawer-heading">
-            <div class="stu-drawer-title">{{ currentClass?.name }} · 学生名单</div>
-            <div class="stu-drawer-subtitle">共 {{ students.length }} 名学生</div>
-          </div>
-          <el-button text circle class="creation-dialog-close" :icon="Close" @click="studentsVisible = false" />
-        </div>
-      </template>
-
-      <div class="stu-drawer-body">
-        <div class="invite-banner">
-          <div class="invite-banner-text">
-            <div class="invite-banner-label">班级邀请码</div>
-            <div class="invite-banner-tip">学生可在「我的班级」输入邀请码自助加入</div>
-          </div>
-          <button
-            type="button"
-            class="invite-chip copyable"
-            :title="'点击复制：' + (currentClass?.invite_code || '')"
-            @click="copyInvite(currentClass?.invite_code)"
-          >
-            <span class="invite-chip-label">邀请码</span>
-            <code>{{ currentClass?.invite_code }}</code>
-            <el-icon class="copy-ico"><DocumentCopy /></el-icon>
-          </button>
-        </div>
-
-        <div class="add-bar">
-          <el-input
-            v-model="addName"
-            placeholder="搜索学号或姓名（支持前缀，如 2024 圈全班）"
-            :prefix-icon="User"
-            clearable
-            @input="onSearchInput"
-            @clear="clearSearch"
-          />
-        </div>
-
-        <!-- 搜索候选：勾选后批量添加 -->
-        <div v-if="searchKeyword" class="cand-panel">
-          <div class="cand-head">
-            <el-checkbox
-              :model-value="isAllChecked"
-              :indeterminate="isIndeterminate"
-              :disabled="!checkableCandidates.length"
-              @change="toggleAll"
-            >全选（{{ checkableCandidates.length }} 人可选）</el-checkbox>
-            <span class="cand-hint">已选 {{ selectedIds.size }} 人</span>
-            <el-button
-              type="primary"
-              size="small"
-              :loading="adding"
-              :disabled="!selectedIds.size"
-              @click="doBatchAdd"
-            >批量添加（{{ selectedIds.size }}）</el-button>
-          </div>
-          <div v-loading="searching" class="cand-list">
-            <el-empty v-if="!searching && !candidates.length" description="未找到匹配的学生" :image-size="60" />
-            <div
-              v-for="c in candidates"
-              :key="c.id"
-              class="cand-row"
-              :class="{ 'in-class': c.already_in, 'no-profile': !c.profile_complete }"
-            >
-              <el-checkbox
-                :model-value="selectedIds.has(c.username)"
-                :disabled="c.already_in"
-                @change="toggleOne(c.username)"
-              />
-              <span class="cand-no">{{ c.username }}</span>
-              <span class="cand-name">{{ c.real_name || '未填写姓名' }}</span>
-              <span class="cand-cls" :class="{ empty: !c.current_class }">{{ c.current_class || '未分班' }}</span>
-              <el-tag v-if="c.already_in" size="small" type="info" effect="plain">已在班</el-tag>
-              <el-tag v-else-if="!c.profile_complete" size="small" type="warning">资料不全</el-tag>
-            </div>
-          </div>
-        </div>
-
-        <div v-loading="studentsLoading" class="stu-list animate-list">
-          <div v-for="stu in students" :key="stu.id" class="stu-row" @click="openDetail(stu)">
-            <span class="stu-avatar" :style="{ background: avatarBg(stu.student_name || stu.username) }">
-              {{ (stu.student_name || stu.username || '?').charAt(0) }}
-            </span>
-            <div class="stu-info">
-              <div class="stu-name">{{ stu.student_name || stu.username }}</div>
-              <div class="stu-username">{{ stu.username }}</div>
-            </div>
-            <div class="stu-joined">
-              <div class="stu-joined-label">加入时间</div>
-              <div class="stu-joined-value">{{ fmtJoined(stu.joined_at) }}</div>
-            </div>
-            <el-button link type="danger" :icon="Delete" class="stu-remove" @click.stop="openDelete(stu, 'student')">移除</el-button>
-          </div>
-          <el-empty v-if="!studentsLoading && !students.length" description="暂无学生，用邀请码或上方手动添加" />
-        </div>
-      </div>
-    </el-drawer>
-
     <DeleteConfirmDialog
       v-model="deleteVisible"
-      :title="deleteTarget?.type === 'student' ? '移出学生' : '删除班级'"
-      :item-name="deleteTarget?.type === 'student'
-        ? (deleteTarget?.row?.student_name || deleteTarget?.row?.username)
-        : deleteTarget?.row?.name"
-      :description="deleteTarget?.type === 'student'
-        ? '移出后，该学生将不再属于当前班级，需要重新添加或使用邀请码加入。'
-        : '删除后，该班级及其成员关系将无法继续访问，此操作无法撤销。'"
-      :action-text="deleteTarget?.type === 'student' ? '移出' : '删除'"
-      :confirm-text="deleteTarget?.type === 'student' ? '确认移出' : '确认删除'"
+      title="删除班级"
+      :item-name="deleteTarget?.name"
+      description="删除后，该班级及其成员关系将无法继续访问，此操作无法撤销。"
+      action-text="删除"
+      confirm-text="确认删除"
       :loading="deleting"
       @confirm="confirmDelete"
     />
@@ -225,7 +117,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Plus, Delete, EditPen, User, Refresh, School, Close } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
@@ -235,7 +127,6 @@ import { listCourses } from '@/api/course'
 import { compareCourseName } from '@/utils/course-sort'
 import {
   listClasses, createClass, updateClass, deleteClass, regenerateCode,
-  listClassStudents, removeClassStudent, searchClassStudents, addStudentsBatch,
 } from '@/api/classroom'
 
 const courses = ref([])
@@ -315,8 +206,8 @@ const deleteVisible = ref(false)
 const deleteTarget = ref(null)
 const deleting = ref(false)
 
-function openDelete(row, type) {
-  deleteTarget.value = { row, type }
+function openDelete(row) {
+  deleteTarget.value = row
   deleteVisible.value = true
 }
 
@@ -324,14 +215,8 @@ async function confirmDelete() {
   if (!deleteTarget.value) return
   deleting.value = true
   try {
-    if (deleteTarget.value.type === 'student') {
-      await removeClassStudent(deleteTarget.value.row.id)
-      ElMessage.success('已移出')
-      await loadStudents()
-    } else {
-      await deleteClass(deleteTarget.value.row.id)
-      ElMessage.success('已删除')
-    }
+    await deleteClass(deleteTarget.value.id)
+    ElMessage.success('已删除')
     deleteVisible.value = false
     deleteTarget.value = null
     await load()
@@ -345,47 +230,12 @@ async function regenCode(row) {
   load()
 }
 
-// ---- 学生名单 ----
-const studentsVisible = ref(false)
-const studentsLoading = ref(false)
-const students = ref([])
-const currentClass = ref(null)
-const addName = ref('')
-const adding = ref(false)
-const searchKeyword = ref('')
-const searching = ref(false)
-const candidates = ref([])
-const selectedIds = ref(new Set())
-let searchTimer = null
-
-const AVATAR_COLORS = ['#2563eb', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4', '#f97316']
-function avatarBg(name) {
-  let hash = 0
-  for (const ch of name || '') hash = (hash * 31 + ch.codePointAt(0)) >>> 0
-  const color = AVATAR_COLORS[hash % AVATAR_COLORS.length]
-  return `linear-gradient(135deg, ${color} 0%, ${color}cc 100%)`
-}
-function fmtJoined(t) {
-  if (!t) return '-'
-  const d = new Date(t)
-  const pad = (n) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+// ---- 学生名单（独立页面：列表 + 筛选 + 排序） ----
+const router = useRouter()
+function openStudents(row) {
+  router.push({ name: 'class-students', params: { classId: row.id } })
 }
 
-async function openStudents(row) {
-  currentClass.value = row
-  studentsVisible.value = true
-  loadStudents()
-}
-async function loadStudents() {
-  studentsLoading.value = true
-  try {
-    const data = await listClassStudents({ classroom: currentClass.value.id })
-    students.value = data.results ?? data
-  } finally {
-    studentsLoading.value = false
-  }
-}
 /** 点击复制邀请码到剪贴板。 */
 async function copyInvite(code) {
   if (!code) return
@@ -404,98 +254,6 @@ async function copyInvite(code) {
   }
 }
 
-/** 学号/姓名搜索候选（防抖 300ms）。 */
-function onSearchInput(val) {
-  searchKeyword.value = (val || '').trim()
-  clearTimeout(searchTimer)
-  if (!searchKeyword.value) { candidates.value = []; selectedIds.value = new Set(); return }
-  searchTimer = setTimeout(doSearch, 300)
-}
-
-function clearSearch() {
-  searchKeyword.value = ''
-  candidates.value = []
-  selectedIds.value = new Set()
-  clearTimeout(searchTimer)
-}
-
-async function doSearch() {
-  if (!searchKeyword.value || !currentClass.value) return
-  searching.value = true
-  try {
-    const data = await searchClassStudents(currentClass.value.id, searchKeyword.value)
-    candidates.value = data.results ?? data ?? []
-    // 保留已有勾选（候选刷新后勾选项过滤到仍存在的）
-    const still = new Set(candidates.value.filter((c) => !c.already_in).map((c) => c.username))
-    selectedIds.value = new Set([...selectedIds.value].filter((u) => still.has(u)))
-  } finally {
-    searching.value = false
-  }
-}
-
-const checkableCandidates = computed(() =>
-  candidates.value.filter((c) => !c.already_in),
-)
-const isAllChecked = computed(() =>
-  checkableCandidates.value.length > 0 && checkableCandidates.value.every((c) => selectedIds.value.has(c.username)),
-)
-const isIndeterminate = computed(() =>
-  selectedIds.value.size > 0 && !isAllChecked.value,
-)
-
-function toggleOne(username) {
-  const next = new Set(selectedIds.value)
-  if (next.has(username)) next.delete(username)
-  else next.add(username)
-  selectedIds.value = next
-}
-
-function toggleAll(checked) {
-  const next = new Set(selectedIds.value)
-  checkableCandidates.value.forEach((c) => (checked ? next.add(c.username) : next.delete(c.username)))
-  selectedIds.value = next
-}
-
-async function doBatchAdd() {
-  if (!selectedIds.value.size || !currentClass.value) return
-  adding.value = true
-  try {
-    const usernames = [...selectedIds.value]
-    const data = await addStudentsBatch(currentClass.value.id, usernames)
-    const incomplete = (data?.data?.incomplete) || []
-    if (incomplete.length) {
-      ElMessage.warning(data?.message || `已添加，但 ${incomplete.length} 人资料不全`)
-    } else {
-      ElMessage.success(data?.message || `已添加 ${data?.data?.added ?? usernames.length} 人`)
-    }
-    clearSearch()
-    addName.value = ''
-    loadStudents()
-    load()
-  } finally {
-    adding.value = false
-  }
-}
-
-// ---- 学生详情（跳转完整页面） ----
-const router = useRouter()
-
-const courseOptions = computed(() => {
-  const ids = currentClass.value?.courses?.length
-    ? currentClass.value.courses
-    : (currentClass.value?.course ? [currentClass.value.course] : [])
-  const names = currentClass.value?.course_names || []
-  return ids.map((id, i) => ({ id, name: names[i] || currentClass.value?.course_name || `课程 ${id}` }))
-})
-
-function openDetail(stu) {
-  const course = courseOptions.value[0]?.id
-  router.push({
-    name: 'class-student-detail',
-    params: { classId: currentClass.value.id, studentId: stu.student },
-    query: course ? { course } : {},
-  })
-}
 onMounted(() => { loadCourses(); load() })
 </script>
 
@@ -875,261 +633,6 @@ onMounted(() => { loadCourses(); load() })
   box-shadow: 0 9px 18px rgba(37, 99, 235, 0.22);
 }
 
-/* ===== 学生名单抽屉 ===== */
-:global(.student-drawer.el-drawer) {
-  border-radius: 20px 0 0 20px;
-  box-shadow: -18px 0 54px rgba(15, 23, 42, 0.16);
-}
-
-:global(.student-drawer .el-drawer__header) {
-  margin: 0;
-  padding: 0;
-}
-
-:global(.student-drawer .el-drawer__body) {
-  padding: 0;
-  background: #f7f9fc;
-}
-
-.stu-drawer-header {
-  display: flex;
-  align-items: center;
-  gap: 13px;
-  min-height: 86px;
-  padding: 22px 24px 18px;
-  border-bottom: 1px solid rgba(226, 232, 240, 0.88);
-  background: linear-gradient(135deg, rgba(239, 246, 255, 0.96), rgba(255, 255, 255, 0.98) 58%);
-}
-
-.stu-drawer-icon {
-  width: 44px;
-  height: 44px;
-  display: grid;
-  flex: 0 0 44px;
-  place-items: center;
-  border-radius: 14px;
-  background: #e8f4ff;
-  color: var(--primary-600);
-  font-size: 21px;
-  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.11);
-}
-
-.stu-drawer-heading {
-  min-width: 0;
-  flex: 1;
-}
-
-.stu-drawer-title {
-  overflow: hidden;
-  color: #0f172a;
-  font-size: 18px;
-  font-weight: 760;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.stu-drawer-subtitle {
-  margin-top: 3px;
-  color: #94a3b8;
-  font-size: 12.5px;
-}
-
-.stu-drawer-body {
-  padding: 18px 22px 24px;
-}
-
-.invite-banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 14px;
-  padding: 13px 16px;
-  border-radius: 14px;
-  background: linear-gradient(135deg, #eff6ff, #f5f3ff);
-  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.16);
-}
-
-.invite-banner-label {
-  color: var(--primary-700);
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.invite-banner-tip {
-  margin-top: 2px;
-  color: #64748b;
-  font-size: 12px;
-}
-
-.invite-banner .invite-chip {
-  flex-shrink: 0;
-  background: rgba(255, 255, 255, 0.85);
-}
-
-.add-bar {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 16px;
-}
-
-.add-bar :deep(.el-input__wrapper) {
-  min-height: 42px;
-  border-radius: 11px;
-  background: #fff;
-  box-shadow: inset 0 0 0 1px #dbe5f2;
-  transition: box-shadow 0.2s ease;
-}
-
-/* 搜索候选面板 */
-.cand-panel {
-  margin-bottom: 16px;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  background: #f8fafc;
-  overflow: hidden;
-}
-.cand-head {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 12px 16px;
-  border-bottom: 1px solid #eef2f7;
-  background: #fff;
-}
-.cand-hint { flex: 1; font-size: 12px; color: #94a3b8; }
-.cand-list { max-height: 280px; overflow-y: auto; }
-.cand-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 16px;
-  border-bottom: 1px solid #f1f5f9;
-  transition: background 0.15s ease;
-}
-.cand-row:last-child { border-bottom: none; }
-.cand-row:hover { background: #fff; }
-.cand-row.in-class { background: #f1f5f9; opacity: 0.7; }
-.cand-row.no-profile { background: #fffbeb; }
-.cand-row.no-profile:hover { background: #fef3c7; }
-.cand-row.no-profile .cand-name { color: #b45309; }
-.cand-no { font-family: 'JetBrains Mono', Consolas, monospace; font-size: 13px; color: #475569; min-width: 88px; }
-.cand-name { font-size: 13px; font-weight: 600; color: #1e293b; flex: 1; }
-.cand-cls { font-size: 12px; color: #64748b; }
-.cand-cls.empty { color: #cbd5e1; }
-.cand-list::-webkit-scrollbar { width: 5px; }
-.cand-list::-webkit-scrollbar-thumb { border-radius: 3px; background: rgba(37, 99, 235, 0.22); }
-
-.add-bar :deep(.el-input__wrapper:hover) {
-  box-shadow: inset 0 0 0 1px #bfdbfe;
-}
-
-.add-bar :deep(.el-input__wrapper.is-focus) {
-  box-shadow: inset 0 0 0 1px var(--primary-500), 0 0 0 3px rgba(59, 130, 246, 0.12);
-}
-
-.add-bar :deep(.el-button) {
-  height: 42px;
-  padding: 0 18px;
-  border-radius: 11px;
-  box-shadow: 0 9px 18px rgba(37, 99, 235, 0.2);
-}
-
-.stu-list {
-  display: grid;
-  gap: 10px;
-  min-height: 140px;
-  align-content: start;
-}
-
-.stu-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
-  border: 1px solid rgba(37, 99, 235, 0.06);
-  border-radius: 14px;
-  background: #fff;
-  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.05);
-  cursor: pointer;
-  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
-}
-
-.stu-row:hover {
-  transform: translateY(-1px);
-  border-color: rgba(96, 165, 250, 0.4);
-  box-shadow: 0 10px 22px rgba(37, 99, 235, 0.09);
-}
-
-.stu-avatar {
-  width: 36px;
-  height: 36px;
-  display: flex;
-  flex: 0 0 36px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  color: #fff;
-  font-size: 14px;
-  font-weight: 700;
-  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.14);
-}
-
-.stu-info {
-  min-width: 0;
-  flex: 1;
-}
-
-.stu-name {
-  overflow: hidden;
-  color: #1e293b;
-  font-size: 14px;
-  font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.stu-username {
-  overflow: hidden;
-  margin-top: 1px;
-  color: #94a3b8;
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.stu-joined {
-  flex-shrink: 0;
-  margin-right: 4px;
-  text-align: right;
-}
-
-.stu-joined-label {
-  color: #94a3b8;
-  font-size: 11px;
-}
-
-.stu-joined-value {
-  margin-top: 1px;
-  color: #475569;
-  font-size: 12.5px;
-}
-
-.stu-remove {
-  flex-shrink: 0;
-}
-
-@media (max-width: 640px) {
-  :global(.student-drawer.el-drawer) {
-    width: 100% !important;
-    border-radius: 0;
-  }
-
-  .stu-joined {
-    display: none;
-  }
-}
 
 @media (max-width: 1280px) {
   .class-row {
