@@ -1,12 +1,11 @@
 from django.contrib.auth import get_user_model
-from django.contrib.auth.password_validation import validate_password as django_validate_password
 from rest_framework import serializers
 
 from apps.classroom.models import ClassRoom
 from apps.courses.models import Course
 from apps.ai.models import AICallLog, AICapabilityChangeLog, AICapabilityConfig
 from apps.ai.providers.factory import get_env_config
-from apps.users.serializers import PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH
+from apps.users.serializers import PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, validate_password_clean
 
 from .models import AdminActionLog
 
@@ -53,7 +52,7 @@ class AdminUserWriteSerializer(serializers.ModelSerializer):
         return value
 
     def validate_password(self, value):
-        django_validate_password(value, self.instance)
+        validate_password_clean(value, self.instance)
         return value
 
     def validate(self, attrs):
@@ -86,7 +85,7 @@ class PasswordResetSerializer(serializers.Serializer):
     )
 
     def validate_password(self, value):
-        django_validate_password(value)
+        validate_password_clean(value)
         return value
 
 

@@ -7,10 +7,10 @@ from openpyxl import Workbook, load_workbook
 
 User = get_user_model()
 
-# 初始密码规则：Lylg + 用户名后 6 位（不足 6 位取整个用户名）
-PASSWORD_PREFIX = "Lylg"
-# 用户名最少 4 位，保证初始密码 Lylg+用户名 至少 8 位（对齐系统密码长度约束）
-MIN_USERNAME_LENGTH = 4
+# 初始密码规则：Zk + 用户名后 6 位（不足 6 位取整个用户名）
+PASSWORD_PREFIX = "Zk"
+# 用户名最少 6 位，保证初始密码 Zk+用户名 至少 8 位（对齐系统密码长度约束）
+MIN_USERNAME_LENGTH = 6
 MAX_IMPORT_ROWS = 500
 MAX_FILE_SIZE = 5 * 1024 * 1024
 
@@ -34,9 +34,9 @@ def build_template() -> bytes:
     tips = wb.create_sheet("填写说明")
     tips.append(["学生账号批量导入说明"])
     tips.append(["1. 请在「学生导入」页从第 2 行开始填写，每行一名学生，表头请勿修改。"])
-    tips.append(["2. 用户名为学生登录账号（如学号），4 位以上，平台内不可重复。"])
-    tips.append(["3. 初始密码由系统自动生成，规则为：Lylg + 用户名后 6 位（不足 6 位取整个用户名）。"])
-    tips.append(["4. 例如用户名 2024012345 的初始密码为 Lylg012345。"])
+    tips.append(["2. 用户名为学生登录账号（如学号），6 位以上，平台内不可重复。"])
+    tips.append(["3. 初始密码由系统自动生成，规则为：Zk + 用户名后 6 位（不足 6 位取整个用户名）。"])
+    tips.append(["4. 例如用户名 2024012345 的初始密码为 Zk012345。"])
     tips.append(["5. 学生首次登录后，系统会提示修改密码。"])
     tips.column_dimensions["A"].width = 90
 

@@ -26,7 +26,7 @@
 - 成绩可见性：考试 `score_released`、作业 `correct_status=returned` 后学生才可见分数（序列化器按角色隐藏）
 - 学习进度：`VideoWatchProgress`（学生×视频唯一），前端每 10 秒上报，断点续播
 - 作业/考试题目均以快照冻结，发布后不可改题
-- 注册（2026-09-08 恢复开放）：曾于 2026-08-21 关闭，现恢复原注册功能（教师/学生自助注册，注册即登录）；账号也可由管理员单个创建或 Excel 批量导入（`platform_admin/user_import.py`，初始密码 `Lylg+用户名后6位`，导入/管理员重置密码后 `must_change_password=True`，前端 MainLayout 弹窗提示改密可跳过）
+- 注册（2026-09-08 恢复开放）：曾于 2026-08-21 关闭，现恢复原注册功能（教师/学生自助注册，注册即登录）；账号也可由管理员单个创建或 Excel 批量导入（`platform_admin/user_import.py`，初始密码 `Zk+用户名后6位`，导入/管理员重置密码后 `must_change_password=True`，前端 MainLayout 弹窗提示改密可跳过）
 - 登录态（2026-08-27）：access 12h / refresh 7d；前端 `api/request.js` 已实现 401 静默续期（单飞并发去重 + 重放原请求，刷新也失败才登出），登录态最长 7 天
 
 ## 当前状态（2026-08-21）
@@ -64,7 +64,7 @@
 - 能力-服务商白名单（`AICapabilityConfig.CAPABILITY_PROVIDERS`）：对话（chat）= DeepSeek/通义千问/本地模型服务/模拟模式；**向量化与语音合成仅通义千问/本地模型服务**（DeepSeek 无 embed/TTS 接口；模拟模式 64 维假向量会污染真实向量空间）；**向量化/重排序另开放系统内置模型 local**（BGE-M3 / Qwen3-Reranker-0.6B，本机 CPU 推理，无需 Key/接口地址），保存与连接测试接口双重校验
 
 ## 安全基线（2026-09-02）
-- 登录防爆破：同 用户名+IP 连续失败 5 次锁 15 分钟（`users/views.py` LoginView；计数用 `login_fail` 文件缓存 **跨 worker 共享**，勿改回 locmem——2 worker 下 locmem 会把阈值稀释成约 10 次且不稳定，已实测）；初始密码规则（Lylg+学号后6位）为需求约定保留，首登改密维持前端提示可跳过
+- 登录防爆破：同 用户名+IP 连续失败 5 次锁 15 分钟（`users/views.py` LoginView；计数用 `login_fail` 文件缓存 **跨 worker 共享**，勿改回 locmem——2 worker 下 locmem 会把阈值稀释成约 10 次且不稳定，已实测）；初始密码规则（Zk+学号后6位）为需求约定保留，首登改密维持前端提示可跳过
 - media 路径不可预测：PPT 页图目录 `ppt_pages/<sha256(ppt:{id}:{SECRET_KEY})[:16]>`（`ppt_parser.ppt_pages_dirname`，SECRET_KEY 换了旧 URL 即全失效需重跑 obfuscate_media）；课件/资料/作业附件文件名 uuid（各 models.py 的 upload_to callable）；头像/TTS 原本就是 uuid
 - 上传白名单：Material（pdf/word/ppt/txt/md，50MB）、HomeworkSubmission 附件（同教师侧，20MB）、课件（ppt/pptx/pdf，100MB）——防 media 同域存储型 XSS
 - nginx 兜底：`/media/` 全局 nosniff；html/svg/js 扩展强制 `application/octet-stream` 下载

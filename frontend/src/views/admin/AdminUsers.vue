@@ -55,7 +55,7 @@
     <el-dialog v-model="editorVisible" width="580px" align-center :title="editingId ? '编辑账号' : '新建账号'" @closed="editorRef?.clearValidate()">
       <el-form ref="editorRef" :model="form" :rules="rules" label-position="top">
         <div class="form-grid">
-          <el-form-item label="用户名" prop="username"><el-input v-model.trim="form.username" placeholder="用于登录，不能与其他账号重复" /></el-form-item>
+          <el-form-item label="用户名" prop="username"><el-input v-model.trim="form.username" placeholder="用于登录，不能与其他账号重复" @input="onUsernameInput" /></el-form-item>
           <el-form-item label="姓名" prop="real_name"><el-input v-model.trim="form.real_name" placeholder="请输入真实姓名" /></el-form-item>
           <el-form-item label="角色" prop="role"><el-select v-model="form.role" style="width:100%"><el-option label="学生" value="student" /><el-option label="教师" value="teacher" /><el-option label="管理员" value="admin" /></el-select></el-form-item>
           <el-form-item v-if="!editingId" label="初始密码" prop="password" class="full"><el-input v-model="form.password" type="password" show-password placeholder="8～12 位字符" maxlength="12" /></el-form-item>
@@ -66,7 +66,7 @@
     </el-dialog>
 
     <el-dialog v-model="resetVisible" width="460px" align-center title="重置密码">
-      <p class="dialog-tip">为 <b>{{ resetTarget?.real_name || resetTarget?.username }}</b> 设置新密码，保存后原密码立即失效，该用户下次登录会被提示修改密码。</p>
+      <p class="dialog-tip">为 <b>{{ resetTarget?.real_name || resetTarget?.username }}</b> 设置新密码，保存后原密码立即失效，该用户下次登录会被提示修改密码。默认已按「Zk + 用户名后 6 位」规则填入，可直接确认或自行修改。</p>
       <el-form label-position="top"><el-form-item label="新密码"><el-input v-model="resetPassword" type="password" show-password placeholder="8～12 位字符" maxlength="12" @keyup.enter="submitReset" /></el-form-item></el-form>
       <template #footer><el-button @click="resetVisible=false">取消</el-button><el-button type="primary" :loading="resetting" @click="submitReset">确认重置</el-button></template>
     </el-dialog>
@@ -78,7 +78,7 @@
             <span class="step-no">1</span>
             <div>
               <strong>下载模板</strong>
-              <p>按模板填写用户名与姓名，初始密码自动生成为「Lylg + 用户名后 6 位」，如用户名 2024012345 的初始密码为 Lylg012345。</p>
+              <p>按模板填写用户名与姓名，初始密码自动生成为「Zk + 用户名后 6 位」，如用户名 2024012345 的初始密码为 Zk012345。</p>
               <el-button size="small" :icon="Download" :loading="templateDownloading" @click="downloadTemplate">下载导入模板</el-button>
             </div>
           </div>
@@ -195,6 +195,11 @@ async function load() {
   try { const res = await listAdminUsers({ ...filters, page: page.value, page_size: pageSize }); rows.value = res.items; total.value = res.total } finally { loading.value = false }
 }
 function openCreate() { editingId.value = null; Object.assign(form, blankForm()); editorVisible.value = true }
+// 新建账号时初始密码默认 Zk+用户名后6位（用户名 ≥6 位才够 8 位密码长度）；管理员改过后不再覆盖
+function onUsernameInput() {
+  const name = String(form.username || '').trim()
+  if (name.length >= 6) form.password = `Zk${name.slice(-6)}`
+}
 function openEdit(row) { editingId.value = row.id; Object.assign(form, { username: row.username, real_name: row.real_name || '', role: row.role, is_active: row.is_active, password: '' }); editorVisible.value = true }
 async function saveUser() {
   if (!(await editorRef.value?.validate().catch(() => false))) return
@@ -209,7 +214,7 @@ async function saveUser() {
 async function changeActive(row, value) {
   try { await updateAdminUser(row.id, { is_active: value }); row.is_active = value; ElMessage.success(value ? '账号已启用' : '账号已停用') } catch { row.is_active = !value }
 }
-function openReset(row) { resetTarget.value = row; resetPassword.value = ''; resetVisible.value = true }
+function openReset(row) { resetTarget.value = row; const name = String(row.username || '').trim(); resetPassword.value = name.length >= 6 ? `Zk${name.slice(-6)}` : ''; resetVisible.value = true }
 async function submitReset() {
   if (resetPassword.value.length < 8 || resetPassword.value.length > 12) return ElMessage.warning('密码长度应为 8～12 位')
   resetting.value = true
@@ -228,7 +233,7 @@ function resetImport() { importRows.value = []; parsing.value = false; importing
 // 与后端 user_import.initial_password_for 同规则，仅用于预览展示
 function previewPassword(username) {
   const name = String(username || '').trim()
-  return name ? `Lylg${name.slice(-6)}` : '—'
+  return name ? `Zk${name.slice(-6)}` : '—'
 }
 
 async function downloadTemplate() {

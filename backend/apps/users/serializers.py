@@ -1,9 +1,23 @@
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password as django_validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 User = get_user_model()
 PASSWORD_MIN_LENGTH = 8
 PASSWORD_MAX_LENGTH = 12
+
+# Django NumericPasswordValidator 的提示文案；统一报错时剔除，避免
+# 「这个密码太常见了。，密码只包含数字。」这类多校验器文案被「，」生硬拼接
+NUMERIC_ONLY_MESSAGE = "密码只包含数字。"
+
+
+def validate_password_clean(value, user=None):
+    """Django 密码校验的统一切面：校验规则不变，仅清理多条提示的拼接文案。"""
+    try:
+        django_validate_password(value, user)
+    except DjangoValidationError as exc:
+        messages = [m for m in exc.messages if NUMERIC_ONLY_MESSAGE not in m]
+        raise DjangoValidationError(messages or exc.messages)
 
 
 class LoginSerializer(serializers.Serializer):
@@ -55,7 +69,7 @@ class RegisterSerializer(serializers.ModelSerializer):
         return value
 
     def validate_password(self, value):
-        django_validate_password(value)
+        validate_password_clean(value)
         return value
 
     def validate_username(self, value):
@@ -128,7 +142,7 @@ class PasswordChangeSerializer(serializers.Serializer):
     def validate(self, attrs):
         if attrs["new_password"] != attrs["confirm_password"]:
             raise serializers.ValidationError({"confirm_password": "两次输入的新密码不一致"})
-        django_validate_password(attrs["new_password"], self.context["request"].user)
+        validate_password_clean(attrs["new_password"], self.context["request"].user)
         return attrs
 
 
