@@ -1,0 +1,33 @@
+request_id: course-ai-cost-report
+entry_type: full_pipeline
+current_stage: stage_3
+output_docx_path: "D:\\Claude_Code\\智课系统V2\\docs\\智课平台单课大模型成本报告.docx"
+output_docx_user_specified: true
+stage_1:
+  status: completed
+  entry_type: full_pipeline
+  content_source: "D:/tmp/zhike-report/report.md（编排层已备稿：生产库 AI 调用审计日志实测数据 + 百炼现行定价推算）"
+stage_2:
+  status: completed
+  entry_type: stage2_flow
+  route: html
+  html_sub: template
+  genre: business-report
+  template_used: business-report.html
+  output_path: "stage2/formatted-business-report.html"
+  output_format: html
+  skills_invoked: [design-token, doc-typeset, html-review]
+  html_review_attempts: 1
+  intermediate_dir: "D:\\Claude_Code\\智课系统V2\\output\\course-ai-cost-report\\stage2\\intermediate"
+stage_3:
+  status: completed
+  executor: doc-converter
+  input_format: html
+  output_path: "D:\\Claude_Code\\智课系统V2\\docs\\智课平台单课大模型成本报告.docx"
+  skill_used: ["html-to-doc"]
+  present_files_opened: true
+  fallback: false
+  fallback_used: false
+  fallback_reason: null
+  preflight: passed
+  aigc_tag: true
