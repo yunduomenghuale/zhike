@@ -8,9 +8,6 @@ export const listLabs = (params) => request.get('/labs/', { params })
 export const createLab = (data) => request.post('/labs/', data)
 export const updateLab = (id, data) => request.patch(`/labs/${id}/`, data)
 export const deleteLab = (id) => request.delete(`/labs/${id}/`)
-export const addLabQuestions = (id, questionIds) =>
-  request.post(`/labs/${id}/questions/`, { question_ids: questionIds })
-export const clearLabQuestions = (id) => request.delete(`/labs/${id}/questions/`)
 export const publishLab = (id) => request.post(`/labs/${id}/publish/`)
 export const closeLab = (id) => request.post(`/labs/${id}/close/`)
 
@@ -30,9 +27,6 @@ export const submitLabConclusion = (subId, conclusion) =>
 export const reviewLabSubmission = (subId, data) =>
   request.post(`/lab-submissions/${subId}/review/`, data)
 export const resetLabSubmission = (subId) => request.post(`/lab-submissions/${subId}/reset/`)
-export const gradeLabSubmission = (subId, data) =>
-  request.post(`/lab-submissions/${subId}/grade/`, data)
-export const getLabAnswers = (subId) => request.get(`/lab-submissions/${subId}/answers/`)
 export const getMyLabSchedule = (labId) => request.get(`/labs/${labId}/my-schedule/`)
 
 // ===== 二期A：实验报告 =====

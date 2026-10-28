@@ -16,24 +16,17 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from .auth import LabTokenAuthentication
 from apps.common.viewsets import BaseModelViewSet
 from apps.courses import resource_gate
-from apps.homework.models import question_snapshot
-from apps.questions.grading import grade_objective
-from apps.questions.models import Question
 
 from . import bridge, gate, guide_preset, scoring, seedgen
 from .models import (
     Lab,
-    LabAnswer,
     LabGuide,
-    LabQuestion,
     LabSchedule,
     LabSubmission,
     LabTemplate,
 )
 from .serializers import (
-    LabAnswerSerializer,
     LabGuideSerializer,
-    LabQuestionSerializer,
     LabScheduleSerializer,
     LabSerializer,
     LabSubmissionSerializer,
@@ -127,44 +120,6 @@ class LabViewSet(BaseModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save()
-
-    @action(detail=True, methods=["post"], url_path="questions", permission_classes=[IsTeacher])
-    def add_questions(self, request, pk=None):
-        """从题库选题附为实验题目（草稿期；发布后禁止修改）。"""
-        lab = self.get_object()
-        if lab.status != Lab.Status.DRAFT:
-            raise ValidationError("实验发布后不能修改题目")
-        raw_ids = request.data.get("question_ids", [])
-        if not isinstance(raw_ids, list) or not raw_ids:
-            raise ValidationError({"question_ids": "请至少选择一道题目"})
-        try:
-            question_ids = [int(qid) for qid in raw_ids]
-        except (TypeError, ValueError) as exc:
-            raise ValidationError({"question_ids": "题目 ID 格式不正确"}) from exc
-        if len(question_ids) != len(set(question_ids)):
-            raise ValidationError({"question_ids": "同一道题不能重复添加"})
-        questions = Question.objects.filter(
-            id__in=question_ids, course=lab.course, status=Question.Status.PUBLISHED
-        )
-        if questions.count() != len(question_ids):
-            raise ValidationError({"question_ids": "包含其他课程、未发布或不存在的题目"})
-        next_order = lab.questions.count()
-        created = []
-        for offset, q in enumerate(questions.order_by("id")):
-            item = LabQuestion.objects.create(
-                lab=lab, question=q, score=q.score, order=next_order + offset,
-                snapshot=question_snapshot(q),
-            )
-            created.append(item)
-        return api_response(LabQuestionSerializer(created, many=True).data, message=f"已添加 {len(created)} 道题")
-
-    @action(detail=True, methods=["delete"], url_path="questions", permission_classes=[IsTeacher])
-    def remove_question(self, request, pk=None):
-        lab = self.get_object()
-        if lab.status != Lab.Status.DRAFT:
-            raise ValidationError("实验发布后不能修改题目")
-        lab.questions.all().delete()
-        return api_response(message="已清空实验题目")
 
     @action(detail=True, methods=["post"], url_path="publish", permission_classes=[IsTeacher])
     def publish(self, request, pk=None):
@@ -323,7 +278,6 @@ class LabSubmissionViewSet(BaseModelViewSet):
                 "expires_at": ticket.expires_at,
                 "random_seed": sub.random_seed,
                 "page_url": f"{gate_url}&token={ticket.token}",
-                "questions": self._build_for_taking(lab),
             },
             message="实验已开始",
         )
@@ -352,23 +306,6 @@ class LabSubmissionViewSet(BaseModelViewSet):
         sub.started_at = timezone.now()
         sub.reset_by = operator
         sub.reset_at = timezone.now()
-        sub.answers.all().delete()
-
-    def _build_for_taking(self, lab):
-        """学生作答视图的题目（不含答案）。"""
-        result = []
-        for lq in lab.questions.all().order_by("order"):
-            snap = lq.snapshot or {}
-            item = {
-                "lab_question_id": lq.id,
-                "order": lq.order,
-                "score": str(lq.score),
-                "qtype": snap.get("qtype"),
-                "stem": snap.get("stem"),
-                "options": snap.get("options", []),
-            }
-            result.append(item)
-        return result
 
     # ---- 桥接：静态页换取随机参数 ----
     @action(detail=False, methods=["get"], url_path="bridge-validate",
@@ -395,7 +332,6 @@ class LabSubmissionViewSet(BaseModelViewSet):
                         "time_limit_seconds": lab.time_limit_seconds},
                 "random_seed": sub.random_seed,
                 "expected": seedgen.derive_expected(sub.random_seed, lab.template.code),
-                "questions": self._build_for_taking(lab),
                 "status": sub.status,
             }
         )
@@ -421,11 +357,8 @@ class LabSubmissionViewSet(BaseModelViewSet):
 
         steps = request.data.get("steps_result") or {}
         error_log = request.data.get("error_log", []) or []
-        answers = request.data.get("answers") or {}
         if not isinstance(steps, (dict, list)) or not isinstance(error_log, list):
             raise ValidationError("步骤结果或错误日志格式不正确")
-        if not isinstance(answers, dict):
-            raise ValidationError({"answers": "附题作答格式不正确（应为 {lab_question_id: answer}）"})
         try:
             elapsed = max(0, int(request.data.get("elapsed_seconds", 0)))
         except (TypeError, ValueError) as exc:
@@ -450,34 +383,15 @@ class LabSubmissionViewSet(BaseModelViewSet):
             sub.submitted_at = now
             sub.save()
 
-            # 附题作答落库：{lab_question_id: {key/keys/text/blanks,...}}，评分以题目快照为准
-            if answers:
-                valid_ids = set(
-                    sub.lab.questions.values_list("id", flat=True)
-                )
-                LabAnswer.objects.filter(submission=sub).delete()
-                for raw_id, stu_answer in answers.items():
-                    try:
-                        lq_id = int(raw_id)
-                    except (TypeError, ValueError):
-                        raise ValidationError({"answers": f"无效的附题编号：{raw_id}"})
-                    if lq_id not in valid_ids:
-                        continue  # 非本实验的题目直接忽略
-                    if not isinstance(stu_answer, dict):
-                        stu_answer = {"text": str(stu_answer)}
-                    LabAnswer.objects.create(submission=sub, lab_question_id=lq_id, student_answer=stu_answer)
-
             lab = sub.lab
             step_scores = scoring.calc_step_scores(sub, lab.effective_standard_minutes, lab.total_score)
-            question_total = scoring.grade_submission_questions(sub)
-            total = scoring.calc_total(sub, step_scores, question_total, lab.question_weight, lab.total_score)
+            total = scoring.calc_total(step_scores, lab.total_score)
             sub.base_score = step_scores["base"]
             sub.accuracy_score = step_scores["accuracy"]
             sub.efficiency_score = step_scores["efficiency"]
             sub.completion_score = step_scores["completion"]
-            sub.question_score = question_total
             sub.total_score = total
-            sub.score_breakdown = scoring.build_breakdown(sub, step_scores, question_total, total)
+            sub.score_breakdown = scoring.build_breakdown(sub, step_scores, total)
             sub.save()
 
         bridge.consume_token(ticket)
@@ -559,59 +473,6 @@ class LabSubmissionViewSet(BaseModelViewSet):
         return api_response(
             LabSubmissionSerializer(sub, context={"request": request}).data, message="实验已重置，学生可重做"
         )
-
-    # ---- 教师：主观题批改 ----
-    @action(detail=True, methods=["post"], url_path="grade", permission_classes=[IsTeacher])
-    def grade(self, request, pk=None):
-        sub = self.get_object()
-        if sub.lab.course.teacher_id != request.user.id:
-            raise PermissionDenied("只能批改自己课程的实验")
-        scores = request.data.get("scores", {})
-        if not isinstance(scores, dict) or not scores:
-            raise ValidationError({"scores": "请提供 {lab_question_id: score} 批改分"})
-        subjective_total = Decimal("0")
-        for lq in sub.lab.questions.filter(id__in=[int(k) for k in scores.keys()]):
-            raw = scores.get(str(lq.id), scores.get(lq.id))
-            try:
-                value = Decimal(str(raw))
-            except Exception as exc:
-                raise ValidationError({str(lq.id): "分数格式不正确"}) from exc
-            if value < 0 or value > lq.score:
-                raise ValidationError({str(lq.id): f"分数须在 0~{lq.score} 之间"})
-            answer = LabAnswer.objects.filter(submission=sub, lab_question=lq).first()
-            if not answer:
-                answer = LabAnswer.objects.create(submission=sub, lab_question=lq)
-            answer.score = value
-            answer.pending_review = False
-            answer.graded_by = request.user
-            answer.graded_at = timezone.now()
-            answer.save(update_fields=["score", "pending_review", "graded_by", "graded_at", "updated_at"])
-            subjective_total += value
-        sub.subjective_scores = scores
-        sub.question_score = subjective_total.quantize(Decimal("0.1"))
-        sub.reviewed = True
-        sub.reviewed_by = request.user
-        sub.reviewed_at = timezone.now()
-        # 重新合成总分
-        lab = sub.lab
-        step_scores = scoring.calc_step_scores(sub, lab.effective_standard_minutes, lab.total_score)
-        total = scoring.calc_total(sub, step_scores, sub.question_score or Decimal("0"),
-                                   lab.question_weight, lab.total_score)
-        sub.total_score = total
-        sub.score_breakdown = scoring.build_breakdown(sub, step_scores, sub.question_score or Decimal("0"), total)
-        sub.save()
-        return api_response(
-            LabSubmissionSerializer(sub, context={"request": request}).data, message="批改完成"
-        )
-
-    @action(detail=True, methods=["get"], url_path="answers", permission_classes=[IsAuthenticated])
-    def answers(self, request, pk=None):
-        sub = self.get_object()
-        if sub.student_id != request.user.id and not (
-            getattr(request.user, "is_teacher", False) and sub.lab.course.teacher_id == request.user.id
-        ):
-            raise PermissionDenied("无权查看该作答")
-        return api_response(LabAnswerSerializer(sub.answers.all(), many=True).data)
 
     # ---- 报告：生成（幂等） ----
     @action(detail=True, methods=["post"], url_path="generate-report", permission_classes=[IsAuthenticated])

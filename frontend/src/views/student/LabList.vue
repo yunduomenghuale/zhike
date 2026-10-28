@@ -168,27 +168,16 @@ function num(v) {
   return Number.isFinite(n) ? Math.round(n * 10) / 10 : 0
 }
 
-/** 评分构成：基础分（步骤分×折算比）+ 准确性 + 效率 + 完成度 + 附加题分。 */
+/** 评分构成：基础分（步骤分×折算比）+ 准确性 + 效率 + 完成度（纯步骤评分，附题已下线）。 */
 function breakdownItems(row) {
   const bk = breakdownOf(row)
   if (!bk) return []
-  const sub = submissionOf(row)
   const items = [
     { key: 'base', label: '基础分', value: num(bk.base), max: num(bk.max_base), color: '#3b82f6' },
     { key: 'accuracy', label: '操作准确性', value: num(bk.accuracy), max: 5, color: '#10b981' },
     { key: 'efficiency', label: '完成效率', value: num(bk.efficiency), max: 5, color: '#f59e0b' },
     { key: 'completion', label: '完成度', value: num(bk.completion), max: 10, color: '#8b5cf6' },
   ]
-  if (num(bk.question_total) > 0) {
-    items.push({
-      key: 'question',
-      label: '附加题得分',
-      value: num(bk.question_total),
-      max: num(bk.question_total),
-      color: '#0d9488',
-      noBar: true,
-    })
-  }
   return items.map((it) => ({
     ...it,
     percent: it.noBar ? 100 : it.max > 0 ? Math.min(100, Math.round((it.value / it.max) * 100)) : 0,

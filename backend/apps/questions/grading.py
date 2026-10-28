@@ -6,8 +6,7 @@
 - blank:          answer = {"blanks": [{"text": "xxx", "score": 2}, ...]}（按空赋分，
                   逐空命中累计得分：全对满分、部分对给部分分）；
                   旧版纯字符串数组 ["xxx","yyy"] 无按空分值，保持全对满分/否则 0 分
-主观题（short）：grade_objective 保持返回 (None, None)（作业/考试教师批改流依赖此契约）；
-labs 场景经 grade_lab_question → grade_subjective 做相似度预评分。
+主观题（short）：grade_objective 保持返回 (None, None)（作业/考试教师批改流依赖此契约）。
 """
 import re
 import unicodedata
@@ -164,18 +163,3 @@ def grade_subjective(question, student_answer: dict):
     if sim >= SIM_CORRECT:
         return "correct", full, round(sim, 4)
     return "pending_review", (full * Decimal(str(round(sim, 4)))).quantize(Decimal("0.1")), round(sim, 4)
-
-
-def grade_lab_question(question, student_answer: dict):
-    """labs 评分派发入口：客观题走 grade_objective，主观题走 grade_subjective。
-
-    返回统一三元组 (verdict, score, similarity)：
-    - 客观题 correct → (correct, score, None)；错误 → (wrong, 0, None)
-    - 主观题 → grade_subjective 结果；None 分数表示交教师批改
-    """
-    if getattr(question, "qtype", None) == "short":
-        return grade_subjective(question, student_answer)
-    is_correct, score = grade_objective(question, student_answer)
-    if is_correct is None:
-        return "pending_review", None, None
-    return ("correct" if is_correct else "wrong"), (score if is_correct else Decimal("0")), None

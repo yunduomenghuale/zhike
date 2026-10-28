@@ -27,7 +27,6 @@
     submissionId: null,
     seed: null,
     lab: null,
-    questions: [],
     startTime: null,
     steps: {},
     errorLog: [],
@@ -53,7 +52,6 @@
           self.submissionId = data.submission_id;
           self.seed = data.random_seed || {};
           self.lab = data.lab || {};
-          self.questions = data.questions || [];
           self.startTime = Date.now();
           window.LAB_SEED = self.seed; // 实验页以 seed 驱动随机参数
           return data;
@@ -75,7 +73,7 @@
     },
 
     /** 提交：只回传过程数据，分数由服务端按 seed 重算。 */
-    submit: function (answers) {
+    submit: function () {
       if (!this.validated) return Promise.reject(new Error('not validated'));
       var payload = {
         attempt_token: this.token,
@@ -83,7 +81,6 @@
         error_log: this.errorLog,
         elapsed_seconds: this.elapsedSeconds(),
       };
-      if (answers) payload.answers = answers;
       return fetch(API_ROOT + '/lab-submissions/' + this.submissionId + '/submit/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Lab-Token': this.token },

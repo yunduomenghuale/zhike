@@ -29,21 +29,7 @@
           <el-input-number v-model="form.standard_minutes" :min="5" :max="180" placeholder="分钟" />
         </el-form-item>
         <el-form-item>
-          <template #label>
-            <span class="weight-label">题目权重</span>
-            <el-tooltip placement="top" effect="light">
-              <template #content>
-                <div class="weight-tip">
-                  <p><b>0</b> = 纯实验步骤评分（基础分+准确性+效率+完成度）</p>
-                  <p><b>0.3</b> = 实验步骤分 × 0.7 + 附加题得分 × 0.3</p>
-                  <p>取值 0~1，附加题越多建议权重越大</p>
-                </div>
-              </template>
-              <el-icon class="tip-ico"><QuestionFilled /></el-icon>
-            </el-tooltip>
-          </template>
           <div class="weight-row">
-            <el-input-number v-model="form.question_weight" :min="0" :max="1" :step="0.1" />
             <el-button class="create-btn" type="primary" :loading="creating" @click="create">创建实验</el-button>
           </div>
         </el-form-item>
@@ -139,7 +125,6 @@
               <div class="d-item"><span class="d-k">实验模板</span><span>{{ currentLab.template_title }}</span></div>
               <div class="d-item"><span class="d-k">满分</span><span>{{ currentLab.total_score }} 分（及格 {{ currentLab.pass_score }}）</span></div>
               <div class="d-item"><span class="d-k">标准时长</span><span>{{ currentLab.standard_minutes_display }} 分钟</span></div>
-              <div class="d-item"><span class="d-k">题目权重</span><span>{{ currentLab.question_weight > 0 ? currentLab.question_weight : '纯步骤评分' }}</span></div>
             </div>
           </div>
 
@@ -236,7 +221,6 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { QuestionFilled } from '@element-plus/icons-vue'
 import request from '@/api/request'
 import LabGuideDialog from '@/components/LabGuideDialog.vue'
 import {
@@ -259,7 +243,7 @@ const labs = ref([])
 const loading = ref(false)
 const creating = ref(false)
 
-const form = ref({ template: null, title: '', standard_minutes: 30, question_weight: 0 })
+const form = ref({ template: null, title: '', standard_minutes: 30 })
 
 const scheduleVisible = ref(false)
 const scheduleForm = ref({ lab: null, classroom: null, open_at: '', close_at: '' })
@@ -413,7 +397,7 @@ async function create() {
     // course 由路由注入：本页面仅存在于课程空间内
     await createLab({ ...form.value, course: fixedCourseId.value, title: form.value.title || undefined })
     ElMessage.success('实验已创建，排课并发布后学生可见')
-    form.value = { template: null, title: '', standard_minutes: 30, question_weight: 0 }
+    form.value = { template: null, title: '', standard_minutes: 30 }
     await load()
   } finally {
     creating.value = false
@@ -495,13 +479,7 @@ onMounted(load)
 .lab-manage-card :deep(.el-table .el-scrollbar__bar.is-horizontal) {
   display: block !important;
 }
-.weight-label { margin-right: 2px; }
-.tip-ico { color: #94a3b8; cursor: help; font-size: 14px; vertical-align: -2px; }
-.weight-tip p { margin: 0 0 4px; font-size: 12px; line-height: 1.6; }
-.weight-tip p:last-child { margin-bottom: 0; }
-.weight-tip b { color: #2563eb; }
 .weight-row { display: flex; align-items: center; width: 100%; }
-.weight-row .el-input-number { margin-right: auto; }
 .create-btn { margin-left: auto; }
 .schedule-line { display: flex; align-items: center; gap: 8px; line-height: 1.9; }
 .schedule-class {

@@ -1,4 +1,4 @@
-"""labs 一期冒烟测试：模板库 → 建实验 → 附题 → 排课发布 → start/bridge → 提交评分 → 复核/重置 → 统计。"""
+"""labs 一期冒烟测试：模板库 → 建实验 → 排课发布 → start/bridge → 提交评分 → 复核/重置 → 统计。"""
 from decimal import Decimal
 
 from django.test import TestCase
@@ -8,7 +8,6 @@ from rest_framework.test import APIClient
 from apps.classroom.models import ClassCourse, ClassRoom, ClassStudent
 from apps.courses.models import Catalog, Course
 from apps.labs.models import Lab, LabSchedule, LabSubmission, LabTemplate
-from apps.questions.models import Question
 from apps.users.models import User
 
 
@@ -26,16 +25,6 @@ class LabFlowTest(TestCase):
             code="arp-ip-lab", title="ARP实验", default_standard_minutes=30,
             random_config={"ranges": {"s1": [1, 9], "s2": [1, 9]}},
         )
-        cls.short_q = Question.objects.create(
-            course=cls.course, catalog=cls.catalog, qtype="short",
-            stem="简述ARP的工作过程", answer={"text": "ARP请求广播，目标主机单播回应，建立IP到MAC映射缓存"},
-            analysis="ARP 通过广播请求与单播应答完成地址解析", score=10, status="published",
-        )
-        cls.single_q = Question.objects.create(
-            course=cls.course, catalog=cls.catalog, qtype="single",
-            stem="ARP 的作用是", options=[{"key": "A", "text": "IP到MAC"}, {"key": "B", "text": "MAC到IP"}],
-            answer={"key": "A"}, score=10, status="published",
-        )
 
     def setUp(self):
         self.tc = APIClient()
@@ -52,8 +41,9 @@ class LabFlowTest(TestCase):
         return res.data["data"]["id"] if isinstance(res.data.get("data"), dict) else res.data["data"]
 
     def _publish(self, lab_id):
-        res = self.tc.post(f"/api/labs/{lab_id}/questions/", {"question_ids": [self.short_q.id, self.single_q.id]}, format="json")
-        self.assertIn(res.status_code, (200, 201), res.data)
+        # 附题端点已随「实验附题」功能整体下线：/questions/ 应 404
+        res = self.tc.post(f"/api/labs/{lab_id}/questions/", {"question_ids": [1]}, format="json")
+        self.assertEqual(res.status_code, 404)
         res = self.tc.post("/api/lab-schedules/", {"lab": lab_id, "classroom": self.classroom.id}, format="json")
         self.assertIn(res.status_code, (200, 201), res.data)
         res = self.tc.post(f"/api/labs/{lab_id}/publish/", format="json")
@@ -84,22 +74,18 @@ class LabFlowTest(TestCase):
         self.assertEqual(res.status_code, 200, res.data)
         self.assertEqual(res.data["data"]["random_seed"], seed)
 
-        # 提交：全步骤通过、耗时 20 分钟、2 次错误、主观题答对关键词
+        # 提交：全步骤通过、耗时 20 分钟、2 次错误（附题 answers 字段已不再消费）
         res = self.sc.post(f"/api/lab-submissions/{sub_id}/submit/", {
             "attempt_token": token,
             "steps_result": {"1": "pass", "2": "pass", "3": "pass", "4": "pass", "5": "pass"},
             "error_log": [{"step": 1, "cmd": "xx"}, {"step": 2, "cmd": "yy"}],
             "elapsed_seconds": 1200,
-            "answers": {
-                str(self.single_q.id): {"key": "A"},
-                str(self.short_q.id): {"text": "ARP请求以广播形式发出，目标主机以单播回应，并建立IP与MAC的映射缓存"},
-            },
         }, format="json")
         self.assertIn(res.status_code, (200, 201), res.data)
         sub = res.data["data"]
         self.assertEqual(sub["status"], "submitted")
         self.assertIsNotNone(sub["total_score"])
-        # 基础分 100*0.8=80；准确性 5-2=3；效率 5；完成度 10 → 步骤分 98；题目 20 分
+        # 基础分 100*0.8=80；准确性 5-2=3；效率 5；完成度 10 → 步骤分 98
         self.assertEqual(Decimal(sub["score_breakdown"]["base"]), Decimal("80.0"))
         self.assertEqual(Decimal(sub["base_score"]), Decimal("80.0"))
         self.assertEqual(Decimal(sub["accuracy_score"]), Decimal("3"))
@@ -131,24 +117,6 @@ class LabFlowTest(TestCase):
         self.assertIn("experiment_done", row)
         self.assertIn("avg_experiment_score", row)
         self.assertEqual(row["experiment_total"], 1)
-
-        # 相似度评分单元验证
-        from apps.questions.grading import grade_subjective, subjective_similarity
-
-        sim = subjective_similarity(
-            "ARP请求以广播形式发出，目标主机以单播回应",
-            "ARP请求广播，目标主机单播回应，建立IP到MAC映射",
-        )
-        self.assertGreater(sim, 0.5)
-        verdict, score, _ = grade_subjective(self.short_q, {"text": "完全无关的内容哈哈哈哈"})
-        self.assertEqual(verdict, "wrong")
-
-    def test_question_weight_validation(self):
-        """question_weight>0 时不强制附题（允许先建后附），但权重越界报错。"""
-        res = self.tc.post("/api/labs/", {
-            "template": self.template.id, "course": self.course.id, "question_weight": "1.5",
-        }, format="json")
-        self.assertEqual(res.status_code, 400)
 
     def test_schedule_empty_time_means_open(self):
         """排课时间留空（空字符串）按“立即开放/不限制”保存，不再 400；

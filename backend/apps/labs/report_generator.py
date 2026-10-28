@@ -81,7 +81,6 @@ def build_report_context(submission) -> dict:
             "accuracy": _fmt_score(submission.accuracy_score),
             "efficiency": _fmt_score(submission.efficiency_score),
             "completion": _fmt_score(submission.completion_score),
-            "question": _fmt_score(submission.question_score),
             "total": _fmt_score(submission.total_score),
             "full": str(lab.total_score),
         },
@@ -173,7 +172,6 @@ def _render_docx(ctx: dict) -> str:
         f"操作准确性：{s['accuracy']} / 5\n"
         f"完成效率：{s['efficiency']} / 5\n"
         f"完成度：{s['completion']} / 10\n"
-        f"题目得分：{s['question']}\n"
         f"总分：{s['total']} / {s['full']}"
     )
 
@@ -241,7 +239,6 @@ def _render_pdf(ctx: dict) -> str:
         Paragraph(
             f"基础分：{s['base']} / 80<br/>操作准确性：{s['accuracy']} / 5<br/>"
             f"完成效率：{s['efficiency']} / 5<br/>完成度：{s['completion']} / 10<br/>"
-            f"题目得分：{s['question']}<br/>"
             f"<b>总分：{s['total']} / {s['full']}</b>",
             styles["body"],
         ),

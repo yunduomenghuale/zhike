@@ -2,8 +2,11 @@
 
 实验内容三层分离：
 - LabTemplate 平台层：实验本体是代码资产（静态 HTML 页 + 步骤校验引擎），由开发者维护；
-- Lab 教师层：教师引用模板 → 绑定课程 → 覆盖配置 → 可选附题 → 排课发布；
+- Lab 教师层：教师引用模板 → 绑定课程 → 覆盖配置 → 排课发布；
 - LabSubmission 学生层：做实验、被评分（服务端按 seed 重算，唯一真相源）。
+
+说明：曾经的「实验附题」（从题库选题附给实验）已整体下线——教师端无选题入口、
+需求不存在，相关模型/端点/评分分支已删除（2026-10-28），实验回归纯步骤评分。
 """
 from pathlib import Path
 from uuid import uuid4
@@ -69,8 +72,6 @@ class Lab(BaseModel):
     standard_minutes = models.PositiveIntegerField("标准时长(分钟)", null=True, blank=True)
     total_score = models.DecimalField("总分", max_digits=6, decimal_places=1, default=100)
     pass_score = models.DecimalField("及格分", max_digits=6, decimal_places=1, default=60)
-    # 附题占总分权重：0=纯实验步骤评分；0.3 = 实验分*0.7 + 题目分*0.3
-    question_weight = models.DecimalField("题目权重", max_digits=3, decimal_places=2, default=0)
     # 缺省继承模板，允许覆盖随机参数范围
     random_config = models.JSONField("随机参数配置", default=dict, blank=True)
     time_limit_seconds = models.IntegerField("限时(秒)", null=True, blank=True)
@@ -161,10 +162,8 @@ class LabSubmission(BaseModel):
     accuracy_score = models.DecimalField("操作准确性", max_digits=4, decimal_places=1, null=True, blank=True)
     efficiency_score = models.DecimalField("完成效率", max_digits=4, decimal_places=1, null=True, blank=True)
     completion_score = models.DecimalField("完成度", max_digits=4, decimal_places=1, null=True, blank=True)
-    question_score = models.DecimalField("题目得分", max_digits=6, decimal_places=1, null=True, blank=True)
     total_score = models.DecimalField("总分", max_digits=6, decimal_places=1, null=True, blank=True)
     score_breakdown = models.JSONField("评分明细", default=dict, blank=True)
-    subjective_scores = models.JSONField("主观题得分", default=dict, blank=True)  # {lab_question_id: score}
     # 教师复核
     reviewed = models.BooleanField("教师已复核", default=False)
     reviewed_by = models.ForeignKey(
@@ -189,69 +188,6 @@ class LabSubmission(BaseModel):
 
     def __str__(self):
         return f"{self.student} - {self.lab}"
-
-
-class LabQuestion(BaseModel):
-    """实验附题中间表；发布后以 snapshot 为唯一判题依据（仿作业快照）。"""
-
-    lab = models.ForeignKey(Lab, on_delete=models.CASCADE, related_name="questions", verbose_name="实验")
-    question = models.ForeignKey(
-        "questions.Question", null=True, blank=True, on_delete=models.SET_NULL,
-        related_name="lab_items", verbose_name="来源题目",
-    )
-    score = models.DecimalField("题目分值", max_digits=5, decimal_places=1, default=5)
-    order = models.PositiveIntegerField("题目顺序", default=0)
-    snapshot = models.JSONField("题目快照", default=dict, blank=True)
-
-    class Meta:
-        verbose_name = "实验题目"
-        verbose_name_plural = verbose_name
-        ordering = ["order", "id"]
-        constraints = [
-            models.UniqueConstraint(fields=["lab", "question"], name="unique_lab_question"),
-            models.UniqueConstraint(fields=["lab", "order"], name="unique_lab_question_order"),
-        ]
-
-    @property
-    def is_subjective(self) -> bool:
-        return (self.snapshot or {}).get("qtype") == "short"
-
-    def __str__(self):
-        return f"{self.lab} - 第{self.order + 1}题"
-
-
-class LabAnswer(BaseModel):
-    """实验逐题作答。客观题自动判分；主观题相似度预评分 + pending_review 待教师复核。"""
-
-    submission = models.ForeignKey(
-        LabSubmission, on_delete=models.CASCADE, related_name="answers", verbose_name="实验作答"
-    )
-    lab_question = models.ForeignKey(
-        LabQuestion, on_delete=models.PROTECT, related_name="answers", verbose_name="实验题目"
-    )
-    student_answer = models.JSONField("学生答案", default=dict, blank=True)
-    is_correct = models.BooleanField("是否正确", null=True)
-    score = models.DecimalField("最终得分", max_digits=5, decimal_places=1, null=True, blank=True)
-    auto_score = models.DecimalField("自动评分", max_digits=5, decimal_places=1, null=True, blank=True)
-    auto_comment = models.TextField("自动评语", blank=True)
-    similarity = models.FloatField("相似度", null=True, blank=True)
-    pending_review = models.BooleanField("待教师复核", default=False)
-    graded_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
-        related_name="lab_answer_gradings", verbose_name="批改人",
-    )
-    graded_at = models.DateTimeField("批改时间", null=True, blank=True)
-
-    class Meta:
-        verbose_name = "实验作答明细"
-        verbose_name_plural = verbose_name
-        ordering = ["lab_question__order", "id"]
-        constraints = [
-            models.UniqueConstraint(fields=["submission", "lab_question"], name="unique_lab_submission_question"),
-        ]
-
-    def __str__(self):
-        return f"{self.submission} - {self.lab_question}"
 
 
 class LabAttemptToken(BaseModel):

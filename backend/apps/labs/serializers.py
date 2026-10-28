@@ -4,10 +4,8 @@ from apps.courses.models import Course
 
 from .models import (
     Lab,
-    LabAnswer,
     LabAttemptToken,
     LabGuide,
-    LabQuestion,
     LabReport,
     LabSchedule,
     LabSubmission,
@@ -81,7 +79,7 @@ class LabSerializer(serializers.ModelSerializer):
             "id", "template", "template_code", "template_title", "page_url",
             "course", "course_name", "catalog", "title", "description",
             "standard_minutes", "standard_minutes_display",
-            "total_score", "pass_score", "question_weight", "random_config",
+            "total_score", "pass_score", "random_config",
             "time_limit_seconds", "allow_resubmit", "status", "order",
             "schedules", "created_at", "updated_at",
         ]
@@ -91,11 +89,6 @@ class LabSerializer(serializers.ModelSerializer):
         user = self.context["request"].user
         if not (getattr(user, "is_teacher", False) and value.teacher_id == user.id):
             raise serializers.ValidationError("只能给自己的课程创建实验")
-        return value
-
-    def validate_question_weight(self, value):
-        if value and (value < 0 or value > 1):
-            raise serializers.ValidationError("题目权重须在 0~1 之间")
         return value
 
     def validate(self, attrs):
@@ -111,28 +104,6 @@ class LabSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class LabQuestionSerializer(serializers.ModelSerializer):
-    stem = serializers.CharField(source="snapshot.stem", read_only=True)
-    qtype = serializers.CharField(source="snapshot.qtype", read_only=True)
-    qtype_display = serializers.CharField(source="snapshot.qtype_display", read_only=True)
-
-    class Meta:
-        model = LabQuestion
-        fields = ["id", "lab", "question", "score", "order", "snapshot", "stem", "qtype", "qtype_display"]
-        read_only_fields = ["snapshot"]
-
-
-class LabAnswerSerializer(serializers.ModelSerializer):
-    lab_question = LabQuestionSerializer(read_only=True)
-
-    class Meta:
-        model = LabAnswer
-        fields = [
-            "id", "lab_question", "student_answer", "is_correct", "score",
-            "auto_score", "auto_comment", "similarity", "pending_review", "graded_at",
-        ]
-
-
 class LabSubmissionSerializer(serializers.ModelSerializer):
     """对本人/教师始终返回分数（提交即见分，无 score_released 门控）。"""
 
@@ -141,7 +112,6 @@ class LabSubmissionSerializer(serializers.ModelSerializer):
     lab_title = serializers.CharField(source="lab.title", read_only=True)
     course_name = serializers.CharField(source="lab.course.name", read_only=True)
     lab_total_score = serializers.CharField(source="lab.total_score", read_only=True)
-    answers = LabAnswerSerializer(many=True, read_only=True)
 
     class Meta:
         model = LabSubmission
@@ -151,9 +121,8 @@ class LabSubmissionSerializer(serializers.ModelSerializer):
             "status", "attempt", "error_log", "steps_result", "elapsed_seconds",
             "error_count", "passed_steps", "total_steps",
             "base_score", "accuracy_score", "efficiency_score", "completion_score",
-            "question_score", "total_score", "score_breakdown", "subjective_scores",
+            "total_score", "score_breakdown",
             "reviewed", "abnormal", "started_at", "submitted_at",
-            "answers",
         ]
 
 
