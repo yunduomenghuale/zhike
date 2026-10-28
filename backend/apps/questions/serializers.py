@@ -7,7 +7,13 @@ from rest_framework import serializers
 
 from apps.courses.models import Catalog
 
-from .models import AnswerRecord, Question, QuestionDraftBatch
+from .models import AnswerRecord, Question, QuestionDraftBatch, SceneTag
+
+
+class SceneTagSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SceneTag
+        fields = ["id", "code", "name"]
 
 
 class QuestionSerializer(serializers.ModelSerializer):
@@ -20,16 +26,26 @@ class QuestionSerializer(serializers.ModelSerializer):
     # image_url 为只读展示地址（/media/...）
     image = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     image_url = serializers.SerializerMethodField()
+    # 用途分类按 code 读写（practice/homework/exam），多选；空数组=服务端默认
+    scenes = serializers.SlugRelatedField(
+        slug_field="code", queryset=SceneTag.objects.all(), many=True, required=False
+    )
 
     class Meta:
         model = Question
         fields = [
             "id", "course", "catalog", "catalog_title", "qtype", "qtype_display", "stem", "image",
-            "image_url", "options",
+            "image_url", "options", "scenes",
             "answer", "analysis", "score", "difficulty", "difficulty_display",
             "knowledge_tags", "source", "status", "status_display", "creator", "created_at",
         ]
         read_only_fields = ["creator"]
+
+    def validate_scenes(self, value):
+        # 显式提交至少选一个分类；缺省字段（导入/旧客户端）走模型 save 兜底
+        if self.initial_data.get("scenes") is not None and not value:
+            raise serializers.ValidationError("请至少选择一个用途分类")
+        return value
 
     def get_image_url(self, obj) -> str:
         return f"/media/{obj.image.name}" if obj.image else ""

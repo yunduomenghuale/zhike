@@ -172,7 +172,7 @@ def _normalize_item(item, batch, source, status=Question.Status.DRAFT):
     else:  # short 简答：参考答案原文，无结构约束
         answer_payload = {"text": str(answer.get("text") or "").strip()}
 
-    return {
+    payload = {
         "course": batch.course_id,
         "catalog": batch.catalog_id,
         "qtype": qtype,
@@ -186,7 +186,11 @@ def _normalize_item(item, batch, source, status=Question.Status.DRAFT):
         "knowledge_tags": [str(t) for t in tags][:10],
         "source": source,
         "status": status,
-    }, None
+    }
+    # 用途分类：草稿自带逐题 scenes 用之；没有则不带该字段（模型 save 兜底默认）
+    if isinstance(item.get("scenes"), list) and item["scenes"]:
+        payload["scenes"] = [str(s) for s in item["scenes"]]
+    return payload, None
 
 
 def _flatten_errors(errors) -> str:

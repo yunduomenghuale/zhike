@@ -1,13 +1,16 @@
 import os
 import tempfile
 import time
+import json
 from uuid import uuid4
 
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.db import IntegrityError
+from django_filters import rest_framework as django_filters
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser
+from rest_framework import viewsets
 from rest_framework.views import APIView
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
@@ -25,11 +28,12 @@ from apps.knowledge.extractor import extract_text_with_images, extract_text_with
 from .draft_pipeline import save_batch_drafts
 from .grading import grade_objective
 from .import_parser import parse_questions
-from .models import AnswerRecord, Question, QuestionDraftBatch, WrongMastery, WrongNote
+from .models import AnswerRecord, Question, QuestionDraftBatch, SceneTag, WrongMastery, WrongNote
 from .serializers import (
     AnswerRecordSerializer,
     QuestionDraftBatchSerializer,
     QuestionSerializer,
+    SceneTagSerializer,
     StudentQuestionSerializer,
 )
 from .throttles import TeacherAiScopedThrottle
@@ -87,10 +91,37 @@ AI_GEN_MAX_TOTAL = 50
 AI_GEN_MAX_SCORE = 100
 
 
+class SceneTagViewSet(viewsets.ReadOnlyModelViewSet):
+    """题目用途标签（固定 3 条：章节练习/作业/考试）：下拉数据源。"""
+
+    serializer_class = SceneTagSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = None
+
+    def get_queryset(self):
+        return SceneTag.objects.order_by("id")
+
+
+class QuestionFilter(django_filters.FilterSet):
+    """题目列表筛选；scene 按 code（可逗号多选，OR 语义），M2M 过滤需 distinct。"""
+
+    scene = django_filters.CharFilter(method="filter_scene")
+
+    class Meta:
+        model = Question
+        fields = ["course", "catalog", "qtype", "difficulty", "status", "source"]
+
+    def filter_scene(self, qs, name, value):
+        codes = [c.strip() for c in str(value).split(",") if c.strip()]
+        if not codes:
+            return qs
+        return qs.filter(scenes__code__in=codes).distinct()
+
+
 class QuestionViewSet(BaseModelViewSet):
     serializer_class = QuestionSerializer
     permission_classes = [IsTeacherOrReadOnly]
-    filterset_fields = ["course", "catalog", "qtype", "difficulty", "status", "source"]
+    filterset_class = QuestionFilter
     search_fields = ["stem"]
     # 教师端 AI 重操作限流（throttles.py 按 action_scopes 分档，未声明的动作放行）
     throttle_classes = [TeacherAiScopedThrottle]
@@ -99,12 +130,14 @@ class QuestionViewSet(BaseModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = Question.objects.filter(course__in=courses_for_user(user))
-        # 学生只见已发布题目（用于章节练习）
+        # 学生只见「已发布 + 章节已发布 + 打了练习标签」的题目（章节练习）；
+        # 后端强制过滤防绕过前端，避免考试/作业专用题提前泄进练习
         if getattr(user, "is_student", False):
             qs = qs.filter(
                 status=Question.Status.PUBLISHED,
                 catalog__is_published=True,
-            )
+                scenes__code=SceneTag.PRACTICE,
+            ).distinct()
         return qs.order_by("id")
 
     def get_serializer_class(self):
@@ -184,6 +217,10 @@ class QuestionViewSet(BaseModelViewSet):
         if err:
             return api_response(message=err, code=400, status=400)
         objective = str(request.data.get("objective") or "")[:500]
+        # 用途分类预设：合法 code 随任务配置下发，生成的草稿逐题携带（入库时打标）
+        scenes, err = self._validate_scenes(request.data.get("scenes"))
+        if err:
+            return api_response(message=err, code=400, status=400)
 
         try:
             task = submit_ai_task(
@@ -198,6 +235,7 @@ class QuestionViewSet(BaseModelViewSet):
                     "total": sum(g["count"] for g in groups),
                     "groups": groups,
                     "objective": objective,
+                    "scenes": scenes,
                     "message": "排队中…",
                 },
             )
@@ -241,6 +279,31 @@ class QuestionViewSet(BaseModelViewSet):
         if total > AI_GEN_MAX_TOTAL:
             return None, f"一次生成题目总数不可超过 {AI_GEN_MAX_TOTAL}"
         return groups, None
+
+    @staticmethod
+    def _validate_scenes(raw):
+        """用途分类预设校验：合法 code 列表（可多选），缺省/空 → None（走默认）。
+
+        返回 (codes, None) 或 (None, 中文错误文案)。
+        """
+        if raw is None:
+            return None, None
+        if isinstance(raw, str):
+            # multipart 表单字段：JSON 字符串（前端 FormData 传数组的惯例）
+            try:
+                raw = json.loads(raw)
+            except (ValueError, TypeError):
+                raw = [s for s in raw.split(",") if s.strip()]
+        if not isinstance(raw, list):
+            return None, "用途分类格式不正确"
+        codes = [str(s).strip() for s in raw if str(s).strip()]
+        if not codes:
+            return None, None
+        valid = set(SceneTag.objects.filter(code__in=codes).values_list("code", flat=True))
+        invalid = [c for c in codes if c not in valid]
+        if invalid:
+            return None, f"无效的用途分类：{'、'.join(invalid)}"
+        return codes, None
 
     @action(detail=False, methods=["post"], url_path="import", permission_classes=[IsTeacherOrAdmin])
     def import_questions(self, request):
@@ -320,6 +383,15 @@ class QuestionViewSet(BaseModelViewSet):
                 continue
             name = f"question_images/{uuid4().hex}{img['ext']}"
             draft["image"] = default_storage.save(name, ContentFile(img["data"]))
+
+        # 用途分类：导入时整批选择（multipart 字段），逐题写进草稿；
+        # 预览可再逐题改，入库管道按草稿 scenes 打标
+        import_scenes, scenes_err = QuestionViewSet._validate_scenes(request.data.get("scenes"))
+        if scenes_err:
+            return api_response(message=scenes_err, code=400, status=400)
+        if import_scenes:
+            for draft in drafts:
+                draft["scenes"] = import_scenes
 
         batch = QuestionDraftBatch(
             origin=QuestionDraftBatch.Origin.IMPORT,

@@ -287,6 +287,10 @@ def run_question_gen(task: AITask) -> None:
     if not groups:
         raise ValueError("生题配置缺失（groups 为空）")
 
+    # 用途分类预设：随任务配置下发（生题对话框勾选），逐题写进草稿随入库生效
+    scenes = config.get("scenes")
+    scenes = [str(s) for s in scenes] if isinstance(scenes, list) else None
+
     provider = get_provider("chat")
     is_mock = provider.name == "mock"
 
@@ -341,6 +345,8 @@ def run_question_gen(task: AITask) -> None:
                 if item is None:
                     dropped += 1
                     continue
+                if scenes:
+                    item["scenes"] = scenes
                 drafts.append(item)
             done_q += n  # 按请求题数推进：进度稳定只增，与实际产出差额在终态消息体现
             remaining -= n

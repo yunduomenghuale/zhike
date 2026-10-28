@@ -23,6 +23,29 @@ def _split_score(total, n: int) -> list:
     return [Decimal(base + (1 if i < rem else 0)) / 10 for i in range(n)]
 
 
+class SceneTag(BaseModel):
+    """题目用途标签：章节练习 / 作业 / 考试（预置 3 条，题目可多选）。
+
+    分类只管会"自动暴露给学生"的三个场景；实验附题不受约束。
+    题库列表筛选与消费端取题均以 code 为准。
+    """
+
+    PRACTICE = "practice"
+    HOMEWORK = "homework"
+    EXAM = "exam"
+    DEFAULT_CODES = (PRACTICE, HOMEWORK)  # 新建/兜底默认：练习+作业（考试需显式勾选防泄题）
+
+    code = models.CharField("标识", max_length=16, unique=True)
+    name = models.CharField("名称", max_length=16)
+
+    class Meta:
+        verbose_name = "题目场景标签"
+        verbose_name_plural = verbose_name
+
+    def __str__(self):
+        return self.name
+
+
 class Question(BaseModel):
     """题目（需求 5.7 / 第 8.1 节 / 第 9 节·题目）。
 
@@ -72,6 +95,9 @@ class Question(BaseModel):
     knowledge_tags = models.JSONField("知识点标签", default=list, blank=True)
     source = models.CharField("来源", max_length=16, choices=Source.choices, default=Source.MANUAL)
     status = models.CharField("状态", max_length=16, choices=Status.choices, default=Status.DRAFT)
+    scenes = models.ManyToManyField(
+        SceneTag, related_name="questions", blank=True, verbose_name="用途分类"
+    )  # 多选：一题可同时属于 练习/作业/考试；空分类由 save() 兜底默认（练习+作业）
     creator = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="questions", verbose_name="创建人"
     )
@@ -95,6 +121,10 @@ class Question(BaseModel):
         if self.qtype == self.QType.BLANK:
             self._normalize_blank_answer()
         super().save(*args, **kwargs)
+        # 空分类兜底（ORM/种子脚本直插路径不走序列化器）：补默认 练习+作业，
+        # 保证章节练习/作业选题池不出现"静默消失"的题；显式传了分类则不动
+        if not self.scenes.exists():
+            self.scenes.set(SceneTag.objects.filter(code__in=SceneTag.DEFAULT_CODES))
 
     def _normalize_blank_answer(self):
         """填空题答案规范化：blanks 统一为 [{"text","score"}]，并重算 score=Σ空分。
