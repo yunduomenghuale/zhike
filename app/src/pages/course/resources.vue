@@ -7,27 +7,8 @@
       <view v-if="!items.length" class="tip">教师暂未发布课程资源</view>
 
       <template v-for="item in items" :key="`${item.type}-${item.id}`">
-        <!-- 数字人视频：内嵌播放 -->
-        <view v-if="item.type === 'video'" class="card">
-          <video
-            class="video"
-            :src="mediaURL(item.file_url)"
-            controls
-            object-fit="contain"
-            :poster="''"
-          />
-          <view class="card-main">
-            <view class="card-title">{{ item.title }}</view>
-            <view class="card-meta">
-              <text class="chip video-chip">视频</text>
-              <text v-if="item.catalog_title" class="meta-text">{{ item.catalog_title }}</text>
-              <text class="meta-text">{{ fmtSize(item.file_size) }}</text>
-            </view>
-          </view>
-        </view>
-
         <!-- 思维导图/交互演示：H5 内打开，小程序/ App 用 web-view -->
-        <view class="card" @click="openResource(item)">
+        <view v-if="item.kind !== 'document'" class="card" @click="openResource(item)">
           <view class="res-icon">{{ item.kind === 'mindmap' ? '🗺️' : '🎬' }}</view>
           <view class="card-main">
             <view class="card-title">{{ item.title }}</view>
@@ -35,7 +16,20 @@
               <text class="chip" :class="item.kind === 'mindmap' ? 'mind-chip' : 'demo-chip'">
                 {{ item.kind_display }}
               </text>
-              <text v-if="item.catalog_title" class="meta-text">{{ item.catalog_title }}</text>
+            </view>
+          </view>
+          <text class="arrow">›</text>
+        </view>
+
+        <!-- 文档：签名后打开（PDF 预览，doc/docx 下载） -->
+        <view v-else class="card" @click="openDocument(item)">
+          <view class="res-icon">📄</view>
+          <view class="card-main">
+            <view class="card-title">{{ item.title }}</view>
+            <view class="card-meta">
+              <text class="chip doc-chip">文档</text>
+              <text v-if="item.file_name" class="meta-text">{{ item.file_name }}</text>
+              <text v-if="item.file_size" class="meta-text">{{ fmtSize(item.file_size) }}</text>
             </view>
           </view>
           <text class="arrow">›</text>
@@ -48,8 +42,8 @@
 <script setup>
 import { ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
-import { listCourseResources, listCourseVideos } from '@/api/course.js'
-import { mediaURL, BASE_URL } from '@/config.js'
+import { listCourseResources, signCourseResource } from '@/api/course.js'
+import { BASE_URL } from '@/config.js'
 
 const courseId = ref(null)
 const courseName = ref('课程资源')
@@ -67,27 +61,40 @@ async function load() {
   if (!courseId.value) return
   loading.value = true
   try {
-    const [resRes, vidRes] = await Promise.all([
-      listCourseResources({ course: courseId.value }),
-      listCourseVideos({ course: courseId.value }),
-    ])
-    const resources = (resRes.results ?? resRes ?? []).map((r) => ({ ...r, type: 'resource' }))
-    const videos = (vidRes.results ?? vidRes ?? []).map((v) => ({ ...v, type: 'video' }))
-    items.value = [...resources, ...videos]
+    const res = await listCourseResources({ course: courseId.value })
+    items.value = res.results ?? res ?? []
   } finally {
     loading.value = false
   }
 }
 
-function openResource(item) {
-  // 资源静态页挂在生产 nginx /resources/ 子路径（与 /api 同域）
-  const url = `${BASE_URL}${item.url}`
+function openUrl(url, title) {
   // #ifdef H5
   window.open(url, '_blank')
   // #endif
   // #ifndef H5
-  uni.navigateTo({ url: `/pages/course/resource-viewer?url=${encodeURIComponent(url)}&title=${encodeURIComponent(item.title)}` })
+  uni.navigateTo({ url: `/pages/course/resource-viewer?url=${encodeURIComponent(url)}&title=${encodeURIComponent(title)}` })
   // #endif
+}
+
+async function openResource(item) {
+  // 预置页：先签发唯一签名 URL（未发布/非在读课程后端拒签）
+  try {
+    const signed = await signCourseResource(item.id)
+    openUrl(`${BASE_URL}${signed.url}`, item.title)
+  } catch (e) {
+    uni.showToast({ title: '资源打开失败', icon: 'none' })
+  }
+}
+
+async function openDocument(item) {
+  // 文档：签发 file 地址（PDF 内联预览，doc/docx 附件下载）
+  try {
+    const signed = await signCourseResource(item.id)
+    openUrl(`${BASE_URL}${signed.url}`, item.title)
+  } catch (e) {
+    uni.showToast({ title: '文档打开失败', icon: 'none' })
+  }
 }
 
 function fmtSize(bytes) {
@@ -138,13 +145,6 @@ function fmtSize(bytes) {
   transform: scale(0.98);
 }
 
-.video {
-  width: 100%;
-  height: 380rpx;
-  border-radius: 14rpx;
-  background: #000;
-}
-
 .card-main {
   flex: 1;
   min-width: 0;
@@ -180,9 +180,9 @@ function fmtSize(bytes) {
   color: #10b981;
 }
 
-.video-chip {
-  background: #f5f3ff;
-  color: #8b5cf6;
+.doc-chip {
+  background: #fff7ed;
+  color: #ea580c;
 }
 
 .res-icon {

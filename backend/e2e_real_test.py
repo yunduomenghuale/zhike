@@ -116,10 +116,10 @@ print('ok')
         json={"lab": lab_id, "classroom": class_id})
     api("POST", f"/labs/{lab_id}/publish/", token=tok_t, label="发布实验", expect=200)
 
-    # 课程资源（思维导图引用）
+    # 课程资源（思维导图引用，直接归属课程不再挂章节）
     r = api("POST", "/course-resources/", token=tok_t, label="教师添加思维导图资源", expect=201,
-            json={"course": course_id, "catalog": catalog_id, "kind": "mindmap",
-                  "title": "第4章思维导图(真实测试)", "path": "mindmap/chapter4.html"})
+            json={"course": course_id, "kind": "mindmap",
+                  "title": "课程思维导图(真实测试)", "path": "mindmap/chapter4.html"})
     res_id = (j(r) or {}).get("id")
     api("POST", f"/course-resources/{res_id}/publish/", token=tok_t, label="发布资源", expect=200)
 
@@ -129,19 +129,19 @@ print('ok')
                   "path": "demos/tcp-demo.html"})
     hidden_res_id = (j(r) or {}).get("id")
 
-    # 数字人视频上传（真实 multipart，几 KB）
-    files = {"file": ("真实测试.mp4", io.BytesIO(b"\x00\x00\x00\x18ftypmp42" + b"0" * 65536), "video/mp4")}
-    r = S.post(f"{BASE}/api/course-videos/",
+    # 文档资源上传（真实 multipart）+ 签名拿到 file 地址
+    files = {"file": ("复习大纲(真实测试).pdf", io.BytesIO(b"%PDF-1.4 " + b"0" * 65536), "application/pdf")}
+    r = S.post(f"{BASE}/api/course-resources/",
                headers={"Authorization": f"Bearer {tok_t}"},
-               data={"course": course_id, "catalog": catalog_id, "title": "数字人精讲(真实测试)"},
+               data={"course": course_id, "kind": "document", "title": "复习大纲(真实测试)"},
                files=files, timeout=60)
-    print(f"{'✅' if r.status_code == 201 else '❌'} [{r.status_code}] POST /course-videos/  教师上传视频")
-    video_id = (j(r) or {}).get("id")
-    assert video_id, f"视频上传失败: {r.text[:200]}"
-    api("POST", f"/course-videos/{video_id}/publish/", token=tok_t, label="发布视频", expect=200)
-
-    # 超大视频拒绝（声明式伪造 header 不可靠，直接校验 500MB 常量边界——用 499MB 跳过太慢，跳过真实大文件）
-    print("ℹ️  超大视频拒绝已由单测覆盖（patch 常量），此处跳过真实 500MB 传输")
+    print(f"{'✅' if r.status_code == 201 else '❌'} [{r.status_code}] POST /course-resources/  教师上传文档")
+    doc_id = (j(r) or {}).get("id")
+    assert doc_id, f"文档上传失败: {r.text[:200]}"
+    r = api("POST", f"/course-resources/{doc_id}/sign/", token=tok_t, label="签发文档资源", expect=200)
+    doc_url = (j(r) or {}).get("url", "")
+    assert "/api/course-resources/file/" in doc_url, f"❌ 文档签名地址异常: {doc_url}"
+    api("POST", f"/course-resources/{doc_id}/publish/", token=tok_t, label="发布文档", expect=200)
 
     print()
     print("=" * 60)
@@ -150,32 +150,26 @@ print('ok')
     # 学生看课程（移动端"我的课程"）
     r = api("GET", "/classes/", token=tok_s, label="学生我的课程(移动端)", expect=200)
 
-    # 课程资源可见性
+    # 课程资源可见性（已发布：思维导图 + 文档 = 2 条；未发布演示不可见）
     r = api("GET", f"/course-resources/?course={course_id}", token=tok_s,
-            label="学生看资源(应只见已发布1条)", expect=200)
+            label="学生看资源(应只见已发布2条)", expect=200)
     items = (j(r) or {}).get("results") or []
-    assert len(items) == 1 and items[0]["id"] == res_id, f"❌ 资源可见性异常: {json.dumps(items, ensure_ascii=False)[:200]}"
-    print(f"   ✅ 可见性正确：只见已发布资源 {items[0]['url']}")
-    assert items[0].get("kind_display"), "❌ kind_display 缺失（移动端要显示类型）"
-    assert items[0].get("url", "").startswith("/resources/"), "❌ url 前缀异常"
+    kinds = sorted(i["kind"] for i in items)
+    assert len(items) == 2 and kinds == ["document", "mindmap"], \
+        f"❌ 资源可见性异常: {json.dumps(items, ensure_ascii=False)[:200]}"
+    mm = next(i for i in items if i["kind"] == "mindmap")
+    print(f"   ✅ 可见性正确：只见已发布资源 mindmap={mm['url']}")
+    assert mm.get("kind_display"), "❌ kind_display 缺失（移动端要显示类型）"
+    assert mm.get("url", "").startswith("/api/course-resources/page/"), "❌ url 前缀异常"
 
-    # 数字人视频可见性 + 移动端字段
-    r = api("GET", f"/course-videos/?course={course_id}", token=tok_s,
-            label="学生看视频列表(移动端)", expect=200)
-    vids = (j(r) or {}).get("results") or []
-    assert len(vids) == 1, f"❌ 视频可见性异常: {vids}"
-    v = vids[0]
-    for f in ["file_url", "file_size", "catalog_title", "kind_display" if False else "title"]:
-        assert v.get(f), f"❌ 视频缺字段 {f}"
-    assert "/media/course_videos/" in v["file_url"], f"❌ 视频地址异常: {v['file_url']}"
-    print(f"   ✅ 视频字段齐全 file_url={v['file_url'][:60]}")
-
-    # 视频文件真实可下载
-    vurl = v["file_url"]
-    if vurl.startswith("/"):
-        vurl = BASE + vurl
-    r2 = S.get(vurl, timeout=30)
-    print(f"{'✅' if r2.status_code == 200 and len(r2.content) > 60000 else '❌'} [{r2.status_code}] GET 视频文件 实际{len(r2.content)}字节")
+    # 文档资源：学生签发 → 文件地址可下载
+    doc = next(i for i in items if i["kind"] == "document")
+    assert doc.get("file_name") and doc.get("file_size"), "❌ 文档字段缺失"
+    r = api("POST", f"/course-resources/{doc['id']}/sign/", token=tok_s, label="学生签发文档", expect=200)
+    durl = (j(r) or {}).get("url", "")
+    assert "/api/course-resources/file/" in durl, f"❌ 文档签名地址异常: {durl}"
+    r2 = S.get(BASE + durl, timeout=30)
+    print(f"{'✅' if r2.status_code == 200 and len(r2.content) > 60000 else '❌'} [{r2.status_code}] GET 文档文件 实际{len(r2.content)}字节")
 
     # 开始实验 → 提交
     r = api("POST", "/lab-submissions/start/", token=tok_s, label="学生开始实验", expect=200,

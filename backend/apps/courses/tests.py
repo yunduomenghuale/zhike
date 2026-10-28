@@ -210,7 +210,7 @@ class CatalogOrderTests(APITestCase):
 
 
 class CourseResourceTests(APITestCase):
-    """二期B：思维导图/交互演示挂课程资源。"""
+    """课程教学资源：思维导图/交互演示（预置页）+ 文档（上传），直接归属课程。"""
 
     def setUp(self):
         self.teacher = User.objects.create_user(
@@ -220,14 +220,12 @@ class CourseResourceTests(APITestCase):
             username="res-student", password="StrongPass!123", role=User.Role.STUDENT
         )
         self.course = Course.objects.create(name="计算机网络", teacher=self.teacher)
-        self.catalog = Catalog.objects.create(course=self.course, title="第4章 网络层", is_published=True)
 
     def _create(self, client, **overrides):
         payload = {
             "course": self.course.id,
-            "catalog": self.catalog.id,
             "kind": "mindmap",
-            "title": "第4章思维导图",
+            "title": "课程思维导图",
             "path": "mindmap/chapter4.html",
         }
         payload.update(overrides)
@@ -252,25 +250,69 @@ class CourseResourceTests(APITestCase):
         self.assertEqual(res.status_code, 400)
 
     def test_duplicate_page_rejected_with_friendly_message(self):
-        """同一课程重复添加同一预置页：友好提示，而非 unique_together 原始报错。"""
+        """同一课程重复添加同一预置页：友好提示，而非唯一约束原始报错。"""
         self.client.force_authenticate(self.teacher)
         res = self._create(self.client)
         self.assertEqual(res.status_code, 201, res.data)
-        # 换标题/换章节都不行：唯一约束是 (course, path)
-        res = self._create(self.client, title="第4章思维导图V2", catalog=None)
+        # 换标题也不行：唯一约束是 (course, path)（path 非空才生效）
+        res = self._create(self.client, title="课程思维导图V2")
         self.assertEqual(res.status_code, 400)
         self.assertIn("不能重复添加", res.data["message"])
-        self.assertIn("第4章思维导图", res.data["message"])
+        self.assertIn("课程思维导图", res.data["message"])
         # 编辑自身（PATCH 同 path）不受影响
         listing = self.client.get(f"/api/course-resources/?course={self.course.id}")
         items = listing.data["data"]
         items = items["results"] if isinstance(items, dict) and "results" in items else items
         res = self.client.patch(
             f"/api/course-resources/{items[0]['id']}/",
-            {"title": "第4章思维导图改个名"},
+            {"title": "课程思维导图改个名"},
             format="json",
         )
         self.assertEqual(res.status_code, 200, res.data)
+
+    def test_document_upload_and_sign_file_url(self):
+        """文档类：multipart 上传 pdf → 签名拿到 file 地址（非 page）。"""
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        self.client.force_authenticate(self.teacher)
+        pdf = SimpleUploadedFile(
+            "计算机网络复习大纲.pdf", b"%PDF-1.4 fake", content_type="application/pdf"
+        )
+        res = self.client.post(
+            "/api/course-resources/",
+            {"course": self.course.id, "kind": "document", "title": "复习大纲", "file": pdf},
+            format="multipart",
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(res.data["data"]["file_name"], "计算机网络复习大纲.pdf")
+        self.assertEqual(res.data["data"]["file_size"], len(b"%PDF-1.4 fake"))
+        # 未发布时教师可签（预览），签出来的是 file 地址
+        rid = res.data["data"]["id"]
+        res = self.client.post(f"/api/course-resources/{rid}/sign/")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertIn("/api/course-resources/file/", res.data["data"]["url"])
+
+    def test_document_rejects_bad_ext_and_oversize(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        self.client.force_authenticate(self.teacher)
+        bad = SimpleUploadedFile("evil.exe", b"MZ", content_type="application/octet-stream")
+        res = self.client.post(
+            "/api/course-resources/",
+            {"course": self.course.id, "kind": "document", "title": "x", "file": bad},
+            format="multipart",
+        )
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("pdf", res.data["message"])
+        # 预置类不允许带文件、文档类必须有文件
+        res = self._create(self.client)
+        self.assertEqual(res.status_code, 201, res.data)
+        res = self.client.post(
+            "/api/course-resources/",
+            {"course": self.course.id, "kind": "document", "title": "无文件"},
+            format="multipart",
+        )
+        self.assertEqual(res.status_code, 400)
 
     def test_student_sees_only_published_of_enrolled_course(self):
         from apps.classroom.models import ClassCourse, ClassRoom, ClassStudent
@@ -286,11 +328,6 @@ class CourseResourceTests(APITestCase):
         res = self.client.get(f"/api/course-resources/?course={self.course.id}")
         self.assertEqual(len(res.data["data"]["results"] if isinstance(res.data["data"], dict) else res.data["data"]), 0)
         # 发布后可见
-        self.client.force_authenticate(self.teacher)
-        rid = res.data["data"]["id"] if res.status_code == 201 else None
-        # 重新拿 id（上面学生视角返回结构可能不同）
-        listing = self.client.get(f"/api/course-resources/?course={self.course.id}")
-        # 教师视角可见
         self.client.force_authenticate(self.teacher)
         listing = self.client.get(f"/api/course-resources/?course={self.course.id}")
         data = listing.data["data"]
@@ -343,10 +380,9 @@ class CourseResourceGateTests(APITestCase):
             username="gate-student", password="StrongPass!123", role=User.Role.STUDENT
         )
         self.course = Course.objects.create(name="计算机网络", teacher=self.teacher)
-        self.catalog = Catalog.objects.create(course=self.course, title="第4章 网络层", is_published=True)
         self.resource = CourseResource.objects.create(
-            course=self.course, catalog=self.catalog, kind="mindmap",
-            title="第4章思维导图", path="mindmap/chapter4.html",
+            course=self.course, kind="mindmap",
+            title="课程思维导图", path="mindmap/chapter4.html",
         )
         from apps.classroom.models import ClassCourse, ClassRoom, ClassStudent
 
@@ -466,94 +502,6 @@ class CourseResourceGateTests(APITestCase):
         self.assertEqual(res.content, b"body{color:red}")
         res = self.client.get(f"/api/course-resources/preset-asset/{sig}/{'0' * 64}/vendor/x.css")
         self.assertEqual(res.status_code, 403)
-
-
-class CourseVideoTests(APITestCase):
-    """二期C：数字人视频上传/发布/学生可见性。"""
-
-    def setUp(self):
-        self.media_directory = TemporaryDirectory()
-        self.media_override = override_settings(MEDIA_ROOT=self.media_directory.name)
-        self.media_override.enable()
-        self.addCleanup(self.media_override.disable)
-
-        self.teacher = User.objects.create_user(
-            username="vid-teacher", password="StrongPass!123", role=User.Role.TEACHER
-        )
-        self.student = User.objects.create_user(
-            username="vid-student", password="StrongPass!123", role=User.Role.STUDENT
-        )
-        self.course = Course.objects.create(name="计算机网络", teacher=self.teacher)
-        self.catalog = Catalog.objects.create(course=self.course, title="第5章 传输层", is_published=True)
-
-    def _tiny_mp4(self, name="dh.mp4", size_kb=64):
-        # 合法 mp4 头 + 填充，几 KB 即可（仅存储与接口冒烟，不做真解码）
-        return SimpleUploadedFile(name, b"\x00\x00\x00\x18ftypmp42" + b"\0" * size_kb * 1024,
-                                  content_type="video/mp4")
-
-    def test_teacher_upload_publish_and_student_visible(self):
-        from apps.classroom.models import ClassCourse, ClassRoom, ClassStudent
-
-        classroom = ClassRoom.objects.create(name="网络2402", teacher=self.teacher)
-        ClassCourse.objects.create(classroom=classroom, course=self.course)
-        ClassStudent.objects.create(classroom=classroom, student=self.student)
-
-        self.client.force_authenticate(self.teacher)
-        res = self.client.post("/api/course-videos/", {
-            "course": self.course.id,
-            "catalog": self.catalog.id,
-            "title": "第5章数字人精讲",
-            "file": self._tiny_mp4(),
-        }, format="multipart")
-        self.assertEqual(res.status_code, 201, res.data)
-        data = res.data["data"]
-        self.assertEqual(data["file_size"], 64 * 1024 + 12)  # 12 字节 mp4 头
-        self.assertIn("course_videos/", data["file_url"])
-        vid = data["id"]
-
-        # 未发布学生不可见
-        self.client.force_authenticate(self.student)
-        res = self.client.get(f"/api/course-videos/?course={self.course.id}")
-        items = res.data["data"]["results"] if isinstance(res.data["data"], dict) else res.data["data"]
-        self.assertEqual(len(items or []), 0)
-
-        # 发布后可见
-        self.client.force_authenticate(self.teacher)
-        res = self.client.post(f"/api/course-videos/{vid}/publish/")
-        self.assertEqual(res.status_code, 200)
-        self.client.force_authenticate(self.student)
-        res = self.client.get(f"/api/course-videos/?course={self.course.id}")
-        items = res.data["data"]["results"] if isinstance(res.data["data"], dict) else res.data["data"]
-        self.assertEqual(len(items or []), 1)
-        self.assertEqual(items[0]["title"], "第5章数字人精讲")
-
-    def test_oversize_rejected(self):
-        from unittest.mock import patch
-
-        from apps.courses import views as course_views
-
-        self.client.force_authenticate(self.teacher)
-        # patch 上限常量到极小值，验证超限拒绝逻辑（避免真实生成 500MB 数据）
-        with patch.object(course_views, "MAX_COURSE_VIDEO_SIZE", 1024):
-            res = self.client.post("/api/course-videos/", {
-                "course": self.course.id,
-                "title": "超限视频",
-                "file": self._tiny_mp4(size_kb=64),
-            }, format="multipart")
-        self.assertEqual(res.status_code, 400)
-        self.assertIn("500MB", res.data["message"])
-
-    def test_other_teacher_cannot_upload(self):
-        other = User.objects.create_user(
-            username="vid-other", password="StrongPass!123", role=User.Role.TEACHER
-        )
-        self.client.force_authenticate(other)
-        res = self.client.post("/api/course-videos/", {
-            "course": self.course.id,
-            "title": "越权上传",
-            "file": self._tiny_mp4(),
-        }, format="multipart")
-        self.assertEqual(res.status_code, 400)
 
 
 class RegenerateAudioPageTests(APITestCase):

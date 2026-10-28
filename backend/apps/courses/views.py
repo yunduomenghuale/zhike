@@ -20,12 +20,11 @@ from apps.common.viewsets import BaseModelViewSet
 from apps.knowledge.models import KnowledgeChunk
 
 from . import resource_gate
-from .models import Catalog, Course, CourseResource, CourseVideo, PPTResource, TeachingVideo, VideoWatchProgress
+from .models import Catalog, Course, CourseResource, PPTResource, TeachingVideo, VideoWatchProgress
 from .serializers import (
     CatalogSerializer,
     CourseResourceSerializer,
     CourseSerializer,
-    CourseVideoSerializer,
     PPTResourceSerializer,
     TeachingVideoSerializer,
     VideoWatchProgressSerializer,
@@ -705,14 +704,18 @@ class WatchProgressViewSet(BaseModelViewSet):
 
 
 class CourseResourceViewSet(BaseModelViewSet):
-    """课程扩展资源（思维导图/交互演示）：教师引用挂课程，学生看已发布的。"""
+    """课程教学资源（思维导图/交互演示/文档）：直接归属课程，不再挂章节。
+
+    预置类（mindmap/demo）教师引用平台静态页；文档类（document）教师上传
+    pdf/doc/docx（≤100MB，multipart）。学生看已发布的，访问走签名门控。
+    """
 
     serializer_class = CourseResourceSerializer
     permission_classes = [IsTeacherOrReadOnly]
-    filterset_fields = ["course", "catalog", "kind", "is_published"]
+    filterset_fields = ["course", "kind", "is_published"]
 
     def get_queryset(self):
-        qs = CourseResource.objects.select_related("course", "catalog")
+        qs = CourseResource.objects.select_related("course")
         user = self.request.user
         if user.is_authenticated and user.is_student:
             qs = qs.filter(is_published=True, course__classes__students__student=user,
@@ -725,6 +728,29 @@ class CourseResourceViewSet(BaseModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save()
+
+    def create(self, request, *args, **kwargs):
+        # 文档类走 multipart 上传（file 字段），大小/格式校验在序列化器；
+        # 预置类保持 JSON 提交。统一以真实文件 size 落库。
+        upload = request.FILES.get("file")
+        if upload and upload.size == 0:
+            return api_response(message="文档文件为空", code=400, status=400)
+        response = super().create(request, *args, **kwargs)
+        if upload and response.status_code < 400:
+            instance = CourseResource.objects.get(pk=response.data["data"]["id"])
+            instance.file_name = upload.name
+            instance.file_size = upload.size
+            instance.save(update_fields=["file_name", "file_size", "updated_at"])
+            response.data["data"] = CourseResourceSerializer(
+                instance, context={"request": request}
+            ).data
+        return response
+
+    def perform_destroy(self, instance):
+        # 删除文档类资源时清理上传文件（预置类 file 为空，delete 为 no-op）
+        if instance.file:
+            instance.file.delete(save=False)
+        instance.delete()
 
     @action(detail=True, methods=["post"], url_path="sign", permission_classes=[IsAuthenticated])
     def sign(self, request, pk=None):
@@ -821,6 +847,36 @@ def course_resource_preset_page(request, sig, exp, rest):
     return response
 
 
+def course_resource_file(request, token):
+    """文档类资源文件：验签（含发布状态）→ 流式输出上传文件。
+
+    与预置页共用 token 级签名（sign 动作签发，2h 时效，下架即失效）；
+    PDF 内联预览（浏览器原生），doc/docx 以附件下载。
+    """
+    resource = CourseResource.objects.filter(access_token=token).first()
+    if resource is None or not resource_gate.verify_resource(
+        resource, request.GET.get("sig", ""), request.GET.get("exp", "")
+    ):
+        return _resource_error_page(403, "资源链接无效或已过期", "请返回课程页面重新打开该资源。")
+    if resource.kind != CourseResource.Kind.DOCUMENT or not resource.file:
+        return _resource_error_page(404, "资源文件不存在", "该资源不是文档类型，请返回课程页面重试。")
+    from django.http import FileResponse
+
+    inline = resource.file.name.lower().endswith(".pdf")
+    response = FileResponse(
+        resource.file.open("rb"),
+        as_attachment=not inline,
+        filename=resource.file_name or resource.title,
+        content_type=resource_gate.guess_content_type_name(resource.file.name),
+    )
+    response["Cache-Control"] = "private, max-age=7200"
+    response["X-Content-Type-Options"] = "nosniff"
+    if inline:
+        # 允许同源 iframe 嵌入（PDF 查看器），clickjacking 中间件不覆盖已设置的头
+        response["X-Frame-Options"] = "SAMEORIGIN"
+    return response
+
+
 def course_resource_preset_asset(request, sig, exp, rest):
     """预置页预览资产（教师签名，2 小时有效）。"""
     if not resource_gate.verify_preset(sig, exp):
@@ -832,69 +888,3 @@ def course_resource_preset_asset(request, sig, exp, rest):
     response["Cache-Control"] = "private, max-age=7200"
     response["X-Content-Type-Options"] = "nosniff"
     return response
-
-
-MAX_COURSE_VIDEO_SIZE = 500 * 1024 * 1024  # 500MB
-
-
-class CourseVideoViewSet(BaseModelViewSet):
-    """数字人视频：教师上传（≤500MB）、发布；学生看自己课程已发布的。"""
-
-    serializer_class = CourseVideoSerializer
-    permission_classes = [IsTeacherOrReadOnly]
-    http_method_names = ["get", "post", "delete", "head", "options"]
-    filterset_fields = ["course", "catalog", "is_published"]
-
-    def get_queryset(self):
-        qs = CourseVideo.objects.select_related("course", "course__teacher", "catalog")
-        user = self.request.user
-        if user.is_authenticated and user.is_student:
-            qs = qs.filter(
-                is_published=True,
-                course__classes__students__student=user,
-                course__classes__students__learn_status="active",
-            )
-        elif user.is_authenticated and user.is_teacher:
-            qs = qs.filter(course__teacher=user)
-        elif not user.is_authenticated or not user.is_staff:
-            qs = qs.none()
-        return qs.distinct()
-
-    def create(self, request, *args, **kwargs):
-        file = request.FILES.get("file")
-        if not file:
-            return api_response(message="请上传视频文件", code=400, status=400)
-        if file.size > MAX_COURSE_VIDEO_SIZE:
-            return api_response(message="视频大小不能超过 500MB", code=400, status=400)
-        if file.size == 0:
-            return api_response(message="视频文件为空", code=400, status=400)
-        request_data = request.data.copy()
-        request_data["file"] = file
-        serializer = self.get_serializer(data=request_data)
-        serializer.is_valid(raise_exception=True)
-        video = serializer.save(
-            file_name=file.name,
-            file_size=file.size,  # 以落库时的真实 size 为准
-        )
-        return api_response(
-            CourseVideoSerializer(video, context={"request": request}).data,
-            message="视频已上传", status=201,
-        )
-
-    @action(detail=True, methods=["post"], url_path="publish", permission_classes=[IsTeacher])
-    def publish(self, request, pk=None):
-        video = self.get_object()
-        video.is_published = True
-        video.save(update_fields=["is_published", "updated_at"])
-        return api_response(
-            CourseVideoSerializer(video, context={"request": request}).data, message="视频已发布"
-        )
-
-    @action(detail=True, methods=["post"], url_path="unpublish", permission_classes=[IsTeacher])
-    def unpublish(self, request, pk=None):
-        video = self.get_object()
-        video.is_published = False
-        video.save(update_fields=["is_published", "updated_at"])
-        return api_response(
-            CourseVideoSerializer(video, context={"request": request}).data, message="视频已下架"
-        )

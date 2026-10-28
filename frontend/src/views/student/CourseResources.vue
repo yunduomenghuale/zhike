@@ -3,73 +3,53 @@
     <div class="page-header">
       <div>
         <div class="page-title">课程资源</div>
-        <div class="page-subtitle">思维导图、交互演示与数字人视频，点击卡片全屏查看</div>
+        <div class="page-subtitle">思维导图、交互演示与文档资料，点击卡片查看</div>
       </div>
     </div>
 
     <el-card shadow="never" class="mb12">
       <template #header><span>思维导图 / 交互演示</span></template>
-      <el-empty v-if="!resources.length" description="教师暂未发布资源" :image-size="80" />
-      <template v-else>
-        <div v-for="group in groupedResources" :key="group.catalog" class="chapter-group">
-          <div class="group-title">
-            <el-icon><Collection /></el-icon>
-            <span>{{ group.title }}</span>
-            <span class="group-count">{{ group.items.length }} 个</span>
+      <el-empty v-if="!presetResources.length" description="教师暂未发布资源" :image-size="80" />
+      <div v-else class="res-grid">
+        <div
+          v-for="r in presetResources"
+          :key="r.id"
+          class="res-card"
+          @click="openPreset(r)"
+        >
+          <div class="res-icon">{{ r.kind === 'mindmap' ? '🗺️' : '🎬' }}</div>
+          <div class="res-info">
+            <div class="res-title">{{ r.title }}</div>
+            <div class="res-meta">{{ r.kind_display }}</div>
           </div>
-          <div class="res-grid">
-            <div
-              v-for="r in group.items"
-              :key="r.id"
-              class="res-card"
-              @click="openResource(r)"
-            >
-              <div class="res-icon">{{ r.kind === 'mindmap' ? '🗺️' : '🎬' }}</div>
-              <div class="res-info">
-                <div class="res-title">{{ r.title }}</div>
-                <div class="res-meta">{{ r.kind_display }}</div>
-              </div>
-              <el-icon class="res-arrow"><ArrowRight /></el-icon>
-            </div>
-          </div>
+          <el-icon class="res-arrow"><ArrowRight /></el-icon>
         </div>
-      </template>
+      </div>
     </el-card>
 
     <el-card shadow="never">
-      <template #header><span>数字人视频</span></template>
-      <el-empty v-if="!videos.length" description="教师暂未发布视频" :image-size="80" />
-      <template v-else>
-        <div v-for="group in groupedVideos" :key="group.catalog" class="chapter-group">
-          <div class="group-title">
-            <el-icon><Collection /></el-icon>
-            <span>{{ group.title }}</span>
-            <span class="group-count">{{ group.items.length }} 个</span>
-          </div>
-          <div class="res-grid">
-            <div v-for="v in group.items" :key="v.id" class="res-card" @click="openVideo(v)">
-              <div class="res-icon">📹</div>
-              <div class="res-info">
-                <div class="res-title">{{ v.title }}</div>
-                <div class="res-meta">视频 · {{ fmtSize(v.file_size) }}</div>
-              </div>
-              <el-icon class="res-arrow"><ArrowRight /></el-icon>
+      <template #header><span>文档资料</span></template>
+      <el-empty v-if="!documentResources.length" description="教师暂未发布文档" :image-size="80" />
+      <div v-else class="res-grid">
+        <div
+          v-for="r in documentResources"
+          :key="r.id"
+          class="res-card"
+          @click="openDocument(r)"
+        >
+          <div class="res-icon">📄</div>
+          <div class="res-info">
+            <div class="res-title">{{ r.title }}</div>
+            <div class="res-meta">
+              文档 · {{ r.file_name || '—' }}
+              <template v-if="r.file_size"> · {{ fmtSize(r.file_size) }}</template>
+              <template v-if="isPdf(r)"> · 可在线预览</template>
             </div>
           </div>
+          <el-icon class="res-arrow"><ArrowRight /></el-icon>
         </div>
-      </template>
+      </div>
     </el-card>
-
-    <!-- 视频预览弹窗（保持原有查看方式） -->
-    <el-dialog v-model="videoVisible" :title="videoTitle" width="920" destroy-on-close>
-      <video
-        v-if="videoUrl"
-        :src="videoUrl"
-        controls
-        autoplay
-        style="width: 100%; max-height: 62vh"
-      />
-    </el-dialog>
   </div>
 </template>
 
@@ -77,8 +57,8 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowRight, Collection } from '@element-plus/icons-vue'
-import { listCourseResources, listCourseVideos, signCourseResource } from '@/api/course'
+import { ArrowRight } from '@element-plus/icons-vue'
+import { listCourseResources, signCourseResource } from '@/api/course'
 import { openTabDeferred } from '@/utils/open-tab'
 
 const route = useRoute()
@@ -86,12 +66,6 @@ const router = useRouter()
 const courseId = computed(() => Number(route.params.id) || null)
 
 const resources = ref([])
-const videos = ref([])
-
-// 视频弹窗播放状态
-const videoVisible = ref(false)
-const videoUrl = ref('')
-const videoTitle = ref('')
 
 function pick(list) {
   if (Array.isArray(list)) return list
@@ -100,36 +74,18 @@ function pick(list) {
 
 async function load() {
   const params = courseId.value ? { course: courseId.value } : undefined
-  const [r, v] = await Promise.all([listCourseResources(params), listCourseVideos(params)])
+  const r = await listCourseResources(params)
   resources.value = pick(r)
-  videos.value = pick(v)
 }
 
-// 按挂载章节分组：有章节的排前面按章节聚合，未挂章节的归入「通用资源」
-function groupByCatalog(list) {
-  const chapters = new Map()
-  const general = []
-  for (const item of list) {
-    if (item.catalog && item.catalog_title) {
-      if (!chapters.has(item.catalog)) chapters.set(item.catalog, [])
-      chapters.get(item.catalog).push(item)
-    } else {
-      general.push(item)
-    }
-  }
-  const groups = [...chapters.entries()].map(([catalog, items]) => ({
-    catalog,
-    title: items[0].catalog_title,
-    items,
-  }))
-  if (general.length) groups.push({ catalog: 0, title: '通用资源', items: general })
-  return groups
+const presetResources = computed(() => resources.value.filter((r) => r.kind !== 'document'))
+const documentResources = computed(() => resources.value.filter((r) => r.kind === 'document'))
+
+function isPdf(row) {
+  return (row.file_name || '').toLowerCase().endsWith('.pdf')
 }
 
-const groupedResources = computed(() => groupByCatalog(resources.value))
-const groupedVideos = computed(() => groupByCatalog(videos.value))
-
-// 进入近全屏查看器；思维导图带 #chapters-hidden 隐藏站内章节导航（只看挂载的这一章）
+// 进入近全屏查看器；思维导图带 #chapters-hidden 隐藏站内章节导航
 function viewerQuery(extra) {
   return {
     src: extra.src,
@@ -140,7 +96,7 @@ function viewerQuery(extra) {
   }
 }
 
-async function openResource(r) {
+async function openPreset(r) {
   // 先签发唯一签名 URL（未发布/非在读课程后端拒签），再进查看器；
   // 标签页在点击时同步开出，避免异步后的 window.open 被弹窗拦截
   const tab = openTabDeferred()
@@ -161,11 +117,27 @@ async function openResource(r) {
   tab.open(href)
 }
 
-function openVideo(v) {
-  // 视频保持弹窗播放（原有方式），仅思维导图/演示用全屏查看器
-  videoTitle.value = v.title
-  videoUrl.value = v.file_url
-  videoVisible.value = true
+async function openDocument(r) {
+  // 文档：签发 file 地址；PDF 进查看器内联预览，doc/docx 新窗口触发下载
+  const tab = openTabDeferred()
+  let signed
+  try {
+    signed = await signCourseResource(r.id)
+  } catch (e) {
+    tab.close()
+    ElMessage.error(e?.message || '文档打开失败，请稍后重试')
+    return
+  }
+  if (isPdf(r)) {
+    const { href } = router.resolve({
+      name: 'student-course-resource-viewer',
+      params: { id: courseId.value },
+      query: viewerQuery({ src: signed.url, title: r.title, type: 'pdf', kind: 'document' }),
+    })
+    tab.open(href)
+    return
+  }
+  tab.open(signed.url)
 }
 
 function fmtSize(bytes) {
@@ -188,22 +160,6 @@ onMounted(load)
 
 <style scoped>
 .mb12 { margin-bottom: 12px; }
-.chapter-group { margin-bottom: 18px; }
-.chapter-group:last-child { margin-bottom: 0; }
-.group-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 14px;
-  font-weight: 700;
-  color: #334155;
-  margin-bottom: 10px;
-}
-.group-count {
-  color: #94a3b8;
-  font-size: 12px;
-  font-weight: 500;
-}
 .res-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -226,7 +182,7 @@ onMounted(load)
 .res-icon { font-size: 28px; }
 .res-info { flex: 1; min-width: 0; }
 .res-title { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
-.res-meta { color: #94a3b8; font-size: 12px; }
+.res-meta { color: #94a3b8; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .res-arrow { color: #cbd5e1; }
 .res-card:hover .res-arrow { color: #4a90e2; }
 </style>

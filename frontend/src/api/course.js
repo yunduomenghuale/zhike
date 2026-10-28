@@ -61,9 +61,21 @@ export const listWatchProgress = (params) => request.get('/watch-progress/', { p
 export const reportVideoProgress = (videoId, data) =>
   request.post(`/videos/${videoId}/report-progress/`, data)
 
-// ===== 二期B：课程扩展资源（思维导图/交互演示） =====
+// ===== 课程教学资源（思维导图/交互演示/文档，直接归属课程，不挂章节） =====
 export const listCourseResources = (params) => request.get('/course-resources/', { params })
+// 预置类走 JSON；文档类走 multipart（file 上传，pdf/doc/docx ≤100MB）
 export const createCourseResource = (data) => request.post('/course-resources/', data)
+export const uploadCourseDocument = ({ course, title, file, onProgress }) => {
+  const form = new FormData()
+  form.append('course', course)
+  form.append('kind', 'document')
+  form.append('title', title)
+  form.append('file', file)
+  return request.post('/course-resources/', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    onUploadProgress: onProgress,
+  })
+}
 export const deleteCourseResource = (id) => request.delete(`/course-resources/${id}/`)
 export const publishCourseResource = (id) => request.post(`/course-resources/${id}/publish/`)
 export const unpublishCourseResource = (id) => request.post(`/course-resources/${id}/unpublish/`)
@@ -71,20 +83,3 @@ export const unpublishCourseResource = (id) => request.post(`/course-resources/$
 export const signCourseResource = (id) => request.post(`/course-resources/${id}/sign/`)
 // 教师添加资源前预览平台预置页（按路径签发）
 export const signPresetPage = (path) => request.post('/course-resources/preset-sign/', { path })
-
-// ===== 二期C：数字人视频 =====
-export const listCourseVideos = (params) => request.get('/course-videos/', { params })
-export const uploadCourseVideo = ({ course, catalog, title, file, onProgress }) => {
-  const form = new FormData()
-  form.append('course', course)
-  form.append('catalog', catalog)
-  form.append('title', title)
-  form.append('file', file)
-  return request.post('/course-videos/', form, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-    onUploadProgress: onProgress,
-  })
-}
-export const deleteCourseVideo = (id) => request.delete(`/course-videos/${id}/`)
-export const publishCourseVideo = (id) => request.post(`/course-videos/${id}/publish/`)
-export const unpublishCourseVideo = (id) => request.post(`/course-videos/${id}/unpublish/`)

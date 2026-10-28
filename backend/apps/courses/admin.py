@@ -4,7 +4,6 @@ from .models import (
     Catalog,
     Course,
     CourseResource,
-    CourseVideo,
     PPTResource,
     TeachingVideo,
     VideoWatchProgress,
@@ -45,13 +44,6 @@ class VideoWatchProgressAdmin(admin.ModelAdmin):
 
 @admin.register(CourseResource)
 class CourseResourceAdmin(admin.ModelAdmin):
-    list_display = ("title", "course", "catalog", "kind", "path", "is_published", "order")
+    list_display = ("title", "course", "kind", "path", "file_name", "is_published", "order")
     list_filter = ("kind", "is_published", "course")
-    search_fields = ("title", "path")
-
-
-@admin.register(CourseVideo)
-class CourseVideoAdmin(admin.ModelAdmin):
-    list_display = ("title", "course", "catalog", "file_size", "is_published", "order", "created_at")
-    list_filter = ("is_published", "course")
-    search_fields = ("title",)
+    search_fields = ("title", "path", "file_name")

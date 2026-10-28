@@ -3,11 +3,11 @@
     <div class="page-header">
       <div>
         <div class="page-title">教学资源</div>
-        <div class="page-subtitle">挂载思维导图/交互演示与数字人视频，发布后学生课程内可见</div>
+        <div class="page-subtitle">思维导图/交互演示为平台预置页，文档支持上传 pdf / doc / docx（≤100MB），发布后学生课程内可见</div>
       </div>
     </div>
 
-    <!-- 思维导图 / 交互演示 -->
+    <!-- 思维导图 / 交互演示（平台预置页引用） -->
     <el-card shadow="never" class="mb12 res-panel">
       <template #header><span>思维导图 / 交互演示</span></template>
       <el-form :model="resForm" label-width="90px" style="max-width: 720px" class="mb12">
@@ -39,31 +39,22 @@
           <span v-if="resForm.path" class="form-tip">预置页：{{ resForm.path }}</span>
           <span v-else class="form-tip">页面为平台预置，选择后可先预览再添加</span>
         </el-form-item>
-        <div class="form-row">
-          <el-form-item label="资源标题" class="form-col">
-            <el-input v-model="resForm.title" placeholder="留空默认取页面文件名" />
-          </el-form-item>
-          <el-form-item label="挂载章节" class="form-col">
-            <el-select v-model="resForm.catalog" clearable placeholder="可选，便于学生按章节查找">
-              <el-option v-for="c in catalogs" :key="c.id" :value="c.id" :label="c.title" />
-            </el-select>
-          </el-form-item>
-        </div>
+        <el-form-item label="资源标题">
+          <el-input v-model="resForm.title" placeholder="留空默认取页面文件名" style="max-width: 420px" />
+        </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="creating" @click="createResource">添加资源</el-button>
         </el-form-item>
       </el-form>
 
-      <el-table :data="resources" v-loading="loadingRes" size="small" class="compact-table">
-        <el-table-column prop="title" label="标题" width="186" show-overflow-tooltip />
-        <el-table-column label="类型" width="84">
+      <el-table :data="presetResources" v-loading="loadingRes" size="small" class="compact-table">
+        <el-table-column prop="title" label="标题" min-width="170" show-overflow-tooltip />
+        <el-table-column label="类型" width="90">
           <template #default="{ row }">
             <el-tag :type="row.kind === 'mindmap' ? 'primary' : 'success'" size="small">{{ row.kind_display }}</el-tag>
           </template>
         </el-table-column>
-        <!-- 章节为唯一弹性列：容器有余量时由它吸收，标题/地址保持紧凑不再被拉宽 -->
-        <el-table-column prop="catalog_title" label="章节" min-width="96" show-overflow-tooltip />
-        <el-table-column label="页面地址" width="142">
+        <el-table-column label="页面地址" width="150">
           <template #default="{ row }">
             <!-- 每条资源的访问链接唯一（按令牌）；点击经签名后新窗口打开 -->
             <el-link
@@ -80,7 +71,7 @@
             </el-link>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="76">
+        <el-table-column label="状态" width="80">
           <template #default="{ row }">
             <el-tag :type="row.is_published ? 'success' : 'info'" size="small">{{ row.is_published ? '已发布' : '未发布' }}</el-tag>
           </template>
@@ -98,67 +89,54 @@
           </template>
         </el-table-column>
       </el-table>
+      <div v-if="!loadingRes && !presetResources.length" class="table-empty">暂无预置资源，添加后显示在这里</div>
     </el-card>
 
-    <!-- 数字人视频 -->
+    <!-- 文档资源（教师上传 pdf/doc/docx） -->
     <el-card shadow="never" class="res-panel">
-      <template #header><span>数字人视频</span></template>
+      <template #header><span>文档资源</span></template>
       <el-form label-width="90px" style="max-width: 720px" class="mb12">
-        <el-form-item label="视频文件" required>
-          <input ref="videoFileEl" type="file" accept="video/mp4,video/webm" @change="onVideoPicked" />
-          <span class="form-tip">支持 MP4 / WebM，单个不超过 500MB</span>
+        <el-form-item label="文档文件" required>
+          <input ref="docFileEl" type="file" accept=".pdf,.doc,.docx" @change="onDocPicked" />
+          <span class="form-tip">支持 PDF / DOC / DOCX，单个不超过 100MB；PDF 学生端可直接预览，DOC/DOCX 下载查看</span>
         </el-form-item>
-        <div class="form-row">
-          <el-form-item label="视频标题" required class="form-col">
-            <el-input v-model="videoForm.title" placeholder="例如：第4章 IP地址数字人精讲" />
-          </el-form-item>
-          <el-form-item label="挂载章节" class="form-col">
-            <el-select v-model="videoForm.catalog" clearable placeholder="可选">
-              <el-option v-for="c in catalogs" :key="c.id" :value="c.id" :label="c.title" />
-            </el-select>
-          </el-form-item>
-        </div>
+        <el-form-item label="资源标题" required>
+          <el-input v-model="docForm.title" placeholder="例如：计算机网络复习大纲" style="max-width: 420px" />
+        </el-form-item>
         <el-form-item>
-          <el-button type="primary" :loading="uploading" :disabled="!videoForm.file" @click="uploadVideo">
-            {{ uploading ? `上传中 ${uploadPercent}%` : '上传视频' }}
+          <el-button type="primary" :loading="uploading" :disabled="!docForm.file" @click="uploadDocument">
+            {{ uploading ? `上传中 ${uploadPercent}%` : '上传文档' }}
           </el-button>
         </el-form-item>
       </el-form>
 
-      <el-table v-if="videos.length" :data="videos" v-loading="loadingVideo" size="small" class="compact-table">
-        <el-table-column prop="title" label="标题" min-width="150" show-overflow-tooltip />
-        <el-table-column prop="catalog_title" label="章节" width="120" show-overflow-tooltip />
-        <el-table-column label="大小" width="100">
+      <el-table v-if="documentResources.length" :data="documentResources" v-loading="loadingRes" size="small" class="compact-table">
+        <el-table-column prop="title" label="标题" min-width="160" show-overflow-tooltip />
+        <el-table-column label="文件名" min-width="150" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.file_name || '—' }}</template>
+        </el-table-column>
+        <el-table-column label="大小" width="96">
           <template #default="{ row }">{{ fmtSize(row.file_size) }}</template>
         </el-table-column>
-        <el-table-column label="状态" width="76">
+        <el-table-column label="状态" width="80">
           <template #default="{ row }">
             <el-tag :type="row.is_published ? 'success' : 'info'" size="small">{{ row.is_published ? '已发布' : '未发布' }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="220" fixed="right" header-align="center">
+        <el-table-column label="操作" width="330" fixed="right" header-align="center">
           <template #default="{ row }">
             <div class="op-cell">
-              <el-button @click="previewVideo(row)">播放</el-button>
-              <el-button v-if="!row.is_published" type="success" @click="publishVideo(row)">发布</el-button>
-              <el-button v-else type="warning" @click="unpublishVideo(row)">下架</el-button>
-              <el-button @click="removeVideo(row)">删除</el-button>
+              <el-button @click="previewResource(row)">{{ isPdf(row) ? '预览' : '下载' }}</el-button>
+              <el-button v-if="!row.is_published" type="success" @click="publishRes(row)">发布</el-button>
+              <el-button v-else type="warning" @click="unpublishRes(row)">下架</el-button>
+              <el-button @click="copyResourceLink(row)">复制链接</el-button>
+              <el-button @click="removeRes(row)">删除</el-button>
             </div>
           </template>
         </el-table-column>
       </el-table>
-      <div v-else-if="!loadingVideo" class="table-empty">暂无视频，上传后显示在这里</div>
+      <div v-else-if="!loadingRes" class="table-empty">暂无文档，上传后显示在这里</div>
     </el-card>
-
-    <!-- 视频预览弹窗（保持原有查看方式） -->
-    <el-dialog v-model="videoVisible" :title="videoTitle" width="900" destroy-on-close>
-      <video
-        v-if="videoUrl"
-        :src="videoUrl"
-        controls
-        style="width: 100%; max-height: 60vh"
-      />
-    </el-dialog>
   </div>
 </template>
 
@@ -170,12 +148,8 @@ import { Link } from '@element-plus/icons-vue'
 import {
   listCourseResources, createCourseResource, deleteCourseResource,
   publishCourseResource, unpublishCourseResource,
-  signCourseResource, signPresetPage,
-  listCourseVideos, uploadCourseVideo, deleteCourseVideo,
-  publishCourseVideo, unpublishCourseVideo,
+  signCourseResource, signPresetPage, uploadCourseDocument,
 } from '@/api/course'
-import { listCatalogs } from '@/api/course'
-import request from '@/api/request'
 import { openTabDeferred } from '@/utils/open-tab'
 
 const route = useRoute()
@@ -207,41 +181,34 @@ const PRESET_PAGES = [
   { value: 'demos/transmission-media-comparison.html', label: '演示：传输介质对比', kind: 'demo' },
 ]
 
-const resForm = ref({ kind: 'mindmap', path: '', title: '', catalog: null })
+const resForm = ref({ kind: 'mindmap', path: '', title: '' })
 const availablePaths = computed(() => PRESET_PAGES.filter((p) => p.kind === resForm.value.kind))
 
 const resources = ref([])
-const videos = ref([])
-const catalogs = ref([])
 const loadingRes = ref(false)
-const loadingVideo = ref(false)
 const creating = ref(false)
 const presetPreviewing = ref(false)
 
-const videoForm = ref({ file: null, title: '', catalog: null })
-const videoFileEl = ref(null)
+const docForm = ref({ file: null, title: '' })
+const docFileEl = ref(null)
 const uploading = ref(false)
 const uploadPercent = ref(0)
 
-// 视频弹窗播放状态
-const videoVisible = ref(false)
-const videoUrl = ref('')
-const videoTitle = ref('')
+const presetResources = computed(() => resources.value.filter((r) => r.kind !== 'document'))
+const documentResources = computed(() => resources.value.filter((r) => r.kind === 'document'))
 
 function presetTitle(path) {
   return PRESET_PAGES.find((p) => p.value === path)?.label || path
+}
+
+function isPdf(row) {
+  return (row.file_name || '').toLowerCase().endsWith('.pdf')
 }
 
 // 页面地址列展示短令牌（完整 URL 在 title 提示与复制链接里）
 function shortToken(url) {
   const token = (url || '').replace('/api/course-resources/page/', '').replace('/', '')
   return token.length > 8 ? `page/${token.slice(0, 8)}…` : `page/${token}`
-}
-
-async function loadCatalogs() {
-  if (!courseId.value) return
-  const res = await listCatalogs({ course: courseId.value, tree: '1' })
-  catalogs.value = res.results ?? res
 }
 
 async function loadResources() {
@@ -255,17 +222,6 @@ async function loadResources() {
   }
 }
 
-async function loadVideos() {
-  loadingVideo.value = true
-  try {
-    const res = await listCourseVideos(courseId.value ? { course: courseId.value } : undefined)
-    const data = res.results ?? res
-    videos.value = Array.isArray(data) ? data : data?.results ?? []
-  } finally {
-    loadingVideo.value = false
-  }
-}
-
 async function createResource() {
   if (!resForm.value.path) {
     ElMessage.warning('请选择平台页面')
@@ -275,7 +231,6 @@ async function createResource() {
   try {
     await createCourseResource({
       course: courseId.value,
-      catalog: resForm.value.catalog || null,
       kind: resForm.value.kind,
       title: resForm.value.title || presetTitle(resForm.value.path),
       path: resForm.value.path,
@@ -291,12 +246,18 @@ async function createResource() {
 }
 
 async function previewResource(row) {
-  // 先签发唯一签名 URL 再进查看器（思维导图隐藏站内章节导航，只看挂载的这一章）
+  // 先签发唯一签名 URL 再打开；文档类签发 file 地址（PDF 新窗口内联预览，doc/docx 触发下载）
+  const tab = openTabDeferred()
   let signed
   try {
     signed = await signCourseResource(row.id)
   } catch (e) {
+    tab.close()
     ElMessage.error(e?.message || '资源打开失败，请稍后重试')
+    return
+  }
+  if (row.kind === 'document') {
+    tab.open(signed.url)
     return
   }
   const hash = row.kind === 'mindmap' ? '#chapters-hidden' : ''
@@ -391,72 +352,65 @@ async function unpublishRes(row) {
 }
 
 async function removeRes(row) {
-  await ElMessageBox.confirm(`确认删除资源「${row.title}」？`, '提示', { type: 'warning' })
+  await ElMessageBox.confirm(
+    `确认删除资源「${row.title}」？${row.kind === 'document' ? '上传的文件将一并删除，' : ''}不可恢复。`,
+    '提示', { type: 'warning' },
+  )
   await deleteCourseResource(row.id)
   await loadResources()
 }
 
-function onVideoPicked(e) {
+// ---- 文档上传 ----
+const DOC_EXTS = ['.pdf', '.doc', '.docx']
+const DOC_MAX_SIZE = 100 * 1024 * 1024
+
+function onDocPicked(e) {
   const file = e.target.files?.[0]
   if (!file) return
-  if (file.size > 500 * 1024 * 1024) {
-    ElMessage.error('视频不能超过 500MB')
-    videoFileEl.value.value = ''
+  const ext = '.' + (file.name.split('.').pop() || '').toLowerCase()
+  if (!DOC_EXTS.includes(ext)) {
+    ElMessage.error('仅支持 pdf / doc / docx 格式')
+    docFileEl.value.value = ''
     return
   }
-  videoForm.value.file = file
-  if (!videoForm.value.title) videoForm.value.title = file.name.replace(/\.[^.]+$/, '')
+  if (file.size > DOC_MAX_SIZE) {
+    ElMessage.error('文档不能超过 100MB')
+    docFileEl.value.value = ''
+    return
+  }
+  if (file.size === 0) {
+    ElMessage.error('文档文件为空')
+    docFileEl.value.value = ''
+    return
+  }
+  docForm.value.file = file
+  if (!docForm.value.title) docForm.value.title = file.name.replace(/\.[^.]+$/, '')
 }
 
-async function uploadVideo() {
-  if (!videoForm.value.file || !videoForm.value.title) {
+async function uploadDocument() {
+  if (!docForm.value.file || !docForm.value.title.trim()) {
     ElMessage.warning('请选择文件并填写标题')
     return
   }
   uploading.value = true
   uploadPercent.value = 0
   try {
-    await uploadCourseVideo({
+    await uploadCourseDocument({
       course: courseId.value,
-      catalog: videoForm.value.catalog || null,
-      title: videoForm.value.title,
-      file: videoForm.value.file,
+      title: docForm.value.title.trim(),
+      file: docForm.value.file,
       onProgress: (e) => {
         if (e.total) uploadPercent.value = Math.round((e.loaded / e.total) * 100)
       },
     })
-    ElMessage.success('视频已上传')
-    videoForm.value = { file: null, title: '', catalog: null }
-    videoFileEl.value.value = ''
-    await loadVideos()
+    ElMessage.success('文档已上传')
+    docForm.value = { file: null, title: '' }
+    docFileEl.value.value = ''
+    await loadResources()
   } catch { /* 响应拦截器已提示具体错误 */ }
   finally {
     uploading.value = false
   }
-}
-
-function previewVideo(row) {
-  videoTitle.value = row.title
-  videoUrl.value = row.file_url
-  videoVisible.value = true
-}
-
-async function publishVideo(row) {
-  await publishCourseVideo(row.id)
-  ElMessage.success('已发布')
-  await loadVideos()
-}
-
-async function unpublishVideo(row) {
-  await unpublishCourseVideo(row.id)
-  ElMessage.success('已下架')
-  await loadVideos()
-}
-
-async function removeVideo(row) {
-  await ElMessageBox.confirm(`确认删除视频「${row.title}」？删除后不可恢复。`, '提示', { type: 'warning' })
-  await deleteCourseVideo(row.id)
-  await loadVideos()
 }
 
 function fmtSize(bytes) {
@@ -471,10 +425,7 @@ function fmtSize(bytes) {
   return `${n.toFixed(1)} ${units[i]}`
 }
 
-onMounted(async () => {
-  await loadCatalogs()
-  await Promise.all([loadResources(), loadVideos()])
-})
+onMounted(loadResources)
 </script>
 
 <style scoped>
@@ -491,10 +442,6 @@ onMounted(async () => {
   white-space: nowrap;
   vertical-align: bottom;
 }
-
-/* 表单两列并排：标题/章节同行，压缩表单高度 */
-.form-row { display: flex; gap: 18px; }
-.form-row .form-col { flex: 1; min-width: 0; }
 
 /* 表格紧凑化：小尺寸 + 收紧单元格内边距，消除行内无效空白 */
 .compact-table :deep(.el-table__cell) { padding: 7px 0; }

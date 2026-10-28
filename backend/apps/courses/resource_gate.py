@@ -27,6 +27,7 @@ from django.utils import timezone
 SIGN_TTL = timedelta(hours=2)
 
 PAGE_URL = "/api/course-resources/page/{token}/"
+FILE_URL = "/api/course-resources/file/{token}/"
 ASSET_URL = "/api/course-resources/asset/{token}/{sig}/{exp}/{parent}/"
 PRESET_PAGE_URL = "/api/course-resources/preset/{sig}/{exp}/{path}"
 PRESET_ASSET_URL = "/api/course-resources/preset-asset/{sig}/{exp}/"
@@ -41,6 +42,8 @@ _MIME_MAP = {
     ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
     ".ico": "image/x-icon", ".woff": "font/woff", ".woff2": "font/woff2",
     ".ttf": "font/ttf", ".map": "application/json", ".txt": "text/plain",
+    ".pdf": "application/pdf", ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
 _CHARSET_TYPES = {"text/html", "text/javascript", "text/css", "application/json", "image/svg+xml", "text/plain"}
 
@@ -60,11 +63,16 @@ def _expires_ts() -> int:
 # ---------------------------------------------------------------------------
 
 def sign_resource(resource) -> dict:
-    """为资源签发带时效的入口页 URL（教师预览/学生学习统一入口）。"""
+    """为资源签发带时效的访问 URL（教师预览/学生学习统一入口）。
+
+    文档类签文件流地址（PDF 内联/doc 下载由输出端点按扩展名决定），
+    预置类签入口页地址；verify_resource 同口径校验（签名含发布状态）。
+    """
     expires_ts = _expires_ts()
     sig = _hmac(f"{resource.access_token}.{expires_ts}.{1 if resource.is_published else 0}")
+    template = FILE_URL if resource.kind == "document" else PAGE_URL
     return {
-        "url": f"{PAGE_URL.format(token=resource.access_token)}?sig={sig}&exp={expires_ts}",
+        "url": f"{template.format(token=resource.access_token)}?sig={sig}&exp={expires_ts}",
         "expires_at": timezone.now() + SIGN_TTL,
     }
 
@@ -157,6 +165,17 @@ def guess_content_type(path: Path) -> str:
         import mimetypes
 
         ctype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    if ctype in _CHARSET_TYPES:
+        ctype += "; charset=utf-8"
+    return ctype
+
+
+def guess_content_type_name(filename: str) -> str:
+    """按文件名猜 Content-Type（文档文件端点用，上传文件不在 RESOURCES_ROOT）。"""
+    import mimetypes
+
+    suffix = Path(filename).suffix.lower()
+    ctype = _MIME_MAP.get(suffix) or mimetypes.guess_type(filename)[0] or "application/octet-stream"
     if ctype in _CHARSET_TYPES:
         ctype += "; charset=utf-8"
     return ctype

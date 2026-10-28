@@ -186,25 +186,41 @@ class VideoWatchProgress(BaseModel):
         return f"{self.student} - {self.video} 进度"
 
 
-class CourseResource(BaseModel):
-    """课程扩展资源（二期B）：思维导图 / 交互演示静态页。
+def _course_video_file_path(instance, filename):
+    """【已废弃】数字人视频文件名 uuid 化——CourseVideo 模块已删除（2026-10-28），
+    本函数仅为历史迁移 0008_coursevideo 的可导入性保留，不得在新代码中使用。"""
+    return f"course_videos/{uuid4().hex}{Path(filename).suffix.lower()}"
 
-    资源本体是平台预置的静态 HTML（nginx /resources/ 子路径，只读），
-    教师侧仅做"引用 + 挂章节 + 排序 + 发布"，与 Lab/LabTemplate 的三层思路一致。
+
+def _course_resource_file_path(instance, filename):
+    """文档资源文件名 uuid 化（原文件名仅存展示字段），防路径猜测。"""
+    return f"course_resources/{uuid4().hex}{Path(filename).suffix.lower()}"
+
+
+class CourseResource(BaseModel):
+    """课程教学资源：思维导图 / 交互演示（平台预置静态页）/ 文档（教师上传）。
+
+    资源直接归属课程，不再挂载章节（2026-10-28 调整：章节聚焦型学习链路
+    与课程级资源展示冲突，且部分资源本就跨章节）。
+    思维导图/交互演示本体是平台预置静态 HTML（nginx /resources/ 子路径，只读），
+    教师侧仅做"引用 + 排序 + 发布"；文档类为教师上传的 pdf/doc/docx（≤100MB）。
+    每行独立 access_token，对外链接唯一，经签名门控访问（2h 时效，下架即失效）。
     """
 
     class Kind(models.TextChoices):
         MINDMAP = "mindmap", "思维导图"
         DEMO = "demo", "交互演示"
+        DOCUMENT = "document", "文档"
 
     course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="resources", verbose_name="课程")
-    catalog = models.ForeignKey(
-        Catalog, null=True, blank=True, on_delete=models.SET_NULL, related_name="resources", verbose_name="章节"
-    )
     kind = models.CharField("资源类型", max_length=16, choices=Kind.choices)
     title = models.CharField("资源标题", max_length=200)
-    # 相对 /resources/ 的路径，如 mindmap/chapter1.html、demos/tcp-demo.html
-    path = models.CharField("资源路径", max_length=255)
+    # 预置类：相对 /resources/ 的路径，如 mindmap/chapter1.html、demos/tcp-demo.html；文档类为空
+    path = models.CharField("资源路径", max_length=255, blank=True, default="")
+    # 文档类：教师上传文件（pdf/doc/docx）；预置类为空
+    file = models.FileField("文档文件", upload_to=_course_resource_file_path, null=True, blank=True, max_length=255)
+    file_name = models.CharField("原始文件名", max_length=255, blank=True)
+    file_size = models.BigIntegerField("文件大小(字节)", default=0)
     # 每条资源独立的访问令牌：对外链接唯一（/api/course-resources/page/{token}/），
     # 配合签名与发布状态门控，未发布/非本人课程无法拿到有效签名 URL
     access_token = models.UUIDField("访问令牌", default=uuid4, unique=True, editable=False)
@@ -217,7 +233,12 @@ class CourseResource(BaseModel):
         verbose_name_plural = verbose_name
         ordering = ["course_id", "order", "id"]
         constraints = [
-            models.UniqueConstraint(fields=["course", "path"], name="unique_course_resource_path"),
+            # 仅预置类按 path 判重（文档类 path 恒为空，不参与）
+            models.UniqueConstraint(
+                fields=["course", "path"],
+                condition=~models.Q(path=""),
+                name="unique_course_resource_path",
+            ),
         ]
 
     def __str__(self):
@@ -227,36 +248,3 @@ class CourseResource(BaseModel):
     def url(self) -> str:
         # 规范地址（唯一，按资源令牌）；实际访问需经 /sign/ 签发带时效的签名 URL
         return f"/api/course-resources/page/{self.access_token}/"
-
-
-def _course_video_file_path(instance, filename):
-    """数字人视频文件名 uuid 化（原文件名仅存展示字段）。"""
-    return f"course_videos/{uuid4().hex}{Path(filename).suffix.lower()}"
-
-
-class CourseVideo(BaseModel):
-    """数字人视频（二期C）：教师上传、挂课程章节，发布后学生观看。
-
-    视频文件走 FileField（≤500MB 校验在序列化器），nginx 需同步调大
-    client_max_body_size。播放走 /media/ 静态服务。
-    """
-
-    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="course_videos", verbose_name="课程")
-    catalog = models.ForeignKey(
-        Catalog, null=True, blank=True, on_delete=models.SET_NULL, related_name="course_videos", verbose_name="章节"
-    )
-    title = models.CharField("视频标题", max_length=200)
-    file = models.FileField("视频文件", upload_to=_course_video_file_path)
-    file_name = models.CharField("原始文件名", max_length=255, blank=True)
-    file_size = models.BigIntegerField("文件大小(字节)", default=0)
-    duration = models.FloatField("时长(秒)", null=True, blank=True)
-    is_published = models.BooleanField("是否发布", default=False)
-    order = models.PositiveIntegerField("排序号", default=0)
-
-    class Meta:
-        verbose_name = "数字人视频"
-        verbose_name_plural = verbose_name
-        ordering = ["course_id", "order", "id"]
-
-    def __str__(self):
-        return f"{self.course} - {self.title}"

@@ -24,6 +24,12 @@
         class="viewer-frame"
         allow="fullscreen"
       />
+      <iframe
+        v-else-if="src && type === 'pdf'"
+        :src="src"
+        class="viewer-frame"
+        allow="fullscreen"
+      />
       <video
         v-else-if="src && type === 'video'"
         :src="src"
@@ -46,7 +52,7 @@ const route = useRoute()
 const router = useRouter()
 
 const title = ref(route.query.title || '资源查看')
-const type = ref(route.query.type === 'video' ? 'video' : 'html')
+const type = ref(['video', 'pdf'].includes(route.query.type) ? route.query.type : 'html')
 const kind = ref(route.query.kind || '')
 const backName = ref(route.query.back || 'student-course-resources')
 const backId = ref(route.params.id || null)
@@ -58,7 +64,7 @@ const src = computed(() => {
 })
 
 const kindLabel = computed(() =>
-  kind.value === 'mindmap' ? '思维导图' : kind.value === 'demo' ? '交互演示' : kind.value === 'video' ? '视频' : '',
+  kind.value === 'mindmap' ? '思维导图' : kind.value === 'demo' ? '交互演示' : kind.value === 'video' ? '视频' : kind.value === 'document' ? '文档' : '',
 )
 
 function goBack() {

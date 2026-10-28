@@ -6,7 +6,6 @@ from .models import (
     Catalog,
     Course,
     CourseResource,
-    CourseVideo,
     PPTResource,
     TeachingVideo,
     VideoWatchProgress,
@@ -142,76 +141,76 @@ class VideoWatchProgressSerializer(serializers.ModelSerializer):
 class CourseResourceSerializer(serializers.ModelSerializer):
     kind_display = serializers.CharField(source="get_kind_display", read_only=True)
     url = serializers.CharField(read_only=True)
-    catalog_title = serializers.CharField(source="catalog.title", read_only=True, default="")
+    # 文档类上传后展示用（文件名/大小服务端落库，前端不直传）
+    file_url = serializers.FileField(source="file", read_only=True)
+
+    # 文档类支持的格式白名单（2026-10-28 定稿：仅 pdf/doc/docx，txt/md/epub 暂不开放）
+    DOCUMENT_EXTS = {".pdf", ".doc", ".docx"}
+    MAX_DOCUMENT_SIZE = 100 * 1024 * 1024  # 100MB
 
     class Meta:
         model = CourseResource
         fields = [
-            "id", "course", "catalog", "catalog_title", "kind", "kind_display",
-            "title", "path", "url", "intro", "is_published", "order",
+            "id", "course", "kind", "kind_display", "title", "path",
+            "file", "file_url", "file_name", "file_size",
+            "url", "intro", "is_published", "order",
         ]
-        # 显式声明 validators 即关闭自动生成的 unique_together 校验
-        # （其「字段 course, path 必须能构成唯一集合」报错不友好），
+        # 显式声明 validators 即关闭自动生成的唯一校验（报错不友好），
         # 改由下方 validate() 提前拦截并给出可读提示；DB 层唯一约束仍作兜底。
         validators = []
 
     def validate_path(self, value):
-        # 只允许平台预置静态页的相对路径，防目录穿越与任意外链
+        # 预置类：只允许平台预置静态页的相对路径，防目录穿越与任意外链；
+        # 文档类 path 为空（校验在 validate() 按 kind 分流）
+        value = (value or "").strip().strip("/")
+        if not value:
+            return value
         import re
 
-        value = (value or "").strip().strip("/")
         if not re.fullmatch(r"(mindmap|demos)/[A-Za-z0-9_\-]+\.html", value):
             raise serializers.ValidationError("资源路径须为 mindmap/*.html 或 demos/*.html 平台预置页")
         return value
 
     def validate(self, attrs):
         course = attrs.get("course", getattr(self.instance, "course", None))
-        catalog = attrs.get("catalog", getattr(self.instance, "catalog", None))
-        if catalog and course and catalog.course_id != course.id:
-            raise serializers.ValidationError({"catalog": "所选章节不属于当前课程"})
-        # 同一课程下同一预置页只能挂一次：提前拦截并给友好提示，
-        # 否则模型 unique_together 会抛「字段 course, path 必须能构成唯一集合」
-        path = attrs.get("path", getattr(self.instance, "path", None))
-        if course and path:
-            duplicated = CourseResource.objects.filter(course=course, path=path)
-            if self.instance:
-                duplicated = duplicated.exclude(pk=self.instance.pk)
-            existing = duplicated.first()
-            if existing:
-                name = existing.title or existing.path
-                raise serializers.ValidationError(
-                    f"该课程下已添加过「{name}」，不能重复添加"
-                )
+        kind = attrs.get("kind", getattr(self.instance, "kind", None))
         request = self.context.get("request")
         user = getattr(request, "user", None)
         if user and user.is_authenticated and user.is_teacher:
             if not course or course.teacher_id != user.id:
                 raise serializers.ValidationError("只能维护自己课程的资源")
-        return attrs
 
+        if kind == CourseResource.Kind.DOCUMENT:
+            # 文档类：必须有上传文件（multipart），path 不允许
+            attrs["path"] = ""
+            upload = (request and request.FILES.get("file")) or attrs.get("file")
+            if self.instance is None and not upload:
+                raise serializers.ValidationError({"file": "请上传文档文件（pdf / doc / docx，不超过 100MB）"})
+            if upload:
+                import os
 
-class CourseVideoSerializer(serializers.ModelSerializer):
-    catalog_title = serializers.CharField(source="catalog.title", read_only=True, default="")
-    file_url = serializers.FileField(source="file", read_only=True)
-    uploaded_by_name = serializers.CharField(source="course.teacher.real_name", read_only=True, default="")
-
-    class Meta:
-        model = CourseVideo
-        fields = [
-            "id", "course", "catalog", "catalog_title", "title",
-            "file", "file_url", "file_name", "file_size", "duration",
-            "is_published", "order", "uploaded_by_name", "created_at",
-        ]
-        read_only_fields = ["file_name", "file_size"]
-
-    def validate(self, attrs):
-        course = attrs.get("course", getattr(self.instance, "course", None))
-        catalog = attrs.get("catalog", getattr(self.instance, "catalog", None))
-        if catalog and course and catalog.course_id != course.id:
-            raise serializers.ValidationError({"catalog": "所选章节不属于当前课程"})
-        request = self.context.get("request")
-        user = getattr(request, "user", None)
-        if user and user.is_authenticated and user.is_teacher:
-            if not course or course.teacher_id != user.id:
-                raise serializers.ValidationError("只能维护自己课程的视频")
+                ext = os.path.splitext(upload.name)[1].lower()
+                if ext not in self.DOCUMENT_EXTS:
+                    raise serializers.ValidationError({"file": f"仅支持 pdf / doc / docx 格式，当前为 {ext or '未知'}"})
+                if upload.size > self.MAX_DOCUMENT_SIZE:
+                    raise serializers.ValidationError({"file": "文档不能超过 100MB"})
+                if upload.size == 0:
+                    raise serializers.ValidationError({"file": "文档文件为空"})
+        else:
+            # 预置类：必须选平台页面，不允许带文件
+            attrs["file"] = None
+            path = attrs.get("path") or getattr(self.instance, "path", "")
+            if not path:
+                raise serializers.ValidationError({"path": "请选择平台预置页面"})
+            # 同一课程下同一预置页只能挂一次：提前拦截并给友好提示
+            if course and path:
+                duplicated = CourseResource.objects.filter(course=course, path=path)
+                if self.instance:
+                    duplicated = duplicated.exclude(pk=self.instance.pk)
+                existing = duplicated.first()
+                if existing:
+                    name = existing.title or existing.path
+                    raise serializers.ValidationError(
+                        f"该课程下已添加过「{name}」，不能重复添加"
+                    )
         return attrs

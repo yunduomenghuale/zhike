@@ -4,12 +4,12 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     CatalogViewSet,
     CourseResourceViewSet,
-    CourseVideoViewSet,
     CourseViewSet,
     PPTResourceViewSet,
     TeachingVideoViewSet,
     WatchProgressViewSet,
     course_resource_asset,
+    course_resource_file,
     course_resource_page,
     course_resource_preset_asset,
     course_resource_preset_page,
@@ -22,14 +22,18 @@ router.register("ppts", PPTResourceViewSet, basename="ppt")
 router.register("videos", TeachingVideoViewSet, basename="video")
 router.register("watch-progress", WatchProgressViewSet, basename="watch-progress")
 router.register("course-resources", CourseResourceViewSet, basename="course-resource")
-router.register("course-videos", CourseVideoViewSet, basename="course-video")
 
-# 资源门控端点（签名 URL 直出静态页，须先于 router 的 detail 路由匹配）
+# 资源门控端点（签名 URL 直出静态页/文档文件，须先于 router 的 detail 路由匹配）
 urlpatterns = [
     path(
         "course-resources/page/<uuid:token>/",
         course_resource_page,
         name="course-resource-page",
+    ),
+    path(
+        "course-resources/file/<uuid:token>/",
+        course_resource_file,
+        name="course-resource-file",
     ),
     path(
         "course-resources/asset/<uuid:token>/<str:sig>/<int:exp>/<path:rest>",

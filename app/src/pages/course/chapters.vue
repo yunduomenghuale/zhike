@@ -29,7 +29,7 @@
         <view class="resource-icon">🧩</view>
         <view class="resource-main">
           <view class="resource-title">课程资源</view>
-          <view class="resource-sub">思维导图 · 交互演示 · 数字人视频</view>
+          <view class="resource-sub">思维导图 · 交互演示 · 文档资料</view>
         </view>
         <text class="arrow">›</text>
       </view>
