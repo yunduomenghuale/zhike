@@ -846,7 +846,9 @@ function fmtNum(v) {
 }
 function fmtMs(v) {
   if (!v) return '0ms'
-  return v >= 1000 ? (v / 1000).toFixed(1) + 's' : v + 'ms'
+  // 毫秒保留两位小数并去尾零（后端平均值是浮点，直接拼接会溢出如 480.666666666666ms）
+  if (v >= 1000) return (v / 1000).toFixed(1) + 's'
+  return parseFloat(v.toFixed(2)) + 'ms'
 }
 function fmtPct(v) { return v == null ? '—' : (v * 100).toFixed(1) + '%' }
 function capabilityLabel(value) { return capabilityOptions.find(i => i.value === value)?.label || value }
