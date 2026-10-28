@@ -809,9 +809,9 @@ const distRows = computed(() => {
   }
   return (s.by_capability || []).map(r => ({ key: r.capability, label: capabilityLabel(r.capability), group: '', ...r }))
 })
-const distMax = computed(() => Math.max(1, ...distRows.value.map(r => r.calls || 0)))
 const distTotal = computed(() => stats.value?.totals?.calls || 0)
-function distBarWidth(row) { return Math.max(2, ((row.calls || 0) / distMax.value) * 100) }
+// 条长按总量占比画（与右侧百分比同口径）；最小 2% 保证零星调用也可见
+function distBarWidth(row) { return Math.max(2, ((row.calls || 0) / (distTotal.value || 1)) * 100) }
 function distPct(row) { return distTotal.value ? ((row.calls / distTotal.value) * 100).toFixed(1) + '%' : '—' }
 const distGroups = computed(() => {
   const rows = distRows.value
