@@ -47,19 +47,17 @@
     <div v-loading="loading" class="detail-wrap">
       <template v-if="detail">
         <!-- 学习概览 -->
-        <el-row :gutter="16" class="stat-row">
-          <el-col :xs="12" :sm="8" :lg="4" v-for="card in cards" :key="card.label">
-            <div class="stat-card">
-              <div class="stat-icon" :class="card.color">
-                <el-icon :size="22"><component :is="card.icon" /></el-icon>
-              </div>
-              <div>
-                <div class="stat-title">{{ card.label }}</div>
-                <div class="stat-value">{{ 'num' in card ? (card.num == null ? '—' : fmtNum(displayed[card.label] ?? 0) + card.suffix) : card.value }}</div>
-              </div>
+        <div class="stat-grid">
+          <div v-for="card in cards" :key="card.label" class="stat-card">
+            <div class="stat-icon" :class="card.color">
+              <el-icon :size="22"><component :is="card.icon" /></el-icon>
             </div>
-          </el-col>
-        </el-row>
+            <div class="stat-copy">
+              <div class="stat-title">{{ card.label }}</div>
+              <div class="stat-value">{{ 'num' in card ? (card.num == null ? '—' : fmtNum(displayed[card.label] ?? 0) + card.suffix) : card.value }}</div>
+            </div>
+          </div>
+        </div>
 
         <!-- 章节学习进度 -->
         <div class="data-card section-card">
@@ -532,9 +530,19 @@ onMounted(async () => {
   font-size: 12.5px;
 }
 
-/* 概览卡 */
-.stat-row {
-  margin-bottom: 8px;
+/* 概览卡：4 列网格，两行等高、卡片同宽同高（原 el-col lg:4 一行 6 个、
+   列宽不足导致标签竖排、两行高度参差） */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-auto-rows: 1fr;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+@media (max-width: 1100px) {
+  .stat-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 .stat-card {
   min-height: 92px;
@@ -546,8 +554,11 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 12px;
+  min-width: 0;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.stat-copy {
+  min-width: 0;
 }
 .stat-card:hover {
   transform: translateY(-2px);
@@ -568,7 +579,7 @@ onMounted(async () => {
 .stat-icon.purple { background: #f5f3ff; color: #8b5cf6; }
 .stat-icon.red { background: #fef2f2; color: var(--danger); }
 .stat-icon.cyan { background: #f0fdfa; color: #0d9488; }
-.stat-title { font-size: 13px; color: var(--gray-500); font-weight: 650; }
+.stat-title { font-size: 13px; color: var(--gray-500); font-weight: 650; white-space: nowrap; }
 .stat-value { margin-top: 3px; font-size: 21px; font-weight: 800; color: var(--gray-900); }
 
 /* 区块卡 */
