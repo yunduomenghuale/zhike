@@ -10,9 +10,14 @@ headless 转成 docx 后再抽，二者都不可用才降级为空。
 from __future__ import annotations
 
 import logging
+import mimetypes
 import os
 
 logger = logging.getLogger(__name__)
+
+# 题库导入题图占位行：抽取时在图片的原文位置插入，import_parser 识别后挂到
+# 当前题目（题干一张图）。序号与返回 images 列表的 index 一一对应。
+QUESTION_IMAGE_PLACEHOLDER = "[[QUESTION_IMAGE:{n}]]"
 
 # OLE2 复合文档魔数（旧版 .doc / .ppt / .xls）
 OLE2_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
@@ -238,3 +243,156 @@ def _read_pptx(path: str) -> str:
             if shape.has_text_frame:
                 parts.append(shape.text_frame.text)
     return "\n".join(p for p in parts if p.strip())
+
+
+def extract_text_with_images(file_path: str) -> tuple[str, list[dict]]:
+    """题库导入专用：抽取文本并在图片原文位置插入占位行（QUESTION_IMAGE_PLACEHOLDER）。
+
+    返回 (text, images)；images = [{"index": n, "ext": ".png", "data": bytes}]，
+    与占位行序号一一对应。仅 docx/pdf 提取内嵌图，其余类型退回纯文本（images=[]）。
+    - docx：沿用 _read_docx_with_tables 的块级遍历（表格行保持制表符连接），
+      段落/表格行内的内嵌图（a:blip）紧随其文本之后登记占位行；
+    - pdf：pypdf 无图片位置能力，改用 PyMuPDF 按页内 bbox 与文本块纵向交错定位；
+    - 旧版 .doc 经 LibreOffice 转 docx 后按 docx 路径提取（COM 全文模式无位置信息）。
+    任何失败都退回纯文本抽取，不阻断导入主流程。
+    """
+    if not file_path or not os.path.exists(file_path):
+        return "", []
+    ftype = detect_file_type(file_path)
+    try:
+        if ftype == "word":
+            if os.path.splitext(file_path)[1].lower() == ".doc" and is_legacy_doc(file_path):
+                converted = _convert_legacy_doc_to_docx(file_path)
+                if not converted:
+                    return extract_text_with_tables(file_path), []
+                try:
+                    return _read_docx_with_images(converted)
+                finally:
+                    try:
+                        os.remove(converted)
+                    except OSError:
+                        pass
+            return _read_docx_with_images(file_path)
+        if ftype == "pdf":
+            return _read_pdf_with_images(file_path)
+        return extract_text(file_path), []
+    except Exception:
+        logger.exception("题图抽取失败，退回纯文本: %s", file_path)
+        try:
+            return extract_text_with_tables(file_path), []
+        except Exception:
+            return "", []
+
+
+def _convert_legacy_doc_to_docx(path: str) -> str:
+    """旧版 .doc → 临时 docx（LibreOffice）；不可用返回 ''。"""
+    import shutil
+    import subprocess
+    import tempfile
+
+    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    if not soffice:
+        return ""
+    try:
+        tmp = tempfile.mkdtemp()
+        subprocess.run(
+            [soffice, "--headless", "--convert-to", "docx", "--outdir", tmp, path],
+            timeout=300, check=True, capture_output=True,
+        )
+        docx_path = os.path.join(tmp, f"{os.path.splitext(os.path.basename(path))[0]}.docx")
+        return docx_path if os.path.exists(docx_path) else ""
+    except Exception:
+        logger.exception("LibreOffice 转换旧版 .doc 提取题图失败: %s", path)
+        return ""
+
+
+def _read_docx_with_images(path: str) -> tuple[str, list[dict]]:
+    from docx import Document
+    from docx.oxml.ns import qn
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+
+    doc = Document(path)
+    lines: list[str] = []
+    images: list[dict] = []
+
+    def _register(ext: str, blob: bytes) -> None:
+        images.append({"index": len(images), "ext": ext, "data": blob})
+        lines.append(QUESTION_IMAGE_PLACEHOLDER.format(n=len(images) - 1))
+
+    def _collect_images(element, seen_rids: set) -> None:
+        """元素内所有内嵌图（a:blip r:embed），按文档序登记；seen_rids 防合并单元格重复。"""
+        for blip in element.findall(".//" + qn("a:blip")):
+            rid = blip.get(qn("r:embed"))
+            if not rid or rid in seen_rids:
+                continue
+            seen_rids.add(rid)
+            part = doc.part.related_parts.get(rid)
+            blob = getattr(part, "blob", None) if part is not None else None
+            if not blob:
+                continue
+            ctype = getattr(part, "content_type", "") or ""
+            ext = mimetypes.guess_extension(ctype) or ".png"
+            _register(ext, blob)
+
+    for child in doc.element.body.iterchildren():
+        if child.tag == qn("w:p"):
+            text = Paragraph(child, doc).text.strip()
+            if text:
+                lines.append(text)
+            _collect_images(child, set())
+        elif child.tag == qn("w:tbl"):
+            for row in Table(child, doc).rows:
+                cells = [c.text.strip() for c in row.cells]
+                # 合并单元格去重（连续相同值只留一个）
+                deduped = [v for i, v in enumerate(cells) if i == 0 or v != cells[i - 1]]
+                line = "\t".join(deduped).strip()
+                if line:
+                    lines.append(line)
+                # 表格行内图片（题干配图常见排法）：占位行紧随该行之后，
+                # 解析时正挂在刚由该行开启的题目上
+                seen: set = set()
+                for cell in row.cells:
+                    _collect_images(cell._tc, seen)
+
+    return "\n".join(lines), images
+
+
+def _read_pdf_with_images(path: str) -> tuple[str, list[dict]]:
+    import pymupdf
+
+    doc = pymupdf.open(path)
+    lines: list[str] = []
+    images: list[dict] = []
+    try:
+        for page in doc:
+            # 文本块与图片按页内纵向位置（y0, x0）交错排序，占位行落在图片实际位置
+            entries: list[tuple] = []
+            for block in page.get_text("blocks"):
+                x0, y0, _x1, _y1, text = block[:5]
+                if text and str(text).strip():
+                    entries.append((float(y0), float(x0), "text", str(text)))
+            for info in page.get_image_info(xrefs=True):
+                bbox = info.get("bbox")
+                xref = info.get("xref")
+                if not bbox or not xref:
+                    continue
+                entries.append((float(bbox[1]), float(bbox[0]), "img", xref))
+            entries.sort(key=lambda e: (round(e[0], 1), e[1]))
+            for _y, _x, kind, payload in entries:
+                if kind == "text":
+                    lines.extend(l for l in payload.splitlines() if l.strip())
+                    continue
+                try:
+                    img = doc.extract_image(payload)
+                except Exception:
+                    continue
+                data = img.get("image")
+                if not data:
+                    continue
+                ext = "." + (img.get("ext") or "png")
+                images.append({"index": len(images), "ext": ext, "data": data})
+                lines.append(QUESTION_IMAGE_PLACEHOLDER.format(n=len(images) - 1))
+    finally:
+        doc.close()
+    return "\n".join(lines), images

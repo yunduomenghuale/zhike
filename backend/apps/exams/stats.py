@@ -195,6 +195,7 @@ def build_exam_stats(exam: Exam) -> dict:
             "qtype": q.qtype,
             "qtype_display": q.get_qtype_display(),
             "stem": q.stem,
+            "image_url": f"/media/{q.image.name}" if q.image else "",
             "score": full,
             "answered_n": n,
             "avg_score": round(sum(a["scores"]) / n, 1) if n else None,

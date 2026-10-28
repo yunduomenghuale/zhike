@@ -517,6 +517,7 @@ class MyWrongQuestionsView(APIView):
             items.append({
                 "question_id": q.id,
                 "stem": q.stem,
+                "image_url": f"/media/{q.image.name}" if q.image else "",
                 "qtype": q.qtype,
                 "qtype_display": q.get_qtype_display(),
                 "options": q.options,

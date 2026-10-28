@@ -100,6 +100,10 @@ def _normalize_item(item, batch, source, status=Question.Status.DRAFT):
     difficulty = str(item.get("difficulty") or "medium").strip() or "medium"
     tags = item.get("knowledge_tags") if isinstance(item.get("knowledge_tags"), list) else []
     analysis = str(item.get("analysis") or "").strip()
+    # 题图（题干配图）：仅接受上传接口产出的 question_images/ 路径（FileField 直接挂名）
+    image = str(item.get("image") or "").strip()
+    if image and not image.startswith("question_images/"):
+        return None, "题图路径不合法"
 
     if qtype == "single":
         if len(options) < 2:
@@ -173,6 +177,7 @@ def _normalize_item(item, batch, source, status=Question.Status.DRAFT):
         "catalog": batch.catalog_id,
         "qtype": qtype,
         "stem": stem,
+        "image": image or None,
         "options": options,
         "answer": answer_payload,
         "analysis": analysis,

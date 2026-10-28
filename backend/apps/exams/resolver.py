@@ -205,6 +205,7 @@ def build_for_taking(paper, exam, layout: dict | None = None) -> list[dict]:
             "qtype": q.qtype,
             "qtype_display": q.get_qtype_display(),
             "stem": q.stem,
+            "image_url": f"/media/{q.image.name}" if q.image else "",
             "options": permuted_options(q, perm),
         }
         if q.qtype == Question.QType.BLANK:
@@ -252,6 +253,7 @@ def build_for_review(paper, submission, exam=None) -> list[dict]:
             "qtype": q.qtype,
             "qtype_display": q.get_qtype_display(),
             "stem": q.stem,
+            "image_url": f"/media/{q.image.name}" if q.image else "",
             # S4：回看归序——用原始选项（key 原样），不用 permuted_options
             "options": [{"key": o.get("key"), "text": o.get("text")} for o in (q.options or [])],
             "correct_answer": _sorted_answer_keys(q.answer or {}),

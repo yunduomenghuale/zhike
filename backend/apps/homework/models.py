@@ -65,6 +65,7 @@ def question_snapshot(question):
         "qtype": question.qtype,
         "qtype_display": question.get_qtype_display(),
         "stem": question.stem,
+        "image_url": f"/media/{question.image.name}" if question.image else "",
         "options": question.options or [],
         "answer": question.answer or {},
         "analysis": question.analysis,

@@ -9,6 +9,11 @@ from apps.common.models import BaseModel
 from apps.courses.models import Catalog, Course
 
 
+def _question_image_path(instance, filename):
+    """题目配图 uuid 化：防枚举/猜测下载，与导入文件同口径。"""
+    return f"question_images/{uuid4().hex}{Path(filename).suffix.lower()}"
+
+
 def _split_score(total, n: int) -> list:
     """把总分尽量均分到 n 份（余数依次补给前几份，保证 Σ=total，保留 1 位小数）。"""
     if n <= 0:
@@ -54,6 +59,9 @@ class Question(BaseModel):
     )
     qtype = models.CharField("题型", max_length=16, choices=QType.choices)
     stem = models.TextField("题干")
+    image = models.FileField(
+        "题图", upload_to=_question_image_path, null=True, blank=True, max_length=255
+    )  # 题干配图（几何图/流程图/截图等），URL 经序列器 image_url 暴露
     options = models.JSONField("选项", default=list, blank=True)  # [{key, text}, ...]
     answer = models.JSONField("答案", default=dict, blank=True)   # 结构随题型而定；填空={"blanks":[{"text","score"}]}（按空赋分，score=Σ空分）
     analysis = models.TextField("解析", blank=True)

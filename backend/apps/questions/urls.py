@@ -11,8 +11,10 @@ router.register("wrong-notes", WrongNoteViewSet, basename="wrong-note")
 urlpatterns = router.urls
 
 from django.urls import path as _path
+from .views import QuestionImageUploadView as _QuestionImageUploadView
 from .views import WrongMasteryView as _WrongMasteryView
 
 urlpatterns += [
     _path("wrong-mastery/", _WrongMasteryView.as_view(), name="wrong-mastery"),
+    _path("question-images/upload/", _QuestionImageUploadView.as_view(), name="question-image-upload"),
 ]

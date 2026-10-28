@@ -16,15 +16,23 @@ class QuestionSerializer(serializers.ModelSerializer):
     qtype_display = serializers.CharField(source="get_qtype_display", read_only=True)
     difficulty_display = serializers.CharField(source="get_difficulty_display", read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
+    # 题图走「先上传后提交」：image 为媒体库相对路径（question_images/ 前缀），
+    # image_url 为只读展示地址（/media/...）
+    image = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    image_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Question
         fields = [
-            "id", "course", "catalog", "catalog_title", "qtype", "qtype_display", "stem", "options",
+            "id", "course", "catalog", "catalog_title", "qtype", "qtype_display", "stem", "image",
+            "image_url", "options",
             "answer", "analysis", "score", "difficulty", "difficulty_display",
             "knowledge_tags", "source", "status", "status_display", "creator", "created_at",
         ]
         read_only_fields = ["creator"]
+
+    def get_image_url(self, obj) -> str:
+        return f"/media/{obj.image.name}" if obj.image else ""
 
     def validate(self, attrs):
         course = attrs.get("course", getattr(self.instance, "course", None))
@@ -33,6 +41,15 @@ class QuestionSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"catalog": "题目必须归属到具体章节"})
         if course and catalog.course_id != course.id:
             raise serializers.ValidationError({"catalog": "所选章节不属于当前课程"})
+        image = attrs.get("image")
+        if image is not None:
+            image = str(image).strip()
+            if not image:
+                attrs["image"] = None  # 空串=移除题图
+            elif not image.startswith("question_images/"):
+                raise serializers.ValidationError({"image": "题图路径不合法"})
+            else:
+                attrs["image"] = image
         request = self.context.get("request")
         user = getattr(request, "user", None)
         if user and user.is_authenticated and user.is_teacher:
@@ -108,10 +125,14 @@ class StudentQuestionSerializer(serializers.ModelSerializer):
 
     qtype_display = serializers.CharField(source="get_qtype_display", read_only=True)
     blank_count = serializers.SerializerMethodField()
+    image_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Question
-        fields = ["id", "qtype", "qtype_display", "stem", "options", "score", "blank_count"]
+        fields = ["id", "qtype", "qtype_display", "stem", "image_url", "options", "score", "blank_count"]
+
+    def get_image_url(self, obj) -> str:
+        return f"/media/{obj.image.name}" if obj.image else ""
 
     def get_blank_count(self, obj):
         if obj.qtype != Question.QType.BLANK:

@@ -91,6 +91,9 @@ _COMBINED_LEAD_RE = re.compile(
     r"^\s*(?:([A-Ha-h]{1,3}(?:\s*[、,，]\s*[A-Ha-h]{1,3})*)|(对|错|正确|错误|√|×))(?![A-Za-z])"
 )
 
+# 题图占位行（extract_text_with_images 在图片原文位置插入）：挂到当前题目题干
+_QUESTION_IMAGE_LINE_RE = re.compile(r"^\[\[\s*QUESTION_IMAGE\s*:\s*(\d+)\s*\]\]$")
+
 # 填空空位：2+ 下划线（半/全角）或空括号
 _BLANK_MARKER_RE = re.compile(r"_{2,}|＿{2,}|[（(]\s*[）)]")
 # 题干尾部分值：「（2分）」「(3.5分)」
@@ -338,6 +341,7 @@ def parse_questions(raw_text: str) -> list[dict]:
     questions: list[dict] = []
     current: dict | None = None
     section: str | None = None
+    pending_image: int | None = None  # 题图占位行出现在题号前 → 挂到下一道题
 
     def _finalize():
         nonlocal current
@@ -355,6 +359,17 @@ def parse_questions(raw_text: str) -> list[dict]:
             continue  # 卷末答案速查行（整行仅「序号 + 选项字母」，不作题干并入）
         if _is_table_header_row(line):
             continue  # 表格表头行
+
+        # 题图占位行（extract_text_with_images 插入）：不进正文，挂到当前题目
+        # （题干一张图，先到先得）；出现在题号前则挂到下一道题
+        img_m = _QUESTION_IMAGE_LINE_RE.match(line.strip())
+        if img_m:
+            if current is not None:
+                if current.get("image_index") is None:
+                    current["image_index"] = int(img_m.group(1))
+            else:
+                pending_image = int(img_m.group(1))
+            continue
 
         # 表格题目行优先于标记切分（行内单元格可能含「答案：A」）
         row_head = _table_row_head(line)
@@ -377,16 +392,25 @@ def parse_questions(raw_text: str) -> list[dict]:
                     continue  # 卷首说明/标题等前导内容，跳过
                 head = row_head
             current = _new_question(None if is_row else section, table_row=is_row)
+            if pending_image is not None:
+                current["image_index"] = pending_image
+                pending_image = None
             _absorb(current, head)
         else:
             start_head = _match_question_start(content)
             if start_head is not None:
                 _finalize()
                 current = _new_question(section)
+                if pending_image is not None:
+                    current["image_index"] = pending_image
+                    pending_image = None
                 _absorb(current, start_head)
             elif is_row:
                 _finalize()
                 current = _new_question(None, table_row=True)
+                if pending_image is not None:
+                    current["image_index"] = pending_image
+                    pending_image = None
                 _absorb(current, row_head)
             else:
                 _absorb(current, content)
@@ -423,6 +447,7 @@ def _new_question(section: str | None, table_row: bool = False) -> dict:
         "options": [],           # [(原始标签, 文本)]
         "answer_raw": "",
         "analysis_parts": [],
+        "image_index": None,     # 题图占位序号（extract_text_with_images 注入）
         "_table_row": table_row,  # 一题一行的表格题目行（题型按结构推断）
         "_last_opt": False,       # 上一行是选项（续行并入末选项）
         "_in_analysis": False,    # 已出现答案/解析标记（后续裸行进解析）
@@ -527,6 +552,7 @@ def _build_draft(q: dict) -> dict | None:
         "score": score if score else DEFAULT_SCORES.get(qtype, 2),
         "difficulty": "medium",
         "knowledge_tags": [],
+        "image_index": q.get("image_index"),  # 题图占位序号；导入视图落盘后转为 image 路径
         "_warnings": warnings,
     }
 

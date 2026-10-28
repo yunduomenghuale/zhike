@@ -453,6 +453,27 @@ class ImportParserTests(SimpleTestCase):
         self.assertEqual(d["answer"], {"key": "C"})
         self.assertIn("因为 2+2 等于 4", d["analysis"])
 
+    def test_question_image_placeholder_attaches_to_current_question(self):
+        """题图占位行挂到当前题目（题干一张图），不进题干文本。"""
+        text = (
+            "一、单选题\n"
+            "1. 如图，R 因拥塞丢弃分组时发送的报文是（ ）\n"
+            "[[QUESTION_IMAGE:0]]\n"
+            "A. 路由重定向\nB. 目的不可达\nC. 源抑制\nD. 超时\n"
+            "答案：C\n"
+            "2. 下一题 1+1=？\nA. 1\nB. 2\n答案：B"
+        )
+        drafts = parse_questions(text)
+        self.assertEqual(drafts[0]["image_index"], 0)
+        self.assertIsNone(drafts[1]["image_index"])
+        self.assertNotIn("QUESTION_IMAGE", drafts[0]["stem"])
+
+    def test_question_image_placeholder_before_first_question_goes_next(self):
+        """占位行出现在题号前 → 挂到下一道题。"""
+        text = "[[QUESTION_IMAGE:0]]\n1. 题干预留\nA. x\nB. y\n答案：A"
+        drafts = parse_questions(text)
+        self.assertEqual(drafts[0]["image_index"], 0)
+
     def test_single_choice_paren_wrapped_marker(self):
         """「（答案：A）」整行括号包裹：残留「（」不污染题干。"""
         text = "一、单选题\n1. 1+1=?\nA. 2\nB. 3\nC. 4\nD. 5\n（答案：A）"
@@ -874,6 +895,156 @@ class QuestionImportApiTests(APITestCase):
         self.client.force_authenticate(user=admin)
         response = self._upload(_IMPORT_TXT, course=self.course.id)
         self.assertEqual(response.status_code, 200)
+
+
+# ---------------------------------------------------------------------------
+# 题目配图（题干一张图）：上传接口 / 入库管道 / docx 内嵌图提取
+# ---------------------------------------------------------------------------
+
+
+def _png_bytes(color=(59, 130, 246), size=(64, 48)):
+    import io
+
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", size, color).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+class QuestionImageTests(APITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.teacher = User.objects.create_user(username="t_img", password="pw123456!", role=User.Role.TEACHER)
+        cls.student = User.objects.create_user(username="s_img", password="pw123456!", role=User.Role.STUDENT)
+        cls.course = Course.objects.create(name="配图课程", teacher=cls.teacher)
+        cls.catalog = Catalog.objects.create(course=cls.course, title="第一章")
+
+    def _upload_image(self, filename="题图.png", data=None):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        upload = SimpleUploadedFile(filename, data if data is not None else _png_bytes(), content_type="image/png")
+        return self.client.post("/api/question-images/upload/", {"file": upload}, format="multipart")
+
+    # ------------------------------------------------------------- 上传接口
+    def test_upload_image_success(self):
+        self.client.force_authenticate(user=self.teacher)
+        response = self._upload_image()
+        self.assertEqual(response.status_code, 201, response.data)
+        data = response.data["data"]
+        self.assertTrue(data["path"].startswith("question_images/"))
+        self.assertEqual(data["url"], f"/media/{data['path']}")
+        from django.core.files.storage import default_storage
+
+        self.assertTrue(default_storage.exists(data["path"]))
+
+    def test_upload_rejects_bad_extension(self):
+        self.client.force_authenticate(user=self.teacher)
+        response = self._upload_image(filename="题图.svg")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("仅支持", response.data["message"])
+
+    def test_upload_rejects_fake_image(self):
+        self.client.force_authenticate(user=self.teacher)
+        response = self._upload_image(data=b"not an image at all")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("不是有效的图片", response.data["message"])
+
+    def test_upload_student_forbidden(self):
+        self.client.force_authenticate(user=self.student)
+        self.assertEqual(self._upload_image().status_code, 403)
+
+    # ------------------------------------------------------------- 入库/编辑
+    def _image_draft(self, image="question_images/abc.png"):
+        return _draft(
+            qtype="single", stem="如图，R 因拥塞丢弃分组时发送的报文是（ ）",
+            options=[{"key": "A", "text": "路由重定向"}, {"key": "B", "text": "源抑制"}],
+            answer={"key": "B"}, image=image,
+        )
+
+    def test_save_draft_with_image_sets_question_image(self):
+        batch = QuestionDraftBatch.objects.create(
+            origin=QuestionDraftBatch.Origin.IMPORT,
+            course=self.course, catalog=self.catalog, creator=self.teacher,
+            drafts=[self._image_draft()],
+        )
+        self.client.force_authenticate(user=self.teacher)
+        response = self.client.post(
+            f"/api/question-draft-batches/{batch.id}/save/", {"items": [self._image_draft()]}, format="json"
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        question = Question.objects.get(course=self.course)
+        self.assertEqual(question.image.name, "question_images/abc.png")
+
+    def test_save_draft_with_bad_image_path_fails(self):
+        draft = self._image_draft(image="../secret.png")
+        batch = QuestionDraftBatch.objects.create(
+            origin=QuestionDraftBatch.Origin.IMPORT,
+            course=self.course, catalog=self.catalog, creator=self.teacher, drafts=[draft],
+        )
+        self.client.force_authenticate(user=self.teacher)
+        response = self.client.post(
+            f"/api/question-draft-batches/{batch.id}/save/", {"items": [draft]}, format="json"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data["data"]["failed"]), 1)
+        self.assertIn("题图路径不合法", response.data["data"]["failed"][0]["error"])
+
+    def test_question_patch_image_validation(self):
+        question = Question.objects.create(
+            course=self.course, catalog=self.catalog, qtype="single", stem="题干",
+            options=[{"key": "A", "text": "x"}, {"key": "B", "text": "y"}],
+            answer={"key": "A"}, creator=self.teacher,
+        )
+        self.client.force_authenticate(user=self.teacher)
+        res = self.client.patch(f"/api/questions/{question.id}/", {"image": "../etc.png"}, format="json")
+        self.assertEqual(res.status_code, 400)
+        res = self.client.patch(f"/api/questions/{question.id}/", {"image": "question_images/ok.png"}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        question.refresh_from_db()
+        self.assertEqual(question.image.name, "question_images/ok.png")
+        self.assertEqual(res.data["data"]["image_url"], "/media/question_images/ok.png")
+        # 空串 = 移除题图
+        res = self.client.patch(f"/api/questions/{question.id}/", {"image": ""}, format="json")
+        self.assertEqual(res.status_code, 200)
+        question.refresh_from_db()
+        self.assertFalse(question.image)
+
+    # ------------------------------------------------------------- docx 导入
+    def _docx_with_image(self) -> bytes:
+        import io
+
+        from docx import Document
+
+        doc = Document()
+        doc.add_paragraph("一、单选题")
+        doc.add_paragraph("1. 如下图所示，R 因拥塞丢弃 IP 分组时，发送的 ICMP 报文类型是（ ）")
+        doc.add_picture(io.BytesIO(_png_bytes()))
+        for opt in ("A. 路由重定向", "B. 目的不可达", "C. 源抑制", "D. 超时"):
+            doc.add_paragraph(opt)
+        doc.add_paragraph("答案：C")
+        out = io.BytesIO()
+        doc.save(out)
+        return out.getvalue()
+
+    def test_import_docx_embedded_image_attaches_to_draft(self):
+        from django.core.files.storage import default_storage
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        self.client.force_authenticate(user=self.teacher)
+        upload = SimpleUploadedFile("图库.docx", self._docx_with_image(), content_type="application/msword")
+        response = self.client.post(
+            "/api/questions/import/",
+            {"file": upload, "course": self.course.id, "catalog": self.catalog.id},
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        data = response.data["data"]
+        self.assertEqual(data["stats"]["with_image"], 1)
+        draft = data["drafts"][0]
+        self.assertTrue(str(draft.get("image") or "").startswith("question_images/"))
+        self.assertNotIn("QUESTION_IMAGE", draft["stem"])
+        self.assertTrue(default_storage.exists(draft["image"]))
 
 
 # ---------------------------------------------------------------------------

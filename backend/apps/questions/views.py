@@ -1,9 +1,13 @@
 import os
 import tempfile
 import time
+from uuid import uuid4
 
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from django.db import IntegrityError
 from rest_framework.decorators import action
+from rest_framework.parsers import MultiPartParser
 from rest_framework.views import APIView
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
@@ -16,7 +20,7 @@ from apps.common.response import api_response
 from apps.common.viewsets import BaseModelViewSet
 from apps.courses.models import Catalog, Course
 from django.db.models import Q
-from apps.knowledge.extractor import extract_text_with_tables
+from apps.knowledge.extractor import extract_text_with_images, extract_text_with_tables
 
 from .draft_pipeline import save_batch_drafts
 from .grading import grade_objective
@@ -34,6 +38,42 @@ from .throttles import TeacherAiScopedThrottle
 IMPORT_SUPPORTED_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt", ".md"}
 IMPORT_MAX_SIZE = 10 * 1024 * 1024  # 10MB
 RAW_TEXT_LIMIT = 100_000  # raw_text 截断字符数（防撑爆行）
+
+# 题目配图上传约束（与 nginx media 危险扩展强制下载双保险：仅图片类型）
+QUESTION_IMAGE_MAX_SIZE = 5 * 1024 * 1024  # 5MB
+QUESTION_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+
+
+class QuestionImageUploadView(APIView):
+    """题目配图上传（教师）：uuid 化存储、扩展名/大小/PIL 三层校验。
+
+    「先上传后提交」：返回的 path 由前端在保存题目/草稿时随表单回传，
+    入库管道与 QuestionSerializer 仅接受 question_images/ 前缀路径。
+    """
+
+    permission_classes = [IsTeacherOrAdmin]
+    parser_classes = [MultiPartParser]
+
+    def post(self, request):
+        upload = request.FILES.get("file")
+        if not upload:
+            return api_response(message="请选择图片文件", code=400, status=400)
+        ext = os.path.splitext(upload.name or "")[1].lower()
+        if ext not in QUESTION_IMAGE_EXTS:
+            return api_response(message="仅支持 PNG/JPG/GIF/WebP/BMP 图片", code=400, status=400)
+        if upload.size > QUESTION_IMAGE_MAX_SIZE:
+            return api_response(message="图片超过 5MB 上限，请压缩后重试", code=400, status=400)
+        try:
+            from PIL import Image
+
+            img = Image.open(upload)
+            img.verify()
+        except Exception:
+            return api_response(message="文件不是有效的图片", code=400, status=400)
+        upload.seek(0)
+        name = f"question_images/{uuid4().hex}{ext}"
+        path = default_storage.save(name, upload)
+        return api_response({"path": path, "url": f"/media/{path}"}, message="上传成功", status=201)
 # 扩展名 → 文件头魔数（txt/md 纯文本不复检）
 _IMPORT_MAGIC = {
     ".pdf": b"%PDF",
@@ -248,7 +288,8 @@ class QuestionViewSet(BaseModelViewSet):
                             code=400, status=400,
                         )
             started = time.monotonic()
-            text = extract_text_with_tables(tmp_path)
+            # 题图感知抽取：docx/pdf 在图片原文位置插入 [[QUESTION_IMAGE:n]] 占位行
+            text, extracted_images = extract_text_with_images(tmp_path)
             parse_ms = int((time.monotonic() - started) * 1000)
         finally:
             try:
@@ -268,6 +309,18 @@ class QuestionViewSet(BaseModelViewSet):
                 code=400, status=400,
             )
 
+        # 题图落盘：草稿的占位序号 → 媒体库路径（入库管道按 question_images/ 前缀透传）
+        for draft in drafts:
+            idx = draft.pop("image_index", None)
+            if idx is None:
+                continue
+            img = next((i for i in extracted_images if i["index"] == idx), None)
+            if not img or not img.get("data"):
+                draft.setdefault("_warnings", []).append("题图提取失败，请手动上传")
+                continue
+            name = f"question_images/{uuid4().hex}{img['ext']}"
+            draft["image"] = default_storage.save(name, ContentFile(img["data"]))
+
         batch = QuestionDraftBatch(
             origin=QuestionDraftBatch.Origin.IMPORT,
             course=course,
@@ -279,6 +332,7 @@ class QuestionViewSet(BaseModelViewSet):
             stats={
                 "total": len(drafts),
                 "warned": sum(1 for d in drafts if d.get("_warnings")),
+                "with_image": sum(1 for d in drafts if d.get("image")),
                 "truncated": len(text) > RAW_TEXT_LIMIT,
                 "parse_ms": parse_ms,
             },

@@ -375,6 +375,7 @@ def build_class_stats_v2(classroom, course_id) -> dict:
         row["wrong_questions"] = [
             {
                 "stem": (ar.question.stem or "")[:80],
+                "image_url": f"/media/{ar.question.image.name}" if ar.question.image else "",
                 "my_answer": _answer_text(ar.student_answer),
                 "correct_answer": _answer_text(ar.question.answer),
                 "analysis": (ar.question.analysis or "")[:120],
