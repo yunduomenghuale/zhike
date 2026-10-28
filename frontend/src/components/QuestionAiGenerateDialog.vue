@@ -56,6 +56,23 @@
           </div>
         </el-form-item>
 
+        <el-form-item label="用途分类">
+          <el-select
+            v-model="scenes"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            :max-collapse-tags="2"
+            class="module-select"
+            popper-class="module-select-popper"
+            placeholder="生成的题目默认用于哪些场景"
+            style="width: 100%"
+          >
+            <el-option v-for="s in SCENE_OPTIONS" :key="s.code" :label="s.label" :value="s.code" />
+          </el-select>
+          <div class="aig-scenes-tip">默认「章节练习+作业」；勾选「考试」的题目不会出现在学生练习中</div>
+        </el-form-item>
+
         <el-form-item label="教学目标 / 出题要求（选填）">
           <el-input v-model="objective" type="textarea" :rows="2" placeholder="如：侧重概念辨析与实际应用，难度适中" maxlength="500" show-word-limit />
         </el-form-item>
@@ -78,7 +95,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Close, InfoFilled, MagicStick } from '@element-plus/icons-vue'
 import { generateQuestions } from '@/api/question'
-import { DEFAULT_QTYPES } from '@/utils/questionDraft'
+import { DEFAULT_QTYPES, DEFAULT_SCENES, SCENE_OPTIONS } from '@/utils/questionDraft'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -89,6 +106,7 @@ const emit = defineEmits(['update:visible', 'submitted'])
 
 const catalog = ref(null)
 const objective = ref('')
+const scenes = ref([...DEFAULT_SCENES])
 const submitting = ref(false)
 
 // 五种题型一行一组：勾选后配置数量与每题分值（与后端 groups 协议一致）
@@ -100,6 +118,7 @@ watch(() => props.visible, (v) => {
   if (v) {
     catalog.value = null
     objective.value = ''
+    scenes.value = [...DEFAULT_SCENES]
     groups.forEach((g, i) => { g.enabled = i === 0; g.count = 5 })
   }
 })
@@ -111,6 +130,7 @@ async function doSubmit() {
   if (!props.courseId) return ElMessage.warning('请先选择课程')
   if (!catalog.value) return ElMessage.warning('请选择题目所属章节')
   if (!enabledGroups.value.length) return ElMessage.warning('请至少勾选一种题型')
+  if (!scenes.value.length) return ElMessage.warning('请至少选择一个用途分类')
   if (totalCount.value > 50) return ElMessage.warning('一次生成题目总数不可超过 50')
   const payloadGroups = enabledGroups.value.map((g) => ({
     qtype: g.qtype, count: Number(g.count) || 1, score: Number(g.score) || 1,
@@ -121,6 +141,7 @@ async function doSubmit() {
       course: props.courseId,
       catalog: catalog.value,
       objective: objective.value.trim(),
+      scenes: [...scenes.value],
       groups: payloadGroups,
     })
     ElMessage.success('生题任务已提交，生成过程中离开页面也不会丢失')
@@ -236,6 +257,12 @@ async function doSubmit() {
   color: var(--danger);
 }
 .aig-total-over b { color: var(--danger); }
+.aig-scenes-tip {
+  margin-top: 6px;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.5;
+}
 
 .creation-dialog-header {
   display: flex;

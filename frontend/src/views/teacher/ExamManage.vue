@@ -681,7 +681,8 @@ async function loadPoolQuestions() {
   if (!course) return
   poolLoading.value = true
   try {
-    const params = { course, status: 'published', page_size: 1000 }
+    // 用途分类过滤：考试组卷池只拉「考试」标签的题（练习/作业专用题不混入）
+    const params = { course, status: 'published', page_size: 1000, scene: 'exam' }
     if (poolFilters.catalog) params.catalog = poolFilters.catalog
     if (poolFilters.qtype) params.qtype = poolFilters.qtype
     if (poolFilters.difficulty) params.difficulty = poolFilters.difficulty
@@ -1105,6 +1106,8 @@ async function saveDraftQuestion() {
       difficulty: draftQuestion.difficulty,
       source: 'manual',
       status: 'published',
+      // 考试页语境：自写题默认带「考试」标签（不勾练习，防泄题）；不进练习但可再编辑
+      scenes: ['exam'],
     })
     addPoolQuestion(question)
     // 自写题目加入的是「已选试卷」，切到题库选题页签以便继续调整后统一生成试卷

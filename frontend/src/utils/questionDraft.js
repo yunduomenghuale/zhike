@@ -12,6 +12,15 @@ export const DEFAULT_QTYPES = [
   { value: 'short', label: '简答题' },
 ]
 
+// 题目用途分类（与后端 SceneTag.code 对齐）：新建默认 练习+作业（考试显式勾选防泄题）
+export const SCENE_OPTIONS = [
+  { code: 'practice', label: '章节练习' },
+  { code: 'homework', label: '作业' },
+  { code: 'exam', label: '考试' },
+]
+export const DEFAULT_SCENES = ['practice', 'homework']
+export const sceneLabel = (code) => SCENE_OPTIONS.find((s) => s.code === code)?.label || code
+
 function defaultOptions() {
   return [
     { key: 'A', text: '' }, { key: 'B', text: '' },
@@ -50,6 +59,7 @@ export function draftToForm(d = {}) {
     analysis: d.analysis || '',
     score: Number(d.score) || 2,
     difficulty: d.difficulty || 'medium',
+    scenes: Array.isArray(d.scenes) && d.scenes.length ? [...d.scenes] : [...DEFAULT_SCENES],
   }
 }
 
@@ -91,5 +101,6 @@ export function formToDraft(form) {
     // 填空题总分 = Σ空分（后端入库管道按此均分校验）
     score: form.qtype === 'blank' ? blankScoreTotal(form) : (Number(form.score) || 0),
     difficulty: form.difficulty || 'medium',
+    scenes: Array.isArray(form.scenes) && form.scenes.length ? [...form.scenes] : [...DEFAULT_SCENES],
   }
 }

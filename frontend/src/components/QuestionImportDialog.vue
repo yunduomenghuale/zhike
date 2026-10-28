@@ -35,6 +35,23 @@
             <el-option v-for="c in catalogs" :key="c.id" :label="c.label" :value="c.id" />
           </el-select>
         </el-form-item>
+        <el-form-item label="用途分类">
+          <el-select
+            v-model="scenes"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            :max-collapse-tags="2"
+            class="module-select"
+            popper-class="module-select-popper"
+            placeholder="导入的题目默认用于哪些场景"
+            style="width: 100%"
+            :disabled="!!task"
+          >
+            <el-option v-for="s in SCENE_OPTIONS" :key="s.code" :label="s.label" :value="s.code" />
+          </el-select>
+          <div class="import-scenes-tip">默认「章节练习+作业」；如导入的是试卷请勾选「考试」，考试题不会出现在学生练习中</div>
+        </el-form-item>
         <el-form-item label="题目文件">
           <!-- 选择即上传解析，样式与流程对齐章节课件上传（CourseCatalog .ppt-upload） -->
           <el-upload
@@ -96,6 +113,7 @@ import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Close, InfoFilled, Loading, School, UploadFilled } from '@element-plus/icons-vue'
 import { importQuestions } from '@/api/question'
+import { DEFAULT_SCENES, SCENE_OPTIONS } from '@/utils/questionDraft'
 
 const SUPPORTED_EXT = ['.pdf', '.doc', '.docx', '.txt', '.md']
 const MAX_SIZE = 10 * 1024 * 1024
@@ -109,12 +127,14 @@ const props = defineProps({
 const emit = defineEmits(['update:visible', 'imported'])
 
 const catalog = ref(null)
+const scenes = ref([...DEFAULT_SCENES])
 // 上传解析任务（对齐课件上传的 uploadTasks 单任务口径）：选择即上传，阶段化进度
 const task = ref(null) // { phase: 'upload'|'parse'|'done'|'failed', percent, error }
 
 watch(() => props.visible, (v) => {
   if (v) {
     catalog.value = null
+    scenes.value = [...DEFAULT_SCENES]
     task.value = null
   }
 })
@@ -169,6 +189,7 @@ async function startImport(raw) {
   form.append('file', raw)
   form.append('course', props.courseId)
   if (catalog.value) form.append('catalog', catalog.value)
+  if (scenes.value.length) form.append('scenes', JSON.stringify(scenes.value))
   try {
     const batch = await importQuestions(form, (e) => {
       const t = task.value
@@ -252,6 +273,12 @@ async function startImport(raw) {
   flex: 0 0 auto;
   font-size: 15px;
   color: var(--primary-600);
+}
+.import-scenes-tip {
+  margin-top: 6px;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 /* 上传区：样式与流程对齐章节课件上传（CourseCatalog .ppt-upload 体系） */

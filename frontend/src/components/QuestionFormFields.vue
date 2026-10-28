@@ -30,6 +30,23 @@
       </el-select>
     </el-form-item>
 
+    <el-form-item v-if="showScenes" label="用途分类">
+      <el-select
+        v-model="model.scenes"
+        multiple
+        collapse-tags
+        collapse-tags-tooltip
+        :max-collapse-tags="2"
+        class="module-select scene-select"
+        popper-class="module-select-popper"
+        placeholder="至少选择一项"
+        style="width: 100%; max-width: 340px"
+      >
+        <el-option v-for="s in SCENE_OPTIONS" :key="s.code" :label="s.label" :value="s.code" />
+      </el-select>
+      <span class="scene-tip">考试题勾选「考试」后不会出现在章节练习中</span>
+    </el-form-item>
+
     <el-form-item label="题干" class="qff-multiline">
       <el-input v-model="model.stem" type="textarea" :autosize="{ minRows: 2, maxRows: 8 }" placeholder="请输入题干" />
     </el-form-item>
@@ -132,7 +149,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { Plus, Delete } from '@element-plus/icons-vue'
-import { DEFAULT_QTYPES, blankScoreTotal, buildAnswer, buildOptions, formToDraft } from '@/utils/questionDraft'
+import { DEFAULT_QTYPES, SCENE_OPTIONS, blankScoreTotal, buildAnswer, buildOptions, formToDraft } from '@/utils/questionDraft'
 import { uploadQuestionImage } from '@/api/question'
 import QuestionImage from '@/components/QuestionImage.vue'
 
@@ -144,6 +161,8 @@ const props = defineProps({
   catalogs: { type: Array, default: () => [] },
   // 是否展示章节选择（新建/编辑题目显示；草稿预览行内不显示，章节在批次级设置）
   showCatalog: { type: Boolean, default: false },
+  // 是否展示用途分类多选（手动/草稿编辑显示；考试页内联建题隐藏，走页面语境默认）
+  showScenes: { type: Boolean, default: true },
   // 紧凑模式：草稿预览行内嵌使用（压缩纵向占位）
   compact: { type: Boolean, default: false },
   // 标签布局：right=标签列在左（72px 固定对齐，默认）/ top=标签在上（手动弹窗态）
@@ -383,6 +402,15 @@ defineExpose({ normalize })
 }
 .score-num {
   width: 130px;
+}
+.scene-select {
+  flex: none;
+}
+.scene-tip {
+  margin-left: 10px;
+  color: #94a3b8;
+  font-size: 12px;
+  white-space: nowrap;
 }
 .blank-total-score {
   color: #1e293b;

@@ -733,7 +733,8 @@ async function loadQuestionOptions() {
   if (form.mode !== 'questions' || isFrozen.value) return
   questionLoading.value = true
   try {
-    const params = { course: activeCourseId(), status: 'published', page_size: 1000 }
+    // 用途分类过滤：作业选题池只拉「作业」标签的题（考试专用题不混入）
+    const params = { course: activeCourseId(), status: 'published', page_size: 1000, scene: 'homework' }
     const data = await listQuestions(params)
     questionOptions.value = data.results ?? data
   } finally {

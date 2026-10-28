@@ -10,6 +10,8 @@ export const uploadQuestionImage = (file) => {
   formData.append('file', file)
   return request.post('/question-images/upload/', formData)
 }
+// 题目用途标签（固定 3 条：章节练习/作业/考试）：下拉数据源
+export const listSceneTags = () => request.get('/question-scene-tags/')
 // AI 多类型生题（异步）：提交 groups → 轮询 /ai-tasks/{id}/ → result.batch_id
 export const generateQuestions = (data) => request.post('/questions/generate/', data)
 

@@ -40,6 +40,9 @@
             <el-option label="已发布" value="published" />
             <el-option label="停用" value="disabled" />
           </el-select>
+          <el-select v-model="filterScene" size="large" class="module-select" popper-class="module-select-popper" placeholder="用途分类" clearable style="width: 150px" @change="load">
+            <el-option v-for="s in SCENE_OPTIONS" :key="s.code" :label="s.label" :value="s.code" />
+          </el-select>
         </div>
         <div class="q-toolbar-actions">
           <el-button v-if="courseId" class="q-btn-batch" :icon="Files" @click="openBatches">
@@ -76,6 +79,7 @@
                   <el-tag v-if="row.image || row.image_url" size="small" type="warning" effect="plain" round>带图</el-tag>
                   <el-tag size="small" :type="difficultyTag(row.difficulty)" effect="light" round>{{ row.difficulty_display }}</el-tag>
                   <el-tag size="small" effect="plain" round>{{ row.catalog_title }}</el-tag>
+                  <el-tag v-for="sc in row.scenes || []" :key="sc" size="small" :type="sceneTag(sc)" effect="plain" round>{{ sceneLabel(sc) }}</el-tag>
                   <span class="q-score">{{ row.score }} 分</span>
                   <el-tag size="small" :type="statusTag(row.status)" effect="light" round>{{ row.status_display }}</el-tag>
                   <el-tag size="small" :type="sourceTag(row.source)[1]" effect="plain" round>
@@ -219,7 +223,7 @@ import { useAiTaskPolling } from '@/composables/useAiTaskPolling'
 import { listActiveAiTasks } from '@/api/ai-task'
 import { listCourses, listCatalogs } from '@/api/course'
 import { listQuestions, createQuestion, updateQuestion, deleteQuestion, listDraftBatches } from '@/api/question'
-import { draftToForm } from '@/utils/questionDraft'
+import { draftToForm, DEFAULT_SCENES, SCENE_OPTIONS, sceneLabel } from '@/utils/questionDraft'
 
 const qtypes = [
   { value: 'single', label: '单选题' },
@@ -239,6 +243,7 @@ const loading = ref(false)
 const filterType = ref('')
 const filterStatus = ref('')
 const filterCatalog = ref(null)
+const filterScene = ref('')
 const search = ref(String(route.query.search || ''))
 const total = ref(0)
 const page = ref(1)
@@ -261,6 +266,10 @@ function sourceTag(s) {
   if (s === 'ai') return ['AI 生成', 'primary']
   if (s === 'import') return ['文档导入', 'warning']
   return ['手动录入', 'info']
+}
+// 用途分类标签色：练习绿 / 作业蓝 / 考试橙
+function sceneTag(code) {
+  return { practice: 'success', homework: 'primary', exam: 'warning' }[code] || 'info'
 }
 
 async function loadCourses() {
@@ -306,7 +315,8 @@ async function load() {
     const data = await listQuestions({
       course: courseId.value, qtype: filterType.value || undefined,
       catalog: filterCatalog.value || undefined,
-      status: filterStatus.value || undefined, search: search.value || undefined, page: page.value,
+      status: filterStatus.value || undefined, scene: filterScene.value || undefined,
+      search: search.value || undefined, page: page.value,
     })
     rows.value = data.results ?? data
     total.value = data.total ?? rows.value.length
@@ -326,7 +336,7 @@ function blankForm() {
     id: null, catalog: null, qtype: 'single', stem: '', image: '',
     options: [{ key: 'A', text: '' }, { key: 'B', text: '' }, { key: 'C', text: '' }, { key: 'D', text: '' }],
     answerKey: '', answerKeys: [], blanks: [{ text: '', score: 1 }], answerText: '',
-    analysis: '', score: 5, difficulty: 'medium', status: 'draft',
+    analysis: '', score: 5, difficulty: 'medium', status: 'draft', scenes: [...DEFAULT_SCENES],
   }
 }
 
@@ -337,6 +347,7 @@ function openEdit(row) {
     Object.assign(form, draftToForm({
       qtype: row.qtype, stem: row.stem, image: row.image, options: row.options,
       answer: row.answer, analysis: row.analysis, score: row.score, difficulty: row.difficulty,
+      scenes: row.scenes,
     }))
     form.id = row.id
     form.catalog = row.catalog
@@ -348,6 +359,7 @@ function openEdit(row) {
 async function save(publish = false) {
   if (!form.stem?.trim()) return ElMessage.warning('请填写题干')
   if (!form.catalog) return ElMessage.warning('请选择题目所属章节')
+  if (!form.scenes?.length) return ElMessage.warning('请至少选择一个用途分类')
   const normalized = formFields.value?.normalize() || {}
   if (form.qtype === 'blank') {
     const filled = normalized.answer?.blanks || []
@@ -473,6 +485,7 @@ function onBatchSaved() {
   filterType.value = ''
   filterStatus.value = ''
   filterCatalog.value = null
+  filterScene.value = ''
   search.value = ''
   page.value = 1
   load()
