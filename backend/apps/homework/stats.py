@@ -191,6 +191,7 @@ def build_homework_stats(homework: Homework) -> dict:
                 "qtype": qtype,
                 "qtype_display": snapshot.get("qtype_display") or qtype,
                 "stem": snapshot.get("stem") or "",
+                "image_url": snapshot.get("image_url") or "",
                 "score": full,
                 "answered_n": n,
                 "avg_score": round(sum(item["scores"]) / n, 1) if n else None,
