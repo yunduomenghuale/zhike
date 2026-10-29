@@ -203,6 +203,15 @@ TEACHER_AI_THROTTLE_RATES = {
 if "test" in sys.argv:
     TEACHER_AI_THROTTLE_RATES = {scope: None for scope in TEACHER_AI_THROTTLE_RATES}
 
+# 教师端班级学习数据 Excel 导出限流（analytics/throttles.py）
+TEACHER_EXPORT_THROTTLE_RATES = {
+    "teacher_export": "10/min",
+}
+
+# 测试运行同样关闭导出限流
+if "test" in sys.argv:
+    TEACHER_EXPORT_THROTTLE_RATES = {scope: None for scope in TEACHER_EXPORT_THROTTLE_RATES}
+
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=12),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),

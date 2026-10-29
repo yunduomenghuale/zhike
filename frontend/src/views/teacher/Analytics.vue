@@ -8,6 +8,14 @@
         </el-select>
       </div>
       <div class="an-toolbar-actions">
+        <el-button
+          class="an-history-btn an-export-btn"
+          :icon="Download"
+          :disabled="!classId"
+          @click="openExportDialog"
+        >
+          导出 Excel
+        </el-button>
         <el-button class="an-history-btn" :icon="Clock" :disabled="!classId" @click="openHistory">
           历史报告
         </el-button>
@@ -200,6 +208,65 @@
       </template>
     </template>
 
+    <!-- 导出学习数据：先配置范围与内容再导出（避免"点了就全量下载"的盲盒体验） -->
+    <el-dialog
+      v-model="exportVisible"
+      title="导出学习数据"
+      width="560px"
+      class="an-export-dialog"
+      :close-on-click-modal="false"
+    >
+      <div class="exp-block">
+        <div class="exp-label">时间范围</div>
+        <el-radio-group v-model="exportPreset" class="exp-presets">
+          <el-radio-button value="all">全部时间</el-radio-button>
+          <el-radio-button value="7d">近 7 天</el-radio-button>
+          <el-radio-button value="30d">近 30 天</el-radio-button>
+          <el-radio-button value="custom">自定义</el-radio-button>
+        </el-radio-group>
+        <el-date-picker
+          v-if="exportPreset === 'custom'"
+          v-model="exportRange"
+          type="daterange"
+          value-format="YYYY-MM-DD"
+          start-placeholder="开始日期"
+          end-placeholder="结束日期"
+          class="exp-range"
+        />
+        <div class="exp-hint">{{ exportRangeHint }}</div>
+      </div>
+
+      <div class="exp-block">
+        <div class="exp-label">
+          导出内容
+          <el-checkbox
+            class="exp-all"
+            :model-value="allSectionsChecked"
+            :indeterminate="someSectionsChecked"
+            @change="toggleAllSections"
+          >
+            全选
+          </el-checkbox>
+        </div>
+        <el-checkbox-group v-model="exportSections" class="exp-sections">
+          <el-checkbox
+            v-for="s in SECTION_OPTIONS"
+            :key="s.key"
+            :value="s.key"
+            :disabled="s.key === 'overview'"
+          >
+            {{ s.label }}
+          </el-checkbox>
+        </el-checkbox-group>
+        <div class="exp-hint">{{ exportSummaryHint }}</div>
+      </div>
+
+      <template #footer>
+        <el-button @click="exportVisible = false">取消</el-button>
+        <el-button type="primary" :loading="exporting" @click="doExport">开始导出</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 历史报告列表（按 AITask 查，点击回看完整报告） -->
     <el-dialog v-model="historyVisible" title="历史报告" width="720px" class="an-history-dialog">
       <div v-loading="historyLoading" class="history-list">
@@ -238,12 +305,12 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { MagicStick, Loading, WarningFilled, Clock, Search, ArrowRight } from '@element-plus/icons-vue'
+import { MagicStick, Loading, WarningFilled, Clock, Search, ArrowRight, Download } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { renderAiMarkdown } from '@/utils/markdown'
 import { sortedCourseNames } from '@/utils/course-sort'
 import { listClasses } from '@/api/classroom'
-import { getClassStats, generateClassAiReport, getClassAiReportHistory } from '@/api/analytics'
+import { getClassStats, generateClassAiReport, getClassAiReportHistory, downloadClassExport } from '@/api/analytics'
 import { getAiTask } from '@/api/ai-task'
 import { useAiTaskPolling } from '@/composables/useAiTaskPolling'
 
@@ -481,6 +548,140 @@ function onClassChange() {
   resumeActiveTask() // 切班也可能有进行中的任务，同样恢复
 }
 
+// ---- 导出 Excel：弹窗先配置时间范围与内容（默认全量 + 全选，选择记忆到 localStorage）----
+const SECTION_OPTIONS = [
+  { key: 'overview', label: '成绩总览' },
+  { key: 'homework', label: '作业明细' },
+  { key: 'exam', label: '考试明细' },
+  { key: 'lab', label: '实验明细' },
+  { key: 'practice', label: '练习与错题' },
+  { key: 'qa', label: '问答与视频' },
+  { key: 'chapter', label: '章节矩阵' },
+]
+const ALL_SECTION_KEYS = SECTION_OPTIONS.map((s) => s.key)
+const EXPORT_PREF_KEY = 'zhike.classExportPrefs'
+
+const exportVisible = ref(false)
+const exporting = ref(false)
+const exportPreset = ref('all')
+const exportRange = ref(null)
+const exportSections = ref([...ALL_SECTION_KEYS])
+
+const allSectionsChecked = computed(() => exportSections.value.length === SECTION_OPTIONS.length)
+const someSectionsChecked = computed(
+  () => exportSections.value.length > 0 && !allSectionsChecked.value
+)
+function toggleAllSections(checked) {
+  exportSections.value = checked ? [...ALL_SECTION_KEYS] : ['overview']
+}
+
+function fmtDay(d) {
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+// 预设 → { start, end }（近 N 天含今天）；custom 无选择返回 null
+function presetRange(preset) {
+  if (preset === 'all') return {}
+  const today = new Date()
+  if (preset === '7d' || preset === '30d') {
+    const start = new Date(today)
+    start.setDate(today.getDate() - (preset === '7d' ? 6 : 29))
+    return { start: fmtDay(start), end: fmtDay(today) }
+  }
+  const r = exportRange.value
+  if (!Array.isArray(r) || !r[0]) return null
+  return { start: r[0], end: r[1] }
+}
+
+// 范围文案：让教师明确「这次导的是哪段时间的数据」
+const exportRangeHint = computed(() => {
+  const r = presetRange(exportPreset.value)
+  if (r === null) return '请选择开始与结束日期（含首尾两天）'
+  if (!r.start) return '全部时间：导出该班全部历史学习数据'
+  if (exportPreset.value === 'custom') return `${r.start} ~ ${r.end}`
+  return `${r.start} ~ ${r.end}（近 ${exportPreset.value === '7d' ? 7 : 30} 天）`
+})
+
+const exportSummaryHint = computed(() => {
+  const labels = SECTION_OPTIONS.filter((s) => exportSections.value.includes(s.key)).map((s) => s.label)
+  const stu = students.value.length
+  // 任务规模取自班级统计（每生行的 homework_total / exam_total / experiment_total 是同一份清单长度）
+  const first = students.value[0] || {}
+  const parts = []
+  if (exportSections.value.includes('homework') && first.homework_total) parts.push(`作业 ${first.homework_total} 次`)
+  if (exportSections.value.includes('exam') && first.exam_total) parts.push(`考试 ${first.exam_total} 场`)
+  if (exportSections.value.includes('lab') && first.experiment_total) parts.push(`实验 ${first.experiment_total} 个`)
+  const scale = parts.length ? `（${parts.join(' · ')}）` : ''
+  return `将导出 ${stu} 名学生 · ${labels.length} 个表：${labels.join('、')}${scale}`
+})
+
+function loadExportPrefs() {
+  try {
+    const raw = localStorage.getItem(EXPORT_PREF_KEY)
+    if (!raw) return
+    const prefs = JSON.parse(raw) || {}
+    if (['all', '7d', '30d', 'custom'].includes(prefs.preset)) exportPreset.value = prefs.preset
+    if (Array.isArray(prefs.sections) && prefs.sections.length) {
+      const valid = prefs.sections.filter((k) => ALL_SECTION_KEYS.includes(k))
+      exportSections.value = Array.from(new Set(['overview', ...valid]))
+    }
+  } catch {
+    // 本地偏好损坏则用默认值，不影响导出
+  }
+}
+function saveExportPrefs() {
+  try {
+    localStorage.setItem(
+      EXPORT_PREF_KEY,
+      JSON.stringify({ preset: exportPreset.value, sections: exportSections.value })
+    )
+  } catch {
+    // 存不了就算了（隐私模式）
+  }
+}
+
+function openExportDialog() {
+  if (!classId.value) return
+  loadExportPrefs()
+  exportVisible.value = true
+}
+
+async function doExport() {
+  if (!classId.value || exporting.value) return
+  const range = presetRange(exportPreset.value)
+  if (range === null) {
+    ElMessage.warning('请选择时间范围')
+    return
+  }
+  exportSections.value = Array.from(new Set(['overview', ...exportSections.value]))
+  saveExportPrefs()
+  exporting.value = true
+  try {
+    const params = { sheets: exportSections.value.join(',') }
+    if (activeCourseId()) params.course = activeCourseId()
+    if (range.start) {
+      params.start = range.start
+      params.end = range.end
+    }
+    await downloadClassExport(classId.value, params)
+    exportVisible.value = false
+    ElMessage.success('导出成功')
+  } catch (err) {
+    let msg = '导出失败'
+    const data = err?.response?.data
+    if (data instanceof Blob) {
+      try {
+        msg = JSON.parse(await data.text())?.message || msg
+      } catch {
+        // 非 JSON 错误体，保持默认提示
+      }
+    }
+    ElMessage.error(msg)
+  } finally {
+    exporting.value = false
+  }
+}
+
 async function generateReport() {
   if (!classId.value || aiBusy.value) return
   historyTask.value = null // 生成新报告即退出历史查看，回到当前任务口径
@@ -568,6 +769,48 @@ onMounted(loadClasses)
 .an-primary-btn:hover {
   transform: translateY(-1px);
   box-shadow: 0 6px 14px rgba(37, 99, 235, 0.2);
+}
+/* ===== 导出配置弹窗 ===== */
+.exp-block {
+  margin-bottom: 18px;
+}
+.exp-block:last-child {
+  margin-bottom: 0;
+}
+.exp-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gray-700);
+}
+.exp-presets {
+  width: 100%;
+}
+.exp-range {
+  width: 100% !important;
+  margin-top: 10px;
+}
+.exp-hint {
+  margin-top: 8px;
+  color: var(--gray-400);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.exp-all {
+  font-weight: 400;
+  font-size: 12.5px;
+}
+.exp-sections {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 0;
+}
+.exp-sections :deep(.el-checkbox) {
+  width: 33.33%;
+  margin-right: 0;
 }
 .an-history-btn {
   height: 40px;

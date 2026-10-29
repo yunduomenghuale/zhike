@@ -3,6 +3,8 @@
 本模块无自有模型，纯聚合其它模块数据。
 班级统计逻辑收敛在 services.build_class_stats（教师端督管与平台端督管共用）。
 """
+import io
+
 from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework import serializers
@@ -18,6 +20,7 @@ from apps.labs.models import Lab, LabSubmission
 from apps.questions.models import AnswerRecord, Question
 
 from .services import build_class_stats
+from .throttles import TeacherExportThrottle
 
 
 class AnalyticsResponseSerializer(serializers.Serializer):
@@ -57,6 +60,54 @@ class ClassStatsView(APIView):
         if error:
             return error
         return api_response(build_class_stats(classroom, course.id))
+
+
+class ClassExportView(APIView):
+    """班级学习数据 Excel 导出（教师端学情分析页「导出 Excel」弹窗）。
+
+    GET /api/analytics/class/<id>/export/?course=&start=&end=&sheets=
+    教师视角全量口径（不受 score_released / correct_status 门控）；
+    start/end 过滤行为发生时间（练习/作业/考试/实验提交、问答创建、视频进度更新），
+    不传 = 全量；sheets 为逗号分隔的内容 key（不传 = 全部，overview 恒导出）。
+    Sheet 口径见 export.py 模块 docstring。
+    """
+
+    permission_classes = [IsTeacher]
+    throttle_classes = [TeacherExportThrottle]
+
+    def get(self, request, class_id):
+        from urllib.parse import quote
+
+        from django.http import FileResponse
+
+        from .export import build_class_export_workbook, parse_export_range, parse_sections
+
+        classroom, course, error = _resolve_classroom_course(request, class_id)
+        if error:
+            return error
+
+        start, end, range_error = parse_export_range(request.query_params)
+        if range_error:
+            return api_response(message=range_error, code=400, status=400)
+
+        sections, section_error = parse_sections(request.query_params.get("sheets"))
+        if section_error:
+            return api_response(message=section_error, code=400, status=400)
+
+        wb = build_class_export_workbook(classroom, course, start=start, end=end, sections=sections)
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+
+        filename = f"{classroom.name}_{course.name}_学习数据导出_{timezone.localtime():%Y%m%d_%H%M%S}.xlsx"
+        response = FileResponse(
+            buffer,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = (
+            f"attachment; filename=export.xlsx; filename*=UTF-8''{quote(filename)}"
+        )
+        return response
 
 
 class ClassAIReportView(APIView):

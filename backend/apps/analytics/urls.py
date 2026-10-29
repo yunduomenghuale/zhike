@@ -5,6 +5,7 @@ from .views import (
     ClassAIReportHistoryView,
     ClassAIReportView,
     ClassChapterSummariesView,
+    ClassExportView,
     ClassStatsView,
     ClassStudentDetailView,
     MyWrongQuestionsView,
@@ -12,6 +13,7 @@ from .views import (
 
 urlpatterns = [
     path("class/<int:class_id>/", ClassStatsView.as_view(), name="class-stats"),
+    path("class/<int:class_id>/export/", ClassExportView.as_view(), name="class-export"),
     path("class/<int:class_id>/ai-report/", ClassAIReportView.as_view(), name="class-ai-report"),
     path(
         "class/<int:class_id>/ai-reports/",
