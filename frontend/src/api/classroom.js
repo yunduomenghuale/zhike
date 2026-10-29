@@ -5,6 +5,9 @@ export const listClasses = (params) => request.get('/classes/', { params })
 export const getClass = (id) => request.get(`/classes/${id}/`)
 export const createClass = (data) => request.post('/classes/', data)
 export const updateClass = (id, data) => request.put(`/classes/${id}/`, data)
+// 局部更新：教师选班只提交 courses（PUT 会因缺必填字段 400，且带全量字段会被
+// 后端的组织字段校验挡下）
+export const patchClass = (id, data) => request.patch(`/classes/${id}/`, data)
 export const deleteClass = (id) => request.delete(`/classes/${id}/`)
 // 邀请码入班已于 P1 下线（/classes/join/ 返回 410），前端不再调用
 

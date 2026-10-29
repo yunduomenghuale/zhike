@@ -34,6 +34,7 @@
 
           <div class="course-actions" @click.stop>
             <el-button text circle :icon="Edit" @click="openDialog(row)" />
+            <el-button text circle :icon="CopyDocument" title="复用课程" @click="openReuse(row)" />
             <el-button text circle type="danger" :icon="Delete" title="删除课程" @click="openDelete(row)" />
           </div>
           <el-icon class="course-arrow"><ArrowRightBold /></el-icon>
@@ -252,6 +253,8 @@
       </template>
     </el-dialog>
 
+    <CourseReuseDialog v-model="reuseVisible" :course="reuseTarget" @done="load" />
+
     <DeleteConfirmDialog
       v-model="deleteVisible"
       title="删除课程"
@@ -269,6 +272,7 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowRightBold,
   Collection,
+  CopyDocument,
   Delete,
   Document,
   Edit,
@@ -281,6 +285,7 @@ import { ElMessage } from 'element-plus'
 import TableSkeleton from '@/components/TableSkeleton.vue'
 import { genUid } from '@/utils/uid'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
+import CourseReuseDialog from '@/components/CourseReuseDialog.vue'
 import {
   listCourses,
   createCourse,
@@ -306,6 +311,8 @@ const editing = ref(null)
 const deleteVisible = ref(false)
 const deleteTarget = ref(null)
 const deleting = ref(false)
+const reuseVisible = ref(false)
+const reuseTarget = ref(null)
 const form = reactive({ name: '', term: '', intro: '', status: 'active' })
 
 const catalogVisible = ref(false)
@@ -556,6 +563,11 @@ function cloneToManual(tree) {
 function openDelete(row) {
   deleteTarget.value = row
   deleteVisible.value = true
+}
+
+function openReuse(row) {
+  reuseTarget.value = row
+  reuseVisible.value = true
 }
 
 async function confirmDelete() {

@@ -6,6 +6,12 @@ export const createCourse = (data) => request.post('/courses/', data)
 export const updateCourse = (id, data) => request.put(`/courses/${id}/`, data)
 export const deleteCourse = (id) => request.delete(`/courses/${id}/`)
 
+// ===== 课程复用（把一门课的资产整份复制到新课程，异步任务） =====
+// 预览：资产数量与 media 体积 + 学期候选（用于弹窗初始化）
+export const getReusePreview = (courseId) => request.get(`/courses/${courseId}/reuse-preview/`)
+// 提交：秒返 task_id，进度走 /ai-tasks/<id>/ 轮询
+export const reuseCourse = (courseId, data) => request.post(`/courses/${courseId}/reuse/`, data)
+
 // 课程目录（章节）
 export const createCatalog = (data) => request.post('/catalogs/', data)
 export const updateCatalog = (id, data) => request.patch(`/catalogs/${id}/`, data)

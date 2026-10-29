@@ -46,6 +46,12 @@
             <el-button text circle :icon="EditPen" title="编辑班级" @click="openEdit(row)" />
             <el-button text circle type="danger" :icon="Delete" title="删除班级" @click="openDelete(row, 'class')" />
           </template>
+          <template v-else>
+            <span class="action-divider"></span>
+            <el-button link type="primary" :icon="Collection" class="class-bind-entry" @click="openBind(row)">
+              课程
+            </el-button>
+          </template>
         </div>
       </article>
     </div>
@@ -127,6 +133,65 @@
       </template>
     </el-dialog>
 
+    <!-- 教师选班（P1 偏差收口）：把自己的课挂进这个班，走班级侧 PATCH courses 追加语义 -->
+    <el-drawer
+      v-model="bindVisible"
+      title="为该班级分配课程"
+      size="440px"
+      class="class-bind-drawer"
+      :close-on-click-modal="false"
+    >
+      <div class="bind-body">
+        <div class="bind-class">
+          <span class="bind-class-name">{{ bindTarget?.name }}</span>
+          <span class="bind-class-note">
+            {{ bindTarget?.student_count || 0 }} 名学生 · 勾选后学生端即可看到课程
+          </span>
+        </div>
+
+        <div class="bind-section-title">我的课程</div>
+        <div class="bind-list">
+          <label
+            v-for="course in courses"
+            :key="course.id"
+            class="bind-item"
+            :class="{ 'is-bound': bindState.bound.includes(course.id), 'is-picked': bindState.picked.includes(course.id) }"
+          >
+            <el-checkbox
+              :model-value="bindState.bound.includes(course.id) || bindState.picked.includes(course.id)"
+              :disabled="bindState.bound.includes(course.id) || binding"
+              @change="(checked) => togglePick(course.id, checked)"
+            />
+            <span class="bind-course-name">{{ course.name }}</span>
+            <el-tag v-if="bindState.bound.includes(course.id)" size="small" type="success" effect="light" round>
+              已加入
+            </el-tag>
+            <el-tag v-else-if="course.status !== 'active'" size="small" type="info" effect="plain" round>
+              停用
+            </el-tag>
+          </label>
+        </div>
+
+        <div class="bind-tip">
+          撤课需联系管理员（班级与课程的组织关系由学校统一维护）；这里只做追加，不会影响其他教师挂的课。
+        </div>
+      </div>
+
+      <template #footer>
+        <div class="bind-footer">
+          <el-button @click="bindVisible = false">取消</el-button>
+          <el-button
+            type="primary"
+            :loading="binding"
+            :disabled="bindState.picked.length === 0"
+            @click="saveBind"
+          >
+            加入 {{ bindState.picked.length ? `${bindState.picked.length} 门课程` : '课程' }}
+          </el-button>
+        </div>
+      </template>
+    </el-drawer>
+
     <!-- 班级批量导入（仅管理端可见）：上传 → 预览 → 结果 -->
     <ImportWizard v-if="isAdmin" v-model="importVisible" kind="class" @done="reloadAfterImport" />
 
@@ -146,7 +211,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, Delete, EditPen, User, School, Close, InfoFilled, Upload } from '@element-plus/icons-vue'
+import { Plus, Delete, EditPen, User, School, Close, InfoFilled, Upload, Collection } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
 import ImportWizard from '@/components/admin/ImportWizard.vue'
@@ -155,7 +220,7 @@ import { listCourses } from '@/api/course'
 import { compareCourseName } from '@/utils/course-sort'
 import { useUserStore } from '@/store/user'
 import {
-  listClasses, createClass, updateClass, deleteClass,
+  listClasses, createClass, updateClass, patchClass, deleteClass,
 } from '@/api/classroom'
 
 // 组织层（建班 / 改班 / 删班）只对管理员开放；教师进这个页面看到的是只读名单。
@@ -173,7 +238,8 @@ const page = ref(1)
 const pageSize = 20
 
 async function loadCourses() {
-  const data = await listCourses()
+  // 选班抽屉与班级编辑都要一次拿全，默认分页 20 会漏课
+  const data = await listCourses({ page_size: 100 })
   courses.value = data.results ?? data
 }
 async function load() {
@@ -264,6 +330,41 @@ async function save() {
     saving.value = false
   }
 }
+// ---- 教师选班（把自己的课挂进班级）----
+const bindVisible = ref(false)
+const bindTarget = ref(null)
+const binding = ref(false)
+const bindState = reactive({ bound: [], picked: [] })
+
+function openBind(row) {
+  bindTarget.value = row
+  bindState.bound = [...(row?.courses || [])]
+  bindState.picked = []
+  bindVisible.value = true
+}
+
+function togglePick(courseId, checked) {
+  if (checked) {
+    if (!bindState.picked.includes(courseId)) bindState.picked.push(courseId)
+  } else {
+    bindState.picked = bindState.picked.filter((id) => id !== courseId)
+  }
+}
+
+async function saveBind() {
+  if (!bindTarget.value || !bindState.picked.length) return
+  binding.value = true
+  try {
+    // 只提交新增的课：后端对教师是「追加」语义，会把它们与班内已有课程合并
+    await patchClass(bindTarget.value.id, { courses: bindState.picked })
+    ElMessage.success('已加入班级')
+    bindVisible.value = false
+    await load()
+  } finally {
+    binding.value = false
+  }
+}
+
 const deleteVisible = ref(false)
 const deleteTarget = ref(null)
 const deleting = ref(false)
@@ -700,5 +801,95 @@ onMounted(() => { loadCourses(); load() })
     justify-content: flex-end;
     box-sizing: border-box;
   }
+}
+
+/* ---- 教师选班抽屉 ---- */
+.bind-body {
+  display: grid;
+  gap: 14px;
+}
+
+.bind-class {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #f5f9ff;
+  border: 1px solid rgba(147, 197, 253, 0.35);
+}
+
+.bind-class-name {
+  font-size: 15px;
+  font-weight: 720;
+  color: var(--gray-900);
+}
+
+.bind-class-note {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.bind-section-title {
+  font-size: 13px;
+  font-weight: 650;
+  color: #475569;
+}
+
+.bind-list {
+  display: grid;
+  gap: 8px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.bind-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--gray-100);
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+  transition: border-color 0.18s ease, background-color 0.18s ease;
+}
+
+.bind-item:hover {
+  border-color: var(--el-color-primary-light-5);
+}
+
+.bind-item.is-picked {
+  border-color: var(--el-color-primary-light-3);
+  background: #f5f9ff;
+}
+
+.bind-item.is-bound {
+  background: #f7faf8;
+  cursor: default;
+}
+
+.bind-course-name {
+  min-width: 0;
+  flex: 1;
+  font-size: 14px;
+  color: var(--gray-900);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bind-tip {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--el-fill-color-light);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
+}
+
+.bind-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 </style>
