@@ -3,148 +3,184 @@
     <div class="page-header">
       <div>
         <div class="page-title">教学资源</div>
-        <div class="page-subtitle">思维导图/交互演示为平台预置页，文档支持上传 pdf / doc / docx（≤100MB），发布后学生课程内可见</div>
+        <div class="page-subtitle">思维导图、交互演示与文档直接归属课程，发布后学生课程内可见</div>
       </div>
     </div>
 
-    <!-- 思维导图 / 交互演示（平台预置页引用） -->
-    <el-card shadow="never" class="mb12 res-panel">
-      <template #header><span>思维导图 / 交互演示</span></template>
-      <el-form :model="resForm" label-width="90px" style="max-width: 720px" class="mb12">
+    <!-- 工具栏：类型分段（带计数）+ 搜索 + 状态筛选 + 添加资源 -->
+    <div class="res-toolbar">
+      <div class="kind-tabs">
+        <button
+          v-for="t in kindTabs"
+          :key="t.value"
+          type="button"
+          class="kind-tab"
+          :class="{ active: kindFilter === t.value }"
+          @click="kindFilter = t.value"
+        >
+          {{ t.label }}<span class="tab-count">{{ t.count }}</span>
+        </button>
+      </div>
+      <span class="toolbar-spacer" />
+      <el-input
+        v-model.trim="keyword"
+        placeholder="搜索资源标题 / 文件名"
+        clearable
+        class="toolbar-search"
+        :prefix-icon="Search"
+      />
+      <el-select v-model="statusFilter" class="toolbar-status" placeholder="状态：全部">
+        <el-option label="状态：全部" value="" />
+        <el-option label="已发布" value="published" />
+        <el-option label="未发布" value="unpublished" />
+      </el-select>
+      <el-button type="primary" :icon="Plus" @click="openAddDialog">添加资源</el-button>
+    </div>
+
+    <!-- 统一资源表格（三种类型同表，前端即时过滤） -->
+    <el-card shadow="never" class="res-panel">
+      <el-table :data="filteredResources" v-loading="loadingRes" size="small" class="compact-table">
+        <el-table-column label="资源" min-width="220">
+          <template #default="{ row }">
+            <div class="res-cell">
+              <span class="res-badge" :class="'kind-' + row.kind">
+                <el-icon :size="15"><component :is="kindIcon(row.kind)" /></el-icon>
+              </span>
+              <span class="res-text">
+                <span class="res-title" :title="row.title">{{ row.title }}</span>
+                <span class="res-sub" :title="row.kind === 'document' ? row.file_name : row.path">
+                  {{ row.kind === 'document' ? (row.file_name || '—') : row.path }}
+                </span>
+              </span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="类型" width="92">
+          <template #default="{ row }">
+            <el-tag :type="kindTagType(row.kind)" size="small" effect="light">{{ row.kind_display }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="大小" width="90">
+          <template #default="{ row }">
+            <span v-if="row.kind === 'document'">{{ fmtSize(row.file_size) }}</span>
+            <span v-else class="muted-cell">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="发布" width="72" align="center">
+          <template #default="{ row }">
+            <el-switch
+              :model-value="row.is_published"
+              :loading="row._toggling"
+              inline-prompt
+              active-text="已发"
+              inactive-text="未发"
+              @change="togglePublish(row)"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="168" fixed="right" header-align="center">
+          <template #default="{ row }">
+            <div class="op-links">
+              <el-button link type="primary" size="small" @click="previewResource(row)">
+                {{ row.kind === 'document' && !isPdf(row) ? '下载' : '预览' }}
+              </el-button>
+              <el-button link type="primary" size="small" @click="copyResourceLink(row)">链接</el-button>
+              <el-button link type="danger" size="small" @click="removeRes(row)">删除</el-button>
+            </div>
+          </template>
+        </el-table-column>
+        <template #empty>
+          <el-empty :description="resources.length ? '没有匹配当前筛选的资源' : '暂无资源，点击右上角「添加资源」开始'" :image-size="80" />
+        </template>
+      </el-table>
+    </el-card>
+
+    <!-- 添加资源弹窗：第一步选类型，动态出表单 -->
+    <el-dialog
+      v-model="addVisible"
+      width="560px"
+      align-center
+      :show-close="false"
+      class="add-res-dialog"
+      :close-on-click-modal="false"
+    >
+      <template #header>
+        <div class="dialog-head">
+          <span class="dialog-title">添加资源</span>
+          <el-button text circle :icon="Close" @click="addVisible = false" />
+        </div>
+      </template>
+
+      <el-form label-position="top">
         <el-form-item label="资源类型" required>
-          <el-radio-group v-model="resForm.kind">
+          <el-radio-group v-model="addForm.kind">
             <el-radio-button value="mindmap">思维导图</el-radio-button>
             <el-radio-button value="demo">交互演示</el-radio-button>
+            <el-radio-button value="document">文档</el-radio-button>
           </el-radio-group>
         </el-form-item>
-        <el-form-item label="平台页面" required>
-          <el-select v-model="resForm.path" filterable placeholder="选择预置静态页" style="width: 100%">
-            <el-option
-              v-for="p in availablePaths"
-              :key="p.value"
-              :value="p.value"
-              :label="p.label"
-            />
-          </el-select>
-          <el-button
-            v-if="resForm.path"
-            link
-            type="primary"
-            :loading="presetPreviewing"
-            @click="previewPreset"
-          >
-            <el-icon class="path-icon"><Link /></el-icon>
-            预览该页面
-          </el-button>
-          <span v-if="resForm.path" class="form-tip">预置页：{{ resForm.path }}</span>
-          <span v-else class="form-tip">页面为平台预置，选择后可先预览再添加</span>
-        </el-form-item>
-        <el-form-item label="资源标题">
-          <el-input v-model="resForm.title" placeholder="留空默认取页面文件名" style="max-width: 420px" />
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" :loading="creating" @click="createResource">添加资源</el-button>
-        </el-form-item>
+
+        <template v-if="addForm.kind !== 'document'">
+          <el-form-item label="平台页面" required>
+            <el-select v-model="addForm.path" filterable placeholder="选择预置静态页" style="width: 100%">
+              <el-option v-for="p in availablePaths" :key="p.value" :value="p.value" :label="p.label" />
+            </el-select>
+            <div class="form-extra">
+              <el-button
+                v-if="addForm.path"
+                link
+                type="primary"
+                :loading="presetPreviewing"
+                @click="previewPreset"
+              >
+                <el-icon class="path-icon"><Link /></el-icon>
+                预览该页面
+              </el-button>
+              <span v-if="addForm.path" class="form-tip">预置页：{{ addForm.path }}</span>
+              <span v-else class="form-tip">页面为平台预置，选择后可先预览再添加</span>
+            </div>
+          </el-form-item>
+          <el-form-item label="资源标题">
+            <el-input v-model="addForm.title" placeholder="留空默认取页面名称" />
+          </el-form-item>
+        </template>
+
+        <template v-else>
+          <el-form-item label="文档文件" required>
+            <input ref="docFileEl" type="file" accept=".pdf,.doc,.docx" class="file-input" @change="onDocPicked" />
+            <div class="form-extra">
+              <span class="form-tip">支持 PDF / DOC / DOCX，单个不超过 100MB；PDF 学生端可在线预览，DOC/DOCX 下载查看</span>
+            </div>
+            <el-progress v-if="uploading" :percentage="uploadPercent" :stroke-width="8" class="upload-progress" />
+          </el-form-item>
+          <el-form-item label="资源标题" required>
+            <el-input v-model="addForm.title" placeholder="例如：计算机网络复习大纲" />
+          </el-form-item>
+        </template>
       </el-form>
 
-      <el-table :data="presetResources" v-loading="loadingRes" size="small" class="compact-table">
-        <el-table-column prop="title" label="标题" min-width="170" show-overflow-tooltip />
-        <el-table-column label="类型" width="90">
-          <template #default="{ row }">
-            <el-tag :type="row.kind === 'mindmap' ? 'primary' : 'success'" size="small">{{ row.kind_display }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="页面地址" width="150">
-          <template #default="{ row }">
-            <!-- 每条资源的访问链接唯一（按令牌）；点击经签名后新窗口打开 -->
-            <el-link
-              type="primary"
-              :underline="false"
-              :href="row.url"
-              target="_blank"
-              class="path-link res-url-link"
-              :title="row.url"
-              @click.prevent="openSignedPage(row)"
-            >
-              <el-icon class="path-icon"><Link /></el-icon>
-              {{ shortToken(row.url) }}
-            </el-link>
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" width="80">
-          <template #default="{ row }">
-            <el-tag :type="row.is_published ? 'success' : 'info'" size="small">{{ row.is_published ? '已发布' : '未发布' }}</el-tag>
-          </template>
-        </el-table-column>
-        <!-- 操作列：4 个按钮全部平铺（预览/发布/复制链接/删除），不再收进 ⋯ 下拉；列头居中 -->
-        <el-table-column label="操作" width="330" fixed="right" header-align="center">
-          <template #default="{ row }">
-            <div class="op-cell">
-              <el-button @click="previewResource(row)">预览</el-button>
-              <el-button v-if="!row.is_published" type="success" @click="publishRes(row)">发布</el-button>
-              <el-button v-else type="warning" @click="unpublishRes(row)">下架</el-button>
-              <el-button @click="copyResourceLink(row)">复制链接</el-button>
-              <el-button @click="removeRes(row)">删除</el-button>
-            </div>
-          </template>
-        </el-table-column>
-      </el-table>
-      <div v-if="!loadingRes && !presetResources.length" class="table-empty">暂无预置资源，添加后显示在这里</div>
-    </el-card>
-
-    <!-- 文档资源（教师上传 pdf/doc/docx） -->
-    <el-card shadow="never" class="res-panel">
-      <template #header><span>文档资源</span></template>
-      <el-form label-width="90px" style="max-width: 720px" class="mb12">
-        <el-form-item label="文档文件" required>
-          <input ref="docFileEl" type="file" accept=".pdf,.doc,.docx" @change="onDocPicked" />
-          <span class="form-tip">支持 PDF / DOC / DOCX，单个不超过 100MB；PDF 学生端可直接预览，DOC/DOCX 下载查看</span>
-        </el-form-item>
-        <el-form-item label="资源标题" required>
-          <el-input v-model="docForm.title" placeholder="例如：计算机网络复习大纲" style="max-width: 420px" />
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" :loading="uploading" :disabled="!docForm.file" @click="uploadDocument">
-            {{ uploading ? `上传中 ${uploadPercent}%` : '上传文档' }}
-          </el-button>
-        </el-form-item>
-      </el-form>
-
-      <el-table v-if="documentResources.length" :data="documentResources" v-loading="loadingRes" size="small" class="compact-table">
-        <el-table-column prop="title" label="标题" min-width="160" show-overflow-tooltip />
-        <el-table-column label="文件名" min-width="150" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.file_name || '—' }}</template>
-        </el-table-column>
-        <el-table-column label="大小" width="96">
-          <template #default="{ row }">{{ fmtSize(row.file_size) }}</template>
-        </el-table-column>
-        <el-table-column label="状态" width="80">
-          <template #default="{ row }">
-            <el-tag :type="row.is_published ? 'success' : 'info'" size="small">{{ row.is_published ? '已发布' : '未发布' }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="330" fixed="right" header-align="center">
-          <template #default="{ row }">
-            <div class="op-cell">
-              <el-button @click="previewResource(row)">{{ isPdf(row) ? '预览' : '下载' }}</el-button>
-              <el-button v-if="!row.is_published" type="success" @click="publishRes(row)">发布</el-button>
-              <el-button v-else type="warning" @click="unpublishRes(row)">下架</el-button>
-              <el-button @click="copyResourceLink(row)">复制链接</el-button>
-              <el-button @click="removeRes(row)">删除</el-button>
-            </div>
-          </template>
-        </el-table-column>
-      </el-table>
-      <div v-else-if="!loadingRes" class="table-empty">暂无文档，上传后显示在这里</div>
-    </el-card>
+      <template #footer>
+        <el-button @click="addVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="creating || uploading"
+          :disabled="addForm.kind === 'document' ? !addForm.file : !addForm.path"
+          @click="confirmAdd"
+        >
+          {{ addForm.kind === 'document' ? '上传并添加' : '添加资源' }}
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Link } from '@element-plus/icons-vue'
+import {
+  Close, Connection, Document, Link, MagicStick, Plus, Search,
+} from '@element-plus/icons-vue'
 import {
   listCourseResources, createCourseResource, deleteCourseResource,
   publishCourseResource, unpublishCourseResource,
@@ -181,34 +217,46 @@ const PRESET_PAGES = [
   { value: 'demos/transmission-media-comparison.html', label: '演示：传输介质对比', kind: 'demo' },
 ]
 
-const resForm = ref({ kind: 'mindmap', path: '', title: '' })
-const availablePaths = computed(() => PRESET_PAGES.filter((p) => p.kind === resForm.value.kind))
+const KIND_LABELS = { mindmap: '思维导图', demo: '交互演示', document: '文档' }
 
+// ---- 列表数据与过滤 ----
 const resources = ref([])
 const loadingRes = ref(false)
-const creating = ref(false)
-const presetPreviewing = ref(false)
+const kindFilter = ref('')
+const keyword = ref('')
+const statusFilter = ref('')
 
-const docForm = ref({ file: null, title: '' })
-const docFileEl = ref(null)
-const uploading = ref(false)
-const uploadPercent = ref(0)
+const kindTabs = computed(() => [
+  { value: '', label: '全部', count: resources.value.length },
+  { value: 'mindmap', label: '思维导图', count: resources.value.filter((r) => r.kind === 'mindmap').length },
+  { value: 'demo', label: '交互演示', count: resources.value.filter((r) => r.kind === 'demo').length },
+  { value: 'document', label: '文档', count: resources.value.filter((r) => r.kind === 'document').length },
+])
 
-const presetResources = computed(() => resources.value.filter((r) => r.kind !== 'document'))
-const documentResources = computed(() => resources.value.filter((r) => r.kind === 'document'))
+const filteredResources = computed(() => {
+  const kw = keyword.value.toLowerCase()
+  return resources.value.filter((r) => {
+    if (kindFilter.value && r.kind !== kindFilter.value) return false
+    if (statusFilter.value === 'published' && !r.is_published) return false
+    if (statusFilter.value === 'unpublished' && r.is_published) return false
+    if (kw) {
+      const hay = `${r.title} ${r.kind === 'document' ? r.file_name || '' : r.path}`.toLowerCase()
+      if (!hay.includes(kw)) return false
+    }
+    return true
+  })
+})
 
-function presetTitle(path) {
-  return PRESET_PAGES.find((p) => p.value === path)?.label || path
+function kindIcon(kind) {
+  return kind === 'mindmap' ? Connection : kind === 'demo' ? MagicStick : Document
+}
+
+function kindTagType(kind) {
+  return kind === 'mindmap' ? 'primary' : kind === 'demo' ? 'success' : 'warning'
 }
 
 function isPdf(row) {
   return (row.file_name || '').toLowerCase().endsWith('.pdf')
-}
-
-// 页面地址列展示短令牌（完整 URL 在 title 提示与复制链接里）
-function shortToken(url) {
-  const token = (url || '').replace('/api/course-resources/page/', '').replace('/', '')
-  return token.length > 8 ? `page/${token.slice(0, 8)}…` : `page/${token}`
 }
 
 async function loadResources() {
@@ -216,28 +264,77 @@ async function loadResources() {
   try {
     const res = await listCourseResources(courseId.value ? { course: courseId.value } : undefined)
     const data = res.results ?? res
-    resources.value = Array.isArray(data) ? data : data?.results ?? []
+    resources.value = (Array.isArray(data) ? data : data?.results ?? []).map((r) => ({ ...r, _toggling: false }))
   } finally {
     loadingRes.value = false
   }
 }
 
-async function createResource() {
-  if (!resForm.value.path) {
-    ElMessage.warning('请选择平台页面')
+// ---- 添加资源弹窗 ----
+const addVisible = ref(false)
+const creating = ref(false)
+const uploading = ref(false)
+const uploadPercent = ref(0)
+const presetPreviewing = ref(false)
+const docFileEl = ref(null)
+const addForm = reactive({ kind: 'mindmap', path: '', title: '', file: null })
+
+const availablePaths = computed(() => PRESET_PAGES.filter((p) => p.kind === addForm.kind))
+
+function openAddDialog() {
+  addForm.kind = 'mindmap'
+  addForm.path = ''
+  addForm.title = ''
+  addForm.file = null
+  uploadPercent.value = 0
+  addVisible.value = true
+}
+
+function presetTitle(path) {
+  return PRESET_PAGES.find((p) => p.value === path)?.label || path
+}
+
+const DOC_EXTS = ['.pdf', '.doc', '.docx']
+const DOC_MAX_SIZE = 100 * 1024 * 1024
+
+function onDocPicked(e) {
+  const file = e.target.files?.[0]
+  if (!file) return
+  const ext = '.' + (file.name.split('.').pop() || '').toLowerCase()
+  if (!DOC_EXTS.includes(ext)) {
+    ElMessage.error('仅支持 pdf / doc / docx 格式')
+    docFileEl.value.value = ''
+    return
+  }
+  if (file.size > DOC_MAX_SIZE) {
+    ElMessage.error('文档不能超过 100MB')
+    docFileEl.value.value = ''
+    return
+  }
+  if (file.size === 0) {
+    ElMessage.error('文档文件为空')
+    docFileEl.value.value = ''
+    return
+  }
+  addForm.file = file
+  if (!addForm.title) addForm.title = file.name.replace(/\.[^.]+$/, '')
+}
+
+async function confirmAdd() {
+  if (addForm.kind === 'document') {
+    await uploadDocument()
     return
   }
   creating.value = true
   try {
     await createCourseResource({
       course: courseId.value,
-      kind: resForm.value.kind,
-      title: resForm.value.title || presetTitle(resForm.value.path),
-      path: resForm.value.path,
+      kind: addForm.kind,
+      title: addForm.title.trim() || presetTitle(addForm.path),
+      path: addForm.path,
     })
     ElMessage.success('资源已添加')
-    resForm.value.path = ''
-    resForm.value.title = ''
+    addVisible.value = false
     await loadResources()
   } catch { /* 响应拦截器已提示具体错误（如重复添加） */ }
   finally {
@@ -245,8 +342,68 @@ async function createResource() {
   }
 }
 
+async function uploadDocument() {
+  if (!addForm.title.trim()) {
+    ElMessage.warning('请填写资源标题')
+    return
+  }
+  uploading.value = true
+  uploadPercent.value = 0
+  try {
+    await uploadCourseDocument({
+      course: courseId.value,
+      title: addForm.title.trim(),
+      file: addForm.file,
+      onProgress: (e) => {
+        if (e.total) uploadPercent.value = Math.round((e.loaded / e.total) * 100)
+      },
+    })
+    ElMessage.success('文档已上传')
+    addVisible.value = false
+    await loadResources()
+  } catch { /* 响应拦截器已提示具体错误 */ }
+  finally {
+    uploading.value = false
+  }
+}
+
+// 添加资源前预览平台预置页（教师签发，无需资源行）
+async function previewPreset() {
+  if (!addForm.path) return
+  presetPreviewing.value = true
+  const tab = openTabDeferred()
+  try {
+    const signed = await signPresetPage(addForm.path)
+    tab.open(signed.url)
+  } catch (e) {
+    tab.close()
+    ElMessage.error(e?.message || '预览失败，请稍后重试')
+  } finally {
+    presetPreviewing.value = false
+  }
+}
+
+// ---- 行操作 ----
+async function togglePublish(row) {
+  row._toggling = true
+  try {
+    if (row.is_published) {
+      await unpublishCourseResource(row.id)
+      row.is_published = false
+      ElMessage.success('已下架，学生端立即不可见')
+    } else {
+      await publishCourseResource(row.id)
+      row.is_published = true
+      ElMessage.success('已发布')
+    }
+  } catch { /* 拦截器已提示 */ }
+  finally {
+    row._toggling = false
+  }
+}
+
 async function previewResource(row) {
-  // 先签发唯一签名 URL 再打开；文档类签发 file 地址（PDF 新窗口内联预览，doc/docx 触发下载）
+  // 先签发唯一签名 URL 再打开；文档类签发 file 地址（PDF 查看器内预览，doc/docx 下载）
   const tab = openTabDeferred()
   let signed
   try {
@@ -271,20 +428,6 @@ async function previewResource(row) {
       back: 'course-resources',
     },
   })
-}
-
-// 页面地址列：签发后新窗口打开（每条资源链接唯一，未发布仅教师本人可签）
-async function openSignedPage(row) {
-  const tab = openTabDeferred()
-  let signed
-  try {
-    signed = await signCourseResource(row.id)
-  } catch (e) {
-    tab.close()
-    ElMessage.error(e?.message || '资源打开失败，请稍后重试')
-    return
-  }
-  tab.open(signed.url)
 }
 
 // 复制 2 小时内有效的访问链接（便于临时分享）
@@ -323,94 +466,14 @@ async function copyText(text) {
   }
 }
 
-// 添加资源前预览平台预置页（教师签发，无需资源行）
-async function previewPreset() {
-  if (!resForm.value.path) return
-  presetPreviewing.value = true
-  const tab = openTabDeferred()
-  try {
-    const signed = await signPresetPage(resForm.value.path)
-    tab.open(signed.url)
-  } catch (e) {
-    tab.close()
-    ElMessage.error(e?.message || '预览失败，请稍后重试')
-  } finally {
-    presetPreviewing.value = false
-  }
-}
-
-async function publishRes(row) {
-  await publishCourseResource(row.id)
-  ElMessage.success('已发布')
-  await loadResources()
-}
-
-async function unpublishRes(row) {
-  await unpublishCourseResource(row.id)
-  ElMessage.success('已下架')
-  await loadResources()
-}
-
 async function removeRes(row) {
   await ElMessageBox.confirm(
     `确认删除资源「${row.title}」？${row.kind === 'document' ? '上传的文件将一并删除，' : ''}不可恢复。`,
     '提示', { type: 'warning' },
   )
   await deleteCourseResource(row.id)
+  ElMessage.success('已删除')
   await loadResources()
-}
-
-// ---- 文档上传 ----
-const DOC_EXTS = ['.pdf', '.doc', '.docx']
-const DOC_MAX_SIZE = 100 * 1024 * 1024
-
-function onDocPicked(e) {
-  const file = e.target.files?.[0]
-  if (!file) return
-  const ext = '.' + (file.name.split('.').pop() || '').toLowerCase()
-  if (!DOC_EXTS.includes(ext)) {
-    ElMessage.error('仅支持 pdf / doc / docx 格式')
-    docFileEl.value.value = ''
-    return
-  }
-  if (file.size > DOC_MAX_SIZE) {
-    ElMessage.error('文档不能超过 100MB')
-    docFileEl.value.value = ''
-    return
-  }
-  if (file.size === 0) {
-    ElMessage.error('文档文件为空')
-    docFileEl.value.value = ''
-    return
-  }
-  docForm.value.file = file
-  if (!docForm.value.title) docForm.value.title = file.name.replace(/\.[^.]+$/, '')
-}
-
-async function uploadDocument() {
-  if (!docForm.value.file || !docForm.value.title.trim()) {
-    ElMessage.warning('请选择文件并填写标题')
-    return
-  }
-  uploading.value = true
-  uploadPercent.value = 0
-  try {
-    await uploadCourseDocument({
-      course: courseId.value,
-      title: docForm.value.title.trim(),
-      file: docForm.value.file,
-      onProgress: (e) => {
-        if (e.total) uploadPercent.value = Math.round((e.loaded / e.total) * 100)
-      },
-    })
-    ElMessage.success('文档已上传')
-    docForm.value = { file: null, title: '' }
-    docFileEl.value.value = ''
-    await loadResources()
-  } catch { /* 响应拦截器已提示具体错误 */ }
-  finally {
-    uploading.value = false
-  }
 }
 
 function fmtSize(bytes) {
@@ -429,42 +492,101 @@ onMounted(loadResources)
 </script>
 
 <style scoped>
-.mb12 { margin-bottom: 12px; }
-.form-tip { color: #94a3b8; font-size: 12px; margin-left: 10px; }
-.path-link { font-size: 12px; }
-.path-icon { margin-right: 4px; vertical-align: -2px; }
-.res-url-link { max-width: 100%; }
-.res-url-link :deep(.el-link__inner) {
-  display: inline-block;
-  max-width: 100%;
+/* ---- 工具栏 ---- */
+.res-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.kind-tabs {
+  display: flex;
+  gap: 4px;
+  background: #f1f5f9;
+  border-radius: 10px;
+  padding: 3px;
+}
+.kind-tab {
+  border: 0;
+  background: transparent;
+  border-radius: 8px;
+  padding: 5px 12px;
+  font-size: 13px;
+  color: #64748b;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.kind-tab:hover { color: #0f172a; }
+.kind-tab.active {
+  background: #fff;
+  color: #0f172a;
+  font-weight: 500;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+.tab-count {
+  margin-left: 4px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+.kind-tab.active .tab-count { color: #2563eb; }
+.toolbar-spacer { flex: 1; }
+.toolbar-search { width: 220px; }
+.toolbar-status { width: 116px; }
+
+/* ---- 资源列（图标章 + 标题/副行） ---- */
+.res-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.res-badge {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+.res-badge.kind-mindmap { background: #e6f1fb; color: #185fa5; }
+.res-badge.kind-demo { background: #e1f5ee; color: #0f6e56; }
+.res-badge.kind-document { background: #faeeda; color: #854f0b; }
+.res-text { min-width: 0; display: flex; flex-direction: column; }
+.res-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #0f172a;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-  vertical-align: bottom;
 }
-
-/* 表格紧凑化：小尺寸 + 收紧单元格内边距，消除行内无效空白 */
-.compact-table :deep(.el-table__cell) { padding: 7px 0; }
-.compact-table :deep(.el-table__cell .cell) { line-height: 22px; }
-/* 操作列单行：按钮间距收紧 + 不换行（按钮保持默认尺寸，不做二次收缩）
-   注意：EP 主题有 .el-button + .el-button { margin-left: 12px }，会和 gap 叠加把按钮挤出列宽
-   （删除按钮曾被裁掉 36px）——这里清零，间距只由 gap 控制 */
-.op-cell { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
-.op-cell :deep(.el-button) { margin-left: 0; }
-/* 空表紧凑占位（替代整张空表格，省掉表头+空块约 100px 空白） */
-.table-empty {
-  border: 1px dashed #dbe4f0;
-  border-radius: 10px;
-  padding: 14px;
-  text-align: center;
+.res-sub {
+  font-size: 11px;
   color: #94a3b8;
-  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-/* 表单留白收紧 */
-.res-panel :deep(.el-form-item) { margin-bottom: 12px; }
-.res-panel :deep(.el-form-item:last-child) { margin-bottom: 0; }
-.res-panel :deep(.el-form) { margin-bottom: 10px; }
-/* 卡片留白收紧 */
-.res-panel :deep(.el-card__header) { padding: 10px 16px; }
-.res-panel :deep(.el-card__body) { padding: 12px 16px 12px; }
+.muted-cell { color: #cbd5e1; font-size: 12px; }
+
+/* 操作列：文字链式，比按钮平铺省宽度 */
+.op-links { display: flex; align-items: center; justify-content: flex-end; gap: 2px; white-space: nowrap; }
+
+/* 表格紧凑化 */
+.compact-table :deep(.el-table__cell) { padding: 8px 0; }
+.compact-table :deep(.el-table__cell .cell) { line-height: 22px; }
+.res-panel :deep(.el-card__body) { padding: 8px 12px; }
+
+/* ---- 添加弹窗 ---- */
+.add-res-dialog :deep(.el-dialog) { border-radius: 16px; }
+.dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 4px;
+}
+.dialog-title { font-size: 16px; font-weight: 600; color: #0f172a; }
+.form-extra { margin-top: 6px; display: flex; align-items: center; gap: 8px; }
+.form-tip { color: #94a3b8; font-size: 12px; }
+.path-icon { margin-right: 2px; vertical-align: -2px; }
+.file-input { display: block; font-size: 13px; }
+.upload-progress { margin-top: 8px; }
 </style>

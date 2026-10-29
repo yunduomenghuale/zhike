@@ -7,49 +7,60 @@
       </div>
     </div>
 
-    <el-card shadow="never" class="mb12">
-      <template #header><span>思维导图 / 交互演示</span></template>
-      <el-empty v-if="!presetResources.length" description="教师暂未发布资源" :image-size="80" />
-      <div v-else class="res-grid">
-        <div
-          v-for="r in presetResources"
-          :key="r.id"
-          class="res-card"
-          @click="openPreset(r)"
+    <!-- 类型筛选 + 搜索（前端即时过滤） -->
+    <div class="res-toolbar">
+      <div class="kind-tabs">
+        <button
+          v-for="t in kindTabs"
+          :key="t.value"
+          type="button"
+          class="kind-tab"
+          :class="{ active: kindFilter === t.value }"
+          @click="kindFilter = t.value"
         >
-          <div class="res-icon">{{ r.kind === 'mindmap' ? '🗺️' : '🎬' }}</div>
-          <div class="res-info">
-            <div class="res-title">{{ r.title }}</div>
-            <div class="res-meta">{{ r.kind_display }}</div>
-          </div>
-          <el-icon class="res-arrow"><ArrowRight /></el-icon>
-        </div>
+          {{ t.label }}<span class="tab-count">{{ t.count }}</span>
+        </button>
       </div>
-    </el-card>
+      <span class="toolbar-spacer" />
+      <el-input
+        v-model.trim="keyword"
+        placeholder="搜索资源"
+        clearable
+        class="toolbar-search"
+        :prefix-icon="Search"
+      />
+    </div>
 
-    <el-card shadow="never">
-      <template #header><span>文档资料</span></template>
-      <el-empty v-if="!documentResources.length" description="教师暂未发布文档" :image-size="80" />
-      <div v-else class="res-grid">
-        <div
-          v-for="r in documentResources"
-          :key="r.id"
-          class="res-card"
-          @click="openDocument(r)"
-        >
-          <div class="res-icon">📄</div>
-          <div class="res-info">
-            <div class="res-title">{{ r.title }}</div>
-            <div class="res-meta">
-              文档 · {{ r.file_name || '—' }}
+    <el-empty
+      v-if="!filteredResources.length"
+      :description="resources.length ? '没有匹配当前筛选的资源' : '教师暂未发布资源'"
+      :image-size="90"
+    />
+    <div v-else class="res-grid">
+      <div
+        v-for="r in filteredResources"
+        :key="r.id"
+        class="res-card"
+        @click="openResource(r)"
+      >
+        <div class="res-cover" :class="'cover-' + r.kind">
+          <span class="cover-badge">
+            <el-icon :size="18"><component :is="kindIcon(r.kind)" /></el-icon>
+          </span>
+        </div>
+        <div class="res-body">
+          <div class="res-title" :title="r.title">{{ r.title }}</div>
+          <div class="res-meta">
+            {{ r.kind_display }}
+            <template v-if="r.kind === 'document'">
               <template v-if="r.file_size"> · {{ fmtSize(r.file_size) }}</template>
               <template v-if="isPdf(r)"> · 可在线预览</template>
-            </div>
+            </template>
           </div>
-          <el-icon class="res-arrow"><ArrowRight /></el-icon>
         </div>
+        <el-icon class="res-arrow"><ArrowRight /></el-icon>
       </div>
-    </el-card>
+    </div>
   </div>
 </template>
 
@@ -57,7 +68,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowRight } from '@element-plus/icons-vue'
+import { ArrowRight, Connection, Document, MagicStick, Search } from '@element-plus/icons-vue'
 import { listCourseResources, signCourseResource } from '@/api/course'
 import { openTabDeferred } from '@/utils/open-tab'
 
@@ -66,6 +77,8 @@ const router = useRouter()
 const courseId = computed(() => Number(route.params.id) || null)
 
 const resources = ref([])
+const kindFilter = ref('')
+const keyword = ref('')
 
 function pick(list) {
   if (Array.isArray(list)) return list
@@ -78,14 +91,33 @@ async function load() {
   resources.value = pick(r)
 }
 
-const presetResources = computed(() => resources.value.filter((r) => r.kind !== 'document'))
-const documentResources = computed(() => resources.value.filter((r) => r.kind === 'document'))
+const kindTabs = computed(() => [
+  { value: '', label: '全部', count: resources.value.length },
+  { value: 'mindmap', label: '思维导图', count: resources.value.filter((r) => r.kind === 'mindmap').length },
+  { value: 'demo', label: '交互演示', count: resources.value.filter((r) => r.kind === 'demo').length },
+  { value: 'document', label: '文档', count: resources.value.filter((r) => r.kind === 'document').length },
+])
+
+const filteredResources = computed(() => {
+  const kw = keyword.value.toLowerCase()
+  return resources.value.filter((r) => {
+    if (kindFilter.value && r.kind !== kindFilter.value) return false
+    if (kw) {
+      const hay = `${r.title} ${r.kind === 'document' ? r.file_name || '' : ''}`.toLowerCase()
+      if (!hay.includes(kw)) return false
+    }
+    return true
+  })
+})
+
+function kindIcon(kind) {
+  return kind === 'mindmap' ? Connection : kind === 'demo' ? MagicStick : Document
+}
 
 function isPdf(row) {
   return (row.file_name || '').toLowerCase().endsWith('.pdf')
 }
 
-// 进入近全屏查看器；思维导图带 #chapters-hidden 隐藏站内章节导航
 function viewerQuery(extra) {
   return {
     src: extra.src,
@@ -96,8 +128,8 @@ function viewerQuery(extra) {
   }
 }
 
-async function openPreset(r) {
-  // 先签发唯一签名 URL（未发布/非在读课程后端拒签），再进查看器；
+async function openResource(r) {
+  // 先签发唯一签名 URL（未发布/非在读课程后端拒签）再打开；
   // 标签页在点击时同步开出，避免异步后的 window.open 被弹窗拦截
   const tab = openTabDeferred()
   let signed
@@ -108,27 +140,8 @@ async function openPreset(r) {
     ElMessage.error(e?.message || '资源打开失败，请稍后重试')
     return
   }
-  const hash = r.kind === 'mindmap' ? '#chapters-hidden' : ''
-  const { href } = router.resolve({
-    name: 'student-course-resource-viewer',
-    params: { id: courseId.value },
-    query: viewerQuery({ src: `${signed.url}${hash}`, title: r.title, kind: r.kind }),
-  })
-  tab.open(href)
-}
-
-async function openDocument(r) {
-  // 文档：签发 file 地址；PDF 进查看器内联预览，doc/docx 新窗口触发下载
-  const tab = openTabDeferred()
-  let signed
-  try {
-    signed = await signCourseResource(r.id)
-  } catch (e) {
-    tab.close()
-    ElMessage.error(e?.message || '文档打开失败，请稍后重试')
-    return
-  }
-  if (isPdf(r)) {
+  if (r.kind === 'document' && isPdf(r)) {
+    // PDF 进查看器内联预览
     const { href } = router.resolve({
       name: 'student-course-resource-viewer',
       params: { id: courseId.value },
@@ -137,7 +150,18 @@ async function openDocument(r) {
     tab.open(href)
     return
   }
-  tab.open(signed.url)
+  if (r.kind === 'document') {
+    // doc/docx 直接下载
+    tab.open(signed.url)
+    return
+  }
+  const hash = r.kind === 'mindmap' ? '#chapters-hidden' : ''
+  const { href } = router.resolve({
+    name: 'student-course-resource-viewer',
+    params: { id: courseId.value },
+    query: viewerQuery({ src: `${signed.url}${hash}`, title: r.title, kind: r.kind }),
+  })
+  tab.open(href)
 }
 
 function fmtSize(bytes) {
@@ -159,30 +183,117 @@ onMounted(load)
 </script>
 
 <style scoped>
-.mb12 { margin-bottom: 12px; }
-.res-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 12px;
-}
-.res-card {
+/* ---- 工具栏 ---- */
+.res-toolbar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 14px;
-  border: 1px solid #e2e8f0;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.kind-tabs {
+  display: flex;
+  gap: 4px;
+  background: #f1f5f9;
+  border-radius: 10px;
+  padding: 3px;
+}
+.kind-tab {
+  border: 0;
+  background: transparent;
   border-radius: 8px;
+  padding: 5px 12px;
+  font-size: 13px;
+  color: #64748b;
   cursor: pointer;
-  transition: all 0.2s;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.kind-tab:hover { color: #0f172a; }
+.kind-tab.active {
+  background: #fff;
+  color: #0f172a;
+  font-weight: 500;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+.tab-count {
+  margin-left: 4px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+.kind-tab.active .tab-count { color: #2563eb; }
+.toolbar-spacer { flex: 1; }
+.toolbar-search { width: 200px; }
+
+/* ---- 封面式卡片 ---- */
+.res-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+.res-card {
+  background: #fff;
+  border: 0.5px solid #e2e8f0;
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 .res-card:hover {
   border-color: #4a90e2;
-  box-shadow: 0 2px 8px rgba(74, 144, 226, 0.15);
+  box-shadow: 0 2px 10px rgba(74, 144, 226, 0.15);
 }
-.res-icon { font-size: 28px; }
-.res-info { flex: 1; min-width: 0; }
-.res-title { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
-.res-meta { color: #94a3b8; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.res-arrow { color: #cbd5e1; }
+.res-cover {
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.res-cover.cover-mindmap { background: #e6f1fb; }
+.res-cover.cover-demo { background: #e1f5ee; }
+.res-cover.cover-document { background: #faeeda; }
+.cover-badge {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cover-mindmap .cover-badge { color: #185fa5; }
+.cover-demo .cover-badge { color: #0f6e56; }
+.cover-document .cover-badge { color: #854f0b; }
+.res-body {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+}
+.res-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.res-meta {
+  flex: 0 0 auto;
+  max-width: 46%;
+  font-size: 11px;
+  color: #94a3b8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.res-arrow {
+  flex: 0 0 auto;
+  color: #cbd5e1;
+  font-size: 14px;
+  margin-right: 4px;
+}
 .res-card:hover .res-arrow { color: #4a90e2; }
 </style>
