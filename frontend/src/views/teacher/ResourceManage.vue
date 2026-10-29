@@ -611,8 +611,8 @@ onMounted(loadResources)
 .course-upload :deep(.el-upload) { width: 100%; }
 .course-upload :deep(.el-upload-dragger) {
   width: 100%;
-  height: 160px;
-  padding: 18px 16px;
+  min-height: 150px;
+  padding: 24px 16px;
   border: 1px dashed #bfdbfe;
   border-radius: 18px;
   background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
@@ -626,14 +626,13 @@ onMounted(loadResources)
   align-items: center;
   justify-content: center;
   width: 100%;
-  height: 100%;
 }
 .course-upload :deep(.el-upload-dragger:hover) {
   border-color: #3b82f6;
   background: #fff;
   box-shadow: 0 14px 32px rgba(37, 99, 235, 0.1);
 }
-.upload-inner { display: grid; justify-items: center; align-content: center; gap: 10px; padding: 8px 16px; height: 100%; box-sizing: border-box; }
+.upload-inner { display: grid; justify-items: center; align-content: center; gap: 10px; padding: 0 8px; }
 .upload-mark {
   width: 46px;
   height: 46px;
