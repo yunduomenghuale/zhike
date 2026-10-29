@@ -78,14 +78,14 @@
             />
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="168" fixed="right" header-align="center">
+        <el-table-column label="操作" width="228" fixed="right" header-align="center">
           <template #default="{ row }">
-            <div class="op-links">
-              <el-button link type="primary" size="small" @click="previewResource(row)">
+            <div class="op-cell">
+              <el-button size="small" @click="previewResource(row)">
                 {{ row.kind === 'document' && !isPdf(row) ? '下载' : '预览' }}
               </el-button>
-              <el-button link type="primary" size="small" @click="copyResourceLink(row)">链接</el-button>
-              <el-button link type="danger" size="small" @click="removeRes(row)">删除</el-button>
+              <el-button size="small" @click="copyResourceLink(row)">复制链接</el-button>
+              <el-button size="small" type="danger" plain @click="removeRes(row)">删除</el-button>
             </div>
           </template>
         </el-table-column>
@@ -147,9 +147,30 @@
 
         <template v-else>
           <el-form-item label="文档文件" required>
-            <input ref="docFileEl" type="file" accept=".pdf,.doc,.docx" class="file-input" @change="onDocPicked" />
-            <div class="form-extra">
-              <span class="form-tip">支持 PDF / DOC / DOCX，单个不超过 100MB；PDF 学生端可在线预览，DOC/DOCX 下载查看</span>
+            <!-- 与章节课件上传同构（CourseCatalog .course-upload）：拖入或点击选择，选择即校验 -->
+            <el-upload
+              drag
+              :show-file-list="false"
+              :before-upload="onDocPicked"
+              :accept="'.pdf,.doc,.docx'"
+              class="course-upload"
+            >
+              <div class="upload-inner">
+                <div class="upload-mark">
+                  <el-icon><UploadFilled /></el-icon>
+                </div>
+                <div class="upload-main">{{ addForm.file ? '重新选择文档' : '拖入或选择文档' }}</div>
+                <div class="upload-sub">支持 PDF / DOC / DOCX，单个不超过 100MB；PDF 学生端可在线预览，DOC/DOCX 下载查看</div>
+              </div>
+            </el-upload>
+            <div v-if="addForm.file" class="file-status">
+              <div class="file-icon">
+                <el-icon><Document /></el-icon>
+              </div>
+              <div class="file-meta">
+                <div class="file-name" :title="addForm.file.name">{{ addForm.file.name }}</div>
+                <div class="file-note">{{ fmtSize(addForm.file.size) }} · 点击上方区域可重新选择</div>
+              </div>
             </div>
             <el-progress v-if="uploading" :percentage="uploadPercent" :stroke-width="8" class="upload-progress" />
           </el-form-item>
@@ -179,7 +200,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Close, Connection, Document, Link, MagicStick, Plus, Search,
+  Close, Connection, Document, Link, MagicStick, Plus, Search, UploadFilled,
 } from '@element-plus/icons-vue'
 import {
   listCourseResources, createCourseResource, deleteCourseResource,
@@ -276,7 +297,6 @@ const creating = ref(false)
 const uploading = ref(false)
 const uploadPercent = ref(0)
 const presetPreviewing = ref(false)
-const docFileEl = ref(null)
 const addForm = reactive({ kind: 'mindmap', path: '', title: '', file: null })
 
 const availablePaths = computed(() => PRESET_PAGES.filter((p) => p.kind === addForm.kind))
@@ -297,27 +317,24 @@ function presetTitle(path) {
 const DOC_EXTS = ['.pdf', '.doc', '.docx']
 const DOC_MAX_SIZE = 100 * 1024 * 1024
 
-function onDocPicked(e) {
-  const file = e.target.files?.[0]
-  if (!file) return
+function onDocPicked(file) {
+  // el-upload before-upload：返回 false 阻断自动上传，仅做校验与暂存（对齐课件/题库导入模式）
   const ext = '.' + (file.name.split('.').pop() || '').toLowerCase()
   if (!DOC_EXTS.includes(ext)) {
     ElMessage.error('仅支持 pdf / doc / docx 格式')
-    docFileEl.value.value = ''
-    return
+    return false
   }
   if (file.size > DOC_MAX_SIZE) {
     ElMessage.error('文档不能超过 100MB')
-    docFileEl.value.value = ''
-    return
+    return false
   }
   if (file.size === 0) {
     ElMessage.error('文档文件为空')
-    docFileEl.value.value = ''
-    return
+    return false
   }
   addForm.file = file
   if (!addForm.title) addForm.title = file.name.replace(/\.[^.]+$/, '')
+  return false
 }
 
 async function confirmAdd() {
@@ -567,8 +584,9 @@ onMounted(loadResources)
 }
 .muted-cell { color: #cbd5e1; font-size: 12px; }
 
-/* 操作列：文字链式，比按钮平铺省宽度 */
-.op-links { display: flex; align-items: center; justify-content: flex-end; gap: 2px; white-space: nowrap; }
+/* 操作列：按钮平铺（EP 主题 .el-button+.el-button margin 与 flex gap 叠加，须 :deep 归零） */
+.op-cell { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.op-cell :deep(.el-button) { margin-left: 0; }
 
 /* 表格紧凑化 */
 .compact-table :deep(.el-table__cell) { padding: 8px 0; }
@@ -587,6 +605,69 @@ onMounted(loadResources)
 .form-extra { margin-top: 6px; display: flex; align-items: center; gap: 8px; }
 .form-tip { color: #94a3b8; font-size: 12px; }
 .path-icon { margin-right: 2px; vertical-align: -2px; }
-.file-input { display: block; font-size: 13px; }
 .upload-progress { margin-top: 8px; }
+
+/* ---- 文档上传区：与章节课件上传同构（CourseCatalog .course-upload 同款样式） ---- */
+.course-upload :deep(.el-upload) { width: 100%; }
+.course-upload :deep(.el-upload-dragger) {
+  width: 100%;
+  height: 150px;
+  border: 1px dashed #bfdbfe;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease;
+}
+.course-upload :deep(.el-upload-dragger:hover) {
+  border-color: #3b82f6;
+  background: #fff;
+  box-shadow: 0 14px 32px rgba(37, 99, 235, 0.1);
+}
+.upload-inner { display: grid; justify-items: center; gap: 8px; padding: 0 16px; }
+.upload-mark {
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #60a5fa 0%, #2563eb 100%);
+  color: #fff;
+  font-size: 22px;
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.2);
+}
+.upload-main { font-size: 15px; font-weight: 700; color: #0f172a; }
+.upload-sub { font-size: 12px; color: #94a3b8; text-align: center; }
+.file-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid #e2ebf7;
+  border-radius: 14px;
+  background: #f8fbff;
+}
+.file-icon {
+  width: 34px;
+  height: 34px;
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: #fff;
+  color: #2563eb;
+  flex-shrink: 0;
+}
+.file-meta { min-width: 0; flex: 1; }
+.file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #0f172a;
+  font-weight: 600;
+  font-size: 13px;
+}
+.file-note { margin-top: 2px; font-size: 12px; color: #94a3b8; }
 </style>

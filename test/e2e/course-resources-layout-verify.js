@@ -145,7 +145,7 @@ async function main() {
       hasInlineForm: !!document.querySelector('.res-panel .el-form'),
       hasSwitch: !!document.querySelector('.el-switch'),
       rows: document.querySelectorAll('.el-table__row').length,
-      opsPerRow: document.querySelector('.el-table__row .op-links')?.querySelectorAll('button').length || 0,
+      opsPerRow: document.querySelector('.el-table__row .op-cell')?.querySelectorAll('button').length || 0,
     }))()`);
     check('N.1 资源库结构（tab+按钮+无常驻表单+开关）',
       n1 && n1.tabs.length === 4 && n1.hasAddBtn && !n1.hasInlineForm && n1.hasSwitch && n1.rows > 0 && n1.opsPerRow === 3,
