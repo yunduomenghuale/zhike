@@ -66,7 +66,9 @@
         <el-table-column label="班级" min-width="172">
           <template #default="{ row }"><div class="entity"><span class="entity-icon class"><el-icon><School /></el-icon></span><div><strong :title="row.name">{{ row.name }}</strong><small :title="dateRange(row)">{{ dateRange(row) }}</small></div></div></template>
         </el-table-column>
-        <el-table-column label="负责人" min-width="112"><template #default="{ row }"><strong :title="row.teacher_name || '未填写姓名'">{{ row.teacher_name || '未填写姓名' }}</strong><small class="block" :title="'@' + row.teacher_username">@{{ row.teacher_username }}</small></template></el-table-column>
+        <el-table-column label="班级编码" width="116"><template #default="{ row }"><span :title="row.code || '未设置编码'" class="mono">{{ row.code || '—' }}</span></template></el-table-column>
+        <el-table-column label="届别 / 学制" width="100" align="center"><template #default="{ row }"><span :title="row.graduate_year ? '预计 ' + row.graduate_year + ' 年毕业' : '未设置届别'">{{ row.enrollment_year || '—' }} / {{ row.duration_years || '—' }}</span></template></el-table-column>
+        <el-table-column label="建班人" min-width="112"><template #default="{ row }"><strong :title="row.creator_name || '未填写姓名'">{{ row.creator_name || '未填写姓名' }}</strong><small class="block" :title="'@' + row.creator_username">@{{ row.creator_username }}</small></template></el-table-column>
         <el-table-column label="关联课程" width="82" align="center"><template #default="{ row }"><b class="number">{{ row.course_count }}</b> 门</template></el-table-column>
         <el-table-column label="班级学生" width="82" align="center"><template #default="{ row }"><b class="number">{{ row.student_count }}</b> 人</template></el-table-column>
         <el-table-column label="作业提交率" width="92" align="center">
@@ -283,5 +285,6 @@ onMounted(load)
    四字表头也会被挤成两行；数值/日期列内容本就短，nowrap 保持单行。
    文本列（课程/教师/班级）内部的 .entity strong/small 自带 ellipsis，不受此影响 */
 .teaching-card :deep(.el-table .cell){white-space:nowrap}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;color:#475569}
 @media(max-width:720px){.page-head{align-items:flex-start;flex-direction:column}.toolbar{align-items:stretch;flex-wrap:wrap}.toolbar :deep(.el-input){width:100%}.toolbar>span{width:100%;margin-left:0}}
 </style>

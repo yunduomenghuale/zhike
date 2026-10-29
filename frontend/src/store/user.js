@@ -48,6 +48,8 @@ export const useUserStore = defineStore('user', () => {
 
   const isTeacher = () => profile.value?.role === 'teacher'
   const isStudent = () => profile.value?.role === 'student'
+  // 组织层（建班、导入、学籍）只对管理员开放，页面用它决定入口是否渲染
+  const isAdmin = () => profile.value?.role === 'admin'
 
   return {
     token,
@@ -60,5 +62,6 @@ export const useUserStore = defineStore('user', () => {
     logout,
     isTeacher,
     isStudent,
+    isAdmin,
   }
 })

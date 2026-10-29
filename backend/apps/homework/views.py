@@ -118,7 +118,8 @@ class HomeworkViewSet(BaseModelViewSet):
         if user.is_authenticated and user.is_student:
             qs = qs.filter(classroom__students__student=user, status=Homework.Status.PUBLISHED)
         elif user.is_authenticated and user.is_teacher:
-            qs = qs.filter(classroom__teacher=user)
+            # 锚点是课程负责人（作业属于某门课在某班的投放）
+            qs = qs.filter(course__teacher=user)
         return qs.distinct()
 
     def _notify_if_published(self, instance, previous_status):
@@ -277,7 +278,7 @@ class HomeworkSubmissionViewSet(BaseModelViewSet):
         if user.is_authenticated and user.is_student:
             qs = qs.filter(student=user)
         elif user.is_authenticated and user.is_teacher:
-            qs = qs.filter(homework__classroom__teacher=user)
+            qs = qs.filter(homework__course__teacher=user)
         return qs
 
     @transaction.atomic
@@ -509,7 +510,7 @@ class HomeworkSubmissionViewSet(BaseModelViewSet):
             return api_response(message="缺少 homework 参数", code=400, status=400)
         qs = HomeworkSubmission.objects.filter(
             homework_id=homework_id,
-            homework__classroom__teacher=request.user,
+            homework__course__teacher=request.user,
             correct_status=HomeworkSubmission.CorrectStatus.GRADED,
         )
         count = qs.update(correct_status=HomeworkSubmission.CorrectStatus.RETURNED)

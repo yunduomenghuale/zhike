@@ -1,6 +1,7 @@
 from django.db import transaction
 from rest_framework import serializers
 
+from apps.common.access import is_platform_admin
 from apps.courses.models import Course
 
 from .models import ClassCourse, ClassRoom, ClassStudent
@@ -50,15 +51,48 @@ class ClassRoomSerializer(serializers.ModelSerializer):
         if selected is not None and not selected:
             raise serializers.ValidationError({"courses": "班级至少需要关联一门课程"})
 
+        self._validate_code(attrs)
+
         request = self.context.get("request")
         user = getattr(request, "user", None)
-        if selected is not None and user and user.is_authenticated and not user.is_superuser:
+        # 管理员代表学校建班，可以挂任意教师的课；教师只能挂自己的课。
+        if (
+            selected is not None
+            and user
+            and user.is_authenticated
+            and not is_platform_admin(user)
+        ):
             invalid = [course.name for course in selected if course.teacher_id != user.id]
             if invalid:
                 raise serializers.ValidationError(
                     {"courses": f"不能关联其他教师的课程：{'、'.join(invalid)}"}
                 )
         return attrs
+
+    def _validate_code(self, attrs):
+        """班级编码：新建必填、统一大写、唯一。
+
+        编码是导入的匹配键（P2），大小写不同视为同一个班（方案 X-32），
+        所以入库前统一 normalize，避免 `CS-2401` 与 `cs-2401` 并存。
+        """
+        code = attrs.get("code")
+        if code is None and self.instance is not None:
+            return
+        code = (code or "").strip().upper()
+        if not code:
+            if self.instance is None:
+                raise serializers.ValidationError({"code": "请填写班级编码"})
+            # 历史班级允许为空（迁移前无此列），编辑时不强制补
+            attrs.pop("code", None)
+            return
+        if len(code) > 32:
+            raise serializers.ValidationError({"code": "班级编码不能超过 32 个字符"})
+        qs = ClassRoom.objects.filter(code__iexact=code)
+        if self.instance is not None:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError({"code": f"班级编码「{code}」已被占用"})
+        attrs["code"] = code
 
     @staticmethod
     def _sync_courses(classroom, courses):
@@ -92,6 +126,11 @@ class ClassRoomSerializer(serializers.ModelSerializer):
         courses = validated_data.pop("courses", None)
         instance = super().update(instance, validated_data)
         if courses is not None:
+            # 教师挂课走「追加」语义：一个班有多位教师时，A 挂自己的课不能把 B 的课踢掉。
+            # 管理员维护班级时仍是整体覆盖（前端提交的是一份完整清单）。
+            if self.context.get("courses_append"):
+                existing = {link.course_id for link in instance.course_links.all()}
+                courses = list(instance.courses.all()) + [c for c in courses if c.id not in existing]
             self._sync_courses(instance, courses)
         elif legacy_course is not None:
             self._sync_courses(instance, [legacy_course])

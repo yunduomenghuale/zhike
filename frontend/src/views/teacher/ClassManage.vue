@@ -1,7 +1,13 @@
 <template>
   <div class="page-container class-manage">
     <div class="class-toolbar">
-      <el-button type="primary" :icon="Plus" @click="openEdit()">新建班级</el-button>
+      <template v-if="isAdmin">
+        <el-button type="primary" :icon="Plus" @click="openEdit()">新建班级</el-button>
+      </template>
+      <span v-else class="class-hint">
+        <el-icon><InfoFilled /></el-icon>
+        班级由学校统一分配，如需调整请联系管理员
+      </span>
     </div>
 
     <TableSkeleton v-if="loading" :cols="4" />
@@ -19,19 +25,13 @@
         </div>
 
         <div class="class-meta">
-          <button
-            type="button"
-            class="invite-chip copyable"
-            :title="'点击复制：' + (row.invite_code || '')"
-            @click.stop="copyInvite(row.invite_code)"
-          >
-            <span class="invite-chip-label">邀请码</span>
-            <code>{{ row.invite_code }}</code>
-            <el-icon class="copy-ico"><DocumentCopy /></el-icon>
-          </button>
           <span class="meta-item">
             <span class="meta-label">学生</span>
             <strong>{{ row.student_count || 0 }} 人</strong>
+          </span>
+          <span v-if="isAdmin && row.code" class="meta-item">
+            <span class="meta-label">编码</span>
+            <strong class="meta-code">{{ row.code }}</strong>
           </span>
           <el-tag :type="classStatusMeta(row.status).type" effect="light" round>
             {{ classStatusMeta(row.status).label }}
@@ -40,15 +40,16 @@
 
         <div class="class-actions">
           <el-button link type="primary" :icon="User" @click="openStudents(row)">学生</el-button>
-          <el-button link type="primary" :icon="Refresh" @click="regenCode(row)">换邀请码</el-button>
-          <span class="action-divider"></span>
-          <el-button text circle :icon="EditPen" title="编辑班级" @click="openEdit(row)" />
-          <el-button text circle type="danger" :icon="Delete" title="删除班级" @click="openDelete(row, 'class')" />
+          <template v-if="isAdmin">
+            <span class="action-divider"></span>
+            <el-button text circle :icon="EditPen" title="编辑班级" @click="openEdit(row)" />
+            <el-button text circle type="danger" :icon="Delete" title="删除班级" @click="openDelete(row, 'class')" />
+          </template>
         </div>
       </article>
     </div>
 
-    <el-empty v-else description="还没有班级，点击右上角新建" />
+    <el-empty v-else :description="isAdmin ? '还没有班级，点击右上角新建' : '暂无可管理的班级'" />
 
     <!-- 新建/编辑班级 -->
     <el-dialog v-model="editVisible" width="620px" align-center :show-close="false" class="class-form-dialog">
@@ -59,7 +60,9 @@
           </span>
           <div class="creation-dialog-heading">
             <div class="creation-dialog-title">{{ form.id ? '编辑班级' : '新建班级' }}</div>
-            <div class="creation-dialog-subtitle">班级基础信息</div>
+            <div class="creation-dialog-subtitle">
+              {{ form.id ? (form.creator_name ? `建班人：${form.creator_name}` : '班级基础信息') : '编码用于批量导入匹配，请与学籍系统保持一致' }}
+            </div>
           </div>
           <el-button text circle class="creation-dialog-close" :icon="Close" @click="editVisible = false" />
         </div>
@@ -67,8 +70,18 @@
 
       <el-form :model="form" label-position="top" class="creation-form class-creation-form">
         <div class="creation-form-grid">
-          <el-form-item label="班级名称" class="form-span-full">
-            <el-input v-model="form.name" placeholder="如 计科2201班" />
+          <el-form-item label="班级编码">
+            <el-input v-model="form.code" placeholder="如 CS-2401" maxlength="32" />
+          </el-form-item>
+          <el-form-item label="班级名称">
+            <el-input v-model="form.name" placeholder="如 计算机2401班" />
+          </el-form-item>
+          <el-form-item label="届别（入学年份）">
+            <el-input-number v-model="form.enrollment_year" :min="2000" :max="2100" :controls="false"
+              placeholder="如 2024" style="width: 100%" />
+          </el-form-item>
+          <el-form-item label="学制（年）">
+            <el-input-number v-model="form.duration_years" :min="2" :max="8" :controls="false" style="width: 100%" />
           </el-form-item>
           <el-form-item label="关联课程" class="form-span-full">
             <el-select
@@ -116,18 +129,22 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, Delete, EditPen, User, Refresh, School, Close } from '@element-plus/icons-vue'
+import { Plus, Delete, EditPen, User, School, Close, InfoFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { DocumentCopy } from '@element-plus/icons-vue'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
 import { CLASS_STATUS_OPTIONS, classStatusMeta } from '@/utils/classStatus'
 import { listCourses } from '@/api/course'
 import { compareCourseName } from '@/utils/course-sort'
+import { useUserStore } from '@/store/user'
 import {
-  listClasses, createClass, updateClass, deleteClass, regenerateCode,
+  listClasses, createClass, updateClass, deleteClass,
 } from '@/api/classroom'
+
+// 组织层（建班 / 改班 / 删班）只对管理员开放；教师进这个页面看到的是只读名单。
+const userStore = useUserStore()
+const isAdmin = computed(() => userStore.isAdmin())
 
 const courses = ref([])
 const rows = ref([])
@@ -176,20 +193,28 @@ const form = reactive({})
 function openEdit(row) {
   Object.assign(form, {
     id: row?.id || null,
+    code: row?.code || '',
     courses: row?.courses?.length
       ? [...row.courses]
       : (row?.course ? [row.course] : (courses.value[0]?.id ? [courses.value[0].id] : [])),
     name: row?.name || '',
+    enrollment_year: row?.enrollment_year || null,
+    duration_years: row?.duration_years || 4,
+    creator_name: row?.teacher_name || '',
     dateRange: row?.start_at && row?.end_at ? [row.start_at, row.end_at] : [],
     status: row?.status || 'active',
   })
   editVisible.value = true
 }
 async function save() {
+  if (!form.code?.trim()) return ElMessage.warning('请填写班级编码')
   if (!form.courses?.length) return ElMessage.warning('请至少选择一门课程')
   if (!form.name) return ElMessage.warning('请填写班级名称')
   const payload = {
+    code: form.code.trim().toUpperCase(),
     courses: form.courses, name: form.name, status: form.status,
+    enrollment_year: form.enrollment_year || null,
+    duration_years: form.duration_years || 4,
     start_at: form.dateRange?.[0] || null, end_at: form.dateRange?.[1] || null,
   }
   saving.value = true
@@ -224,34 +249,12 @@ async function confirmDelete() {
     deleting.value = false
   }
 }
-async function regenCode(row) {
-  const res = await regenerateCode(row.id)
-  ElMessage.success(`新邀请码：${res.invite_code}`)
-  load()
-}
-
 // ---- 学生名单（独立页面：列表 + 筛选 + 排序） ----
 const router = useRouter()
 function openStudents(row) {
-  router.push({ name: 'class-students', params: { classId: row.id } })
-}
-
-/** 点击复制邀请码到剪贴板。 */
-async function copyInvite(code) {
-  if (!code) return
-  try {
-    await navigator.clipboard.writeText(code)
-    ElMessage.success('邀请码已复制：' + code)
-  } catch {
-    // 老浏览器降级：选中文本提示手动复制
-    const ta = document.createElement('textarea')
-    ta.value = code
-    document.body.appendChild(ta)
-    ta.select()
-    document.execCommand('copy')
-    document.body.removeChild(ta)
-    ElMessage.success('邀请码已复制：' + code)
-  }
+  // 管理员与教师共用同一个名单页，路由名不同（侧边栏高亮跟着各自菜单走）
+  const name = isAdmin.value ? 'admin-class-students' : 'class-students'
+  router.push({ name, params: { classId: row.id } })
 }
 
 onMounted(() => { loadCourses(); load() })
@@ -369,62 +372,25 @@ onMounted(() => { loadCourses(); load() })
   font-size: 12px;
 }
 
-.invite-chip {
-  height: 34px;
+.class-hint {
   display: inline-flex;
   align-items: center;
-  overflow: hidden;
-  border-radius: 999px;
-  background: #eff6ff;
-  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.1);
-}
-
-.invite-chip.copyable {
-  border: 0;
-  cursor: pointer;
-  padding: 0;
-  font: inherit;
-  transition: box-shadow 0.15s ease, transform 0.1s ease;
-}
-
-.invite-chip.copyable:hover {
-  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.35);
-  background: #dbeafe;
-}
-
-.invite-chip.copyable:active {
-  transform: scale(0.97);
-}
-
-.invite-chip .copy-ico {
-  margin-right: 10px;
-  font-size: 13px;
-  color: #2563eb;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-}
-
-.invite-chip.copyable:hover .copy-ico {
-  opacity: 1;
-}
-
-.invite-chip-label {
-  padding: 0 8px 0 12px;
+  gap: 6px;
+  height: 40px;
+  padding: 0 14px;
+  margin-right: auto;
+  border-radius: 10px;
+  background: #f8fafc;
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 13px;
 }
 
-.invite-chip code {
-  align-self: stretch;
-  display: inline-flex;
-  align-items: center;
-  padding: 0 12px 0 9px;
-  border-left: 1px solid rgba(59, 130, 246, 0.12);
+.meta-code {
   color: #2563eb;
-  font-size: 13px;
-  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   letter-spacing: 0.3px;
 }
+
 
 .class-actions {
   min-height: 46px;

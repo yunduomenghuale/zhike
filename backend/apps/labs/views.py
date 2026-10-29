@@ -180,7 +180,7 @@ class LabScheduleViewSet(BaseModelViewSet):
         user = self.request.user
         qs = LabSchedule.objects.select_related("lab", "classroom")
         if getattr(user, "is_teacher", False):
-            qs = qs.filter(classroom__teacher=user, lab__course__teacher=user)
+            qs = qs.filter(lab__course__teacher=user)
         elif getattr(user, "is_student", False):
             qs = qs.filter(
                 classroom__students__student=user, classroom__students__learn_status="active"

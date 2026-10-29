@@ -245,11 +245,13 @@ import {
 import { listClasses } from '@/api/classroom'
 import { getClassStudentDetail, getClassChapterSummaries } from '@/api/analytics'
 import { renderAiMarkdown } from '@/utils/markdown'
+import { useUserStore } from '@/store/user'
 
 const renderMd = renderAiMarkdown
 
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
 // 课程空间子路由（/teacher/courses/:id/students/:studentId）经 query.class 带班级；
 // 全局路由（/teacher/classes/:classId/students/:studentId）用路径参数
 const classId = Number(route.params.classId || route.query.class)
@@ -337,7 +339,7 @@ function goBack() {
   else if (route.name === 'course-analytics-student') {
     router.push({ name: 'course-analytics', params: { id: route.params.id } })
   } else {
-    router.push('/teacher/classes')
+    router.push(userStore.isAdmin() ? '/admin/classes' : '/teacher/classes')
   }
 }
 

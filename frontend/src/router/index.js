@@ -61,6 +61,10 @@ const routes = [
 
       { path: 'admin/overview', name: 'admin-overview', component: () => import('@/views/admin/AdminOverview.vue'), meta: { title: '管理概览', role: 'admin' } },
       { path: 'admin/users', name: 'admin-users', component: () => import('@/views/admin/AdminUsers.vue'), meta: { title: '用户管理', role: 'admin' } },
+      // 班级归口管理员：建班 / 改班 / 删班 / 成员增删只在这个入口（教师端同名页面为只读）
+      { path: 'admin/classes', name: 'admin-classes', component: () => import('@/views/teacher/ClassManage.vue'), meta: { title: '班级管理', role: 'admin' } },
+      { path: 'admin/classes/:classId/students', name: 'admin-class-students', component: () => import('@/views/teacher/ClassStudents.vue'), meta: { title: '学生名单', role: 'admin', activeMenu: '/admin/classes' } },
+      { path: 'admin/classes/:classId/students/:studentId', name: 'admin-class-student-detail', component: () => import('@/views/teacher/StudentDetail.vue'), meta: { title: '学生详情', role: 'admin', activeMenu: '/admin/classes' } },
       { path: 'admin/teaching', name: 'admin-teaching', component: () => import('@/views/admin/AdminTeaching.vue'), meta: { title: '教学监管', role: 'admin' } },
       { path: 'admin/audit', name: 'admin-audit', component: () => import('@/views/admin/AdminAudit.vue'), meta: { title: '操作审计', role: 'admin' } },
       { path: 'admin/ai-settings', name: 'admin-ai-settings', component: () => import('@/views/admin/AdminAISettings.vue'), meta: { title: '大模型配置', role: 'admin' } },

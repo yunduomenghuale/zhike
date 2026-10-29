@@ -7,6 +7,7 @@ from rest_framework.test import APITestCase
 
 from apps.ai.vectorstore import search_chunks
 from apps.classroom.models import ClassCourse, ClassRoom, ClassStudent
+from apps.classroom.services import ClassServiceError, assign_students
 from apps.courses.models import Catalog, Course
 from apps.exams.models import Exam, ExamSubmission, Paper
 from apps.knowledge.models import KnowledgeChunk, Material
@@ -112,39 +113,11 @@ class AccessControlTests(PlatformFixtureMixin, APITestCase):
             ).exists()
         )
 
-    def test_student_must_complete_profile_before_joining_class(self):
-        # 用未分班的新学生：单班规则下"已在 A 班的学生再加入 B 班"是违约（409），
-        # 与本用例要验证的资料完整度门禁无关，混在一起会掩盖真正的门禁失效。
-        joiner = User.objects.create_user(
-            username="student-joiner", password="StrongPass!123", role=User.Role.STUDENT
-        )
-        self.login_as(joiner)
+    def test_invite_join_endpoint_is_gone(self):
+        """邀请码入班已下线（方案 §4.4）：路由保留但返回 410，且不产生任何班级关系。
 
-        denied = self.client.post(
-            "/api/classes/join/",
-            {"invite_code": self.class2.invite_code},
-            format="json",
-        )
-        self.assertEqual(denied.status_code, 400)
-        self.assertFalse(
-            ClassStudent.objects.filter(classroom=self.class2, student=joiner).exists()
-        )
-
-        joiner.real_name = "Student Joiner"
-        joiner.save(update_fields=["real_name"])
-        joined = self.client.post(
-            "/api/classes/join/",
-            {"invite_code": self.class2.invite_code},
-            format="json",
-        )
-
-        self.assertEqual(joined.status_code, 200)
-        self.assertTrue(
-            ClassStudent.objects.filter(classroom=self.class2, student=joiner).exists()
-        )
-
-    def test_join_second_class_rejected_single_class_rule(self):
-        """单班规则：已在 A 班的学生凭 B 班邀请码入班必须被拒（409），且不产生第二条占用。"""
+        保留路由而不是删掉，是为了让老客户端 / 收藏的旧链接拿到可读文案而不是 404。
+        """
         self.student1.real_name = "Student One"
         self.student1.save(update_fields=["real_name"])
         self.login_as(self.student1)
@@ -154,25 +127,57 @@ class AccessControlTests(PlatformFixtureMixin, APITestCase):
             {"invite_code": self.class2.invite_code},
             format="json",
         )
-        self.assertEqual(resp.status_code, 409, resp.data)
+        self.assertEqual(resp.status_code, 410, resp.data)
         self.assertFalse(
             ClassStudent.objects.filter(classroom=self.class2, student=self.student1).exists()
         )
 
-    def test_teacher_cannot_add_student_with_incomplete_profile(self):
-        self.login_as(self.teacher1)
+    def test_single_class_rule_enforced_by_service(self):
+        """单班规则：已在 A 班的学生被分配到 B 班必须抛 409，且不产生第二条占用。
 
-        response = self.client.post(
+        入班只有 services.assign_students 一个写入口，规则在这里测；
+        接口层（add-student / add-students-batch）只是把 409 透出来。
+        """
+        with self.assertRaises(ClassServiceError) as ctx:
+            assign_students(self.class2, [self.student1])
+
+        self.assertEqual(ctx.exception.code, 409)
+        self.assertIn(self.class1.name, ctx.exception.detail)
+        self.assertFalse(
+            ClassStudent.objects.filter(
+                classroom=self.class2,
+                student=self.student1,
+                learn_status__in=ClassStudent.OCCUPYING_STATUSES,
+            ).exists()
+        )
+
+    def test_class_roster_writes_are_admin_only(self):
+        """入班 / 加人是组织动作：教师调用得 403，管理员调用才进业务校验。
+
+        同一接口上验两层：外层权限（IsPlatformAdmin）+ 内层资料完整度门禁（400）。
+        """
+        self.login_as(self.teacher1)
+        denied = self.client.post(
             f"/api/classes/{self.class1.id}/add-student/",
             {"username": self.student2.username},
             format="json",
         )
+        self.assertEqual(denied.status_code, 403, denied.data)
 
-        self.assertEqual(response.status_code, 400)
+        admin = User.objects.create_user(
+            username="p_admin_roster", password="pw123456!", role=User.Role.ADMIN
+        )
+        self.login_as(admin)
+        # student2 未填姓名 → 管理员也加不进，且不落库
+        incomplete = self.client.post(
+            f"/api/classes/{self.class1.id}/add-student/",
+            {"username": self.student2.username},
+            format="json",
+        )
+        self.assertEqual(incomplete.status_code, 400, incomplete.data)
         self.assertFalse(
             ClassStudent.objects.filter(
-                classroom=self.class1,
-                student=self.student2,
+                classroom=self.class1, student=self.student2
             ).exists()
         )
 

@@ -17,7 +17,7 @@ from django.db.models.functions import TruncDate
 from django.utils import timezone
 
 from apps.courses.models import Catalog, Course, PPTResource, VideoWatchProgress
-from apps.classroom.models import ClassRoom, ClassStudent
+from apps.classroom.models import ClassCourse, ClassRoom, ClassStudent
 from apps.exams.models import Exam, ExamSubmission
 from apps.homework.models import Homework, HomeworkSubmission
 from apps.questions.models import AnswerRecord
@@ -378,16 +378,18 @@ def teacher_rows(search: str = "") -> list:
         row["teacher"]: row["n"] for row in
         Course.objects.filter(teacher__in=teachers).values("teacher").annotate(n=Count("id"))
     }
+    # 班级归口管理员后，"建班人"不再代表带班教师，教师维度要按"其课程挂过的班"统计
     class_counts = {
-        row["teacher"]: row["n"] for row in
-        ClassRoom.objects.filter(teacher__in=teachers).values("teacher").annotate(n=Count("id"))
+        row["course__teacher"]: row["n"] for row in
+        ClassCourse.objects.filter(course__teacher__in=teachers)
+        .values("course__teacher").annotate(n=Count("classroom_id", distinct=True))
     }
     student_counts = {
-        row["classroom__teacher"]: row["n"] for row in
+        row["classroom__courses__teacher"]: row["n"] for row in
         ClassStudent.objects.filter(
-            classroom__teacher__in=teachers
-        ).exclude(learn_status=ClassStudent.LearnStatus.REMOVED)
-        .values("classroom__teacher").annotate(n=Count("student_id", distinct=True))
+            classroom__courses__teacher__in=teachers,
+            learn_status__in=ClassStudent.OCCUPYING_STATUSES,
+        ).values("classroom__courses__teacher").annotate(n=Count("student_id", distinct=True))
     }
     ai_stats = {
         row["triggered_by"]: row for row in

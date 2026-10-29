@@ -2,6 +2,8 @@ from pathlib import Path
 
 from rest_framework import serializers
 
+from apps.common.access import teacher_teaches
+
 from .models import KnowledgeChunk, Material, QARecord, QASession
 
 
@@ -40,7 +42,7 @@ class MaterialSerializer(serializers.ModelSerializer):
         if user and user.is_authenticated and user.is_teacher:
             if not course or course.teacher_id != user.id:
                 raise serializers.ValidationError("只能维护自己负责课程的资料")
-            if classroom and classroom.teacher_id != user.id:
+            if classroom and not teacher_teaches(user, course, classroom):
                 raise serializers.ValidationError("只能选择自己负责的班级")
         return attrs
 

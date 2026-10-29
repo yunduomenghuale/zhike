@@ -301,6 +301,7 @@ const menuGroups = computed(() => {
         items: [
           { index: '/admin/overview', label: '管理概览', icon: DataAnalysis },
           { index: '/admin/users', label: '用户管理', icon: UserFilled },
+          { index: '/admin/classes', label: '班级管理', icon: School },
           { index: '/admin/teaching', label: '教学监管', icon: Reading },
           { index: '/admin/audit', label: '操作审计', icon: Tickets },
           { index: '/admin/ai-settings', label: '大模型配置', icon: Setting },

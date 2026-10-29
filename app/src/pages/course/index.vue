@@ -1,21 +1,9 @@
 <template>
   <view class="page">
-    <!-- 邀请码加入（仅学生） -->
-    <view v-if="isStudent" class="join-bar">
-      <input
-        v-model="code"
-        class="join-input"
-        placeholder="输入班级邀请码加入班级"
-        placeholder-class="ph"
-        @confirm="join"
-      />
-      <button class="join-btn" :disabled="joining" :loading="joining" @click="join">加入</button>
-    </view>
-
     <view v-if="loading" class="tip">加载中…</view>
     <template v-else>
       <view v-if="!courseCards.length" class="tip">
-        {{ isStudent ? '还没有加入任何班级，用邀请码加入吧' : '暂无关联课程' }}
+        {{ isStudent ? '还没有分配课程，请联系学校管理员' : '暂无关联课程' }}
       </view>
       <view
         v-for="c in courseCards"
@@ -48,7 +36,7 @@
 <script setup>
 import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
-import { listClasses, joinClass } from '@/api/classroom.js'
+import { listClasses } from '@/api/classroom.js'
 import { listCatalogs, listWatchProgress } from '@/api/course.js'
 import { chapterProgress } from '@/utils/progress.js'
 import { classStatusLabel } from '@/utils/classStatus.js'
@@ -57,10 +45,7 @@ const classes = ref([])
 const courseCards = ref([])
 const courseProgress = ref({})
 const loading = ref(false)
-const code = ref('')
-const joining = ref(false)
-
-// 邀请码加入仅学生可用（后端 join 接口为 IsStudent）
+// 邀请码加入已下线（P1）：班级由学校统一分配，学生端只读
 const isStudent = uni.getStorageSync('user')?.role === 'student'
 
 async function loadProgress(ids) {
@@ -114,23 +99,6 @@ async function load() {
   }
 }
 
-async function join() {
-  const c = code.value.trim()
-  if (!c) {
-    uni.showToast({ title: '请输入邀请码', icon: 'none' })
-    return
-  }
-  joining.value = true
-  try {
-    await joinClass(c)
-    uni.showToast({ title: '加入成功', icon: 'success' })
-    code.value = ''
-    load()
-  } finally {
-    joining.value = false
-  }
-}
-
 function openCourse(c) {
   uni.navigateTo({
     url: `/pages/course/chapters?id=${c.id}&name=${encodeURIComponent(c.courseName)}`,
@@ -143,42 +111,6 @@ onShow(load)
 <style scoped>
 .page {
   padding: 28rpx;
-}
-
-.join-bar {
-  display: flex;
-  gap: 16rpx;
-  margin-bottom: 28rpx;
-}
-
-.join-input {
-  flex: 1;
-  height: 84rpx;
-  padding: 0 26rpx;
-  border-radius: 20rpx;
-  background: #f1f5f9;
-  border: 1rpx solid transparent;
-  font-size: 26rpx;
-  box-sizing: border-box;
-}
-
-.ph {
-  color: #94a3b8;
-}
-
-.join-btn {
-  width: 150rpx;
-  height: 84rpx;
-  line-height: 84rpx;
-  border-radius: 20rpx;
-  background: #2563eb;
-  color: #ffffff;
-  font-size: 26rpx;
-  font-weight: 600;
-}
-
-.join-btn::after {
-  border: none;
 }
 
 .tip {

@@ -42,10 +42,8 @@ class ClassRoom(BaseModel):
     enrollment_year = models.PositiveSmallIntegerField("届别（入学年份）", null=True, blank=True)
     duration_years = models.PositiveSmallIntegerField("学制（年）", default=4)
     invite_code = models.CharField("邀请码", max_length=16, unique=True, default=gen_invite_code)
-    # 邀请码入班在 P1「归口」阶段整体下线（join 返回 410 + 前端移除入口），
-    # 届时默认值改为 False。P0 先维持 True，否则会出现"新班无法入班、老班还能入班"
-    # 的中间态，比不改更乱。
-    invite_enabled = models.BooleanField("邀请码开启", default=True)
+    # 邀请码入班已于 P1 下线（join 返回 410，前端入口移除），字段保留以备回滚
+    invite_enabled = models.BooleanField("邀请码开启", default=False)
     start_at = models.DateField("开课时间", null=True, blank=True)
     end_at = models.DateField("结课时间", null=True, blank=True)
     status = models.CharField("状态", max_length=16, choices=Status.choices, default=Status.ACTIVE)
@@ -69,6 +67,23 @@ class ClassRoom(BaseModel):
         if not self.enrollment_year or not self.duration_years:
             return None
         return self.enrollment_year + self.duration_years
+
+    @property
+    def creator(self):
+        """建班人（仅展示留痕，可能为空）。
+
+        字段名仍是 `teacher` 以免大范围改库，但语义已降级为"谁点了建班按钮"。
+        业务代码一律用本属性或 `creator_name` 读取，不要直接读 `teacher`——
+        这样权限锚点 grep 检查才有意义（见方案 §4.1.1）。
+        """
+        return self.teacher if self.teacher_id else None
+
+    @property
+    def creator_name(self) -> str:
+        user = self.creator
+        if not user:
+            return ""
+        return user.real_name or user.username
 
     @property
     def occupied_students(self):

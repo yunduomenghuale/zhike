@@ -274,7 +274,8 @@ class AdminCourseViewSet(AdminThrottleMixin, viewsets.ViewSet):
                 "id": classroom.id,
                 "name": classroom.name,
                 "status": classroom.status,
-                "teacher_name": classroom.teacher.real_name or classroom.teacher.username,
+                # 班级不再有"负责人"，这里只展示建班留痕（可能为空）
+                "creator_name": classroom.creator_name,
                 "student_count": ClassStudent.objects.filter(
                     classroom=classroom
                 ).filter(learn_status__in=ClassStudent.OCCUPYING_STATUSES).count(),
@@ -389,6 +390,7 @@ class AdminClassViewSet(AdminThrottleMixin, viewsets.ViewSet):
         if keyword:
             queryset = queryset.filter(
                 Q(name__icontains=keyword)
+                | Q(code__icontains=keyword)
                 | Q(teacher__username__icontains=keyword)
                 | Q(teacher__real_name__icontains=keyword)
             )
@@ -428,10 +430,10 @@ class AdminClassViewSet(AdminThrottleMixin, viewsets.ViewSet):
             "status_display": classroom.get_status_display(),
             "start_at": classroom.start_at,
             "end_at": classroom.end_at,
-            "teacher": {
-                "id": classroom.teacher_id,
-                "real_name": classroom.teacher.real_name,
-                "username": classroom.teacher.username,
+            "creator": {
+                "id": classroom.creator.id if classroom.creator else None,
+                "real_name": classroom.creator.real_name if classroom.creator else "",
+                "username": classroom.creator.username if classroom.creator else "",
             },
             "course_id": course.id,
             "course_name": course.name,
@@ -491,14 +493,15 @@ class AdminClassViewSet(AdminThrottleMixin, viewsets.ViewSet):
         response = _csv_response("classes")
         writer = csv.writer(response)
         writer.writerow([
-            "班级ID", "班级名称", "状态", "负责人", "用户名", "关联课程",
-            "班级学生", "作业提交率(%)", "考试完成率(%)", "预警人数", "创建时间",
+            "班级ID", "班级编码", "班级名称", "状态", "届别", "学制", "建班人", "建班人用户名",
+            "关联课程", "班级学生", "作业提交率(%)", "考试完成率(%)", "预警人数", "创建时间",
         ])
         for row in queryset:
             summary = class_progress_summary(row)
             writer.writerow([
-                row.id, row.name, row.get_status_display(),
-                row.teacher.real_name or "", row.teacher.username,
+                row.id, row.code or "", row.name, row.get_status_display(),
+                row.enrollment_year or "", row.duration_years or "",
+                row.creator_name, row.creator.username if row.creator else "",
                 row.course_count, row.student_count,
                 summary["homework_rate"] if summary["homework_rate"] is not None else "",
                 summary["exam_rate"] if summary["exam_rate"] is not None else "",

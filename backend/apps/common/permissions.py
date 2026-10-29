@@ -40,11 +40,16 @@ class IsTeacherOrAdmin(BasePermission):
 
 
 class IsTeacherOrReadOnly(BasePermission):
-    """教师可写，其余登录用户只读。"""
+    """教师或平台管理员可写，其余登录用户只读。
+
+    管理员代表学校做组织层操作，必要时也要能直接补录教学数据（发作业/发考试），
+    否则「管理员 200」与「教师 200」两条准出口径对不上。
+    """
 
     def has_permission(self, request, view):
-        if not (request.user and request.user.is_authenticated):
+        user = request.user
+        if not (user and user.is_authenticated):
             return False
         if request.method in ("GET", "HEAD", "OPTIONS"):
             return True
-        return request.user.is_teacher
+        return bool(user.is_teacher or user.role == "admin" or user.is_superuser)

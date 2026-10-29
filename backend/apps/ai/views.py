@@ -77,7 +77,7 @@ def _task_visible(task, user) -> bool:
         return True
     if task.triggered_by_id and task.triggered_by_id == user.id:
         return True
-    if task.classroom_id and task.classroom.teacher_id == user.id:
+    if task.classroom_id and task.course_id and task.course and task.course.teacher_id == user.id:
         return True
     if task.catalog_id:
         if task.course_id and task.course and task.course.teacher_id == user.id:

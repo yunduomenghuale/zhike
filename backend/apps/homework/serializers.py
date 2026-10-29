@@ -5,6 +5,7 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
 
+from apps.common.access import teacher_teaches
 from apps.courses.models import Course
 from apps.questions.models import Question
 
@@ -95,7 +96,9 @@ class HomeworkSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         user = getattr(request, "user", None)
         if user and getattr(user, "is_teacher", False):
-            if course.teacher_id != user.id or (classroom and classroom.teacher_id != user.id):
+            if course.teacher_id != user.id or (
+                classroom and not teacher_teaches(user, course, classroom)
+            ):
                 raise serializers.ValidationError("只能为自己负责的课程和班级创建作业")
 
         start_time = attrs.get("start_time", getattr(self.instance, "start_time", None))

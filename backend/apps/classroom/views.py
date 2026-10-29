@@ -1,8 +1,9 @@
 from django.contrib.auth import get_user_model
 from rest_framework.decorators import action
+from rest_framework.permissions import BasePermission
 
-from apps.common.access import classrooms_for_user
-from apps.common.permissions import IsStudent, IsTeacher, IsTeacherOrReadOnly
+from apps.common.access import classrooms_for_user, is_platform_admin
+from apps.common.permissions import IsPlatformAdmin, IsStudent, IsTeacherOrAdmin
 from apps.common.response import api_response
 from apps.common.viewsets import BaseModelViewSet
 
@@ -16,11 +17,61 @@ def has_complete_profile(user):
     return bool(user.real_name.strip())
 
 
+class IsAdminOrReadOnly(BasePermission):
+    """班级写操作归管理员；其余登录用户只读（教师看自己课挂过的班，学生看自己班）。"""
+
+    message = "班级由学校统一分配，仅平台管理员可维护"
+
+    def has_permission(self, request, view):
+        if not (request.user and request.user.is_authenticated):
+            return False
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return True
+        return is_platform_admin(request.user)
+
+
+# 组织层字段：只有管理员能改。courses 不在其中（教师可以把自己的课挂进班级）。
+ORG_ONLY_FIELDS = {
+    "code", "name", "status", "enrollment_year", "duration_years",
+    "start_at", "end_at", "invite_enabled",
+}
+
+
 class ClassRoomViewSet(BaseModelViewSet):
     serializer_class = ClassRoomSerializer
-    permission_classes = [IsTeacherOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
     filterset_fields = ["status"]
     search_fields = ["name", "courses__name"]
+
+    def get_permissions(self):
+        # PATCH/PUT 放开到「教师或管理员」：教师挂自己的课是教学动作。
+        # 组织字段与成员仍然只有管理员能动（见下面 update 的字段级校验）。
+        if self.action in ("update", "partial_update"):
+            return [IsTeacherOrAdmin()]
+        return [perm() for perm in self.permission_classes]
+
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        # 教师挂课是追加（不覆盖其他教师的课），管理员仍是整体覆盖
+        if self.action in ("update", "partial_update") and not is_platform_admin(self.request.user):
+            ctx["courses_append"] = True
+        return ctx
+
+    def update(self, request, *args, **kwargs):
+        classroom = self.get_object()  # 教师只能 get 到自己授课的班，无需额外判权
+        if not is_platform_admin(request.user):
+            touched = ORG_ONLY_FIELDS & set(request.data.keys())
+            if touched:
+                return api_response(
+                    message=f"班级信息由学校统一维护，不能修改：{'、'.join(sorted(touched))}",
+                    code=403,
+                    status=403,
+                )
+            if "courses" not in request.data:
+                return api_response(
+                    message="教师只能调整班级的课程关联", code=403, status=403
+                )
+        return super().update(request, *args, **kwargs)
 
     def get_queryset(self):
         qs = classrooms_for_user(self.request.user).prefetch_related("course_links__course")
@@ -31,15 +82,16 @@ class ClassRoomViewSet(BaseModelViewSet):
         return qs.distinct()
 
     def perform_create(self, serializer):
+        # teacher 字段已降级为"建班人"留痕，仅作审计线索，不参与权限
         serializer.save(teacher=self.request.user)
 
-    @action(detail=True, methods=["post"], url_path="regenerate-code")
+    @action(detail=True, methods=["post"], url_path="regenerate-code", permission_classes=[IsPlatformAdmin])
     def regenerate_code(self, request, pk=None):
         classroom = self.get_object()
         classroom.regenerate_invite_code()
         return api_response({"invite_code": classroom.invite_code}, message="邀请码已重新生成")
 
-    @action(detail=True, methods=["get"], url_path="search-students", permission_classes=[IsTeacher])
+    @action(detail=True, methods=["get"], url_path="search-students", permission_classes=[IsPlatformAdmin])
     def search_students(self, request, pk=None):
         """教师搜索候选学生（学号/姓名模糊匹配），供班级添加学生用。
         返回：学号、姓名、当前所在班级、是否已在目标班级。"""
@@ -77,7 +129,7 @@ class ClassRoomViewSet(BaseModelViewSet):
             })
         return api_response(rows, message="ok")
 
-    @action(detail=True, methods=["post"], url_path="add-students-batch", permission_classes=[IsTeacher])
+    @action(detail=True, methods=["post"], url_path="add-students-batch", permission_classes=[IsPlatformAdmin])
     def add_students_batch(self, request, pk=None):
         """教师批量添加学生（勾选候选后一次提交多个学号）。
 
@@ -130,7 +182,7 @@ class ClassRoomViewSet(BaseModelViewSet):
             message="、".join(parts),
         )
 
-    @action(detail=True, methods=["post"], url_path="add-student", permission_classes=[IsTeacher])
+    @action(detail=True, methods=["post"], url_path="add-student", permission_classes=[IsPlatformAdmin])
     def add_student(self, request, pk=None):
         """教师按用户名手动添加学生（需求 T-B-02）。"""
         classroom = self.get_object()
@@ -161,40 +213,23 @@ class ClassRoomViewSet(BaseModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="join", permission_classes=[IsStudent])
     def join(self, request):
-        """学生输入邀请码加入班级（需求 S-B-01）。"""
-        if not has_complete_profile(request.user):
-            return api_response(
-                message="请先在个人中心填写姓名，完善资料后才能加入班级",
-                code=400,
-                status=400,
-            )
-        code = request.data.get("invite_code", "").strip().upper()
-        try:
-            classroom = ClassRoom.objects.get(
-                invite_code=code,
-                invite_enabled=True,
-                status=ClassRoom.Status.ACTIVE,
-            )
-        except ClassRoom.DoesNotExist:
-            return api_response(message="邀请码无效或已关闭", code=404, status=404)
-        existing = ClassStudent.objects.filter(
-            classroom=classroom,
-            student=request.user,
-            learn_status__in=ClassStudent.OCCUPYING_STATUSES,
-        ).first()
-        if existing:
-            return api_response(ClassStudentSerializer(existing).data, message="你已在该班级中")
-        try:
-            services.assign_students(classroom, [request.user], operator=request.user)
-        except services.ClassServiceError as exc:
-            return api_response(message=exc.detail, code=exc.code, status=exc.code)
-        obj = ClassStudent.objects.get(classroom=classroom, student=request.user)
-        return api_response(ClassStudentSerializer(obj).data, message="加入成功")
+        """邀请码入班已下线（方案 §4.4）。
+
+        保留路由而不是直接删掉：老客户端、学生端缓存页、收藏的旧链接仍会打这个地址，
+        返回 410 + 可读文案，比 404 更容易让人明白"功能没了，不是坏了"。
+        班级统一由管理员分配，学生无需也无法自行入班。
+        """
+        return api_response(
+            message="班级由学校统一分配，请联系管理员；邀请码入班已停用",
+            code=410,
+            status=410,
+        )
 
 
 class ClassStudentViewSet(BaseModelViewSet):
     serializer_class = ClassStudentSerializer
-    permission_classes = [IsTeacherOrReadOnly]
+    # 名单可读；增删改一律管理员（移出 = 组织动作，不是教学动作）
+    permission_classes = [IsAdminOrReadOnly]
     http_method_names = ["get", "patch", "delete", "head", "options"]
     filterset_fields = ["classroom", "learn_status"]
 

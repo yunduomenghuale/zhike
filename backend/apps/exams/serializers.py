@@ -1,5 +1,6 @@
 from rest_framework import serializers
 
+from apps.common.access import teacher_teaches
 from apps.questions.models import Question
 
 from .models import Exam, ExamLog, ExamSubmission, Paper
@@ -35,7 +36,7 @@ class ExamSerializer(serializers.ModelSerializer):
         if user and user.is_authenticated and user.is_teacher:
             if not course or course.teacher_id != user.id:
                 raise serializers.ValidationError("只能维护自己负责课程的考试")
-            if not classroom or classroom.teacher_id != user.id:
+            if not classroom or not teacher_teaches(user, course, classroom):
                 raise serializers.ValidationError("只能维护自己负责班级的考试")
         if start_at and end_at and end_at <= start_at:
             raise serializers.ValidationError({"end_at": "结束时间必须晚于开始时间"})

@@ -11,7 +11,8 @@ from rest_framework import serializers
 from rest_framework.views import APIView
 
 from apps.classroom.models import ClassRoom, ClassStudent
-from apps.common.permissions import IsStudent, IsTeacher
+from apps.common.access import classrooms_for_user, is_platform_admin
+from apps.common.permissions import IsStudent, IsTeacherOrAdmin
 from apps.common.response import api_response
 from apps.courses.models import Catalog
 from apps.exams.models import Exam, ExamSubmission
@@ -32,27 +33,38 @@ class AnalyticsResponseSerializer(serializers.Serializer):
 
 
 def _resolve_classroom_course(request, class_id):
-    """校验班级归属并解析课程参数。返回 (classroom, course, error_response)。"""
-    classroom = ClassRoom.objects.filter(id=class_id, teacher=request.user).first()
+    """校验班级归属并解析课程参数。返回 (classroom, course, error_response)。
+
+    两道闸缺一不可（X-02）：
+    1. 班级必须在"我教的课挂过的班"范围内（管理员不受限）
+    2. 课程必须是**我自己的**课——不能只校验"该课挂在这个班"，
+       否则教师 A 传 ?course=<教师 B 的课 id> 就能读到别人的学情
+    """
+    qs = ClassRoom.objects.all() if is_platform_admin(request.user) else classrooms_for_user(request.user)
+    classroom = qs.filter(id=class_id).first()
     if not classroom:
         return None, None, api_response(message="班级不存在或无权查看", code=404, status=404)
 
     course_id = request.query_params.get("course")
+    course_qs = classroom.courses.all() if is_platform_admin(request.user) \
+        else classroom.courses.filter(teacher=request.user)
     if course_id:
-        course = classroom.courses.filter(id=course_id).first()
+        course = course_qs.filter(id=course_id).first()
         if not course:
-            return None, None, api_response(message="该课程未关联到此班级", code=400, status=400)
+            return None, None, api_response(
+                message="该课程未关联到此班级，或你无权查看", code=403, status=403
+            )
     else:
-        course = classroom.courses.order_by("id").first()
+        course = course_qs.order_by("id").first()
         if not course:
-            return None, None, api_response(message="该班级尚未关联课程", code=400, status=400)
+            return None, None, api_response(message="你在该班级暂无授课课程", code=403, status=403)
     return classroom, course, None
 
 
 class ClassStatsView(APIView):
     """班级学习统计 + 逐个学生进度 + 预警（需求 T-L-01/02/03）。"""
 
-    permission_classes = [IsTeacher]
+    permission_classes = [IsTeacherOrAdmin]
     serializer_class = AnalyticsResponseSerializer
 
     def get(self, request, class_id):
@@ -72,7 +84,7 @@ class ClassExportView(APIView):
     Sheet 口径见 export.py 模块 docstring。
     """
 
-    permission_classes = [IsTeacher]
+    permission_classes = [IsTeacherOrAdmin]
     throttle_classes = [TeacherExportThrottle]
 
     def get(self, request, class_id):
@@ -121,7 +133,7 @@ class ClassAIReportView(APIView):
     class_analytics 任务则拒绝（LLM 成本保护）；上一次失败允许立即重试。
     """
 
-    permission_classes = [IsTeacher]
+    permission_classes = [IsTeacherOrAdmin]
     serializer_class = AnalyticsResponseSerializer
     RATE_LIMIT_MINUTES = 10
 
@@ -260,7 +272,7 @@ class ClassChapterSummariesView(APIView):
     不经学生端成绩门控（教师看全量）。学生姓名取实时 Users 表。
     """
 
-    permission_classes = [IsTeacher]
+    permission_classes = [IsTeacherOrAdmin]
     serializer_class = AnalyticsResponseSerializer
 
     def get(self, request, class_id):
@@ -322,14 +334,16 @@ class ClassAIReportHistoryView(APIView):
     可见性规则：班级归属教师放行）。重新生成入口见 ClassAIReportView.post。
     """
 
-    permission_classes = [IsTeacher]
+    permission_classes = [IsTeacherOrAdmin]
     serializer_class = AnalyticsResponseSerializer
     HISTORY_LIMIT = 20
 
     def get(self, request, class_id):
         from apps.ai.models import AITask
 
-        classroom = ClassRoom.objects.filter(id=class_id, teacher=request.user).first()
+        scope = ClassRoom.objects.all() if is_platform_admin(request.user) \
+            else classrooms_for_user(request.user)
+        classroom = scope.filter(id=class_id).first()
         if not classroom:
             return api_response(message="班级不存在或无权查看", code=404, status=404)
 
@@ -365,7 +379,7 @@ class ClassAIReportHistoryView(APIView):
 class ClassStudentDetailView(APIView):
     """教师查看班级内单个学生的学习详情（练习/作业/考试/预警）。"""
 
-    permission_classes = [IsTeacher]
+    permission_classes = [IsTeacherOrAdmin]
     serializer_class = AnalyticsResponseSerializer
 
     def get(self, request, class_id, student_id):

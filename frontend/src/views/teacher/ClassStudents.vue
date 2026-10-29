@@ -1,6 +1,6 @@
 <template>
   <div class="page-container class-students">
-    <!-- 页头：返回 + 班级信息 + 邀请码 -->
+    <!-- 页头：返回 + 班级信息 -->
     <div class="roster-head">
       <el-button text circle :icon="ArrowLeft" title="返回班级列表" @click="goBack" />
       <span class="roster-icon">
@@ -11,16 +11,6 @@
         <div class="roster-subtitle">{{ cls ? (cls.course_names?.join('、') || cls.course_name || '未关联课程') : ' ' }}</div>
       </div>
       <span class="roster-count">共 {{ students.length }} 名学生</span>
-      <button
-        type="button"
-        class="invite-chip copyable"
-        :title="'点击复制：' + (cls?.invite_code || '')"
-        @click="copyInvite(cls?.invite_code)"
-      >
-        <span class="invite-chip-label">邀请码</span>
-        <code>{{ cls?.invite_code }}</code>
-        <el-icon class="copy-ico"><DocumentCopy /></el-icon>
-      </button>
     </div>
 
     <!-- 工具栏：搜索 / 状态筛选 / 排序 + 添加学生 -->
@@ -45,11 +35,11 @@
           <el-option label="按姓名" value="name" />
         </el-select>
       </div>
-      <el-button type="primary" :icon="Plus" @click="addVisible = true">添加学生</el-button>
+      <el-button v-if="isAdmin" type="primary" :icon="Plus" @click="addVisible = true">添加学生</el-button>
     </div>
 
     <TableSkeleton v-if="loading" :cols="5" />
-    <el-empty v-else-if="!students.length" description="暂无学生，用邀请码或右上角按钮添加" />
+    <el-empty v-else-if="!students.length" :description="isAdmin ? '暂无学生，可用右上角按钮添加或批量导入' : '暂无学生'" />
     <el-empty v-else-if="!pagedStudents.length" description="没有符合条件的学生" :image-size="60" />
 
     <template v-else>
@@ -86,7 +76,7 @@
         <el-table-column label="操作" width="130" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openDetail(row)">详情</el-button>
-            <el-button link type="danger" @click="openRemove(row)">移除</el-button>
+            <el-button v-if="isAdmin" link type="danger" @click="openRemove(row)">移除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -171,9 +161,10 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, ArrowRight, DocumentCopy, Plus, School, Search, User } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowRight, Plus, School, Search, User } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
+import { useUserStore } from '@/store/user'
 import {
   listClasses, listClassStudents, removeClassStudent, searchClassStudents, addStudentsBatch,
 } from '@/api/classroom'
@@ -181,6 +172,10 @@ import {
 const route = useRoute()
 const router = useRouter()
 const classId = Number(route.params.classId)
+
+// 名单可读；加人 / 移人是组织动作，只对管理员开放（教师看到的是只读名单）。
+const userStore = useUserStore()
+const isAdmin = computed(() => userStore.isAdmin())
 
 const cls = ref(null)
 const students = ref([])
@@ -249,22 +244,6 @@ const sortText = (field) => (a, b) => String(a[field] || '').localeCompare(Strin
 const sortJoined = (a, b) => new Date(a.joined_at) - new Date(b.joined_at)
 const sortLastLogin = (a, b) => new Date(a.last_login || 0) - new Date(b.last_login || 0)
 
-// ---- 邀请码 ----
-async function copyInvite(code) {
-  if (!code) return
-  try {
-    await navigator.clipboard.writeText(code)
-  } catch {
-    const ta = document.createElement('textarea')
-    ta.value = code
-    document.body.appendChild(ta)
-    ta.select()
-    document.execCommand('copy')
-    document.body.removeChild(ta)
-  }
-  ElMessage.success('邀请码已复制：' + code)
-}
-
 // ---- 学生详情 ----
 const courseOptions = computed(() => {
   const ids = cls.value?.courses?.length
@@ -276,7 +255,7 @@ const courseOptions = computed(() => {
 function openDetail(stu) {
   const course = courseOptions.value[0]?.id
   router.push({
-    name: 'class-student-detail',
+    name: isAdmin.value ? 'admin-class-student-detail' : 'class-student-detail',
     params: { classId, studentId: stu.student },
     query: course ? { course } : {},
   })
@@ -376,7 +355,9 @@ async function doBatchAdd() {
   }
 }
 
-function goBack() { router.push('/teacher/classes') }
+function goBack() {
+  router.push(isAdmin.value ? '/admin/classes' : '/teacher/classes')
+}
 
 onMounted(() => { loadClass(); loadStudents() })
 </script>
@@ -435,58 +416,6 @@ onMounted(() => { loadClass(); loadStudents() })
   color: #64748b;
   font-size: 13px;
   white-space: nowrap;
-}
-
-/* 邀请码 chip（与班级管理页同款式） */
-.invite-chip {
-  height: 34px;
-  display: inline-flex;
-  align-items: center;
-  overflow: hidden;
-  flex-shrink: 0;
-  border-radius: 999px;
-  background: #eff6ff;
-  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.1);
-}
-.invite-chip.copyable {
-  border: 0;
-  cursor: pointer;
-  padding: 0;
-  font: inherit;
-  transition: box-shadow 0.15s ease, transform 0.1s ease;
-}
-.invite-chip.copyable:hover {
-  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.35);
-  background: #dbeafe;
-}
-.invite-chip.copyable:active {
-  transform: scale(0.97);
-}
-.invite-chip .copy-ico {
-  margin-right: 10px;
-  font-size: 13px;
-  color: #2563eb;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-}
-.invite-chip.copyable:hover .copy-ico {
-  opacity: 1;
-}
-.invite-chip-label {
-  padding: 0 8px 0 12px;
-  color: #94a3b8;
-  font-size: 12px;
-}
-.invite-chip code {
-  align-self: stretch;
-  display: inline-flex;
-  align-items: center;
-  padding: 0 12px 0 9px;
-  border-left: 1px solid rgba(59, 130, 246, 0.12);
-  color: #2563eb;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.3px;
 }
 
 /* ===== 工具栏 ===== */

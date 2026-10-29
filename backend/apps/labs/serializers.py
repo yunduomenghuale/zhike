@@ -1,5 +1,6 @@
 from rest_framework import serializers
 
+from apps.common.access import teacher_teaches
 from apps.courses.models import Course
 
 from .models import (
@@ -50,7 +51,7 @@ class LabScheduleSerializer(serializers.ModelSerializer):
         lab, classroom = attrs.get("lab"), attrs.get("classroom")
         if lab and classroom:
             user = self.context["request"].user
-            if lab.course.teacher_id != user.id or classroom.teacher_id != user.id:
+            if lab.course.teacher_id != user.id or not teacher_teaches(user, lab.course, classroom):
                 raise serializers.ValidationError("只能给自己课程的实验、自己的班级排课")
             if not classroom.courses.filter(id=lab.course_id).exists():
                 raise serializers.ValidationError("该班级未关联此课程，无法排课")

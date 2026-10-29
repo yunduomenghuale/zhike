@@ -54,7 +54,8 @@ class ExamViewSet(BaseModelViewSet):
                 | Q(submissions__student=user)
             ).distinct()
         elif getattr(user, "is_teacher", False):
-            qs = qs.filter(classroom__teacher=user, course__teacher=user)
+            # 锚点是课程负责人；班级维度只看「该课是否挂在这个班」，不看建班人
+            qs = qs.filter(course__teacher=user)
         elif not is_platform_admin(user):
             qs = qs.none()
         return qs.distinct()
@@ -243,7 +244,7 @@ class ExamSubmissionViewSet(BaseModelViewSet):
         if getattr(user, "is_student", False):
             qs = qs.filter(student=user)
         elif getattr(user, "is_teacher", False):
-            qs = qs.filter(exam__classroom__teacher=user, exam__course__teacher=user)
+            qs = qs.filter(exam__course__teacher=user)
         elif not is_platform_admin(user):
             qs = qs.none()
         return qs
@@ -547,7 +548,7 @@ class ExamLogViewSet(BaseModelViewSet):
         if getattr(user, "is_student", False):
             qs = qs.filter(student=user)
         elif getattr(user, "is_teacher", False):
-            qs = qs.filter(exam__classroom__teacher=user, exam__course__teacher=user)
+            qs = qs.filter(exam__course__teacher=user)
         elif not is_platform_admin(user):
             qs = qs.none()
         return qs

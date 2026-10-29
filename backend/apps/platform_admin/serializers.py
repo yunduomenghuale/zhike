@@ -122,17 +122,21 @@ class ClassStatusSerializer(serializers.ModelSerializer):
 
 
 class AdminClassSerializer(serializers.ModelSerializer):
-    teacher_name = serializers.CharField(source="teacher.real_name", read_only=True)
-    teacher_username = serializers.CharField(source="teacher.username", read_only=True)
+    # ClassRoom.teacher 已降级为「建班人」留痕（不参与权限），对外只暴露 creator_*
+    creator_name = serializers.CharField(source="teacher.real_name", read_only=True)
+    creator_username = serializers.CharField(source="teacher.username", read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     course_count = serializers.IntegerField(read_only=True)
     student_count = serializers.IntegerField(read_only=True)
+    graduate_year = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = ClassRoom
         fields = [
-            "id", "name", "status", "status_display", "teacher_name",
-            "teacher_username", "course_count", "student_count", "start_at", "end_at",
+            "id", "code", "name", "status", "status_display",
+            "creator_name", "creator_username",
+            "enrollment_year", "duration_years", "graduate_year",
+            "course_count", "student_count", "start_at", "end_at",
         ]
 
 
