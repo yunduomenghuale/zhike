@@ -523,7 +523,8 @@ async function togglePublish(row) {
 }
 
 async function previewResource(row) {
-  // 先签发唯一签名 URL 再打开；文档类签发 file 地址（PDF 查看器内预览，doc/docx 下载）
+  // 先签发唯一签名 URL 再打开；文档类签发 file 地址（PDF 查看器内预览，doc/docx 下载）；
+  // HTML 类（预置/自定义导图演示）在延迟标签页中打开查看器，避免签名异步等待被弹窗拦截
   const tab = openTabDeferred()
   let signed
   try {
@@ -538,7 +539,7 @@ async function previewResource(row) {
     return
   }
   const hash = row.kind === 'mindmap' ? '#chapters-hidden' : ''
-  router.push({
+  const { href } = router.resolve({
     name: 'course-resource-viewer',
     params: { id: courseId.value },
     query: {
@@ -548,6 +549,7 @@ async function previewResource(row) {
       back: 'course-resources',
     },
   })
+  tab.open(href)
 }
 
 // 复制 2 小时内有效的访问链接（便于临时分享）
