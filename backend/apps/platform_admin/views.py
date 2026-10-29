@@ -55,14 +55,16 @@ from .serializers import (
     AICapabilityConfigSerializer,
     PasswordResetSerializer,
 )
-from .user_import import (
+from .imports import (
+    KIND_STUDENT,
     MAX_FILE_SIZE,
-    MAX_IMPORT_ROWS,
-    annotate_rows,
-    build_template,
-    initial_password_for,
-    parse_excel,
+    ImportValidationError,
+    annotate_rows as annotate_import_rows,
+    commit as commit_import,
 )
+# 旧接口（/users/import/*）保留一版兼容：模板与解析仍按「用户名/姓名」两列，
+# 校验与写入转调新导入 service（见下方 3 个视图的 docstring）。
+from .user_import import MAX_IMPORT_ROWS, build_template as build_legacy_template, parse_excel
 
 User = get_user_model()
 
@@ -280,13 +282,17 @@ class AdminPasswordResetView(AdminThrottleMixin, APIView):
 
 
 class AdminUserImportTemplateView(AdminThrottleMixin, APIView):
-    """下载学生批量导入模板（xlsx）。"""
+    """下载旧版学生导入模板（两列：用户名/姓名）。
+
+    新前端走 `/imports/template/?kind=student`（多了班级编码等列）；
+    本接口保留一版兼容移动端与旧前端，模板格式不变。
+    """
 
     permission_classes = [IsPlatformAdmin]
 
     def get(self, request):
         response = HttpResponse(
-            build_template(),
+            build_legacy_template(),
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
         response["Content-Disposition"] = "attachment; filename=student_import_template.xlsx"
@@ -294,7 +300,11 @@ class AdminUserImportTemplateView(AdminThrottleMixin, APIView):
 
 
 class AdminUserImportPreviewView(AdminThrottleMixin, APIView):
-    """上传 Excel 真实解析，返回逐行校验结果供前端预览/修改。"""
+    """旧版预览（两列 Excel）：解析用旧函数，校验转调新导入 service。
+
+    输出保持旧结构（`status` / `valid`），新字段（`row_status`）一并带上，
+    避免旧前端改一版；入班相关能力只在新的 `/imports/*` 里提供。
+    """
     method_scopes = {"POST": "admin_heavy"}
 
     permission_classes = [IsPlatformAdmin]
@@ -311,7 +321,9 @@ class AdminUserImportPreviewView(AdminThrottleMixin, APIView):
             rows = parse_excel(file)
         except ValueError as exc:
             return api_response(message=str(exc), code=400, status=400)
-        annotated = annotate_rows(rows)
+
+        result = annotate_import_rows(KIND_STUDENT, rows, {"create_missing_classes": False})
+        annotated = [{**row, "status": row["row_status"]} for row in result["rows"]]
         return api_response({
             "rows": annotated,
             "total": len(annotated),
@@ -320,7 +332,7 @@ class AdminUserImportPreviewView(AdminThrottleMixin, APIView):
 
 
 class AdminUserImportConfirmView(AdminThrottleMixin, APIView):
-    """确认导入：服务端对最终行重新全量校验，全部合法才在事务中批量创建。"""
+    """旧版确认导入：服务端重新校验后转调新 service 写入（单事务 + 审计）。"""
     method_scopes = {"POST": "admin_heavy"}
 
     permission_classes = [IsPlatformAdmin]
@@ -332,35 +344,40 @@ class AdminUserImportConfirmView(AdminThrottleMixin, APIView):
         if len(rows) > MAX_IMPORT_ROWS:
             return api_response(message=f"单次最多导入 {MAX_IMPORT_ROWS} 行", code=400, status=400)
         cleaned = [row for row in rows if isinstance(row, dict)]
-        annotated = annotate_rows(cleaned)
-        errors = [row for row in annotated if row["status"] != "ok"]
-        if errors:
+        try:
+            result = commit_import(
+                KIND_STUDENT,
+                cleaned,
+                {"skip_invalid": False, "create_missing_classes": False},
+                operator=request.user,
+            )
+        except ValueError as exc:  # ImportFileError / 行数超限
+            return api_response(message=str(exc), code=400, status=400)
+        except ImportValidationError as exc:
+            annotated = [{**row, "status": row["row_status"]} for row in exc.rows]
             return api_response(
                 {"rows": annotated},
-                message="存在无效或冲突的数据行，请修正后重新提交",
+                message=exc.message,
                 code=400,
                 status=400,
             )
-        with transaction.atomic():
-            for row in annotated:
-                user = User(
-                    username=row["username"],
-                    real_name=row["real_name"],
-                    role=User.Role.STUDENT,
-                    must_change_password=True,
+        created = result["created_users"]
+        if not created:
+            # 全部行「已存在」属于幂等成功，不是错误：同一份名单传两遍不该报 400
+            if result["skipped"]:
+                return api_response(
+                    {"created": 0, "skipped": result["skipped"]},
+                    message="账号均已存在，未做修改",
                 )
-                user.set_password(initial_password_for(row["username"]))
-                user.save()
-        log_admin_action(
-            request.user,
-            AdminActionLog.Action.USER_IMPORT,
-            target_type="user",
-            target_label=f"批量导入 {len(annotated)} 个学生账号",
-            new_value={"created": len(annotated)},
-        )
+            return api_response(
+                {"created": 0},
+                message="没有可导入的数据行",
+                code=400,
+                status=400,
+            )
         return api_response(
-            {"created": len(annotated)},
-            message=f"成功导入 {len(annotated)} 个学生账号",
+            {"created": created},
+            message=f"成功导入 {created} 个学生账号",
             status=status.HTTP_201_CREATED,
         )
 

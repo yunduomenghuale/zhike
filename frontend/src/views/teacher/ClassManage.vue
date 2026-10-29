@@ -3,6 +3,7 @@
     <div class="class-toolbar">
       <template v-if="isAdmin">
         <el-button type="primary" :icon="Plus" @click="openEdit()">新建班级</el-button>
+        <el-button :icon="Upload" @click="importVisible = true">批量导入班级</el-button>
       </template>
       <span v-else class="class-hint">
         <el-icon><InfoFilled /></el-icon>
@@ -50,6 +51,17 @@
     </div>
 
     <el-empty v-else :description="isAdmin ? '还没有班级，点击右上角新建' : '暂无可管理的班级'" />
+
+    <el-pagination
+      v-if="total > pageSize"
+      class="class-pager"
+      background
+      layout="prev, pager, next, total"
+      :total="total"
+      :page-size="pageSize"
+      :current-page="page"
+      @current-change="changePage"
+    />
 
     <!-- 新建/编辑班级 -->
     <el-dialog v-model="editVisible" width="620px" align-center :show-close="false" class="class-form-dialog">
@@ -115,6 +127,9 @@
       </template>
     </el-dialog>
 
+    <!-- 班级批量导入（仅管理端可见）：上传 → 预览 → 结果 -->
+    <ImportWizard v-if="isAdmin" v-model="importVisible" kind="class" @done="reloadAfterImport" />
+
     <DeleteConfirmDialog
       v-model="deleteVisible"
       title="删除班级"
@@ -131,9 +146,10 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, Delete, EditPen, User, School, Close, InfoFilled } from '@element-plus/icons-vue'
+import { Plus, Delete, EditPen, User, School, Close, InfoFilled, Upload } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
+import ImportWizard from '@/components/admin/ImportWizard.vue'
 import { CLASS_STATUS_OPTIONS, classStatusMeta } from '@/utils/classStatus'
 import { listCourses } from '@/api/course'
 import { compareCourseName } from '@/utils/course-sort'
@@ -149,6 +165,12 @@ const isAdmin = computed(() => userStore.isAdmin())
 const courses = ref([])
 const rows = ref([])
 const loading = ref(false)
+// 班级批量导入向导（仅管理员可见）
+const importVisible = ref(false)
+// 服务端分页：批量导入一次最多 200 个班，列表必须能翻页（后端单页上限 100）
+const total = ref(0)
+const page = ref(1)
+const pageSize = 20
 
 async function loadCourses() {
   const data = await listCourses()
@@ -157,10 +179,25 @@ async function loadCourses() {
 async function load() {
   loading.value = true
   try {
-    const data = await listClasses()
+    const data = await listClasses({ page: page.value, page_size: pageSize })
     rows.value = sortClassCourses(data.results ?? data)
+    total.value = typeof data.total === 'number' ? data.total : rows.value.length
   } finally {
     loading.value = false
+  }
+}
+function changePage(value) {
+  page.value = value
+  load()
+}
+// 导入完成：跳到最后一页——列表按 id 升序，新建的班在末尾，
+// 停在第一页会让管理员「导完看不到新建的班」。
+async function reloadAfterImport() {
+  await load()
+  const last = Math.max(1, Math.ceil(total.value / pageSize))
+  if (last !== page.value) {
+    page.value = last
+    await load()
   }
 }
 
@@ -285,6 +322,12 @@ onMounted(() => { loadCourses(); load() })
   display: grid;
   gap: 14px;
   padding-top: 20px;
+}
+
+/* 分页：批量导入后班级数会超过单页上限，翻页入口放在列表下方右对齐 */
+.class-pager {
+  justify-content: flex-end;
+  padding-top: 18px;
 }
 
 .class-row {

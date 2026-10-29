@@ -19,6 +19,7 @@ class AdminActionLog(BaseModel):
         USER_UPDATE = "user_update", "编辑账号"
         USER_RESET_PWD = "user_reset_pwd", "重置密码"
         USER_IMPORT = "user_import", "批量导入账号"
+        CLASS_IMPORT = "class_import", "批量导入班级"
         CLASS_MEMBER_ADD = "class_member_add", "班级成员入班"
         CLASS_MEMBER_TRANSFER = "class_member_transfer", "班级成员转班"
         CLASS_MEMBER_REMOVE = "class_member_remove", "班级成员移出"

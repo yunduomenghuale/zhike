@@ -54,6 +54,8 @@ backend/data/models/
 output/
 # E2E 截图（体积大，仅本地留存）
 test/screenshots/
+# E2E 运行时生成的 xlsx 夹具（按 RUN_ID 每次重建，不入库）
+test/e2e/fixtures/p2-run/
 # 临时测试样例文件（导入/导出验证用，随时可再造）
 docs/测试文件/
 # 课程原始素材（PPT 等，419M）

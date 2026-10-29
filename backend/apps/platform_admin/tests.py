@@ -1288,7 +1288,8 @@ class OversightAuditTests(OversightFixtureMixin, TestCase):
         }, format="json")
         self.assertEqual(resp.status_code, 201, resp.data)
         log = AdminActionLog.objects.get(action=AdminActionLog.Action.USER_IMPORT)
-        self.assertEqual(log.new_value["created"], 1)
+        # 审计明细统一口径：账号数 / 新建班级 / 入班人数（P2 导入 service 起）
+        self.assertEqual(log.new_value["created_users"], 1)
 
     def test_import_failed_no_audit(self):
         resp = self.client.post("/api/admin-panel/users/import-confirm/", {

@@ -61,6 +61,17 @@ class ClassRoom(BaseModel):
     def __str__(self):
         return self.name
 
+    def save(self, *args, **kwargs):
+        """班级编码统一归一为 strip + 大写。
+
+        导入时 `CS-2401` 与 `cs-2401` 必须视为同一个班（方案 X-32），否则学生被
+        劈成两半；SQLite 的 UNIQUE 区分大小写，所以归一放在模型层，不依赖调用方。
+        历史数据允许 code 为空，此时不做任何处理。
+        """
+        if self.code:
+            self.code = str(self.code).strip().upper()
+        super().save(*args, **kwargs)
+
     @property
     def graduate_year(self):
         """预计毕业年份。届别或学制缺失时返回 None。"""

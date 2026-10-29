@@ -18,6 +18,11 @@ from .views import (
     AdminAIConfigurationView,
     AdminAIConnectionTestView,
 )
+from .views_imports import (
+    AdminImportCommitView,
+    AdminImportPreviewView,
+    AdminImportTemplateView,
+)
 from .oversight_views import (
     AdminActionLogViewSet,
     AdminAlertsView,
@@ -34,6 +39,11 @@ urlpatterns = [
     path("overview/trends/", AdminTrendsView.as_view(), name="admin-overview-trends"),
     path("overview/alerts/", AdminAlertsView.as_view(), name="admin-overview-alerts"),
     path("users/", AdminUserListCreateView.as_view(), name="admin-users"),
+    # 三类批量导入（班级 / 教师 / 学生）统一入口
+    path("imports/template/", AdminImportTemplateView.as_view(), name="admin-import-template"),
+    path("imports/preview/", AdminImportPreviewView.as_view(), name="admin-import-preview"),
+    path("imports/commit/", AdminImportCommitView.as_view(), name="admin-import-commit"),
+    # 旧路径保留一版兼容（移动端 / 旧前端），内部转调新导入 service
     path("users/import-template/", AdminUserImportTemplateView.as_view(), name="admin-user-import-template"),
     path("users/import-preview/", AdminUserImportPreviewView.as_view(), name="admin-user-import-preview"),
     path("users/import-confirm/", AdminUserImportConfirmView.as_view(), name="admin-user-import-confirm"),

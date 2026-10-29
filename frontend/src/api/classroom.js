@@ -1,12 +1,12 @@
 import request from './request'
 
 export const listClasses = (params) => request.get('/classes/', { params })
+// 单班详情：班级多到翻页时，靠列表里「找一下」会漏（只加载了当前页）
+export const getClass = (id) => request.get(`/classes/${id}/`)
 export const createClass = (data) => request.post('/classes/', data)
 export const updateClass = (id, data) => request.put(`/classes/${id}/`, data)
 export const deleteClass = (id) => request.delete(`/classes/${id}/`)
-export const joinClass = (invite_code) => request.post('/classes/join/', { invite_code })
-export const regenerateCode = (id) => request.post(`/classes/${id}/regenerate-code/`)
-export const addStudent = (id, username) => request.post(`/classes/${id}/add-student/`, { username })
+// 邀请码入班已于 P1 下线（/classes/join/ 返回 410），前端不再调用
 
 // 班级学生
 export const listClassStudents = (params) => request.get('/class-students/', { params })

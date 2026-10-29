@@ -166,7 +166,7 @@ import { ElMessage } from 'element-plus'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
 import { useUserStore } from '@/store/user'
 import {
-  listClasses, listClassStudents, removeClassStudent, searchClassStudents, addStudentsBatch,
+  getClass, listClassStudents, removeClassStudent, searchClassStudents, addStudentsBatch,
 } from '@/api/classroom'
 
 const route = useRoute()
@@ -203,16 +203,29 @@ function fmtJoined(t) {
 
 // ---- 数据加载 ----
 async function loadClass() {
-  const data = await listClasses()
-  const list = data.results ?? data
-  cls.value = list.find((item) => item.id === classId) || null
+  // 按 id 取详情：班级超过一页时，从列表里「找一下」会找不到（旧写法只看了首页 20 个）
+  try {
+    cls.value = await getClass(classId)
+  } catch {
+    cls.value = null
+  }
 }
 async function loadStudents() {
   loading.value = true
   try {
-    // page_size=100：单班上限受导入 500 行限制，一次拉全再本地筛选排序
-    const data = await listClassStudents({ classroom: classId, page_size: 100 })
-    students.value = data.results ?? data ?? []
+    // 后端单页上限 100（max_page_size），而导入单班可达 500 人，必须翻页拉全再本地筛选排序
+    const all = []
+    let current = 1
+    let count = Infinity
+    while (all.length < count && current <= 30) {
+      const data = await listClassStudents({ classroom: classId, page_size: 100, page: current })
+      const batch = data.results ?? data ?? []
+      if (!batch.length) break
+      all.push(...batch)
+      count = typeof data.total === 'number' ? data.total : all.length
+      current += 1
+    }
+    students.value = all
   } finally {
     loading.value = false
   }

@@ -26,6 +26,25 @@ export const confirmAdminUserImport = (rows) => (
   request.post('/admin-panel/users/import-confirm/', { rows })
 )
 
+// ---- 三类批量导入（班级 / 教师 / 学生）统一入口 ----
+// kind: 'class' | 'teacher' | 'student'；template 返回 xlsx 流，preview 返回逐行校验，
+// commit 返回写入汇总 + 失败行/初始密码表（base64）。
+export const downloadImportTemplate = (kind) => (
+  request.get('/admin-panel/imports/template/', { params: { kind }, responseType: 'blob' })
+)
+export const previewImport = (kind, file, options = {}) => {
+  const data = new FormData()
+  data.append('kind', kind)
+  data.append('file', file)
+  Object.entries(options).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') data.append(key, value)
+  })
+  return request.post('/admin-panel/imports/preview/', data)
+}
+export const commitImport = (kind, rows, options = {}) => (
+  request.post('/admin-panel/imports/commit/', { kind, rows, options })
+)
+
 export const listAdminCourses = (params) => request.get('/admin-panel/courses/', { params })
 export const updateAdminCourseStatus = (id, status) => (
   request.patch(`/admin-panel/courses/${id}/status/`, { status })
