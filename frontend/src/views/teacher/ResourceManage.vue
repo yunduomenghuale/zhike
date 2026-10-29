@@ -114,17 +114,17 @@
       <el-form label-position="top">
         <el-form-item label="资源类型" required>
           <el-radio-group v-model="addForm.kind">
+            <el-radio-button value="document">文档</el-radio-button>
             <el-radio-button value="mindmap">思维导图</el-radio-button>
             <el-radio-button value="demo">交互演示</el-radio-button>
-            <el-radio-button value="document">文档</el-radio-button>
           </el-radio-group>
         </el-form-item>
 
         <template v-if="addForm.kind !== 'document'">
           <el-form-item label="资源来源" required>
             <el-radio-group v-model="addForm.source">
-              <el-radio-button value="preset">平台预置</el-radio-button>
               <el-radio-button value="upload">上传文件</el-radio-button>
+              <el-radio-button value="preset">平台预置</el-radio-button>
             </el-radio-group>
             <div class="form-extra">
               <span class="form-tip">预置为平台自带静态页；上传支持自定义单文件 HTML（由 markmap 等工具导出，≤100MB）</span>
@@ -340,7 +340,7 @@ const creating = ref(false)
 const uploading = ref(false)
 const uploadPercent = ref(0)
 const presetPreviewing = ref(false)
-const addForm = reactive({ kind: 'mindmap', source: 'preset', path: '', title: '', file: null })
+const addForm = reactive({ kind: 'document', source: 'upload', path: '', title: '', file: null })
 
 const availablePaths = computed(() => PRESET_PAGES.filter((p) => p.kind === addForm.kind))
 
@@ -352,8 +352,9 @@ const confirmDisabled = computed(() => {
 })
 
 function openAddDialog() {
-  addForm.kind = 'mindmap'
-  addForm.source = 'preset'
+  // 文档/上传文件为高频路径，排首位且默认选中
+  addForm.kind = 'document'
+  addForm.source = 'upload'
   addForm.path = ''
   addForm.title = ''
   addForm.file = null

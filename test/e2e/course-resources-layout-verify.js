@@ -133,6 +133,19 @@ async function main() {
   try {
     log('教师登录…');
     check('教师登录', await login(tab, 't101', 'pass1234'), await tab.eval('location.pathname'));
+    // 防御性清场：上次崩溃可能残留同名验收资源，先按标题删除再开始（幂等）
+    await tab.eval(`(async () => {
+      const token = localStorage.getItem('access_token') || '';
+      const h = { Authorization: 'Bearer ' + token };
+      const listRes = await fetch('/api/course-resources/?course=5&page_size=100', { headers: h });
+      const items = (await listRes.json())?.data?.results || [];
+      for (const it of items) {
+        if (it.title?.includes('E2E布局验收') || it.title?.includes('E2E自定义HTML')) {
+          await fetch('/api/course-resources/' + it.id + '/', { method: 'DELETE', headers: h });
+        }
+      }
+      return true;
+    })()`);
     await tab.send('Page.navigate', { url: `${BASE}/teacher/courses/5/resources` });
     const pageReady = await waitFor(tab, `document.querySelectorAll('.kind-tab').length === 4`, 25000);
     check('教师页就绪', pageReady);
@@ -158,30 +171,33 @@ async function main() {
     await sleep(400);
     const n2a = await tab.eval(`(() => {
       const dlg = document.querySelector('.add-res-dialog');
+      const radios = [...dlg.querySelectorAll('.el-radio-button')].map((r) => r.textContent.trim());
       return {
-        kindRadios: [...dlg.querySelectorAll('.el-radio-button')].map((r) => r.textContent.trim()).slice(0, 3),
-        hasPresetSelect: !!dlg.querySelector('.el-select'),
+        kindOrder: radios.slice(0, 3),
+        defaultKindDoc: radios.slice(0, 3)[0] === '文档',
+        defaultShowsDocUpload: !!dlg.querySelector('input[type=file]') && !dlg.querySelector('.el-select'),
       };
     })()`);
-    check('N.2a 弹窗三类型 + 预置类表单(默认来源=平台预置)',
-      n2a && n2a.kindRadios.length === 3 && n2a.kindRadios.includes('文档') && n2a.hasPresetSelect, JSON.stringify(n2a));
-    // 切"上传文件"来源 → 出 HTML 拖拽区
+    check('N.2a 弹窗类型顺序(文档首位) + 默认选中文档',
+      n2a && n2a.defaultKindDoc && n2a.defaultShowsDocUpload, JSON.stringify(n2a));
+    // 切思维导图（导图/演示类）→ 出资源来源分段，默认上传文件
     await tab.eval(`(() => {
       const dlg = document.querySelector('.add-res-dialog');
-      [...dlg.querySelectorAll('.el-radio-button')].find((r) => r.textContent.trim() === '上传文件')?.querySelector('input')?.click();
+      [...dlg.querySelectorAll('.el-radio-button')].find((r) => r.textContent.trim() === '思维导图')?.querySelector('input')?.click();
     })()`);
     await sleep(400);
-    const n2a2 = await tab.eval(`(() => {
+    const n2a1 = await tab.eval(`(() => {
       const dlg = document.querySelector('.add-res-dialog');
-      return { hasHtmlUpload: !!dlg.querySelector('.course-upload input[type=file]'), selectGone: !dlg.querySelector('.el-select') };
+      const radios = [...dlg.querySelectorAll('.el-radio-button')].map((r) => r.textContent.trim());
+      const srcIdx = radios.indexOf('上传文件');
+      return {
+        sourceOrder: radios.slice(srcIdx, srcIdx + 2),
+        uploadFirst: srcIdx !== -1 && radios[srcIdx + 1] === '平台预置',
+        defaultUploadForm: !!dlg.querySelector('.course-upload input[type=file]') && !dlg.querySelector('.el-select'),
+      };
     })()`);
-    check('N.2a-2 切上传来源出 HTML 拖拽区', n2a2 && n2a2.hasHtmlUpload && n2a2.selectGone, JSON.stringify(n2a2));
-    // 切回平台预置（后续文档流程从类型切换开始）
-    await tab.eval(`(() => {
-      const dlg = document.querySelector('.add-res-dialog');
-      [...dlg.querySelectorAll('.el-radio-button')].find((r) => r.textContent.trim() === '平台预置')?.querySelector('input')?.click();
-    })()`);
-    await sleep(300);
+    check('N.2a-1 来源顺序(上传文件首位) + 默认选中上传', n2a1 && n2a1.uploadFirst && n2a1.defaultUploadForm, JSON.stringify(n2a1));
+    // N.2b 切到文档 → 文档文件选择（文档为默认高频路径，单独验证其表单形态）
     await tab.eval(`(() => {
       const dlg = document.querySelector('.add-res-dialog');
       [...dlg.querySelectorAll('.el-radio-button')].find((r) => r.textContent.trim() === '文档')?.querySelector('input')?.click();
@@ -221,6 +237,8 @@ async function main() {
     const uploaded = await waitFor(tab, `[...document.querySelectorAll('.el-table__row')].some((r) => r.textContent.includes('E2E布局验收大纲'))`, 20000);
     check('N.3 弹窗上传 pdf 入表格', uploaded);
     await tab.shot('reslayout-02-uploaded.png');
+    // 等表格 loading 遮罩消退再操作行内开关（遮罩未退时点 switch 会被拦截）
+    await waitFor(tab, `!document.querySelector('.res-panel .el-loading-mask')`, 10000);
 
     // N.4 行内 switch 发布
     await tab.eval(`(() => {
@@ -281,9 +299,15 @@ async function main() {
     await sleep(400);
     await tab.eval(`(() => {
       const dlg = document.querySelector('.add-res-dialog');
-      [...dlg.querySelectorAll('.el-radio-button')].find((r) => r.textContent.trim() === '上传文件')?.querySelector('input')?.click();
+      [...dlg.querySelectorAll('.el-radio-button')].find((r) => r.textContent.trim() === '思维导图')?.querySelector('input')?.click();
     })()`);
     await sleep(400);
+    // 来源默认选中「上传文件」（布局调整后的默认态），无需再点
+    const n6b0 = await tab.eval(`(() => {
+      const dlg = document.querySelector('.add-res-dialog');
+      return { htmlUploadReady: !!dlg.querySelector('.course-upload input[type=file]') };
+    })()`);
+    check('N.6b-0 导图类默认上传来源表单就绪', n6b0 && n6b0.htmlUploadReady, JSON.stringify(n6b0));
     const tmpHtml = path.join(SHOT_DIR, '_e2e_custom.html');
     fs.writeFileSync(tmpHtml, '<!doctype html><html><head><title>E2E自定义导图</title></head><body><h1>E2E自定义HTML验收</h1></body></html>');
     const htmlDom = await tab.send('DOM.getDocument', { depth: -1 });
@@ -395,7 +419,9 @@ async function main() {
     process.exitCode = failures === 0 ? 0 : 1;
   } finally {
     try { process.kill(-chrome.pid, 'SIGKILL'); } catch { chrome.kill('SIGKILL'); }
-    fs.rmSync(PROFILE, { recursive: true, force: true });
+    // 等 Chrome 句柄释放再清配置目录（Windows 下进程未死时 rm 会失败）
+    await sleep(1200);
+    try { fs.rmSync(PROFILE, { recursive: true, force: true }); } catch { /* 残留目录不影响后续运行 */ }
   }
 }
 
