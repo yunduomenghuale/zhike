@@ -122,9 +122,9 @@ def main() -> int:
     from apps.questions.models import Question
 
     created: list[Course] = []
+    # 临时班/临时学生由 sweep() 按名称兜底清理，这里只持有创建时需要的引用
     temp_class = None
     temp_enroll = None
-    started_at = None
 
     def media_bytes() -> int:
         root = Path(settings.MEDIA_ROOT)
@@ -169,11 +169,53 @@ def main() -> int:
                 pass
         print(f"  清理：课程 {course_id} 及 {len(names)} 个文件")
 
+    def sweep(label: str) -> list[str]:
+        """清掉本脚本可能留下的一切痕迹。
+
+        每一步都单独兜异常：清理代码里任何一步抛错都会让后面的步骤整体跳过
+        （P3 首次联调就这样在开发库里漏下两个空的「P3验证临时班」）。
+        返回没能清掉的项目名，供最后汇总。
+        """
+        from django.contrib.auth import get_user_model
+
+        from apps.ai.models import AITask
+
+        leftovers: list[str] = []
+        print(f"\n[{label}] 清理上次运行可能残留的测试数据")
+        for course in list(Course.objects.filter(name__startswith="P3验证-")):
+            try:
+                purge(course)
+            except Exception as exc:  # noqa: BLE001 - 清理要尽力而为，不能半途而废
+                leftovers.append(f"课程 {course.id}: {exc}")
+        for klass in list(ClassRoom.objects.filter(name="P3验证临时班")):
+            try:
+                klass_id = klass.id  # delete() 后 pk 会被置空，先取
+                klass.delete()
+                print(f"  清理：临时班 {klass_id}")
+            except Exception as exc:  # noqa: BLE001
+                leftovers.append(f"临时班 {klass.id}: {exc}")
+        try:
+            deleted, _ = get_user_model().objects.filter(username="p3v_student").delete()
+            if deleted:
+                print(f"  清理：临时学生账号（{deleted} 条）")
+        except Exception as exc:  # noqa: BLE001
+            leftovers.append(f"p3v_student: {exc}")
+        try:
+            # 复用任务记录会一直堆在开发库里，顺手按本脚本前缀的任务类型清
+            stale = AITask.objects.filter(task_type=AITask.TaskType.COURSE_REUSE)
+            count = stale.count()
+            if count:
+                stale.delete()
+                print(f"  清理：历史复用任务记录（{count} 条）")
+        except Exception as exc:  # noqa: BLE001
+            leftovers.append(f"AITask: {exc}")
+        return leftovers
+
+    # 先扫一次：上次异常退出留下的数据不能污染本次的「磁盘增量」等断言
+    leftover_before = sweep("运行前")
+
     try:
         print(f"\n=== P3 准出验证（源课程 {args.source}）===")
-        from django.utils import timezone
-
-        started_at = timezone.now()
         token = login(*TEACHER)
 
         source = Course.objects.get(id=args.source)
@@ -380,28 +422,13 @@ def main() -> int:
         else:
             check("重复提交返回 409", False, f"第二次返回 {second_status}")
     finally:
-        if temp_enroll:
-            temp_enroll.delete()
-        for course in list(Course.objects.filter(name__startswith="P3验证-")):
-            purge(course)
-        if temp_class:
-            temp_class.delete()
-        # 临时学生（只删本次脚本用的那个账号）
-        from django.contrib.auth import get_user_model
-
-        get_user_model().objects.filter(username="p3v_student").delete()
-        # 本次运行产生的复用任务记录一并清掉（别在开发库里堆 success 任务）
-        if started_at is not None:
-            from apps.ai.models import AITask
-
-            AITask.objects.filter(task_type=AITask.TaskType.COURSE_REUSE,
-                                  created_at__gte=started_at).delete()
-        leftovers = list(Course.objects.filter(name__startswith="P3验证-"))
+        leftovers = sweep("收尾") + leftover_before
         if leftovers:
-            print(f"  !! 仍有残留课程：{[c.id for c in leftovers]}")
-
-    failed = [r for r in RESULTS if not r[1]]
-    print(f"\n=== 结果：{len(RESULTS) - len(failed)}/{len(RESULTS)} 通过 ===")
+            print(f"  !! 仍有残留：{leftovers}")
+        failed = [r for r in RESULTS if not r[1]]
+        print(f"\n=== 结果：{len(RESULTS) - len(failed)}/{len(RESULTS)} 通过 ===")
+        if leftover_before:
+            print(f"  !! 运行前就有残留（已尝试清理）：{leftover_before}")
     for name, _, detail in failed:
         print(f"  FAIL {name}  {detail}")
     return 1 if failed else 0
