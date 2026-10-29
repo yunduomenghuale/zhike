@@ -122,7 +122,7 @@
               </template>
             </el-table-column>
             <el-table-column label="状态" width="95">
-              <template #default="{ row }"><el-tag size="small" effect="light" :type="row.status === 'open' ? 'success' : 'info'">{{ row.status === 'open' ? '开课中' : '已结课' }}</el-tag></template>
+              <template #default="{ row }"><el-tag size="small" effect="light" :type="classStatusMeta(row.status).type">{{ classStatusMeta(row.status).label }}</el-tag></template>
             </el-table-column>
             <el-table-column label="学生" width="85" align="center">
               <template #default="{ row }">{{ row.student_count }}</template>
@@ -150,6 +150,7 @@
 import { computed, ref, watch } from 'vue'
 import { Close, Reading } from '@element-plus/icons-vue'
 import { getAdminCourseDetail } from '@/api/admin'
+import { classStatusMeta } from '@/utils/classStatus'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },

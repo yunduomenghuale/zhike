@@ -2,6 +2,7 @@ import os
 import tempfile
 import time
 
+import django_filters
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from django.conf import settings
@@ -74,10 +75,21 @@ def _invalidate_teaching_video_for_new_ppt(catalog, ppt):
     )
 
 
+class CourseFilter(django_filters.FilterSet):
+    """学期筛选兼容两种传参：`?term=2026秋`（文本模糊）与 `?term_id=3`（精确）。"""
+
+    term = django_filters.CharFilter(field_name="term__name", lookup_expr="icontains")
+    term_id = django_filters.NumberFilter(field_name="term_id")
+
+    class Meta:
+        model = Course
+        fields = ["status"]
+
+
 class CourseViewSet(BaseModelViewSet):
     serializer_class = CourseSerializer
     permission_classes = [IsTeacherOrReadOnly]
-    filterset_fields = ["status", "term"]
+    filterset_class = CourseFilter
     search_fields = ["name", "intro"]
 
     def get_queryset(self):

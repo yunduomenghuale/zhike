@@ -20,8 +20,8 @@
               <div class="class-name" :title="c.courseName">{{ c.courseName }}</div>
               <div class="class-meta">
                 <span class="class-chip" :title="c.className">{{ c.className }}</span>
-                <el-tag :type="c.status === 'open' ? 'success' : 'info'" effect="light" round class="class-status">
-                  {{ c.status === 'open' ? '开课中' : '已结课' }}
+                <el-tag :type="classStatusMeta(c.status).type" effect="light" round class="class-status">
+                  {{ classStatusMeta(c.status).label }}
                 </el-tag>
               </div>
               <div v-if="courseProgress[c.id] != null" class="class-progress-row">
@@ -82,6 +82,7 @@ import { storeToRefs } from 'pinia'
 import { Key, Plus, Reading, Close, ArrowRight } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { listClasses, joinClass } from '@/api/classroom'
+import { classStatusMeta } from '@/utils/classStatus'
 import { listCatalogs, listWatchProgress } from '@/api/course'
 import { useUserStore } from '@/store/user'
 import { chapterProgress } from '@/utils/learningProgress'

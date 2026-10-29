@@ -67,12 +67,13 @@ class _FakeEmbedProvider:
 class RebuildVectorsTests(TestCase):
     def setUp(self):
         from apps.courses.models import Course
+        from apps.courses.terms import ensure_term
 
         self.teacher = User.objects.create_user(
             username="t_kb", password="pw123456!", role=User.Role.TEACHER
         )
         self.course = Course.objects.create(
-            name="Java 程序设计", teacher=self.teacher, term="2026-2027-1"
+            name="Java 程序设计", teacher=self.teacher, term=ensure_term("2026-2027-1")
         )
         self.material_a = self._make_material("资料A.txt", "甲" * 1200)  # 3 个片段（500 字/片）
         self.material_b = self._make_material("资料B.txt", "乙" * 700)   # 2 个片段

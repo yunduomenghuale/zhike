@@ -13,7 +13,7 @@
           </div>
         </div>
         <div class="drawer-head-actions">
-          <el-tag v-if="detail" size="small" effect="light" :type="detail.status === 'open' ? 'success' : 'info'">{{ detail.status_display }}</el-tag>
+          <el-tag v-if="detail" size="small" effect="light" :type="classStatusMeta(detail.status).type">{{ detail.status_display || classStatusMeta(detail.status).label }}</el-tag>
           <button class="drawer-close" type="button" title="关闭" @click="$emit('update:modelValue', false)">
             <el-icon><Close /></el-icon>
           </button>
@@ -88,6 +88,7 @@
 import { ref, watch } from 'vue'
 import { Close, School } from '@element-plus/icons-vue'
 import { getAdminClassDetail } from '@/api/admin'
+import { classStatusMeta } from '@/utils/classStatus'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },

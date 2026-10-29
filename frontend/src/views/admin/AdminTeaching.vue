@@ -22,7 +22,7 @@
             <el-option label="启用" value="active" /><el-option label="停用" value="inactive" /><el-option label="归档" value="archived" />
           </template>
           <template v-else>
-            <el-option label="开课中" value="open" /><el-option label="已结课" value="closed" />
+            <el-option v-for="opt in CLASS_STATUS_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
           </template>
         </el-select>
         <el-button :icon="Search" @click="applyFilters">查询</el-button>
@@ -81,7 +81,7 @@
         <el-table-column label="状态" width="116">
           <template #default="{ row }">
             <el-select :model-value="row.status" size="small" @change="(value) => changeClassStatus(row, value)" @click.stop>
-              <el-option label="开课中" value="open" /><el-option label="已结课" value="closed" />
+              <el-option v-for="opt in CLASS_STATUS_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
             </el-select>
           </template>
         </el-table-column>
@@ -128,6 +128,7 @@ import {
 } from '@/api/admin'
 import CourseDetailDrawer from '@/components/admin/drawers/CourseDetailDrawer.vue'
 import ClassDetailDrawer from '@/components/admin/drawers/ClassDetailDrawer.vue'
+import { CLASS_STATUS_OPTIONS } from '@/utils/classStatus'
 import TeacherDetailDrawer from '@/components/admin/drawers/TeacherDetailDrawer.vue'
 
 const activeTab = ref('courses'), search = ref(''), statusFilter = ref('')

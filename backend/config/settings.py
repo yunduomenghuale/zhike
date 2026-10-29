@@ -140,10 +140,19 @@ if DATABASE_URL.startswith("postgres"):
         }
     }
 else:
+    # SQLITE_PATH 允许把库指向副本，供迁移演练 / E2E 隔离库使用，避免手工改代码。
+    # 相对路径按 BASE_DIR 解析；留空则用默认 db.sqlite3。
+    _sqlite_name = os.environ.get("SQLITE_PATH") or ""
+    if _sqlite_name:
+        _sqlite_file = Path(_sqlite_name)
+        if not _sqlite_file.is_absolute():
+            _sqlite_file = Path(BASE_DIR) / _sqlite_file
+    else:
+        _sqlite_file = Path(BASE_DIR) / "db.sqlite3"
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
-            "NAME": BASE_DIR / "db.sqlite3",
+            "NAME": str(_sqlite_file),
         }
     }
 

@@ -12,6 +12,41 @@ def _ppt_file_path(instance, filename):
     return f"ppt/{uuid4().hex}{Path(filename).suffix.lower()}"
 
 
+class Term(BaseModel):
+    """学期字典（学年 + 季节）。
+
+    学年以起始年记录：2026 表示 2026-2027 学年。这样"2027 春"不会产生歧义
+    （它属于 2026 学年，而不是 2027 学年）。
+    """
+
+    class Season(models.TextChoices):
+        SPRING = "spring", "春季"
+        AUTUMN = "autumn", "秋季"
+
+    year = models.PositiveSmallIntegerField("学年起始年")
+    season = models.CharField("季节", max_length=8, choices=Season.choices)
+    name = models.CharField("显示名", max_length=50, unique=True)
+    start_at = models.DateField("开始日期", null=True, blank=True)
+    end_at = models.DateField("结束日期", null=True, blank=True)
+    is_current = models.BooleanField("当前学期", default=False)
+
+    class Meta:
+        verbose_name = "学期"
+        verbose_name_plural = verbose_name
+        ordering = ["-year", "season"]
+        constraints = [
+            models.UniqueConstraint(fields=["year", "season"], name="unique_term_year_season"),
+            models.UniqueConstraint(
+                fields=["is_current"],
+                condition=models.Q(is_current=True),
+                name="unique_current_term",
+            ),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
 class Course(BaseModel):
     """课程（需求 5.1 / 第 9 节·课程）。"""
 
@@ -23,7 +58,17 @@ class Course(BaseModel):
     name = models.CharField("课程名称", max_length=200)
     intro = models.TextField("课程简介", blank=True)
     cover = models.CharField("课程封面", max_length=500, blank=True)
-    term = models.CharField("学期", max_length=50, blank=True)
+    term = models.ForeignKey(
+        Term,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="courses",
+        verbose_name="学期",
+        help_text="允许为空：历史课程可能未归属学期，列表按「学期待归属」提示补齐",
+    )
+    # 学期字段从 CharField 迁移到 FK 时的原文本备份，确认迁移无误后再删（勿新代码引用）
+    term_text = models.CharField("学期（原始文本）", max_length=50, blank=True)
     teacher = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,

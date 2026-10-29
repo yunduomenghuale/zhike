@@ -33,8 +33,8 @@
             <span class="meta-label">学生</span>
             <strong>{{ row.student_count || 0 }} 人</strong>
           </span>
-          <el-tag :type="row.status === 'open' ? 'success' : 'info'" effect="light" round>
-            {{ row.status === 'open' ? '开课中' : '已结课' }}
+          <el-tag :type="classStatusMeta(row.status).type" effect="light" round>
+            {{ classStatusMeta(row.status).label }}
           </el-tag>
         </div>
 
@@ -89,8 +89,7 @@
           </el-form-item>
           <el-form-item label="状态" class="form-span-full class-status-item">
             <el-radio-group v-model="form.status" class="class-status-switch">
-              <el-radio-button value="open">开课中</el-radio-button>
-              <el-radio-button value="closed">已结课</el-radio-button>
+              <el-radio-button v-for="opt in CLASS_STATUS_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</el-radio-button>
             </el-radio-group>
           </el-form-item>
         </div>
@@ -123,6 +122,7 @@ import { Plus, Delete, EditPen, User, Refresh, School, Close } from '@element-pl
 import { ElMessage } from 'element-plus'
 import { DocumentCopy } from '@element-plus/icons-vue'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
+import { CLASS_STATUS_OPTIONS, classStatusMeta } from '@/utils/classStatus'
 import { listCourses } from '@/api/course'
 import { compareCourseName } from '@/utils/course-sort'
 import {
@@ -181,7 +181,7 @@ function openEdit(row) {
       : (row?.course ? [row.course] : (courses.value[0]?.id ? [courses.value[0].id] : [])),
     name: row?.name || '',
     dateRange: row?.start_at && row?.end_at ? [row.start_at, row.end_at] : [],
-    status: row?.status || 'open',
+    status: row?.status || 'active',
   })
   editVisible.value = true
 }

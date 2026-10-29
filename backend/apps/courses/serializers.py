@@ -8,22 +8,61 @@ from .models import (
     CourseResource,
     PPTResource,
     TeachingVideo,
+    Term,
     VideoWatchProgress,
 )
+from .terms import ensure_term
 
 
 class CourseSerializer(serializers.ModelSerializer):
     teacher_name = serializers.CharField(source="teacher.real_name", read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
+    # 对外仍以文本形态暴露学期（"2026秋"），保持前端与导出零改动；
+    # 写入同样接受文本或 Term id，内部统一解析成 FK（见 _term_kwargs）。
+    term = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=50)
+    term_id = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Course
         fields = [
-            "id", "name", "intro", "cover", "term",
+            "id", "name", "intro", "cover", "term", "term_id",
             "teacher", "teacher_name", "status", "status_display",
             "created_at", "updated_at",
         ]
         read_only_fields = ["teacher"]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["term"] = instance.term.name if instance.term_id else ""
+        return data
+
+    @staticmethod
+    def _term_kwargs(raw):
+        """把传入的学期值转成模型参数。
+
+        - 空 → 清空学期（课程允许无学期）
+        - 纯数字 → 按 Term id 取
+        - 其它文本 → 解析；解析不出则只留 term_text 原文，FK 为空
+        """
+        if raw is None or str(raw).strip() == "":
+            return {"term": None, "term_text": ""}
+        text = str(raw).strip()
+        if text.isdigit():
+            term = Term.objects.filter(pk=int(text)).first()
+            if term:
+                return {"term": term, "term_text": term.name}
+        return {"term": ensure_term(text), "term_text": text[:50]}
+
+    def create(self, validated_data):
+        raw = validated_data.pop("term", None)
+        validated_data.update(self._term_kwargs(raw))
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        if "term" in validated_data:
+            raw = validated_data.pop("term")
+            validated_data.update(self._term_kwargs(raw))
+        return super().update(instance, validated_data)
 
 
 class CatalogSerializer(serializers.ModelSerializer):

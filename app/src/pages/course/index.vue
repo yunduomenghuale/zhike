@@ -28,8 +28,8 @@
           <view class="course-name">{{ c.courseName }}</view>
           <view class="course-meta">
             <text class="chip">{{ c.className }}</text>
-            <text class="status" :class="c.status === 'open' ? 'open' : ''">
-              {{ c.status === 'open' ? '开课中' : '已结课' }}
+            <text class="status" :class="c.status === 'active' ? 'open' : ''">
+              {{ classStatusLabel(c.status) }}
             </text>
           </view>
           <view v-if="courseProgress[c.id] != null" class="progress-row">
@@ -51,6 +51,7 @@ import { onShow } from '@dcloudio/uni-app'
 import { listClasses, joinClass } from '@/api/classroom.js'
 import { listCatalogs, listWatchProgress } from '@/api/course.js'
 import { chapterProgress } from '@/utils/progress.js'
+import { classStatusLabel } from '@/utils/classStatus.js'
 
 const classes = ref([])
 const courseCards = ref([])

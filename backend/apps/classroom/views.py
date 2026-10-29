@@ -6,6 +6,7 @@ from apps.common.permissions import IsStudent, IsTeacher, IsTeacherOrReadOnly
 from apps.common.response import api_response
 from apps.common.viewsets import BaseModelViewSet
 
+from . import services
 from .models import ClassRoom, ClassStudent
 from .serializers import ClassRoomSerializer, ClassStudentSerializer
 
@@ -78,7 +79,11 @@ class ClassRoomViewSet(BaseModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="add-students-batch", permission_classes=[IsTeacher])
     def add_students_batch(self, request, pk=None):
-        """教师批量添加学生（勾选候选后一次提交多个学号）。"""
+        """教师批量添加学生（勾选候选后一次提交多个学号）。
+
+        写入统一走 services.assign_students：单班规则由数据库条件唯一约束强制，
+        直接 get_or_create 会在"学生已在别的班"时抛 IntegrityError 变成 500。
+        """
         classroom = self.get_object()
         usernames = request.data.get("usernames") or []
         if not isinstance(usernames, list) or not usernames:
@@ -87,21 +92,23 @@ class ClassRoomViewSet(BaseModelViewSet):
             return api_response(message="单次最多添加 100 人", code=400, status=400)
         User = get_user_model()
         students = {u.username: u for u in User.objects.filter(username__in=usernames, role=User.Role.STUDENT)}
-        added, skipped, not_found = 0, 0, []
+        added, skipped, not_found, conflicted = 0, 0, [], []
         incomplete_names = []  # 资料不全（缺姓名）：照加但标黄提示
         for name in usernames:
             stu = students.get(name)
             if not stu:
                 not_found.append(name)
                 continue
-            obj, created = ClassStudent.objects.get_or_create(classroom=classroom, student=stu)
-            if created:
+            try:
+                result = services.assign_students(classroom, [stu], operator=request.user)
+            except services.ClassServiceError as exc:
+                if exc.code == 409:
+                    conflicted.append(f"{stu.username}（{exc.detail}）")
+                    continue
+                raise
+            if result["created"]:
                 added += 1
-            elif obj.learn_status == ClassStudent.LearnStatus.REMOVED:
-                obj.learn_status = ClassStudent.LearnStatus.ACTIVE
-                obj.save(update_fields=["learn_status", "updated_at"])
-                added += 1
-            else:
+            elif result["unchanged"]:
                 skipped += 1
                 continue
             if not has_complete_profile(stu):
@@ -109,12 +116,17 @@ class ClassRoomViewSet(BaseModelViewSet):
         parts = [f"成功 {added} 人"]
         if skipped:
             parts.append(f"跳过 {skipped} 人（已在班）")
+        if conflicted:
+            parts.append(f"{len(conflicted)} 人已在其他班级（需转班）")
         if not_found:
             parts.append(f"未找到 {len(not_found)} 个学号")
         if incomplete_names:
             parts.append(f"提醒：{len(incomplete_names)} 人资料不全——{'、'.join(incomplete_names[:3])}{'等' if len(incomplete_names) > 3 else ''}")
         return api_response(
-            {"added": added, "skipped": skipped, "not_found": not_found, "incomplete": incomplete_names},
+            {
+                "added": added, "skipped": skipped, "not_found": not_found,
+                "conflicted": conflicted, "incomplete": incomplete_names,
+            },
             message="、".join(parts),
         )
 
@@ -134,13 +146,17 @@ class ClassRoomViewSet(BaseModelViewSet):
                 code=400,
                 status=400,
             )
-        obj, created = ClassStudent.objects.get_or_create(classroom=classroom, student=student)
-        if not created and obj.learn_status == ClassStudent.LearnStatus.REMOVED:
-            obj.learn_status = ClassStudent.LearnStatus.ACTIVE
-            obj.save(update_fields=["learn_status", "updated_at"])
+        obj = ClassStudent.objects.filter(classroom=classroom, student=student).first()
+        if obj and obj.learn_status in (ClassStudent.LearnStatus.ACTIVE, ClassStudent.LearnStatus.INACTIVE):
+            return api_response(ClassStudentSerializer(obj).data, message="该学生已在班级中")
+        try:
+            result = services.assign_students(classroom, [student], operator=request.user)
+        except services.ClassServiceError as exc:
+            return api_response(message=exc.detail, code=exc.code, status=exc.code)
+        obj = ClassStudent.objects.get(classroom=classroom, student=student)
         return api_response(
             ClassStudentSerializer(obj).data,
-            message="添加成功" if created else "该学生已在班级中",
+            message="添加成功" if result["created"] else "该学生已在班级中",
         )
 
     @action(detail=False, methods=["post"], url_path="join", permission_classes=[IsStudent])
@@ -157,20 +173,23 @@ class ClassRoomViewSet(BaseModelViewSet):
             classroom = ClassRoom.objects.get(
                 invite_code=code,
                 invite_enabled=True,
-                status=ClassRoom.Status.OPEN,
+                status=ClassRoom.Status.ACTIVE,
             )
         except ClassRoom.DoesNotExist:
             return api_response(message="邀请码无效或已关闭", code=404, status=404)
-        obj, created = ClassStudent.objects.get_or_create(
-            classroom=classroom, student=request.user
-        )
-        if not created and obj.learn_status == ClassStudent.LearnStatus.REMOVED:
-            obj.learn_status = ClassStudent.LearnStatus.ACTIVE
-            obj.save(update_fields=["learn_status", "updated_at"])
-        return api_response(
-            ClassStudentSerializer(obj).data,
-            message="加入成功" if created else "你已在该班级中",
-        )
+        existing = ClassStudent.objects.filter(
+            classroom=classroom,
+            student=request.user,
+            learn_status__in=ClassStudent.OCCUPYING_STATUSES,
+        ).first()
+        if existing:
+            return api_response(ClassStudentSerializer(existing).data, message="你已在该班级中")
+        try:
+            services.assign_students(classroom, [request.user], operator=request.user)
+        except services.ClassServiceError as exc:
+            return api_response(message=exc.detail, code=exc.code, status=exc.code)
+        obj = ClassStudent.objects.get(classroom=classroom, student=request.user)
+        return api_response(ClassStudentSerializer(obj).data, message="加入成功")
 
 
 class ClassStudentViewSet(BaseModelViewSet):
@@ -183,3 +202,17 @@ class ClassStudentViewSet(BaseModelViewSet):
         return ClassStudent.objects.filter(
             classroom__in=classrooms_for_user(self.request.user)
         ).select_related("student", "classroom").order_by("id")
+
+    def perform_destroy(self, instance):
+        """移出班级一律软删（learn_status=removed），不物理删除。
+
+        硬删会同时丢掉"曾经在过这个班"的留痕，使学生历史成绩失去归属依据；
+        且软删后同一学生加回本班仍能复用原记录。
+        """
+        services.remove_students(
+            instance.classroom,
+            [instance.student],
+            operator=self.request.user if self.request.user.is_authenticated else None,
+            reason="名单移出",
+            withdraw=False,
+        )

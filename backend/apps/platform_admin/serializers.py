@@ -93,15 +93,20 @@ class AdminCourseSerializer(serializers.ModelSerializer):
     teacher_name = serializers.CharField(source="teacher.real_name", read_only=True)
     teacher_username = serializers.CharField(source="teacher.username", read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
+    term = serializers.SerializerMethodField()
+    term_id = serializers.IntegerField(read_only=True)
     class_count = serializers.IntegerField(read_only=True)
     student_count = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Course
         fields = [
-            "id", "name", "term", "status", "status_display", "teacher_name",
+            "id", "name", "term", "term_id", "status", "status_display", "teacher_name",
             "teacher_username", "class_count", "student_count", "created_at",
         ]
+
+    def get_term(self, obj) -> str:
+        return obj.term.name if obj.term_id else ""
 
 
 class CourseStatusSerializer(serializers.ModelSerializer):

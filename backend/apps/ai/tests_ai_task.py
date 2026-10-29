@@ -312,9 +312,13 @@ class AnalyticsTaskTests(TransactionTestCase):
 
     def test_no_data_class_skips_all_calls(self):
         """F5：全班无数据 → 跳过全部 LLM 调用，固定文案直接 SUCCESS。"""
+        from apps.classroom.services import transfer_students
+
         empty = ClassRoom.objects.create(name="无数据班级", teacher=self.teacher)
         empty.courses.add(self.course)
-        ClassStudent.objects.create(classroom=empty, student=self.student_b)
+        # 单班约束：student_b 已在 setUp 的班级里，要把他挪过来必须走转班（旧关系置 transferred），
+        # 不能直接再 create 一条占用关系。
+        transfer_students(empty, [self.student_b], operator=self.teacher)
         self._patch_provider(_ScriptedProvider())
         task = submit_ai_task(
             AITask.TaskType.CLASS_ANALYTICS,

@@ -977,6 +977,7 @@ class AdminAICallLogAPITests(TestCase):
 # ---------------------------------------------------------------------------
 from apps.classroom.models import ClassRoom, ClassStudent  # noqa: E402
 from apps.courses.models import Catalog, PPTResource  # noqa: E402
+from apps.courses.terms import ensure_term  # noqa: E402
 from apps.exams.models import Exam, ExamSubmission  # noqa: E402
 from apps.homework.models import Homework, HomeworkSubmission  # noqa: E402
 
@@ -1011,7 +1012,7 @@ class OversightFixtureMixin:
             real_name="督管学生",
         )
         self.course = Course.objects.create(
-            name="督管课程", teacher=self.teacher, term="2026秋"
+            name="督管课程", teacher=self.teacher, term=ensure_term("2026秋")
         )
         self.classroom = ClassRoom.objects.create(
             name="督管班级", teacher=self.teacher
@@ -1198,10 +1199,10 @@ class OversightClassTests(OversightFixtureMixin, TestCase):
     def test_class_status_change_audit(self):
         resp = self.client.patch(
             f"/api/admin-panel/classes/{self.classroom.id}/status/",
-            {"status": "closed"}, format="json",
+            {"status": "archived"}, format="json",
         )
         self.assertEqual(resp.status_code, 200, resp.data)
-        self.assertEqual(resp.data["data"]["status"], "closed")
+        self.assertEqual(resp.data["data"]["status"], "archived")
         self.assertIn("affected", resp.data["data"])
         self.assertEqual(AdminActionLog.objects.filter(
             action=AdminActionLog.Action.CLASS_STATUS).count(), 1)

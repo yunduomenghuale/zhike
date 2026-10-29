@@ -16,12 +16,36 @@ class User(AbstractUser):
         STUDENT = "student", "学生"
         ADMIN = "admin", "管理员"
 
+    class EduStatus(models.TextChoices):
+        """学籍状态（仅 role=student 有意义）。
+
+        状态可回退（休学复学、退学重新入学、毕业批次撤销），不做一次性写死；
+        每次变更必须同时写 status_changed_at + status_note 并留审计。
+        """
+
+        ENROLLED = "enrolled", "在读"
+        SUSPENDED = "suspended", "休学"
+        GRADUATED = "graduated", "已毕业"
+        WITHDRAWN = "withdrawn", "退学/转出"
+
     role = models.CharField("角色", max_length=16, choices=Role.choices, default=Role.STUDENT)
     real_name = models.CharField("姓名", max_length=64, blank=True)
     phone = models.CharField("手机号", max_length=20, blank=True, null=True, unique=True)
     avatar = models.CharField("头像", max_length=500, blank=True)
     # 批量导入/管理员重置密码后置为 True，前端据此提示首次登录修改密码（可跳过）
     must_change_password = models.BooleanField("首次登录需修改密码", default=False)
+
+    # ===== 学籍（仅学生）=====
+    # 注意：学生当前所属班级**不落字段**，唯一事实源是 ClassStudent 的占用关系
+    # （learn_status in active/inactive，且全库唯一，见 classroom/models.py 的条件唯一约束）。
+    # 不要再加 User.classroom —— 那会造成同一事实两处存储，必然漂移。
+    edu_status = models.CharField(
+        "学籍状态", max_length=16, choices=EduStatus.choices, default=EduStatus.ENROLLED
+    )
+    enrollment_year = models.PositiveSmallIntegerField("入学年份", null=True, blank=True)
+    duration_years = models.PositiveSmallIntegerField("学制（年）", null=True, blank=True)
+    status_changed_at = models.DateTimeField("学籍状态变更时间", null=True, blank=True)
+    status_note = models.CharField("学籍状态说明", max_length=200, blank=True)
 
     class Meta:
         verbose_name = "用户"

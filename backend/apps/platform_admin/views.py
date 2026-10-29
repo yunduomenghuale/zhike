@@ -111,7 +111,7 @@ class AdminOverviewView(AdminThrottleMixin, APIView):
                 "courses": Course.objects.count(),
                 "active_courses": Course.objects.filter(status=Course.Status.ACTIVE).count(),
                 "classes": ClassRoom.objects.count(),
-                "open_classes": ClassRoom.objects.filter(status=ClassRoom.Status.OPEN).count(),
+                "open_classes": ClassRoom.objects.filter(status=ClassRoom.Status.ACTIVE).count(),
                 "enrollments": ClassStudent.objects.exclude(
                     learn_status=ClassStudent.LearnStatus.REMOVED
                 ).count(),

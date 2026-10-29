@@ -17,14 +17,19 @@ class ClassRoomSerializer(serializers.ModelSerializer):
     course_name = serializers.SerializerMethodField()
     course_names = serializers.SerializerMethodField()
     student_count = serializers.IntegerField(source="students.count", read_only=True)
+    teacher_name = serializers.CharField(source="teacher.real_name", read_only=True, default="")
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    graduate_year = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = ClassRoom
         fields = [
-            "id", "course", "course_name", "courses", "course_names", "name", "teacher",
+            "id", "course", "course_name", "courses", "course_names", "code", "name",
+            "teacher", "teacher_name", "enrollment_year", "duration_years", "graduate_year",
             "invite_code", "invite_enabled", "start_at", "end_at",
-            "status", "student_count", "created_at",
+            "status", "status_display", "student_count", "created_at",
         ]
+        # teacher 是「建班人」留痕，由后端写入，不接受前端赋值
         read_only_fields = ["teacher", "invite_code"]
 
     def get_course_name(self, obj) -> str:
@@ -109,11 +114,13 @@ class ClassStudentSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source="student.username", read_only=True)
     avatar = serializers.CharField(source="student.avatar", read_only=True)
     last_login = serializers.DateTimeField(source="student.last_login", read_only=True)
+    learn_status_display = serializers.CharField(source="get_learn_status_display", read_only=True)
 
     class Meta:
         model = ClassStudent
         fields = [
             "id", "classroom", "student", "student_name", "username",
-            "avatar", "joined_at", "last_login", "learn_status",
+            "avatar", "joined_at", "last_login", "learn_status", "learn_status_display",
         ]
-        read_only_fields = ["classroom", "student", "joined_at"]
+        # learn_status 只读：入班/转班/移出必须走 services，否则会绕过单班唯一约束
+        read_only_fields = ["classroom", "student", "joined_at", "learn_status"]

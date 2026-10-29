@@ -22,8 +22,8 @@
       <view v-for="c in rows" :key="c.id" class="card">
         <view class="c-head">
           <view class="c-name">{{ c.name }}</view>
-          <text class="chip" :class="{ success: c.status === 'open' }">
-            {{ c.status === 'open' ? '开课中' : '已结课' }}
+          <text class="chip" :class="{ success: c.status === 'active' }">
+            {{ classStatusLabel(c.status) }}
           </text>
         </view>
         <view class="c-courses">
@@ -73,6 +73,7 @@ import {
   listClassStudents, addStudent, removeClassStudent,
 } from '@/api/classroom.js'
 import { listCourses } from '@/api/course.js'
+import { classStatusLabel } from '@/utils/classStatus.js'
 
 const rows = ref([])
 const courses = ref([])

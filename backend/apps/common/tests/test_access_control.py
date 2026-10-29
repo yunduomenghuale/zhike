@@ -113,7 +113,12 @@ class AccessControlTests(PlatformFixtureMixin, APITestCase):
         )
 
     def test_student_must_complete_profile_before_joining_class(self):
-        self.login_as(self.student1)
+        # 用未分班的新学生：单班规则下"已在 A 班的学生再加入 B 班"是违约（409），
+        # 与本用例要验证的资料完整度门禁无关，混在一起会掩盖真正的门禁失效。
+        joiner = User.objects.create_user(
+            username="student-joiner", password="StrongPass!123", role=User.Role.STUDENT
+        )
+        self.login_as(joiner)
 
         denied = self.client.post(
             "/api/classes/join/",
@@ -122,14 +127,11 @@ class AccessControlTests(PlatformFixtureMixin, APITestCase):
         )
         self.assertEqual(denied.status_code, 400)
         self.assertFalse(
-            ClassStudent.objects.filter(
-                classroom=self.class2,
-                student=self.student1,
-            ).exists()
+            ClassStudent.objects.filter(classroom=self.class2, student=joiner).exists()
         )
 
-        self.student1.real_name = "Student One"
-        self.student1.save(update_fields=["real_name"])
+        joiner.real_name = "Student Joiner"
+        joiner.save(update_fields=["real_name"])
         joined = self.client.post(
             "/api/classes/join/",
             {"invite_code": self.class2.invite_code},
@@ -138,10 +140,23 @@ class AccessControlTests(PlatformFixtureMixin, APITestCase):
 
         self.assertEqual(joined.status_code, 200)
         self.assertTrue(
-            ClassStudent.objects.filter(
-                classroom=self.class2,
-                student=self.student1,
-            ).exists()
+            ClassStudent.objects.filter(classroom=self.class2, student=joiner).exists()
+        )
+
+    def test_join_second_class_rejected_single_class_rule(self):
+        """单班规则：已在 A 班的学生凭 B 班邀请码入班必须被拒（409），且不产生第二条占用。"""
+        self.student1.real_name = "Student One"
+        self.student1.save(update_fields=["real_name"])
+        self.login_as(self.student1)
+
+        resp = self.client.post(
+            "/api/classes/join/",
+            {"invite_code": self.class2.invite_code},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 409, resp.data)
+        self.assertFalse(
+            ClassStudent.objects.filter(classroom=self.class2, student=self.student1).exists()
         )
 
     def test_teacher_cannot_add_student_with_incomplete_profile(self):

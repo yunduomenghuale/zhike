@@ -114,7 +114,7 @@ def _course_list_queryset(request):
             Q(name__icontains=keyword)
             | Q(teacher__username__icontains=keyword)
             | Q(teacher__real_name__icontains=keyword)
-            | Q(term__icontains=keyword)
+            | Q(term__name__icontains=keyword)
         )
     if state:
         queryset = queryset.filter(status=state)
@@ -223,7 +223,7 @@ class AdminCourseViewSet(AdminThrottleMixin, viewsets.ViewSet):
         for hw in Homework.objects.filter(course=course).select_related("classroom").order_by("-id"):
             total = ClassStudent.objects.filter(
                 classroom=hw.classroom
-            ).exclude(learn_status=ClassStudent.LearnStatus.REMOVED).count()
+            ).filter(learn_status__in=ClassStudent.OCCUPYING_STATUSES).count()
             submitted = HomeworkSubmission.objects.filter(homework=hw).count()
             homeworks.append({
                 "id": hw.id,
@@ -242,7 +242,7 @@ class AdminCourseViewSet(AdminThrottleMixin, viewsets.ViewSet):
         for exam in Exam.objects.filter(course=course).select_related("classroom").order_by("-id"):
             total = ClassStudent.objects.filter(
                 classroom=exam.classroom
-            ).exclude(learn_status=ClassStudent.LearnStatus.REMOVED).count()
+            ).filter(learn_status__in=ClassStudent.OCCUPYING_STATUSES).count()
             taken = ExamSubmission.objects.filter(
                 exam=exam,
                 status__in=[ExamSubmission.Status.SUBMITTED, ExamSubmission.Status.TIMEOUT],
@@ -277,7 +277,7 @@ class AdminCourseViewSet(AdminThrottleMixin, viewsets.ViewSet):
                 "teacher_name": classroom.teacher.real_name or classroom.teacher.username,
                 "student_count": ClassStudent.objects.filter(
                     classroom=classroom
-                ).exclude(learn_status=ClassStudent.LearnStatus.REMOVED).count(),
+                ).filter(learn_status__in=ClassStudent.OCCUPYING_STATUSES).count(),
                 **summary,
             })
 
@@ -285,7 +285,8 @@ class AdminCourseViewSet(AdminThrottleMixin, viewsets.ViewSet):
             "id": course.id,
             "name": course.name,
             "intro": course.intro,
-            "term": course.term,
+            "term": course.term.name if course.term_id else "",
+            "term_id": course.term_id,
             "cover": course.cover,
             "status": course.status,
             "status_display": course.get_status_display(),
@@ -314,7 +315,7 @@ class AdminCourseViewSet(AdminThrottleMixin, viewsets.ViewSet):
             "classes": course.classes.count(),
             "students": ClassStudent.objects.filter(
                 classroom__courses=course
-            ).exclude(learn_status=ClassStudent.LearnStatus.REMOVED)
+            ).filter(learn_status__in=ClassStudent.OCCUPYING_STATUSES)
             .values("student_id").distinct().count(),
             "running_exams": Exam.objects.filter(
                 course=course, status=Exam.Status.PUBLISHED
@@ -355,7 +356,7 @@ class AdminCourseViewSet(AdminThrottleMixin, viewsets.ViewSet):
         for row in queryset:
             updated = updates.get(row.id)
             writer.writerow([
-                row.id, row.name, row.term or "", row.get_status_display(),
+                row.id, row.name, row.term.name if row.term_id else "", row.get_status_display(),
                 row.teacher.real_name or "", row.teacher.username,
                 row.class_count, row.student_count, row.catalog_count,
                 row.ppt_count, row.video_count, row.question_count,
@@ -449,7 +450,7 @@ class AdminClassViewSet(AdminThrottleMixin, viewsets.ViewSet):
         affected = {
             "students": ClassStudent.objects.filter(
                 classroom=classroom
-            ).exclude(learn_status=ClassStudent.LearnStatus.REMOVED).count(),
+            ).filter(learn_status__in=ClassStudent.OCCUPYING_STATUSES).count(),
             "courses": classroom.courses.count(),
             "active_homeworks": Homework.objects.filter(
                 classroom=classroom, status=Homework.Status.PUBLISHED
@@ -554,13 +555,14 @@ class AdminTeacherViewSet(AdminThrottleMixin, viewsets.ViewSet):
             courses.append({
                 "id": course.id,
                 "name": course.name,
-                "term": course.term,
+                "term": course.term.name if course.term_id else "",
+                "term_id": course.term_id,
                 "status": course.status,
                 "status_display": course.get_status_display(),
                 "class_count": course.classes.count(),
                 "student_count": ClassStudent.objects.filter(
                     classroom__courses=course
-                ).exclude(learn_status=ClassStudent.LearnStatus.REMOVED)
+                ).filter(learn_status__in=ClassStudent.OCCUPYING_STATUSES)
                 .values("student_id").distinct().count(),
             })
         classes = []
@@ -572,7 +574,7 @@ class AdminTeacherViewSet(AdminThrottleMixin, viewsets.ViewSet):
                 "course_count": classroom.courses.count(),
                 "student_count": ClassStudent.objects.filter(
                     classroom=classroom
-                ).exclude(learn_status=ClassStudent.LearnStatus.REMOVED).count(),
+                ).filter(learn_status__in=ClassStudent.OCCUPYING_STATUSES).count(),
             })
         ai = (
             AICallLog.objects.filter(triggered_by=teacher)

@@ -257,7 +257,7 @@ def platform_alerts() -> list:
     )
     _add(
         "inactive_classes", f"{INACTIVE_DAYS} 天无学习记录班级",
-        ClassRoom.objects.filter(status=ClassRoom.Status.OPEN)
+        ClassRoom.objects.filter(status=ClassRoom.Status.ACTIVE)
         .annotate(last_learn=latest_learn)
         .filter(Q(last_learn__isnull=True) | Q(last_learn__lt=cutoff))
         .count(),
