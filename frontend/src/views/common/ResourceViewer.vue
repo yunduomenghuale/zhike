@@ -10,10 +10,6 @@
         <el-tag v-if="kindLabel" size="small" effect="dark" :type="kind === 'mindmap' ? 'primary' : 'success'" class="vh-tag">
           {{ kindLabel }}
         </el-tag>
-        <button type="button" class="vh-btn" @click="openInNewTab">
-          <el-icon><FullScreen /></el-icon>
-          <span>新窗口打开</span>
-        </button>
       </div>
     </header>
 
@@ -46,7 +42,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, FullScreen } from '@element-plus/icons-vue'
+import { ArrowLeft } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -70,10 +66,6 @@ const kindLabel = computed(() =>
 function goBack() {
   if (backId.value) router.push({ name: backName.value, params: { id: backId.value } })
   else router.back()
-}
-
-function openInNewTab() {
-  if (src.value) window.open(src.value, '_blank')
 }
 
 onMounted(() => {
