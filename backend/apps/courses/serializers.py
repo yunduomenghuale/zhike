@@ -144,9 +144,13 @@ class CourseResourceSerializer(serializers.ModelSerializer):
     # 文档类上传后展示用（文件名/大小服务端落库，前端不直传）
     file_url = serializers.FileField(source="file", read_only=True)
 
-    # 文档类支持的格式白名单（2026-10-28 定稿：仅 pdf/doc/docx，txt/md/epub 暂不开放）
+    # 文档类与自定义 HTML（导图/演示）支持的格式白名单
+    # （2026-10-28 定稿：文档仅 pdf/doc/docx，txt/md/epub 暂不开放；
+    #   自定义导图/演示先只收单文件 .html，多文件 ZIP 包后续再加）
     DOCUMENT_EXTS = {".pdf", ".doc", ".docx"}
+    CUSTOM_HTML_EXTS = {".html"}
     MAX_DOCUMENT_SIZE = 100 * 1024 * 1024  # 100MB
+    MAX_CUSTOM_HTML_SIZE = 100 * 1024 * 1024  # 100MB
 
     class Meta:
         model = CourseResource
@@ -161,7 +165,7 @@ class CourseResourceSerializer(serializers.ModelSerializer):
 
     def validate_path(self, value):
         # 预置类：只允许平台预置静态页的相对路径，防目录穿越与任意外链；
-        # 文档类 path 为空（校验在 validate() 按 kind 分流）
+        # 自定义 HTML 类 path 为空（校验在 validate() 按 kind 分流）
         value = (value or "").strip().strip("/")
         if not value:
             return value
@@ -170,6 +174,17 @@ class CourseResourceSerializer(serializers.ModelSerializer):
         if not re.fullmatch(r"(mindmap|demos)/[A-Za-z0-9_\-]+\.html", value):
             raise serializers.ValidationError("资源路径须为 mindmap/*.html 或 demos/*.html 平台预置页")
         return value
+
+    def _validate_upload(self, upload, allowed_exts, max_size, label):
+        import os
+
+        ext = os.path.splitext(upload.name)[1].lower()
+        if ext not in allowed_exts:
+            raise serializers.ValidationError({"file": f"仅支持 {label} 格式，当前为 {ext or '未知'}"})
+        if upload.size > max_size:
+            raise serializers.ValidationError({"file": "文件不能超过 100MB"})
+        if upload.size == 0:
+            raise serializers.ValidationError({"file": "文件为空"})
 
     def validate(self, attrs):
         course = attrs.get("course", getattr(self.instance, "course", None))
@@ -180,37 +195,38 @@ class CourseResourceSerializer(serializers.ModelSerializer):
             if not course or course.teacher_id != user.id:
                 raise serializers.ValidationError("只能维护自己课程的资源")
 
+        upload = (request and request.FILES.get("file")) or attrs.get("file")
+
         if kind == CourseResource.Kind.DOCUMENT:
             # 文档类：必须有上传文件（multipart），path 不允许
             attrs["path"] = ""
-            upload = (request and request.FILES.get("file")) or attrs.get("file")
             if self.instance is None and not upload:
                 raise serializers.ValidationError({"file": "请上传文档文件（pdf / doc / docx，不超过 100MB）"})
             if upload:
-                import os
-
-                ext = os.path.splitext(upload.name)[1].lower()
-                if ext not in self.DOCUMENT_EXTS:
-                    raise serializers.ValidationError({"file": f"仅支持 pdf / doc / docx 格式，当前为 {ext or '未知'}"})
-                if upload.size > self.MAX_DOCUMENT_SIZE:
-                    raise serializers.ValidationError({"file": "文档不能超过 100MB"})
-                if upload.size == 0:
-                    raise serializers.ValidationError({"file": "文档文件为空"})
+                self._validate_upload(upload, self.DOCUMENT_EXTS, self.MAX_DOCUMENT_SIZE, "pdf / doc / docx")
         else:
-            # 预置类：必须选平台页面，不允许带文件
-            attrs["file"] = None
-            path = attrs.get("path") or getattr(self.instance, "path", "")
-            if not path:
-                raise serializers.ValidationError({"path": "请选择平台预置页面"})
-            # 同一课程下同一预置页只能挂一次：提前拦截并给友好提示
-            if course and path:
-                duplicated = CourseResource.objects.filter(course=course, path=path)
-                if self.instance:
-                    duplicated = duplicated.exclude(pk=self.instance.pk)
-                existing = duplicated.first()
-                if existing:
-                    name = existing.title or existing.path
-                    raise serializers.ValidationError(
-                        f"该课程下已添加过「{name}」，不能重复添加"
-                    )
+            # 思维导图/交互演示：平台预置页引用 或 自定义单文件 HTML 二选一
+            path_given = attrs.get("path") is not None
+            path = attrs.get("path") if path_given else getattr(self.instance, "path", "")
+            existing_file = getattr(self.instance, "file", None) if self.instance else None
+            if upload:
+                # 自定义 HTML：清空 path，按 .html 白名单校验
+                self._validate_upload(upload, self.CUSTOM_HTML_EXTS, self.MAX_CUSTOM_HTML_SIZE, ".html")
+                attrs["path"] = ""
+            elif path:
+                # 预置页引用：path 的格式校验在 validate_path（字段级）；
+                # 同一课程下同一预置页只能挂一次：提前拦截并给友好提示
+                if course:
+                    duplicated = CourseResource.objects.filter(course=course, path=path)
+                    if self.instance:
+                        duplicated = duplicated.exclude(pk=self.instance.pk)
+                    dup = duplicated.first()
+                    if dup:
+                        name = dup.title or dup.path
+                        raise serializers.ValidationError(
+                            f"该课程下已添加过「{name}」，不能重复添加"
+                        )
+            elif self.instance is None or not existing_file:
+                # 既无 path 也无上传，且不是已有自定义 HTML 的更新（如发布切换）
+                raise serializers.ValidationError({"path": "请选择平台预置页面或上传自定义 HTML 文件"})
         return attrs

@@ -142,6 +142,12 @@ def _safe_join(rest: str):
 
 
 def read_page(resource) -> str | None:
+    # 自定义 HTML（导图/演示上传，path 为空）从上传存储读；预置页从 RESOURCES_ROOT 读
+    if not resource.path and resource.file:
+        try:
+            return resource.file.open("rb").read().decode("utf-8", errors="replace")
+        except OSError:
+            return None
     path = _safe_join(resource.path)
     return None if path is None else path.read_text(encoding="utf-8", errors="replace")
 

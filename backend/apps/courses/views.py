@@ -792,7 +792,11 @@ def _resource_error_page(status: int, title: str, hint: str):
 
 
 def course_resource_page(request, token):
-    """资源入口页：验签 → 读预置 HTML → 注入 <base> 指向签名资产路由。"""
+    """资源入口页：验签 → 读 HTML（预置页/自定义上传） → 注入 <base> 指向签名资产路由。
+
+    自定义 HTML 为教师上传内容，响应加 CSP：默认仅同源 + data/blob，
+    脚本/样式允许同源与内联（自包含单文件可运行），挡外部脚本引用与数据外发。
+    """
     resource = CourseResource.objects.filter(access_token=token).first()
     if resource is None or not resource_gate.verify_resource(
         resource, request.GET.get("sig", ""), request.GET.get("exp", "")
@@ -800,13 +804,22 @@ def course_resource_page(request, token):
         return _resource_error_page(403, "资源链接无效或已过期", "请返回课程页面重新打开该资源。")
     html = resource_gate.read_page(resource)
     if html is None:
-        return _resource_error_page(404, "资源页面不存在", "平台尚未部署该预置页面，请联系管理员。")
+        return _resource_error_page(404, "资源页面不存在", "资源文件已丢失，请联系教师重新上传。")
     base = resource_gate.asset_base(resource, request.GET.get("sig", ""), request.GET.get("exp", ""))
     response = HttpResponse(
         resource_gate.inject_base(html, base), content_type="text/html; charset=utf-8"
     )
     response["Cache-Control"] = "no-store"
     response["X-Content-Type-Options"] = "nosniff"
+    response["Content-Security-Policy"] = (
+        "default-src 'self' data: blob:; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: blob:; "
+        "font-src 'self' data:; "
+        "connect-src 'self' blob:; "
+        "frame-ancestors 'self'"
+    )
     # 查看器以同源 iframe 嵌入本页（clickjacking 中间件不覆盖已设置的响应头）
     response["X-Frame-Options"] = "SAMEORIGIN"
     return response

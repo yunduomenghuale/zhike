@@ -63,12 +63,12 @@ export const reportVideoProgress = (videoId, data) =>
 
 // ===== 课程教学资源（思维导图/交互演示/文档，直接归属课程，不挂章节） =====
 export const listCourseResources = (params) => request.get('/course-resources/', { params })
-// 预置类走 JSON；文档类走 multipart（file 上传，pdf/doc/docx ≤100MB）
+// 预置类走 JSON；文档/自定义 HTML 类走 multipart（file 上传）
 export const createCourseResource = (data) => request.post('/course-resources/', data)
-export const uploadCourseDocument = ({ course, title, file, onProgress }) => {
+export const uploadCourseResourceFile = ({ course, kind, title, file, onProgress }) => {
   const form = new FormData()
   form.append('course', course)
-  form.append('kind', 'document')
+  form.append('kind', kind)
   form.append('title', title)
   form.append('file', file)
   return request.post('/course-resources/', form, {
@@ -76,6 +76,8 @@ export const uploadCourseDocument = ({ course, title, file, onProgress }) => {
     onUploadProgress: onProgress,
   })
 }
+export const uploadCourseDocument = ({ course, title, file, onProgress }) =>
+  uploadCourseResourceFile({ course, kind: 'document', title, file, onProgress })
 export const deleteCourseResource = (id) => request.delete(`/course-resources/${id}/`)
 export const publishCourseResource = (id) => request.post(`/course-resources/${id}/publish/`)
 export const unpublishCourseResource = (id) => request.post(`/course-resources/${id}/unpublish/`)

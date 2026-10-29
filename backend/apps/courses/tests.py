@@ -292,6 +292,54 @@ class CourseResourceTests(APITestCase):
         self.assertEqual(res.status_code, 200, res.data)
         self.assertIn("/api/course-resources/file/", res.data["data"]["url"])
 
+    def test_custom_html_mindmap_upload_and_serve(self):
+        """自定义导图：上传单文件 HTML → 签名 page 地址 → 匿名访问读出内容 + CSP 头。"""
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        self.client.force_authenticate(self.teacher)
+        html = SimpleUploadedFile(
+            "自定义导图.html",
+            "<!doctype html><html><head><title>custom</title></head><body><h1>我的导图</h1></body></html>".encode(),
+            content_type="text/html",
+        )
+        res = self.client.post(
+            "/api/course-resources/",
+            {"course": self.course.id, "kind": "mindmap", "title": "自定义导图", "file": html},
+            format="multipart",
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(res.data["data"]["path"], "")  # 自定义资源 path 置空
+        rid = res.data["data"]["id"]
+        res = self.client.post(f"/api/course-resources/{rid}/sign/")
+        self.assertEqual(res.status_code, 200, res.data)
+        signed = res.data["data"]["url"]
+        self.assertIn("/api/course-resources/page/", signed)
+        # 匿名带签名访问：内容与 CSP
+        self.client.force_authenticate(None)
+        res = self.client.get(signed)
+        self.assertEqual(res.status_code, 200, res.content[:200])
+        self.assertIn("我的导图", res.content.decode())
+        csp = res.get("Content-Security-Policy", "")
+        self.assertIn("script-src 'self' 'unsafe-inline'", csp)
+        self.assertIn("frame-ancestors 'self'", csp)
+        # 发布切换（PATCH 走序列化器校验：无 path 有 file 的存量更新不被误判）
+        self.client.force_authenticate(self.teacher)
+        res = self.client.patch(f"/api/course-resources/{rid}/", {"title": "自定义导图V2"}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+
+    def test_custom_html_rejects_non_html(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        self.client.force_authenticate(self.teacher)
+        bad = SimpleUploadedFile("evil.pdf", b"%PDF", content_type="application/pdf")
+        res = self.client.post(
+            "/api/course-resources/",
+            {"course": self.course.id, "kind": "demo", "title": "x", "file": bad},
+            format="multipart",
+        )
+        self.assertEqual(res.status_code, 400)
+        self.assertIn(".html", res.data["message"])
+
     def test_document_rejects_bad_ext_and_oversize(self):
         from django.core.files.uploadedfile import SimpleUploadedFile
 

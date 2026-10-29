@@ -159,11 +159,29 @@ async function main() {
     const n2a = await tab.eval(`(() => {
       const dlg = document.querySelector('.add-res-dialog');
       return {
-        radios: [...dlg.querySelectorAll('.el-radio-button')].map((r) => r.textContent.trim()),
+        kindRadios: [...dlg.querySelectorAll('.el-radio-button')].map((r) => r.textContent.trim()).slice(0, 3),
         hasPresetSelect: !!dlg.querySelector('.el-select'),
       };
     })()`);
-    check('N.2a 弹窗三类型 + 预置类表单', n2a && n2a.radios.length === 3 && n2a.hasPresetSelect, JSON.stringify(n2a));
+    check('N.2a 弹窗三类型 + 预置类表单(默认来源=平台预置)',
+      n2a && n2a.kindRadios.length === 3 && n2a.kindRadios.includes('文档') && n2a.hasPresetSelect, JSON.stringify(n2a));
+    // 切"上传文件"来源 → 出 HTML 拖拽区
+    await tab.eval(`(() => {
+      const dlg = document.querySelector('.add-res-dialog');
+      [...dlg.querySelectorAll('.el-radio-button')].find((r) => r.textContent.trim() === '上传文件')?.querySelector('input')?.click();
+    })()`);
+    await sleep(400);
+    const n2a2 = await tab.eval(`(() => {
+      const dlg = document.querySelector('.add-res-dialog');
+      return { hasHtmlUpload: !!dlg.querySelector('.course-upload input[type=file]'), selectGone: !dlg.querySelector('.el-select') };
+    })()`);
+    check('N.2a-2 切上传来源出 HTML 拖拽区', n2a2 && n2a2.hasHtmlUpload && n2a2.selectGone, JSON.stringify(n2a2));
+    // 切回平台预置（后续文档流程从类型切换开始）
+    await tab.eval(`(() => {
+      const dlg = document.querySelector('.add-res-dialog');
+      [...dlg.querySelectorAll('.el-radio-button')].find((r) => r.textContent.trim() === '平台预置')?.querySelector('input')?.click();
+    })()`);
+    await sleep(300);
     await tab.eval(`(() => {
       const dlg = document.querySelector('.add-res-dialog');
       [...dlg.querySelectorAll('.el-radio-button')].find((r) => r.textContent.trim() === '文档')?.querySelector('input')?.click();
@@ -252,6 +270,92 @@ async function main() {
     }))()`);
     check('N.6 学生封面卡片网格', stuReady && n6 && n6.covers === n6.cards && n6.docVisible && n6.hasCoverBadge, JSON.stringify(n6));
     await tab.shot('reslayout-03-student.png');
+
+    // N.6b 自定义 HTML 导图：教师上传 → 发布 → 学生查看器渲染签名页面
+    await login(tab, 't101', 'pass1234');
+    await tab.send('Page.navigate', { url: `${BASE}/teacher/courses/5/resources` });
+    await waitFor(tab, `document.querySelectorAll('.kind-tab').length === 4`, 25000);
+    await sleep(1000);
+    await tab.eval(`[...document.querySelectorAll('button')].find((b) => b.textContent.includes('添加资源'))?.click()`);
+    await waitFor(tab, `!!document.querySelector('.add-res-dialog')`, 8000);
+    await sleep(400);
+    await tab.eval(`(() => {
+      const dlg = document.querySelector('.add-res-dialog');
+      [...dlg.querySelectorAll('.el-radio-button')].find((r) => r.textContent.trim() === '上传文件')?.querySelector('input')?.click();
+    })()`);
+    await sleep(400);
+    const tmpHtml = path.join(SHOT_DIR, '_e2e_custom.html');
+    fs.writeFileSync(tmpHtml, '<!doctype html><html><head><title>E2E自定义导图</title></head><body><h1>E2E自定义HTML验收</h1></body></html>');
+    const htmlDom = await tab.send('DOM.getDocument', { depth: -1 });
+    const htmlQuery = await tab.send('DOM.querySelector', {
+      nodeId: htmlDom.root.nodeId,
+      selector: '.add-res-dialog .course-upload input[type=file]',
+    });
+    await tab.send('DOM.setFileInputFiles', { files: [tmpHtml], nodeId: htmlQuery.nodeId });
+    await sleep(400);
+    await tab.eval(`(() => {
+      const input = document.querySelector('.add-res-dialog .course-upload input[type=file]');
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    await sleep(300);
+    await tab.eval(`(() => {
+      const dlg = document.querySelector('.add-res-dialog');
+      const titleInput = [...dlg.querySelectorAll('input')].find((i) => i.placeholder?.includes('传输层'));
+      titleInput.value = 'E2E自定义HTML导图';
+      titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    await tab.eval(`(() => {
+      const dlg = document.querySelector('.add-res-dialog');
+      [...dlg.querySelectorAll('button')].find((b) => b.textContent.includes('上传并添加'))?.click();
+    })()`);
+    const customUp = await waitFor(tab, `[...document.querySelectorAll('.el-table__row')].some((r) => r.textContent.includes('E2E自定义HTML导图'))`, 20000);
+    check('N.6b-1 自定义 HTML 上传入表格', customUp);
+    // 行内副标题显示文件名（path 为空）
+    const subOk = await tab.eval(`(() => {
+      const row = [...document.querySelectorAll('.el-table__row')].find((r) => r.textContent.includes('E2E自定义HTML导图'));
+      return row?.querySelector('.res-sub')?.textContent?.includes('_e2e_custom.html') || false;
+    })()`);
+    check('N.6b-2 副标题显示自定义文件名', subOk);
+    // 发布 + 学生端查看
+    await tab.eval(`(() => {
+      const row = [...document.querySelectorAll('.el-table__row')].find((r) => r.textContent.includes('E2E自定义HTML导图'));
+      row.querySelector('.el-switch')?.click();
+    })()`);
+    await sleep(1800);
+    await login(tab, 'dbg1', 'A0987654');
+    await tab.send('Page.navigate', { url: `${BASE}/student/courses/5/resources` });
+    await waitFor(tab, `document.querySelectorAll('.res-card').length > 0`, 25000);
+    await sleep(1000);
+    const stuSigned = await tab.eval(`(async () => {
+      const token = localStorage.getItem('access_token') || '';
+      const h = { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' };
+      const listRes = await fetch('/api/course-resources/?course=5', { headers: h });
+      const items = (await listRes.json())?.data?.results || [];
+      const custom = items.find((i) => i.title === 'E2E自定义HTML导图' && i.kind === 'mindmap');
+      if (!custom) return { err: 'not found' };
+      const signRes = await fetch('/api/course-resources/' + custom.id + '/sign/', { method: 'POST', headers: h });
+      const url = (await signRes.json())?.data?.url || '';
+      const pageRes = await fetch(url, { headers: h });
+      const text = await pageRes.text();
+      return { signedPage: url.includes('/page/'), rendered: text.includes('E2E自定义HTML验收'), csp: !!pageRes.headers.get('Content-Security-Policy') };
+    })()`);
+    check('N.6b-3 学生签发并渲染自定义 HTML', stuSigned && stuSigned.signedPage && stuSigned.rendered && stuSigned.csp, JSON.stringify(stuSigned).slice(0, 120));
+    await tab.shot('reslayout-04-custom-html.png');
+    fs.rmSync(tmpHtml, { force: true });
+    // 清理自定义资源（教师端删除）
+    await login(tab, 't101', 'pass1234');
+    await tab.send('Page.navigate', { url: `${BASE}/teacher/courses/5/resources` });
+    await waitFor(tab, `[...document.querySelectorAll('.el-table__row')].some((r) => r.textContent.includes('E2E自定义HTML导图'))`, 25000);
+    await tab.eval(`(() => {
+      const row = [...document.querySelectorAll('.el-table__row')].find((r) => r.textContent.includes('E2E自定义HTML导图'));
+      [...row.querySelectorAll('button')].find((b) => b.textContent.trim() === '删除')?.click();
+    })()`);
+    await sleep(800);
+    await tab.eval(`(() => {
+      const box = document.querySelector('.el-message-box');
+      [...box.querySelectorAll('button')].find((b) => b.textContent.includes('确定'))?.click();
+    })()`);
+    await sleep(1500);
 
     // N.7 清理验收文档（教师端删除）
     await login(tab, 't101', 'pass1234');

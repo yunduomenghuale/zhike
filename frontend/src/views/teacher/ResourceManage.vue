@@ -48,8 +48,8 @@
               </span>
               <span class="res-text">
                 <span class="res-title" :title="row.title">{{ row.title }}</span>
-                <span class="res-sub" :title="row.kind === 'document' ? row.file_name : row.path">
-                  {{ row.kind === 'document' ? (row.file_name || '—') : row.path }}
+                <span class="res-sub" :title="row.kind === 'document' || !row.path ? row.file_name : row.path">
+                  {{ row.kind === 'document' || !row.path ? (row.file_name || '—') : row.path }}
                 </span>
               </span>
             </div>
@@ -121,27 +121,70 @@
         </el-form-item>
 
         <template v-if="addForm.kind !== 'document'">
-          <el-form-item label="平台页面" required>
-            <el-select v-model="addForm.path" filterable placeholder="选择预置静态页" style="width: 100%">
-              <el-option v-for="p in availablePaths" :key="p.value" :value="p.value" :label="p.label" />
-            </el-select>
+          <el-form-item label="资源来源" required>
+            <el-radio-group v-model="addForm.source">
+              <el-radio-button value="preset">平台预置</el-radio-button>
+              <el-radio-button value="upload">上传文件</el-radio-button>
+            </el-radio-group>
             <div class="form-extra">
-              <el-button
-                v-if="addForm.path"
-                link
-                type="primary"
-                :loading="presetPreviewing"
-                @click="previewPreset"
-              >
-                <el-icon class="path-icon"><Link /></el-icon>
-                预览该页面
-              </el-button>
-              <span v-if="addForm.path" class="form-tip">预置页：{{ addForm.path }}</span>
-              <span v-else class="form-tip">页面为平台预置，选择后可先预览再添加</span>
+              <span class="form-tip">预置为平台自带静态页；上传支持自定义单文件 HTML（由 markmap 等工具导出，≤100MB）</span>
             </div>
           </el-form-item>
+
+          <template v-if="addForm.source === 'preset'">
+            <el-form-item label="平台页面" required>
+              <el-select v-model="addForm.path" filterable placeholder="选择预置静态页" style="width: 100%">
+                <el-option v-for="p in availablePaths" :key="p.value" :value="p.value" :label="p.label" />
+              </el-select>
+              <div class="form-extra">
+                <el-button
+                  v-if="addForm.path"
+                  link
+                  type="primary"
+                  :loading="presetPreviewing"
+                  @click="previewPreset"
+                >
+                  <el-icon class="path-icon"><Link /></el-icon>
+                  预览该页面
+                </el-button>
+                <span v-if="addForm.path" class="form-tip">预置页：{{ addForm.path }}</span>
+                <span v-else class="form-tip">页面为平台预置，选择后可先预览再添加</span>
+              </div>
+            </el-form-item>
+          </template>
+
+          <template v-else>
+            <el-form-item label="HTML 文件" required>
+              <el-upload
+                drag
+                :show-file-list="false"
+                :before-upload="onHtmlPicked"
+                :accept="'.html'"
+                class="course-upload"
+              >
+                <div class="upload-inner">
+                  <div class="upload-mark">
+                    <el-icon><UploadFilled /></el-icon>
+                  </div>
+                  <div class="upload-main">{{ addForm.file ? '重新选择文件' : '拖入或选择 HTML 文件' }}</div>
+                  <div class="upload-sub">单个 .html 文件，不超过 100MB；多文件（含图片/JS 目录）的演示请先内联为单文件</div>
+                </div>
+              </el-upload>
+              <div v-if="addForm.file" class="file-status">
+                <div class="file-icon">
+                  <el-icon><Document /></el-icon>
+                </div>
+                <div class="file-meta">
+                  <div class="file-name" :title="addForm.file.name">{{ addForm.file.name }}</div>
+                  <div class="file-note">{{ fmtSize(addForm.file.size) }} · 点击上方区域可重新选择</div>
+                </div>
+              </div>
+              <el-progress v-if="uploading" :percentage="uploadPercent" :stroke-width="8" class="upload-progress" />
+            </el-form-item>
+          </template>
+
           <el-form-item label="资源标题">
-            <el-input v-model="addForm.title" placeholder="留空默认取页面名称" />
+            <el-input v-model="addForm.title" :placeholder="addForm.source === 'preset' ? '留空默认取页面名称' : '例如：第5章 传输层思维导图'" />
           </el-form-item>
         </template>
 
@@ -185,10 +228,10 @@
         <el-button
           type="primary"
           :loading="creating || uploading"
-          :disabled="addForm.kind === 'document' ? !addForm.file : !addForm.path"
+          :disabled="confirmDisabled"
           @click="confirmAdd"
         >
-          {{ addForm.kind === 'document' ? '上传并添加' : '添加资源' }}
+          {{ addForm.kind === 'document' || addForm.source === 'upload' ? '上传并添加' : '添加资源' }}
         </el-button>
       </template>
     </el-dialog>
@@ -205,7 +248,7 @@ import {
 import {
   listCourseResources, createCourseResource, deleteCourseResource,
   publishCourseResource, unpublishCourseResource,
-  signCourseResource, signPresetPage, uploadCourseDocument,
+  signCourseResource, signPresetPage, uploadCourseDocument, uploadCourseResourceFile,
 } from '@/api/course'
 import { openTabDeferred } from '@/utils/open-tab'
 
@@ -297,12 +340,20 @@ const creating = ref(false)
 const uploading = ref(false)
 const uploadPercent = ref(0)
 const presetPreviewing = ref(false)
-const addForm = reactive({ kind: 'mindmap', path: '', title: '', file: null })
+const addForm = reactive({ kind: 'mindmap', source: 'preset', path: '', title: '', file: null })
 
 const availablePaths = computed(() => PRESET_PAGES.filter((p) => p.kind === addForm.kind))
 
+// 确认按钮禁用态：文档/上传来源必须有文件，预置来源必须选页面
+const confirmDisabled = computed(() => {
+  if (addForm.kind === 'document') return !addForm.file
+  if (addForm.source === 'upload') return !addForm.file
+  return !addForm.path
+})
+
 function openAddDialog() {
   addForm.kind = 'mindmap'
+  addForm.source = 'preset'
   addForm.path = ''
   addForm.title = ''
   addForm.file = null
@@ -315,6 +366,7 @@ function presetTitle(path) {
 }
 
 const DOC_EXTS = ['.pdf', '.doc', '.docx']
+const HTML_EXTS = ['.html']
 const DOC_MAX_SIZE = 100 * 1024 * 1024
 
 function onDocPicked(file) {
@@ -337,9 +389,33 @@ function onDocPicked(file) {
   return false
 }
 
+function onHtmlPicked(file) {
+  // 自定义导图/演示：仅单文件 .html（el-upload before-upload 阻断自动上传）
+  const ext = '.' + (file.name.split('.').pop() || '').toLowerCase()
+  if (!HTML_EXTS.includes(ext)) {
+    ElMessage.error('仅支持 .html 单文件')
+    return false
+  }
+  if (file.size > DOC_MAX_SIZE) {
+    ElMessage.error('文件不能超过 100MB')
+    return false
+  }
+  if (file.size === 0) {
+    ElMessage.error('文件为空')
+    return false
+  }
+  addForm.file = file
+  if (!addForm.title) addForm.title = file.name.replace(/\.[^.]+$/, '')
+  return false
+}
+
 async function confirmAdd() {
   if (addForm.kind === 'document') {
     await uploadDocument()
+    return
+  }
+  if (addForm.source === 'upload') {
+    await uploadCustomHtml()
     return
   }
   creating.value = true
@@ -356,6 +432,33 @@ async function confirmAdd() {
   } catch { /* 响应拦截器已提示具体错误（如重复添加） */ }
   finally {
     creating.value = false
+  }
+}
+
+// 自定义导图/演示：单文件 HTML 上传（multipart，path 留空由后端判定为自定义）
+async function uploadCustomHtml() {
+  if (!addForm.title.trim()) {
+    ElMessage.warning('请填写资源标题')
+    return
+  }
+  uploading.value = true
+  uploadPercent.value = 0
+  try {
+    await uploadCourseResourceFile({
+      course: courseId.value,
+      kind: addForm.kind,
+      title: addForm.title.trim(),
+      file: addForm.file,
+      onProgress: (e) => {
+        if (e.total) uploadPercent.value = Math.round((e.loaded / e.total) * 100)
+      },
+    })
+    ElMessage.success('自定义资源已上传')
+    addVisible.value = false
+    await loadResources()
+  } catch { /* 响应拦截器已提示具体错误 */ }
+  finally {
+    uploading.value = false
   }
 }
 
