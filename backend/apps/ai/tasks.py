@@ -108,6 +108,13 @@ def _dispatch(task: AITask) -> None:
 
         run_question_gen(task)
         return
+    if task.task_type == AITask.TaskType.COURSE_REUSE:
+        # 课程复用是 I/O 密集（复制课件页图/配音/资料本体），走同一套任务框架
+        # 是为了「进度可见 + 失败落库 + 刷新不丢」，不占 AI 语义
+        from apps.courses.reuse import run_course_reuse
+
+        run_course_reuse(task)
+        return
     _mark_failed(task.id, f"未知任务类型：{task.task_type}")
 
 

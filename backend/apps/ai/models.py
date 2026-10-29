@@ -284,6 +284,7 @@ class AITask(BaseModel):
         CLASS_ANALYTICS = "class_analytics", "班级学情分析"
         CHAPTER_SUMMARY = "chapter_summary", "章节学习总结"
         QUESTION_GEN = "question_gen", "题目生成"
+        COURSE_REUSE = "course_reuse", "课程复用"
 
     class Status(models.TextChoices):
         PENDING = "pending", "排队中"

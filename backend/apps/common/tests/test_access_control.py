@@ -503,3 +503,77 @@ class RegisterToggleTests(APITestCase):
             self.client.patch("/api/admin-panel/settings/", {"register_open": False}, format="json").status_code,
             403,
         )
+
+
+class TeacherCourseBindTests(PlatformFixtureMixin, APITestCase):
+    """教师把自己的课挂进班级（P3 选班抽屉的后端通路）。
+
+    追加语义是 P1 的硬要求：一个班有多位教师时，A 挂自己的课不能把 B 的课踢掉。
+    这里额外锁住「响应体必须反映新增」——列表/详情接口 prefetch 了 course_links，
+    写入后不清缓存的话接口会回改动前的列表，前端拿响应渲染就会静默回退。
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.course3 = Course.objects.create(name="Course 3", teacher=self.teacher1)
+        self.client.force_authenticate(user=self.teacher1)
+
+    def test_append_course_and_response_reflects_it(self):
+        resp = self.client.patch(
+            f"/api/classes/{self.class1.id}/", {"courses": [self.course3.id]}, format="json"
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        data = resp.json()["data"]
+        self.assertIn(self.course3.id, data["courses"], "响应体未反映新增课程（prefetch 缓存未清）")
+        self.assertIn(self.course1.id, data["courses"], "原课程被踢掉了")
+        self.assertIn("Course 3", data["course_names"])
+        self.assertEqual(
+            set(ClassCourse.objects.filter(classroom=self.class1).values_list("course_id", flat=True)),
+            {self.course1.id, self.course3.id},
+        )
+
+    def test_append_keeps_other_teachers_course(self):
+        ClassCourse.objects.create(classroom=self.class1, course=self.course2)
+        resp = self.client.patch(
+            f"/api/classes/{self.class1.id}/", {"courses": [self.course3.id]}, format="json"
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        bound = set(ClassCourse.objects.filter(classroom=self.class1).values_list("course_id", flat=True))
+        self.assertEqual(bound, {self.course1.id, self.course2.id, self.course3.id})
+
+    def test_append_is_idempotent(self):
+        payload = {"courses": [self.course3.id]}
+        self.client.patch(f"/api/classes/{self.class1.id}/", payload, format="json")
+        resp = self.client.patch(f"/api/classes/{self.class1.id}/", payload, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(
+            ClassCourse.objects.filter(classroom=self.class1, course=self.course3).count(), 1
+        )
+
+    def test_teacher_cannot_change_org_fields(self):
+        resp = self.client.patch(
+            f"/api/classes/{self.class1.id}/",
+            {"name": "改名", "courses": [self.course3.id]},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 403)
+        self.class1.refresh_from_db()
+        self.assertEqual(self.class1.name, "Class 1")
+
+    def test_teacher_cannot_remove_course_by_omitting_it(self):
+        """追加语义：只提交一门课不会把班内其他课删掉（撤课归管理员）。"""
+        resp = self.client.patch(
+            f"/api/classes/{self.class1.id}/", {"courses": [self.course1.id]}, format="json"
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertTrue(
+            ClassCourse.objects.filter(classroom=self.class1, course=self.course1).exists()
+        )
+
+    def test_other_teacher_cannot_patch_class(self):
+        """别人的班不在我的可见范围内，直接 404。"""
+        self.client.force_authenticate(user=self.teacher2)
+        resp = self.client.patch(
+            f"/api/classes/{self.class1.id}/", {"courses": [self.course2.id]}, format="json"
+        )
+        self.assertEqual(resp.status_code, 404)

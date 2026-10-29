@@ -110,6 +110,11 @@ class ClassRoomSerializer(serializers.ModelSerializer):
                 if course_id not in existing
             ]
         )
+        # 列表/详情接口 prefetch 了 course_links，写入后必须清缓存：
+        # 否则响应体里的 courses 还是改动前的列表——教师刚挂上课，接口回
+        # 「没挂上」，前端若拿响应渲染会直接回退（P3 选班抽屉实测踩到）。
+        if hasattr(classroom, "_prefetched_objects_cache"):
+            classroom._prefetched_objects_cache.pop("course_links", None)
 
     @transaction.atomic
     def create(self, validated_data):

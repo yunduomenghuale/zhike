@@ -13,6 +13,7 @@ from django.http import HttpResponse
 from django.utils import timezone
 
 from apps.ai.services import generate_catalog_from_plan, generate_scripts_for_video
+from apps.ai.tasks import submit_ai_task
 from apps.common.access import courses_for_user
 from apps.common.error_pages import render_block_page
 from apps.common.permissions import IsStudent, IsTeacher, IsTeacherOrReadOnly
@@ -22,6 +23,7 @@ from apps.knowledge.models import KnowledgeChunk
 
 from . import resource_gate
 from .models import Catalog, Course, CourseResource, PPTResource, TeachingVideo, VideoWatchProgress
+from .reuse import course_asset_stats
 from .serializers import (
     CatalogSerializer,
     CourseResourceSerializer,
@@ -86,6 +88,19 @@ class CourseFilter(django_filters.FilterSet):
         fields = ["status"]
 
 
+def _as_bool(value) -> bool:
+    """勾选类参数的宽松解析：JSON 布尔、数字、multipart 字符串都要能认。
+
+    `bool("false")` 是 True——multipart/form-data 传 checkbox 时这会把
+    「不勾选」误判成「勾选」，题库就会悄悄多复制一份。
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value == 1
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
 class CourseViewSet(BaseModelViewSet):
     serializer_class = CourseSerializer
     permission_classes = [IsTeacherOrReadOnly]
@@ -97,6 +112,105 @@ class CourseViewSet(BaseModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(teacher=self.request.user)
+
+    # ---- 课程复用（资产整份复制到新课程，异步任务） ----
+    @staticmethod
+    def _reuse_denied(request, course):
+        """复用权限：只允许该课程的真教师（创建者）。
+
+        不复用 `teacher_can_manage_course`：那个函数放行平台管理员，但复用产物
+        的 `teacher` 必须落在一个教师账号上，管理员代建会产出一门"无主"课程。
+        """
+        user = request.user
+        if getattr(user, "is_teacher", False) and course.teacher_id == user.id:
+            return None
+        return api_response(message="只有课程创建者可以复用该课程", code=403, status=403)
+
+    @staticmethod
+    def _has_reusable_asset(course) -> bool:
+        return bool(
+            course.catalogs.exists()
+            or course.ppts.exists()
+            or course.materials.exists()
+            or course.chunks.exists()
+            or course.resources.exists()
+        )
+
+    @action(detail=True, methods=["get"], url_path="reuse-preview")
+    def reuse_preview(self, request, pk=None):
+        """复用前盘点：章节/课件/讲稿/资料/片段/资源/题目数量与 media 体积。"""
+        course = self.get_object()
+        denied = self._reuse_denied(request, course)
+        if denied:
+            return denied
+        from .models import Term
+
+        stats = course_asset_stats(course)
+        return api_response({
+            "course": {"id": course.id, "name": course.name,
+                       "term_id": course.term_id, "term_name": course.term.name if course.term else ""},
+            "assets": stats.as_dict(),
+            "default_name": f"{course.name}（复用）"[:200],
+            "terms": list(Term.objects.order_by("-year", "season").values("id", "name")),
+        })
+
+    @action(detail=True, methods=["post"], url_path="reuse")
+    def reuse(self, request, pk=None):
+        """提交复用任务：秒级返回 task_id，前端轮询 /api/ai-tasks/<id>/ 看进度。"""
+        from apps.ai.models import AITask
+
+        course = self.get_object()
+        denied = self._reuse_denied(request, course)
+        if denied:
+            return denied
+        if not self._has_reusable_asset(course):
+            return api_response(message="这门课还没有任何可复用的资产", code=400, status=400)
+
+        name = str(request.data.get("name") or "").strip() or f"{course.name}（复用）"
+        if len(name) > 200:
+            return api_response(message="课程名称不能超过 200 字", code=400, status=400)
+        term_id = request.data.get("term_id")
+        if term_id in ("", None):
+            term_id = course.term_id
+        else:
+            try:
+                term_id = int(term_id)
+            except (TypeError, ValueError):
+                return api_response(message="学期参数不合法", code=400, status=400)
+            from .models import Term
+
+            if not Term.objects.filter(id=term_id).exists():
+                return api_response(message="学期不存在", code=400, status=400)
+
+        # 同一门课不允许同时挂两个复用任务（避免撞出两份半成品）
+        running = AITask.objects.filter(
+            task_type=AITask.TaskType.COURSE_REUSE,
+            course=course,
+            status__in=[AITask.Status.PENDING, AITask.Status.RUNNING],
+        ).first()
+        if running:
+            return api_response(
+                {"task_id": running.id}, message="该课程已有复用任务在进行中", code=409, status=409
+            )
+
+        task = submit_ai_task(
+            AITask.TaskType.COURSE_REUSE,
+            user=request.user,
+            course=course,
+            progress={
+                "options": {
+                    "name": name,
+                    "term_id": term_id,
+                    "include_questions": _as_bool(request.data.get("include_questions")),
+                },
+                "stage": "pending",
+                "done": 0,
+                "total": 0,
+                "message": "排队中",
+            },
+        )
+        return api_response({"task_id": task.id, "status": task.status},
+                            message="已开始复用，可在任务进度中查看")
 
 
 class CatalogViewSet(BaseModelViewSet):
