@@ -32,12 +32,13 @@ django.setup()
 from apps.classroom.models import ClassRoom  # noqa: E402
 
 # 班级 id -> 编码。只列「当前 code 为空」的班；已编码的班一律不碰。
+# 注：id 5「P1b冒烟-无数据班」原为 P1b 冒烟遗留空班，2026-10-29 经零关联校验后
+# 已删除（见 docs/阶段计划与进度.md §5-A），故不再出现在本映射中。
 CODE_MAP: dict[int, str] = {
     1: "NET-2026-01",   # 网络2026届-1班
     2: "SJJG-2026-01",  # 数据结构B班
     3: "JSJ-2026-A",    # 计科2026届-A班
     4: "JSJ-2026-B",    # 计科2026届-B班
-    5: "TEST-P1B-01",   # P1b冒烟-无数据班（测试遗留空班，建议直接删除）
     6: "SJJG-XQ-01",    # 数据结构兴趣班
 }
 
