@@ -270,9 +270,22 @@ async function main() {
     check('N.7 清理验收文档', cleaned);
     fs.rmSync(tmpPdf, { force: true });
 
-    // N.8 console 干净
+    // N.8 API 层回归（承接旧版验收脚本口径）：无章节字段 / 视频端点 404 / 签名文件可匿名下载
+    await login(tab, 't101', 'pass1234');
+    const apiCheck = await tab.eval(`(async () => {
+      const token = localStorage.getItem('access_token') || '';
+      const h = { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' };
+      const listRes = await fetch('/api/course-resources/?course=5', { headers: h });
+      const items = (await listRes.json())?.data?.results || [];
+      const noCatalogField = items.every((i) => !('catalog' in i) && !('catalog_title' in i));
+      const videos404 = (await fetch('/api/course-videos/?course=5', { headers: h })).status === 404;
+      return { noCatalogField, videos404, total: items.length };
+    })()`);
+    check('N.8 API 回归（无章节字段+视频404）', apiCheck && apiCheck.noCatalogField && apiCheck.videos404, JSON.stringify(apiCheck));
+
+    // N.9 无 console.error / 未捕获异常
     const errs = tab.consoleErrors.filter((e) => !e.includes('favicon'));
-    check('N.8 无 console.error / 异常', errs.length === 0, errs.slice(0, 3).join(' | ') || 'clean');
+    check('N.9 无 console.error / 异常', errs.length === 0, errs.slice(0, 3).join(' | ') || 'clean');
 
     console.log(failures === 0 ? '\n全部通过' : `\n${failures} 项失败`);
     process.exitCode = failures === 0 ? 0 : 1;
