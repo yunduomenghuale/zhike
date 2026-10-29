@@ -48,3 +48,13 @@ frontend/src/assets/brand/*.png
 
 # 系统内置本地模型权重（BGE-M3/Qwen3-Reranker，数 GB，不入库）
 backend/data/models/
+
+# ===== 本地素材与产物（不入库）=====
+# 导出样例、AI 生成中间产物
+output/
+# E2E 截图（体积大，仅本地留存）
+test/screenshots/
+# 临时测试样例文件（导入/导出验证用，随时可再造）
+docs/测试文件/
+# 课程原始素材（PPT 等，419M）
+docs/计算机网络课程资料/
