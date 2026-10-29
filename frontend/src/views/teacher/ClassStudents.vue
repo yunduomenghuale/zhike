@@ -35,10 +35,14 @@
           <el-option label="按姓名" value="name" />
         </el-select>
       </div>
-      <el-button v-if="isAdmin" type="primary" :icon="Plus" @click="addVisible = true">添加学生</el-button>
+      <div v-if="isAdmin" class="roster-actions">
+        <el-button v-if="cls?.status === 'graduated'" :icon="RefreshLeft" @click="confirmRevoke">撤销毕业</el-button>
+        <el-button v-else :icon="School" @click="graduateVisible = true">整班毕业</el-button>
+        <el-button type="primary" :icon="Plus" @click="addVisible = true">添加学生</el-button>
+      </div>
     </div>
 
-    <TableSkeleton v-if="loading" :cols="5" />
+    <TableSkeleton v-if="loading" :cols="6" />
     <el-empty v-else-if="!students.length" :description="isAdmin ? '暂无学生，可用右上角按钮添加或批量导入' : '暂无学生'" />
     <el-empty v-else-if="!pagedStudents.length" description="没有符合条件的学生" :image-size="60" />
 
@@ -73,9 +77,17 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="130" fixed="right">
+        <el-table-column label="学籍状态" width="100" align="center">
+          <template #default="{ row }">
+            <el-tag :type="eduTagType(row.edu_status)" effect="light" round>
+              {{ row.edu_status_display || '在读' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openDetail(row)">详情</el-button>
+            <el-button v-if="isAdmin" link type="primary" @click="openEdu(row)">学籍</el-button>
             <el-button v-if="isAdmin" link type="danger" @click="openRemove(row)">移除</el-button>
           </template>
         </el-table-column>
@@ -155,18 +167,50 @@
       :loading="removing"
       @confirm="confirmRemove"
     />
+
+    <!-- 整班毕业：预览名单 + 在途清单 + 强制确认（X-14 / X-29） -->
+    <ClassGraduateDialog v-model="graduateVisible" :classroom="cls" @done="onGraduated" />
+
+    <!-- 个别学籍变更：休学/复学/毕业/退学（与整班毕业互补） -->
+    <el-dialog v-model="eduVisible" width="460px" align-center title="变更学籍状态" @closed="eduTarget = null">
+      <div class="edu-dialog-body">
+        <div class="edu-target">
+          <span class="edu-target-no">{{ eduTarget?.username }}</span>
+          <span class="edu-target-name">{{ eduTarget?.student_name || '未填写姓名' }}</span>
+          <span class="edu-target-now">当前：{{ eduTarget?.edu_status_display || '在读' }}</span>
+        </div>
+        <el-radio-group v-model="eduStatusValue" class="edu-options">
+          <el-radio v-for="opt in EDU_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</el-radio>
+        </el-radio-group>
+        <el-input
+          v-model="eduNote"
+          type="textarea"
+          :rows="2"
+          maxlength="200"
+          placeholder="备注（可选，如休学原因、毕业审核结论）"
+        />
+      </div>
+      <template #footer>
+        <div class="edu-dialog-footer">
+          <el-button :disabled="eduSaving" @click="eduVisible = false">取消</el-button>
+          <el-button type="primary" :loading="eduSaving" @click="confirmEdu">确认变更</el-button>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, ArrowRight, Plus, School, Search, User } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ArrowLeft, ArrowRight, Plus, RefreshLeft, School, Search, User } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
+import ClassGraduateDialog from '@/components/admin/ClassGraduateDialog.vue'
 import { useUserStore } from '@/store/user'
 import {
   getClass, listClassStudents, removeClassStudent, searchClassStudents, addStudentsBatch,
+  changeEduStatus, revokeGraduation,
 } from '@/api/classroom'
 
 const route = useRoute()
@@ -372,6 +416,77 @@ function goBack() {
   router.push(isAdmin.value ? '/admin/classes' : '/teacher/classes')
 }
 
+// ---- 整班毕业（P4 流转）----
+const graduateVisible = ref(false)
+async function onGraduated() {
+  // 班级状态与学生学籍都变了：名单与页头一起刷新
+  await Promise.all([loadClass(), loadStudents()])
+}
+async function confirmRevoke() {
+  try {
+    await ElMessageBox.confirm(
+      '撤销后班级恢复为「学习中」，本班已毕业学生恢复在读；班里个别提前毕业的学生不受影响。',
+      '撤销整班毕业',
+      { type: 'warning', confirmButtonText: '确认撤销', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  try {
+    const result = await revokeGraduation(classId, { note: '' })
+    ElMessage.success(`已撤销 ${result.reverted_count} 名学生的毕业状态`)
+    await Promise.all([loadClass(), loadStudents()])
+  } catch {
+    // 失败原因（如班级未毕业）由请求拦截器统一提示
+  }
+}
+
+// ---- 个别学籍变更 ----
+const EDU_OPTIONS = [
+  { value: 'enrolled', label: '在读' },
+  { value: 'suspended', label: '休学' },
+  { value: 'graduated', label: '毕业' },
+  { value: 'withdrawn', label: '退学' },
+]
+const eduVisible = ref(false)
+const eduTarget = ref(null)
+const eduStatusValue = ref('enrolled')
+const eduNote = ref('')
+const eduSaving = ref(false)
+function eduTagType(status) {
+  if (status === 'suspended') return 'warning'
+  if (status === 'graduated') return 'info'
+  if (status === 'withdrawn') return 'danger'
+  return 'success'
+}
+function openEdu(row) {
+  eduTarget.value = row
+  eduStatusValue.value = row.edu_status || 'enrolled'
+  eduNote.value = ''
+  eduVisible.value = true
+}
+async function confirmEdu() {
+  if (!eduTarget.value) return
+  if (eduStatusValue.value === (eduTarget.value.edu_status || 'enrolled')) {
+    ElMessage.info('学籍状态未变化')
+    eduVisible.value = false
+    return
+  }
+  eduSaving.value = true
+  try {
+    await changeEduStatus(classId, {
+      student: eduTarget.value.student,
+      edu_status: eduStatusValue.value,
+      note: eduNote.value,
+    })
+    ElMessage.success('学籍状态已更新')
+    eduVisible.value = false
+    await loadStudents()
+  } finally {
+    eduSaving.value = false
+  }
+}
+
 onMounted(() => { loadClass(); loadStudents() })
 </script>
 
@@ -457,6 +572,59 @@ onMounted(() => { loadClass(); loadStudents() })
 }
 .roster-sort {
   width: 190px;
+}
+/* 工具栏右侧动作组：EP 相邻按钮自带 margin-left:12px，与 gap 叠加会双倍间距 */
+.roster-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.roster-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+
+/* ===== 学籍变更弹窗 ===== */
+.edu-dialog-body {
+  display: grid;
+  gap: 14px;
+}
+.edu-target {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid #e8edf5;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+.edu-target-no {
+  color: #475569;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 13px;
+}
+.edu-target-name {
+  color: #1e293b;
+  font-size: 13px;
+  font-weight: 650;
+}
+.edu-target-now {
+  margin-left: auto;
+  color: #94a3b8;
+  font-size: 12px;
+}
+.edu-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+.edu-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.edu-dialog-footer .el-button {
+  min-width: 92px;
 }
 
 /* ===== 表格 ===== */

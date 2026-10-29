@@ -259,6 +259,11 @@
           </el-checkbox>
         </el-checkbox-group>
         <div class="exp-hint">{{ exportSummaryHint }}</div>
+        <!-- 统计口径（P4）：分母只含班级占用关系且学籍在读的学生，与页面卡片一致 -->
+        <div class="exp-hint exp-scope-hint">
+          <el-icon><InfoFilled /></el-icon>
+          仅统计当前班级占用中的在读学生；已毕业、休学、退学与已转走的学生不计入分母
+        </div>
       </div>
 
       <template #footer>
@@ -305,7 +310,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { MagicStick, Loading, WarningFilled, Clock, Search, ArrowRight, Download } from '@element-plus/icons-vue'
+import { MagicStick, Loading, WarningFilled, Clock, Search, ArrowRight, Download, InfoFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { renderAiMarkdown } from '@/utils/markdown'
 import { sortedCourseNames } from '@/utils/course-sort'
@@ -798,6 +803,15 @@ onMounted(loadClasses)
   color: var(--gray-400);
   font-size: 12.5px;
   line-height: 1.6;
+}
+.exp-scope-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.exp-scope-hint .el-icon {
+  flex: 0 0 auto;
+  margin-top: 3px;
 }
 .exp-all {
   font-weight: 400;

@@ -17,7 +17,12 @@ from apps.ai.services import (
     knowledge_qa_stream,
     maybe_update_session_summary,
 )
-from apps.common.access import classrooms_for_user, courses_for_user, is_platform_admin
+from apps.common.access import (
+    classrooms_for_user,
+    courses_for_user,
+    is_platform_admin,
+    student_submit_block_detail,
+)
 from apps.common.pagination import StandardPagination
 from apps.common.permissions import IsTeacher, IsTeacherOrReadOnly
 from apps.common.qa_stats import (
@@ -384,6 +389,11 @@ class QARecordViewSet(BaseModelViewSet):
         响应 data 附带 session_id（本次会话）与 rewritten_question（改写后的
         检索问题，未改写为空串）。
         """
+        # 学籍门控（方案 §5.4）：毕业/休学/退学不能新提问。历史会话仍可查
+        # （QARecordViewSet 按学生本人过滤，不看学籍）。
+        blocked = student_submit_block_detail(request.user, "提问")
+        if blocked:
+            raise PermissionDenied(blocked)
         course, classroom, catalog, classroom_ids = _resolve_qa_scope(request)
         question = request.data.get("question", "").strip()
         if not question:
@@ -435,6 +445,10 @@ class QARecordViewSet(BaseModelViewSet):
         -> (history_dropped，上下文超限分级降级时) -> done(带 record_id)。
         生成结束后落库为一条 QARecord 并维护会话（标题/滚动摘要）。
         """
+        # 学籍门控：同 ask（流式提问同样关闭）
+        blocked = student_submit_block_detail(request.user, "提问")
+        if blocked:
+            raise PermissionDenied(blocked)
         course, classroom, catalog, classroom_ids = _resolve_qa_scope(request)
         question = (request.data.get("question") or "").strip()
         if not question:

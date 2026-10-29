@@ -16,3 +16,13 @@ export const listClassStudents = (params) => request.get('/class-students/', { p
 export const removeClassStudent = (id) => request.delete(`/class-students/${id}/`)
 export const searchClassStudents = (id, keyword) => request.get(`/classes/${id}/search-students/`, { params: { keyword } })
 export const addStudentsBatch = (id, usernames) => request.post(`/classes/${id}/add-students-batch/`, { usernames })
+
+// 整班毕业（P4 流转，管理员专属）
+// preview 不写库：返回将毕业名单 + 被排除的转班生 + 在途考试/未截止作业清单
+export const graduatePreview = (id) => request.get(`/classes/${id}/graduate-preview/`)
+// 执行毕业：有在途考试/未截止作业时后端 409，带 force=true 才放行（X-14）
+export const graduateClass = (id, data) => request.post(`/classes/${id}/graduate/`, data)
+// 撤销整班毕业：只回滚本批标记的学生（个别提前毕业者不受影响）
+export const revokeGraduation = (id, data) => request.post(`/classes/${id}/graduate-revoke/`, data)
+// 个别学籍变更（休学/复学/毕业/退学），与整班毕业互补
+export const changeEduStatus = (id, data) => request.post(`/classes/${id}/edu-status/`, data)

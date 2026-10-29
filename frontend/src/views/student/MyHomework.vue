@@ -80,7 +80,16 @@
             </section>
 
             <template v-if="detailMode === 'submit'">
-            <div v-if="current?.mode === 'questions'" class="homework-question-list">
+            <el-alert
+              v-if="!canSubmit"
+              class="submit-gate"
+              type="warning"
+              :closable="false"
+              show-icon
+              :title="submitBlockReason('提交作业')"
+              description="你仍可查看历史作业与成绩；如需恢复提交，请联系管理员办理复学或撤销毕业。"
+            />
+            <div v-else-if="current?.mode === 'questions'" class="homework-question-list">
               <div v-for="(item, index) in current.questions" :key="item.id" class="homework-question-card">
                 <div class="question-title">
                   <div class="question-heading">
@@ -180,11 +189,12 @@
             </div>
 
             <footer class="workspace-footer">
-              <div v-if="current?.mode === 'questions'" class="answer-progress">
+              <div v-if="!canSubmit" class="answer-progress">当前学籍状态下不可提交</div>
+              <div v-else-if="current?.mode === 'questions'" class="answer-progress">
                 已完成 <strong>{{ answeredCount }}</strong> / {{ questionTotal }} 题
               </div>
               <div v-else class="answer-progress">完成作业后，请检查内容再提交</div>
-              <el-button type="primary" size="large" :loading="submitting" @click="doSubmit">
+              <el-button type="primary" size="large" :loading="submitting" :disabled="!canSubmit" @click="doSubmit">
                 <el-icon><Check /></el-icon>确认提交
               </el-button>
             </footer>
@@ -284,7 +294,8 @@
                 v-if="!subOf(row)"
                 class="student-action-btn course-standard-action-btn primary"
                 type="button"
-                :disabled="!hasStarted(row)"
+                :disabled="!hasStarted(row) || !canSubmit"
+                :title="canSubmit ? '' : submitBlockReason('提交作业')"
                 @click="openSubmit(row)"
               >
                 <el-icon><View /></el-icon>{{ hasStarted(row) ? '查看作业' : '未开始' }}
@@ -308,12 +319,17 @@ import { ElMessage } from 'element-plus'
 import { ArrowLeft, Check, Clock, Document, Download, Trophy, Upload, View } from '@element-plus/icons-vue'
 import PdfScrollPreview from '@/components/PdfScrollPreview.vue'
 import QuestionImage from '@/components/QuestionImage.vue'
+import { useUserStore } from '@/store/user'
 import { uploadWithProgress, isImageFile, fileNameFromUrl } from '@/utils/upload'
 import { abbrQtype } from '@/utils/question-abbr'
 import { blankAnswerText } from '@/utils/blank-answer'
 import { listHomeworks, listSubmissions, submitHomework } from '@/api/homework'
 
 const route = useRoute()
+// 学籍门控（P4 流转）：提交类动作仅「在读」放行，文案与后端 403 逐字一致
+const userStore = useUserStore()
+const canSubmit = computed(() => userStore.canSubmit)
+const submitBlockReason = (action) => userStore.submitBlockReason(action)
 const rows = ref([])
 const loading = ref(false)
 const subMap = ref({}) // homeworkId -> submission
@@ -543,6 +559,10 @@ function answerOf(id) {
 function openSubmit(row) {
   if (!hasStarted(row)) {
     return ElMessage.warning('作业尚未开始')
+  }
+  // 学籍门控（P4）：毕业/休学/退学不能提交。后端同款 403，这里提前拦 + 同款文案
+  if (!canSubmit.value) {
+    return ElMessage.warning(submitBlockReason('提交作业'))
   }
   current.value = row
   submitForm.content = ''
@@ -868,6 +888,11 @@ onBeforeUnmount(() => {
 .pending-review {
   margin-right: 24px;
   margin-left: 24px;
+}
+
+/* 学籍门控提示（P4）：毕业/休学后提交区顶部警示 */
+.submit-gate {
+  margin: 20px 24px 0;
 }
 
 .assignment-brief {

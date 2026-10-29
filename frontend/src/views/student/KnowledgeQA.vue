@@ -132,12 +132,12 @@
           :autosize="{ minRows: 1, maxRows: 5 }"
           resize="none"
           class="dock-textarea"
-          :disabled="!courseId"
-          placeholder="输入你的问题，Enter 发送，Shift+Enter 换行"
+          :disabled="!courseId || !canSubmit"
+          :placeholder="canSubmit ? '输入你的问题，Enter 发送，Shift+Enter 换行' : submitBlockReason('提问')"
           @keydown.enter.exact.prevent="ask()"
         />
         <div class="dock-toolbar">
-          <div v-if="visionSupported" class="dock-chips">
+          <div v-if="visionSupported && canSubmit" class="dock-chips">
             <input ref="fileInputRef" type="file" accept="image/*" hidden @change="onPickImage" />
             <button class="dock-chip tool-chip" title="提交图片提问" @click="fileInputRef?.click()">
               <el-icon :size="15"><Picture /></el-icon>
@@ -151,7 +151,7 @@
             :icon="Promotion"
             class="dock-send"
             title="发送"
-            :disabled="!courseId"
+            :disabled="!courseId || !canSubmit"
             @click="ask()"
           />
         </div>
@@ -173,8 +173,14 @@ import CitedSources from '@/components/qa/CitedSources.vue'
 import QaFeedback from '@/components/qa/QaFeedback.vue'
 import { listClasses } from '@/api/classroom'
 import { listQaSessions, listQaSessionRecords, deleteQaSession, getQaVisionCapability } from '@/api/knowledge'
+import { useUserStore } from '@/store/user'
 
 const renderMd = renderQaAnswer
+
+// 学籍门控（P4 流转）：提问类动作仅「在读」放行，文案与后端 403 逐字一致
+const userStore = useUserStore()
+const canSubmit = computed(() => userStore.canSubmit)
+const submitBlockReason = (action) => userStore.submitBlockReason(action)
 
 // 回答中 [N] 引用上标的点击处理：滚动到本消息参考来源并闪烁高亮对应编号
 const flashNums = ref(new Set())
@@ -375,6 +381,8 @@ async function ask(preset) {
   const img = imageData.value
   if ((!q && !img) || asking.value) return
   if (!courseId.value) return ElMessage.warning('请先选择课程')
+  // 学籍门控（P4）：毕业/休学/退学不能提问。后端同款 403，这里提前拦 + 同款文案
+  if (!canSubmit.value) return ElMessage.warning(submitBlockReason('提问'))
   const text = q || '请描述并解读这张图片'
   asking.value = true
   question.value = ''

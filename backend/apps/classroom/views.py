@@ -7,9 +7,20 @@ from apps.common.permissions import IsPlatformAdmin, IsStudent, IsTeacherOrAdmin
 from apps.common.response import api_response
 from apps.common.viewsets import BaseModelViewSet
 
-from . import services
+from . import graduation, services
 from .models import ClassRoom, ClassStudent
 from .serializers import ClassRoomSerializer, ClassStudentSerializer
+
+
+def _as_bool(value) -> bool:
+    """DRF 的 BooleanField 在 FormData 下会把 "false" 之外的字符串都判真。
+
+    毕业的 force 参数走 multipart/JSON 两种提交，必须显式识别常见假值，
+    否则 URL 查询串里的 force=false 会被当成强制确认（P4）。
+    """
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
 def has_complete_profile(user):
@@ -90,6 +101,78 @@ class ClassRoomViewSet(BaseModelViewSet):
         classroom = self.get_object()
         classroom.regenerate_invite_code()
         return api_response({"invite_code": classroom.invite_code}, message="邀请码已重新生成")
+
+    # ---- 整班毕业（P4 流转；权限：仅平台管理员）----
+    @action(detail=True, methods=["post"], url_path="edu-status", permission_classes=[IsPlatformAdmin])
+    def change_student_edu_status(self, request, pk=None):
+        """个别学籍变更（休学/复学/毕业/退学），P0 service 的管理端入口。
+
+        与整班毕业互补：提前毕业、休学复学这类"单人事务"走这里；
+        整班事务走 graduate。变更走 `services.change_edu_status`——
+        状态可回退，每次写 status_changed_at + status_note + 审计。
+        """
+        classroom = self.get_object()
+        student_id = request.data.get("student")
+        edu_status = str(request.data.get("edu_status") or "").strip()
+        student = get_user_model().objects.filter(pk=student_id, role="student").first()
+        if student is None:
+            return api_response(message="学生不存在", code=404, status=404)
+        if not ClassStudent.objects.filter(
+            classroom=classroom, student=student, learn_status__in=ClassStudent.OCCUPYING_STATUSES
+        ).exists():
+            return api_response(message="该学生不在本班", code=400, status=400)
+        try:
+            services.change_edu_status(
+                student,
+                edu_status,
+                operator=request.user,
+                note=str(request.data.get("note") or "")[:200],
+            )
+        except services.ClassServiceError as exc:
+            return api_response(message=exc.detail, code=exc.code, status=exc.code)
+        return api_response(
+            {"student": student.pk, "edu_status": student.edu_status},
+            message=f"学籍状态已更新为{student.get_edu_status_display()}",
+        )
+
+    @action(detail=True, methods=["get"], url_path="graduate-preview", permission_classes=[IsPlatformAdmin])
+    def graduate_preview(self, request, pk=None):
+        """毕业前名单预览（不写库）：将被毕业的学生 + 被排除的转班学生 + 在途清单。"""
+        classroom = self.get_object()
+        try:
+            data = graduation.graduate_preview(classroom)
+        except graduation.GraduationError as exc:
+            return api_response(message=exc.detail, code=exc.code, status=exc.code)
+        return api_response(data)
+
+    @action(detail=True, methods=["post"], url_path="graduate", permission_classes=[IsPlatformAdmin])
+    def graduate(self, request, pk=None):
+        """执行整班毕业。有在途考试/未截止作业时需 force=true 强制确认（X-14）。"""
+        classroom = self.get_object()
+        try:
+            result = graduation.graduate_class(
+                classroom,
+                operator=request.user,
+                force=_as_bool(request.data.get("force")),
+                note=str(request.data.get("note") or "")[:200],
+            )
+        except graduation.GraduationError as exc:
+            return api_response(message=exc.detail, code=exc.code, status=exc.code, data=exc.data)
+        return api_response(result, message=f"已毕业 {result['graduated_count']} 名学生")
+
+    @action(detail=True, methods=["post"], url_path="graduate-revoke", permission_classes=[IsPlatformAdmin])
+    def graduate_revoke(self, request, pk=None):
+        """撤销整班毕业（授位审核退回）：班级回 active，本班已毕业学生回 enrolled。"""
+        classroom = self.get_object()
+        try:
+            result = graduation.revoke_graduation(
+                classroom,
+                operator=request.user,
+                note=str(request.data.get("note") or "")[:200],
+            )
+        except graduation.GraduationError as exc:
+            return api_response(message=exc.detail, code=exc.code, status=exc.code, data=exc.data)
+        return api_response(result, message=f"已撤销 {result['reverted_count']} 名学生的毕业状态")
 
     @action(detail=True, methods=["get"], url_path="search-students", permission_classes=[IsPlatformAdmin])
     def search_students(self, request, pk=None):

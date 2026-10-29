@@ -26,13 +26,16 @@
           </div>
           <div class="exam-actions course-standard-actions">
             <button
-              v-if="rowState(row) === 'open'"
+              v-if="rowState(row) === 'open' && canSubmit"
               class="exam-action course-standard-action-btn primary"
               type="button"
               @click="enter(row)"
             >
               <el-icon><EditPen /></el-icon>进入考试
             </button>
+            <span v-else-if="rowState(row) === 'open'" class="exam-action-disabled" :title="submitBlockReason('开始考试')">
+              {{ submitBlockReason('开始考试') }}
+            </span>
             <button
               v-else-if="rowState(row) === 'continue'"
               class="exam-action course-standard-action-btn primary"
@@ -42,9 +45,12 @@
               <el-icon><EditPen /></el-icon>继续考试
             </button>
             <template v-else-if="rowState(row) === 'retake'">
-              <button class="exam-action course-standard-action-btn primary" type="button" @click="enter(row)">
+              <button v-if="canSubmit" class="exam-action course-standard-action-btn primary" type="button" @click="enter(row)">
                 <el-icon><Refresh /></el-icon>重考
               </button>
+              <span v-else class="exam-action-disabled" :title="submitBlockReason('开始考试')">
+                {{ submitBlockReason('开始考试') }}
+              </span>
               <button class="exam-action course-standard-action-btn" type="button" @click="viewResult(row)">
                 <el-icon><View /></el-icon>查看成绩
               </button>
@@ -75,11 +81,18 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useRoute } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { Clock, EditPen, View, Refresh, CircleCheck } from '@element-plus/icons-vue'
+import { useUserStore } from '@/store/user'
 import { listExams } from '@/api/exam'
 
 const router = useRouter()
 const route = useRoute()
+// 学籍门控（P4 流转）：开新考/重考仅「在读」放行；继续考试（在途答卷）不拦，
+// 与后端「交卷不拦」同款边界——否则毕业生连答题页都打不开
+const userStore = useUserStore()
+const canSubmit = computed(() => userStore.canSubmit)
+const submitBlockReason = (action) => userStore.submitBlockReason(action)
 const exams = ref([])
 const loading = ref(false)
 const fixedCourseId = computed(() => Number(route.params.id) || null)
@@ -104,6 +117,10 @@ async function load() {
 }
 
 function enter(row) {
+  // 开新考试受学籍门控（深链兜底）；继续考试放行——后端 start 对在途答卷同样放行
+  if (rowState(row) !== 'continue' && !canSubmit.value) {
+    return ElMessage.warning(submitBlockReason('开始考试'))
+  }
   // 课程空间内进入考试时带 course 查询参数，交卷后返回/回看仍停留课程空间
   const query = fixedCourseId.value ? { course: fixedCourseId.value } : undefined
   router.push({ path: `/student/exams/${row.id}/take`, query })

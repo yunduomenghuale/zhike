@@ -14,6 +14,8 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 
+from apps.classroom.models import ClassStudent
+from apps.common.access import student_study_block_detail, student_submit_block_detail
 from apps.common.permissions import IsStudent, IsTeacher, IsTeacherOrReadOnly
 from apps.common.response import api_response
 from apps.common.viewsets import BaseModelViewSet
@@ -116,7 +118,18 @@ class HomeworkViewSet(BaseModelViewSet):
         user = self.request.user
         qs = Homework.objects.select_related("course", "classroom").prefetch_related("questions")
         if user.is_authenticated and user.is_student:
-            qs = qs.filter(classroom__students__student=user, status=Homework.Status.PUBLISHED)
+            # 学籍门控（方案 §5.4）：休学即停学，不给作业清单；毕业生仍看历史作业
+            # （提交入口另拦，见 HomeworkSubmissionViewSet.create）。
+            blocked = student_study_block_detail(user)
+            if blocked:
+                return qs.none()
+            # 只看当前占用班级的作业：转班后旧班作业从待办消失（与课程列表一致），
+            # 已交记录仍在「提交记录」可见（submission 侧按学生本人过滤，不按班）。
+            qs = qs.filter(
+                classroom__students__student=user,
+                classroom__students__learn_status__in=ClassStudent.OCCUPYING_STATUSES,
+                status=Homework.Status.PUBLISHED,
+            )
         elif user.is_authenticated and user.is_teacher:
             # 锚点是课程负责人（作业属于某门课在某班的投放）
             qs = qs.filter(course__teacher=user)
@@ -286,6 +299,11 @@ class HomeworkSubmissionViewSet(BaseModelViewSet):
         """学生交作业；题库作业逐题留痕并自动批改客观题。"""
         if not request.user.is_student:
             raise PermissionDenied("仅学生可提交作业")
+        # 学籍门控（方案 §5.4）：毕业/休学/退学不能提交。毕业生看得到历史作业，
+        # 但提交入口关闭——统计窗口随学期关闭，补交只会污染完成率。
+        blocked = student_submit_block_detail(request.user, "提交作业")
+        if blocked:
+            raise PermissionDenied(blocked)
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         homework = serializer.validated_data["homework"]
@@ -293,7 +311,10 @@ class HomeworkSubmissionViewSet(BaseModelViewSet):
             raise ValidationError({"homework": "作业尚未发布"})
         if homework.start_time and timezone.now() < homework.start_time:
             raise ValidationError({"homework": "作业尚未开始"})
-        if not homework.classroom.students.filter(student=request.user).exists():
+        # 成员校验收紧到占用关系：转班学生旧班作业不能再交（与作业列表口径一致）
+        if not homework.classroom.students.filter(
+            student=request.user, learn_status__in=ClassStudent.OCCUPYING_STATUSES
+        ).exists():
             raise PermissionDenied("你不在该作业所属班级中")
 
         answers = serializer.validated_data.pop("answers", {}) or {}
@@ -401,6 +422,11 @@ class HomeworkSubmissionViewSet(BaseModelViewSet):
 
         暂存文件未被提交引用时成为孤儿，由 cleanup_submission_staging 管理命令清理。
         """
+        # 学籍门控：暂存是提交的前置动作，毕业生/休学生传了附件也提交不了，
+        # 不如在入口就拦掉（方案 §5.4 精确拦截点明确包含 stage_attachments）。
+        blocked = student_submit_block_detail(request.user, "上传作业附件")
+        if blocked:
+            raise PermissionDenied(blocked)
         files = request.FILES.getlist("attachments")
         if not files:
             raise ValidationError({"attachments": "请选择要上传的附件"})

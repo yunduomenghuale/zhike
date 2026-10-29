@@ -16,6 +16,7 @@ from apps.homework.models import Homework, HomeworkAnswer, HomeworkSubmission
 from apps.knowledge.models import QARecord
 from apps.labs.models import Lab, LabSubmission
 from apps.questions.models import AnswerRecord, Question, WrongMastery, WrongNote
+from apps.users.models import User
 
 INACTIVE_DAYS = 7
 LOW_ACCURACY = 60
@@ -50,7 +51,15 @@ def build_class_stats(classroom, course_id) -> dict:
     now = timezone.now()
 
     rows = []
-    for cs in ClassStudent.objects.filter(classroom=classroom).select_related("student"):
+    # 统计分母（方案 §5.4）：只算「本班占用关系（active）且学籍在读」的学生。
+    # 毕业生保持 ClassStudent.active（要看历史），但不进分母——否则他们未做的
+    # 作业/考试会永久拉低完成率，且统计窗口应随学期关闭；转班生旧关系是
+    # transferred，本来也不该再算原班的人。休学同理。
+    for cs in ClassStudent.objects.filter(
+        classroom=classroom,
+        learn_status=ClassStudent.LearnStatus.ACTIVE,
+        student__edu_status=User.EduStatus.ENROLLED,
+    ).select_related("student"):
         stu = cs.student
         practice = AnswerRecord.objects.filter(
             student=stu, scene=AnswerRecord.Scene.PRACTICE, question__course_id=course_id

@@ -4,6 +4,7 @@ import time
 
 import django_filters
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from django.conf import settings
 from django.db import transaction
@@ -14,7 +15,7 @@ from django.utils import timezone
 
 from apps.ai.services import generate_catalog_from_plan, generate_scripts_for_video
 from apps.ai.tasks import submit_ai_task
-from apps.common.access import courses_for_user
+from apps.common.access import courses_for_user, student_study_block_detail
 from apps.common.error_pages import render_block_page
 from apps.common.permissions import IsStudent, IsTeacher, IsTeacherOrReadOnly
 from apps.common.response import api_response
@@ -732,6 +733,13 @@ class TeachingVideoViewSet(BaseModelViewSet):
         参数：last_page 当前页索引、last_position 页内秒数、
         duration_delta 本次新增学习秒数、completed 是否学完整章。
         """
+        # 学籍门控（方案 §5.4 / X-31）：只拦休学。毕业生/退学生照常写进度——
+        # 这是播放器每 10 秒一次的高频写入，对他们 403 会打断断点续播，
+        # 实际效果变成「看不了」，与「毕业生可看全部历史内容」冲突；
+        # 他们的进度不计入统计（统计侧按 edu_status=enrolled 过滤）。
+        blocked = student_study_block_detail(request.user)
+        if blocked:
+            raise PermissionDenied(blocked)
         video = self.get_object()
 
         def _int(value, default=0):

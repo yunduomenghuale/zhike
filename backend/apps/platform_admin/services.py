@@ -304,10 +304,15 @@ def class_progress_summary(classroom) -> dict:
     if course is None:
         return {"course_id": None, "course_name": None, "homework_rate": None,
                 "exam_rate": None, "warning_count": None}
+    # 分母口径与教师端 build_class_stats 对齐（方案 §5.4）：占用关系且在读。
+    # 原实现只排除了 removed，转班生（transferred）与毕业/休学生都混在分母里，
+    # 完成率被永久拉低——毕业班尤其明显：全班毕业后完成率归零却无法补救。
     students = list(
-        ClassStudent.objects.filter(classroom=classroom)
-        .exclude(learn_status=ClassStudent.LearnStatus.REMOVED)
-        .values_list("student_id", flat=True)
+        ClassStudent.objects.filter(
+            classroom=classroom,
+            learn_status=ClassStudent.LearnStatus.ACTIVE,
+            student__edu_status=User.EduStatus.ENROLLED,
+        ).values_list("student_id", flat=True)
     )
     student_count = len(students)
     hw_list = list(Homework.objects.filter(

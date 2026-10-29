@@ -30,6 +30,7 @@ from apps.homework.models import Homework, HomeworkSubmission
 from apps.knowledge.models import QARecord
 from apps.labs.models import Lab, LabSubmission
 from apps.questions.models import AnswerRecord
+from apps.users.models import User
 
 from .services import _chapter_maps
 
@@ -201,8 +202,15 @@ def build_class_export_workbook(classroom, course, start=None, end=None, section
     base_title = f"{classroom.name} · 《{course.name}》 学习数据导出"
     subtitle = f"时间范围：{range_text}　导出时间：{now.strftime('%Y-%m-%d %H:%M:%S')}"
 
+    # 导出名单与教师端学情统计同口径（方案 §5.4）：占用关系且在读。
+    # 毕业/休学学生不占导出行——他们的未完成任务会把班级完成率永久拉低，
+    # 而导出的核心正是完成率口径；历史成绩由学生本人端保留可查。
     students = list(
-        ClassStudent.objects.filter(classroom=classroom)
+        ClassStudent.objects.filter(
+            classroom=classroom,
+            learn_status=ClassStudent.LearnStatus.ACTIVE,
+            student__edu_status=User.EduStatus.ENROLLED,
+        )
         .select_related("student")
         .order_by("student__username")
     )

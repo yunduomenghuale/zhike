@@ -9,7 +9,7 @@ from rest_framework.exceptions import MethodNotAllowed, PermissionDenied, Valida
 from rest_framework.generics import get_object_or_404
 from rest_framework.permissions import IsAuthenticated
 
-from apps.common.access import is_platform_admin
+from apps.common.access import is_platform_admin, student_submit_block_detail
 from apps.common.permissions import IsTeacher, IsTeacherOrReadOnly
 from apps.common.response import api_response
 from apps.common.viewsets import BaseModelViewSet
@@ -258,6 +258,20 @@ class ExamSubmissionViewSet(BaseModelViewSet):
         """学生开始考试，分配试卷（需求 S-E-02）。"""
         if not request.user.is_student:
             raise PermissionDenied("仅学生可开始考试")
+        # 学籍门控（方案 §5.4）：毕业/休学/退学不能开考。
+        # 注意交卷（submit）**不拦**——已开考的答卷必须允许交，否则休学当天
+        # 正在考试的学生永远交不上卷，答卷卡在 in_progress。同理，start 也是
+        # 「恢复在途答卷」的入口（ExamTaking 每次进页都调它）：已有 in_progress
+        # 答卷时放行，否则毕业生连答题页都打不开，更谈不上交卷。
+        has_in_progress = ExamSubmission.objects.filter(
+            exam_id=request.data.get("exam"),
+            student=request.user,
+            status=ExamSubmission.Status.IN_PROGRESS,
+        ).exists()
+        if not has_in_progress:
+            blocked = student_submit_block_detail(request.user, "开始考试")
+            if blocked:
+                raise PermissionDenied(blocked)
         exam_id = request.data.get("exam")
         exam = get_object_or_404(
             Exam.objects.filter(

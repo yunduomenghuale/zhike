@@ -8,7 +8,7 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 
-from apps.common.access import is_platform_admin
+from apps.common.access import is_platform_admin, student_submit_block_detail
 from apps.common.error_pages import render_block_page
 from apps.common.permissions import IsStudent, IsTeacher, IsTeacherOrReadOnly
 from apps.common.response import api_response
@@ -233,6 +233,11 @@ class LabSubmissionViewSet(BaseModelViewSet):
     # ---- 学生：开始实验 ----
     @action(detail=False, methods=["post"], url_path="start", permission_classes=[IsStudent])
     def start(self, request):
+        # 学籍门控（方案 §5.4）：毕业/休学/退学不能开始新实验（同「开考」语义；
+        # 已开始的答卷/实验在 submit 侧另有机会交，不卡在中间态）。
+        blocked = student_submit_block_detail(request.user, "开始实验")
+        if blocked:
+            raise PermissionDenied(blocked)
         lab_id = request.data.get("lab")
         lab = Lab.objects.select_related("template", "course").filter(id=lab_id).first()
         if not lab:
@@ -340,6 +345,12 @@ class LabSubmissionViewSet(BaseModelViewSet):
     @action(detail=True, methods=["post"], url_path="submit", permission_classes=[IsStudent],
             authentication_classes=[LabTokenAuthentication, JWTAuthentication])
     def submit(self, request, pk=None):
+        # 学籍门控（方案 §5.4）：毕业/休学/退学不能提交实验。
+        # 与考试不同，实验没有「交卷不拦」的例外——实验没有开考倒计时，
+        # 不存在「当天正在做」的卡场问题；进行中的实验随毕业一并关闭。
+        blocked = student_submit_block_detail(request.user, "提交实验")
+        if blocked:
+            raise PermissionDenied(blocked)
         sub = self.get_object()
         if sub.student_id != request.user.id:
             raise PermissionDenied("只能提交自己的实验")
@@ -404,6 +415,10 @@ class LabSubmissionViewSet(BaseModelViewSet):
     @action(detail=True, methods=["post"], url_path="conclusion", permission_classes=[IsStudent],
             authentication_classes=[LabTokenAuthentication, JWTAuthentication])
     def conclusion(self, request, pk=None):
+        # 学籍门控：实验结论是提交类行为（二期报告的前置数据），同 submit 处理
+        blocked = student_submit_block_detail(request.user, "提交实验结论")
+        if blocked:
+            raise PermissionDenied(blocked)
         sub = self.get_object()
         if sub.student_id != request.user.id:
             raise PermissionDenied("只能提交自己的实验结论")

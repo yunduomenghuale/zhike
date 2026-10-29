@@ -79,7 +79,7 @@
         <div class="lab-actions">
           <!-- 已提交：成绩明细直接展示在卡片上；仅允许重做的实验提供重做入口 -->
           <el-button
-            v-if="submissionOf(row) && hasOpenWindow(row)"
+            v-if="submissionOf(row) && hasOpenWindow(row) && canSubmit"
             type="warning"
             size="small"
             :loading="entering === row.id"
@@ -88,7 +88,7 @@
             重做实验
           </el-button>
           <el-button
-            v-if="!submissionOf(row) && hasOpenWindow(row)"
+            v-if="!submissionOf(row) && hasOpenWindow(row) && canSubmit"
             type="primary"
             size="small"
             :loading="entering === row.id"
@@ -96,6 +96,14 @@
           >
             进入实验
           </el-button>
+          <!-- 学籍门控（P4）：毕业/休学/退学不能开始/重做实验，文案与后端 403 一致 -->
+          <span
+            v-else-if="!submissionOf(row) && hasOpenWindow(row)"
+            class="lab-action-disabled"
+            :title="submitBlockReason('开始实验')"
+          >
+            {{ submitBlockReason('开始实验') }}
+          </span>
         </div>
       </article>
     </div>
@@ -111,9 +119,14 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import LabGuideDialog from '@/components/LabGuideDialog.vue'
+import { useUserStore } from '@/store/user'
 import { listLabs, listLabSubmissions, startLab } from '@/api/labs'
 
 const route = useRoute()
+// 学籍门控（P4 流转）：开始/重做实验仅「在读」放行，文案与后端 403 逐字一致
+const userStore = useUserStore()
+const canSubmit = computed(() => userStore.canSubmit)
+const submitBlockReason = (action) => userStore.submitBlockReason(action)
 // 课程空间内（/student/courses/:id/labs）只展示当前课程的实验；独立访问时展示全部
 const fixedCourseId = computed(() => Number(route.params.id) || null)
 
@@ -214,6 +227,10 @@ async function load() {
 }
 
 async function enter(row) {
+  // 学籍门控（P4）：开始/重做实验仅「在读」放行。后端同款 403，这里提前拦 + 同款文案
+  if (!canSubmit.value) {
+    return ElMessage.warning(submitBlockReason('开始实验'))
+  }
   entering.value = row.id
   try {
     const data = await startLab(row.id)
@@ -312,5 +329,10 @@ onMounted(load)
 }
 .lab-review-title { flex-shrink: 0; color: #8b5cf6; font-weight: 650; }
 .lab-review-text { color: #475569; line-height: 1.6; }
-.lab-actions { display: flex; gap: 10px; margin-top: 4px; }
+.lab-actions { display: flex; gap: 10px; margin-top: 4px; align-items: center; }
+.lab-action-disabled {
+  color: #94a3b8;
+  font-size: 12.5px;
+  font-weight: 600;
+}
 </style>

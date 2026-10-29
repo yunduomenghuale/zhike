@@ -159,12 +159,17 @@ class ClassStudentSerializer(serializers.ModelSerializer):
     avatar = serializers.CharField(source="student.avatar", read_only=True)
     last_login = serializers.DateTimeField(source="student.last_login", read_only=True)
     learn_status_display = serializers.CharField(source="get_learn_status_display", read_only=True)
+    # 学籍状态：毕业生留在班级名单（历史档案区，方案 §5.4），但不进统计分母；
+    # 管理端据此判断谁能提交、谁已停学。
+    edu_status = serializers.CharField(source="student.edu_status", read_only=True)
+    edu_status_display = serializers.CharField(source="student.get_edu_status_display", read_only=True)
 
     class Meta:
         model = ClassStudent
         fields = [
             "id", "classroom", "student", "student_name", "username",
             "avatar", "joined_at", "last_login", "learn_status", "learn_status_display",
+            "edu_status", "edu_status_display",
         ]
         # learn_status 只读：入班/转班/移出必须走 services，否则会绕过单班唯一约束
         read_only_fields = ["classroom", "student", "joined_at", "learn_status"]

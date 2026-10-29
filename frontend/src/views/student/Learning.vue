@@ -467,7 +467,22 @@
       </el-select>
     </div>
 
-    <el-empty v-if="!courseId" description="请先选择课程（需先加入班级）" />
+    <el-empty v-if="!courseId">
+      <template v-if="eduStatus === 'suspended'" #description>
+        <div class="learn-gate-text">休学中，暂不可学习</div>
+        <div class="learn-gate-tip">复学后课程与学习进度自动恢复，请联系管理员办理复学</div>
+      </template>
+      <template v-else #description>请先选择课程（需先加入班级）</template>
+    </el-empty>
+
+    <!-- 学籍门控（P4）：休学即停学。班级接口按占用关系返回（不含学籍），
+         所以不能等 courseId 为空才拦——深链进课程空间同样要拦 -->
+    <el-empty v-else-if="eduStatus === 'suspended'" class="learn-gate">
+      <template #description>
+        <div class="learn-gate-text">休学中，暂不可学习</div>
+        <div class="learn-gate-tip">复学后课程与学习进度自动恢复，请联系管理员办理复学</div>
+      </template>
+    </el-empty>
 
     <div v-else class="learn-shell">
       <!-- 章节目录（整宽平铺，与教师端同款行样式） -->
@@ -549,6 +564,7 @@ import { listQaSessions, listQaSessionRecords } from '@/api/knowledge'
 import { submitChapterSummary, getChapterSummary } from '@/api/chapter-summary'
 import { useAiTaskPolling } from '@/composables/useAiTaskPolling'
 import { blankAnswerText } from '@/utils/blank-answer'
+import { useUserStore } from '@/store/user'
 
 const courses = ref([])
 const courseId = ref(null)
@@ -556,6 +572,9 @@ const tree = ref([])
 const current = ref(null)
 const tab = ref('learn')
 const route = useRoute()
+// 学籍门控（P4 流转）：休学生课程列表为空，空状态给出针对性说明
+const userStore = useUserStore()
+const eduStatus = computed(() => userStore.eduStatus)
 const fixedCourseId = computed(() => Number(route.params.id) || null)
 const keyword = computed(() => String(route.query.search || '').trim().toLowerCase())
 const filteredCourses = computed(() => {
@@ -1697,6 +1716,23 @@ onUnmounted(() => {
   min-height: 420px;
   display: grid;
   place-items: center;
+}
+
+/* 休学空状态（P4 学籍门控）：主文案 + 复学指引 */
+.learn-gate {
+  min-height: 320px;
+  display: grid;
+  place-items: center;
+}
+.learn-gate-text {
+  color: #475569;
+  font-size: 14px;
+  font-weight: 650;
+}
+.learn-gate-tip {
+  margin-top: 4px;
+  color: #94a3b8;
+  font-size: 12px;
 }
 
 .content-head {

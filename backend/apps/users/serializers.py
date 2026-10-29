@@ -28,6 +28,7 @@ class LoginSerializer(serializers.Serializer):
 class UserSerializer(serializers.ModelSerializer):
     role = serializers.SerializerMethodField()
     role_display = serializers.SerializerMethodField()
+    edu_status_display = serializers.CharField(source="get_edu_status_display", read_only=True)
 
     def get_role(self, obj):
         return User.Role.ADMIN if obj.is_superuser else obj.role
@@ -47,8 +48,11 @@ class UserSerializer(serializers.ModelSerializer):
             "is_active",
             "must_change_password",
             "date_joined",
+            "edu_status",
+            "edu_status_display",
         ]
-        read_only_fields = ["id", "date_joined", "is_active", "must_change_password"]
+        # edu_status 只读：学籍变更走管理端 service（审计 + 状态时间留痕）
+        read_only_fields = ["id", "date_joined", "is_active", "must_change_password", "edu_status"]
 
 
 class RegisterSerializer(serializers.ModelSerializer):
