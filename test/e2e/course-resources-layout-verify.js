@@ -366,6 +366,63 @@ async function main() {
     check('N.6b-3 学生签发并渲染自定义 HTML', stuSigned && stuSigned.signedPage && stuSigned.rendered && stuSigned.csp, JSON.stringify(stuSigned).slice(0, 120));
     await tab.shot('reslayout-04-custom-html.png');
     fs.rmSync(tmpHtml, { force: true });
+
+    // N.6c 学生下载 docx：弹确认框，取消则不下载（且全程无新标签页）
+    // 准备阶段用教师身份上传并发布（学生无创建权限），再切回学生点卡片
+    await login(tab, 't101', 'pass1234');
+    const docxRes = await tab.eval(`(async () => {
+      const token = localStorage.getItem('access_token') || '';
+      const h = { Authorization: 'Bearer ' + token };
+      const form = new FormData();
+      form.append('course', '5');
+      form.append('kind', 'document');
+      form.append('title', 'E2E验收文档docx');
+      form.append('file', new File(['fake docx content'], '验收文档.docx', { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }));
+      const upRes = await fetch('/api/course-resources/', { method: 'POST', headers: h, body: form });
+      const body = await upRes.json();
+      if (upRes.status !== 201) return { err: body?.message || upRes.status };
+      const created = body.data;
+      await fetch('/api/course-resources/' + created.id + '/publish/', { method: 'POST', headers: h });
+      return { id: created.id, ok: true };
+    })()`);
+    check('N.6c-1 准备 docx 验收资源', docxRes && docxRes.ok, JSON.stringify(docxRes));
+    await login(tab, 'dbg1', 'A0987654');
+    await tab.send('Page.navigate', { url: `${BASE}/student/courses/5/resources` });
+    await waitFor(tab, `[...document.querySelectorAll('.res-card')].some((c) => c.textContent.includes('E2E验收文档docx'))`, 25000);
+    await sleep(1000);
+    const targetsBefore = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json();
+    await tab.eval(`(() => {
+      [...document.querySelectorAll('.res-card')].find((c) => c.textContent.includes('E2E验收文档docx'))?.click();
+    })()`);
+    await sleep(800);
+    const confirmShown = await tab.eval(`(() => {
+      const box = document.querySelector('.el-message-box');
+      return { shown: !!box, text: box?.textContent?.slice(0, 60) || '' };
+    })()`);
+    check('N.6c-2 下载确认框弹出', confirmShown && confirmShown.shown && confirmShown.text.includes('下载'), JSON.stringify(confirmShown));
+    await tab.eval(`(() => {
+      const box = document.querySelector('.el-message-box');
+      [...box.querySelectorAll('button')].find((b) => b.textContent.includes('取消'))?.click();
+    })()`);
+    // 弹窗关闭判定：CDP 启动的 Chrome 窗口被遮挡时节流 CSS transition，transitionend 不触发，
+    // EP 不从 DOM 移除节点（opacity 归零 + leave class 即视为已关）——断言"不可见"而非"DOM 移除"
+    const boxClosed = await waitFor(tab, `(() => {
+      const overlay = document.querySelector('.el-overlay');
+      if (!overlay) return true;
+      const cs = getComputedStyle(overlay);
+      return parseFloat(cs.opacity) < 0.05;
+    })()`, 8000);
+    const targetsAfter = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json();
+    // Chrome 会异步回收已关闭目标，计数只可能持平或减少——断言"无新增"而非"相等"
+    const noNewTab = targetsAfter.filter((t) => t.type === 'page').length <= targetsBefore.filter((t) => t.type === 'page').length;
+    check('N.6c-3 取消后弹窗关闭且无新标签页', boxClosed && noNewTab, `tabs ${targetsBefore.length}->${targetsAfter.length}, boxClosed=${boxClosed}`);
+    // 清理 docx（教师 API 删除）
+    await login(tab, 't101', 'pass1234');
+    await tab.eval(`(async () => {
+      const token = localStorage.getItem('access_token') || '';
+      const h = { Authorization: 'Bearer ' + token };
+      await fetch('/api/course-resources/${docxRes.id}/', { method: 'DELETE', headers: h });
+    })()`);
     // 清理自定义资源（教师端删除）
     await login(tab, 't101', 'pass1234');
     await tab.send('Page.navigate', { url: `${BASE}/teacher/courses/5/resources` });

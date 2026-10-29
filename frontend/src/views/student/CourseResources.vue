@@ -67,10 +67,10 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowRight, Connection, Document, MagicStick, Search } from '@element-plus/icons-vue'
 import { listCourseResources, signCourseResource } from '@/api/course'
-import { openTabDeferred } from '@/utils/open-tab'
+import { openTabDeferred, downloadUrl } from '@/utils/open-tab'
 
 const route = useRoute()
 const router = useRouter()
@@ -129,7 +129,29 @@ function viewerQuery(extra) {
 }
 
 async function openResource(r) {
-  // 先签发唯一签名 URL（未发布/非在读课程后端拒签）再打开；
+  // 文档类非 PDF（doc/docx）：先确认再下载，不新开标签页（避免 about:blank 残留）
+  if (r.kind === 'document' && !isPdf(r)) {
+    const name = r.file_name || r.title
+    const sizeText = r.file_size ? `（${fmtSize(r.file_size)}）` : ''
+    let confirmed = false
+    try {
+      await ElMessageBox.confirm(`确认下载「${name}」${sizeText}？`, '下载确认', {
+        type: 'info',
+        confirmButtonText: '下载',
+        cancelButtonText: '取消',
+      })
+      confirmed = true
+    } catch { /* 用户取消 */ }
+    if (!confirmed) return
+    try {
+      const signed = await signCourseResource(r.id)
+      downloadUrl(signed.url)
+    } catch (e) {
+      ElMessage.error(e?.message || '下载失败，请稍后重试')
+    }
+    return
+  }
+  // PDF / 思维导图 / 交互演示：先签发唯一签名 URL（未发布/非在读课程后端拒签）再打开查看器；
   // 标签页在点击时同步开出，避免异步后的 window.open 被弹窗拦截
   const tab = openTabDeferred()
   let signed
@@ -140,7 +162,7 @@ async function openResource(r) {
     ElMessage.error(e?.message || '资源打开失败，请稍后重试')
     return
   }
-  if (r.kind === 'document' && isPdf(r)) {
+  if (r.kind === 'document') {
     // PDF 进查看器内联预览
     const { href } = router.resolve({
       name: 'student-course-resource-viewer',
@@ -148,11 +170,6 @@ async function openResource(r) {
       query: viewerQuery({ src: signed.url, title: r.title, type: 'pdf', kind: 'document' }),
     })
     tab.open(href)
-    return
-  }
-  if (r.kind === 'document') {
-    // doc/docx 直接下载
-    tab.open(signed.url)
     return
   }
   const hash = r.kind === 'mindmap' ? '#chapters-hidden' : ''

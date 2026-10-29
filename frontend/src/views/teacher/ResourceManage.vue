@@ -250,7 +250,7 @@ import {
   publishCourseResource, unpublishCourseResource,
   signCourseResource, signPresetPage, uploadCourseDocument, uploadCourseResourceFile,
 } from '@/api/course'
-import { openTabDeferred } from '@/utils/open-tab'
+import { openTabDeferred, downloadUrl } from '@/utils/open-tab'
 
 const route = useRoute()
 const router = useRouter()
@@ -524,8 +524,15 @@ async function togglePublish(row) {
 }
 
 async function previewResource(row) {
-  // 先签发唯一签名 URL 再打开；文档类签发 file 地址（PDF 查看器内预览，doc/docx 下载）；
-  // HTML 类（预置/自定义导图演示）在延迟标签页中打开查看器，避免签名异步等待被弹窗拦截
+  // 文档类非 PDF（doc/docx）：签发后直接触发下载，不开新标签页（避免 about:blank 残留）
+  if (row.kind === 'document' && !isPdf(row)) {
+    try {
+      const signed = await signCourseResource(row.id)
+      downloadUrl(signed.url)
+    } catch { /* 拦截器已提示 */ }
+    return
+  }
+  // HTML 类（预置/自定义导图演示）：在延迟标签页中打开查看器，避免签名异步等待被弹窗拦截
   const tab = openTabDeferred()
   let signed
   try {
@@ -536,7 +543,13 @@ async function previewResource(row) {
     return
   }
   if (row.kind === 'document') {
-    tab.open(signed.url)
+    // PDF 文档：file 地址进查看器内联预览（iframe）
+    const { href } = router.resolve({
+      name: 'course-resource-viewer',
+      params: { id: courseId.value },
+      query: { src: signed.url, title: row.title, type: 'pdf', kind: 'document', back: 'course-resources' },
+    })
+    tab.open(href)
     return
   }
   const hash = row.kind === 'mindmap' ? '#chapters-hidden' : ''

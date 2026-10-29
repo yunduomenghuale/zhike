@@ -17,3 +17,16 @@ export function openTabDeferred() {
     },
   }
 }
+
+/* 触发浏览器下载而不新开标签页：隐藏 <a download> 点击。
+ * 适用于后端返回 Content-Disposition: attachment 的签名地址
+ * （doc/docx 等资源）——openTabDeferred 开 about:blank 再跳转会残留空标签页。
+ */
+export function downloadUrl(url) {
+  const a = document.createElement('a')
+  a.href = url
+  a.rel = 'noopener'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}
