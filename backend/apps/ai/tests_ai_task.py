@@ -41,7 +41,14 @@ class _InlineThread:
     主线程并发读写同一张表（ai_aitask）会随机 SQLITE_LOCKED——真实文件库
     有 busy handler 不受影响（本地冒烟已覆盖真线程全路径）。同步执行后
     状态机/埋点/限流断言完全确定性；copy_call_context / run_in_context /
-    信号量 / close_old_connections 等机制原样执行，未被绕过。
+    信号量 等机制原样执行，未被绕过。
+
+    唯一例外是 `close_old_connections()`：它的语义是"清理线程自己残留的连接"，
+    真线程里拿到的是全新连接，本就不需要清理；同步执行时它落到测试自身的连接上，
+    而该连接正被 TestCase 的 atomic 包裹（autocommit 已关）——
+    `close_if_unusable_or_obsolete()` 会判定 autocommit 与配置不一致而直接关连接，
+    后续查询在 MySQL 上报 "server has gone away"（SQLite 因可重开文件连接而未暴露）。
+    因此这里把它替换为空操作，属于"线程边界不存在时该机制无意义"，不是绕过被测逻辑。
     """
 
     def __init__(self, target=None, args=(), kwargs=None, daemon=None, name=None):
@@ -50,7 +57,14 @@ class _InlineThread:
         self._kwargs = kwargs or {}
 
     def start(self):
-        self._target(*self._args, **self._kwargs)
+        from apps.ai import tasks as ai_tasks
+
+        original = ai_tasks.close_old_connections
+        ai_tasks.close_old_connections = lambda: None
+        try:
+            self._target(*self._args, **self._kwargs)
+        finally:
+            ai_tasks.close_old_connections = original
 
     def join(self, timeout=None):
         return

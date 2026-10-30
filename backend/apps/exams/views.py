@@ -345,11 +345,16 @@ class ExamSubmissionViewSet(BaseModelViewSet):
         )
 
     @action(detail=True, methods=["post"], url_path="save")
+    @transaction.atomic
     def save(self, request, pk=None):
         """保存答案（不提交）：考试中途暂存作答，刷新/重进后回填继续答。
 
         仅更新 answers 与 saved_at：不算分、不改状态、不动开始时间；
         超过截止时间后不再接受保存（此时应直接交卷）。
+
+        必须包在事务里：下方 select_for_update 在 SQLite 上是空操作，
+        但 MySQL 下 autocommit 中会直接抛 TransactionManagementError
+        （django/db/models/sql/compiler.py 的行锁前置校验）。
         """
         if not request.user.is_student:
             raise PermissionDenied("仅学生可保存答卷")

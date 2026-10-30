@@ -279,12 +279,19 @@ class CatalogViewSet(BaseModelViewSet):
         video, _ = TeachingVideo.objects.get_or_create(
             catalog=catalog, defaults={"course": catalog.course, "ppt": ppt}
         )
-        # 换了新版本 PPT 或明确 force 时重置衍生内容（含学生观看进度，沿用主线换版逻辑）
-        if force or video.ppt_id != ppt.id:
-            _invalidate_teaching_video_for_new_ppt(catalog, ppt)
-        video.course = catalog.course
-        video.ppt = ppt
-        video.save()
+        # 换了新版本 PPT 或明确 force 时重置衍生内容（含学生观看进度，沿用主线换版逻辑）。
+        # 只把这段写操作包进事务：_invalidate 内部走 select_for_update，SQLite 下是空操作，
+        # MySQL 下 autocommit 中会抛 TransactionManagementError；而后面的 AI 分批生成
+        # 可能耗时数分钟，绝不能一起放进事务（会长时间持有行锁）。
+        with transaction.atomic():
+            if force or video.ppt_id != ppt.id:
+                _invalidate_teaching_video_for_new_ppt(catalog, ppt)
+                # _invalidate 内部重新查询并落库了重置结果，本地 video 实例已陈旧；
+                # 不刷新会把旧的 scripts/audio_url/gen_status 又写回去（换版重置失效）
+                video.refresh_from_db()
+            video.course = catalog.course
+            video.ppt = ppt
+            video.save()
 
         result = generate_script_pages_batched(video, ppt.parsed_pages, batch_size=limit)
         if result.get("done"):
