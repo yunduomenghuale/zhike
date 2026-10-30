@@ -17,8 +17,10 @@
 - `智能课程教学平台需求规格说明书.docx`：需求基线（V1.1）
 
 ## 启动方式
-- 后端：`cd backend && venv\Scripts\python.exe manage.py migrate && manage.py runserver 127.0.0.1:8005`（venv 已建；`.env` 已随仓库提供，AI_PROVIDER=mock）
-- 前端：`cd frontend && npm install && npm run dev`（默认 5273 端口）
+- 后端：`cd backend && venv\Scripts\python.exe manage.py migrate && venv\Scripts\python.exe manage.py runserver 127.0.0.1:8005`
+  - 数据库：本地 MySQL `zk`（`DATABASE_URL=mysql://zk:zk123456@127.0.0.1:3306/zk`）；`.env` 不入库，从 `.env.example` 复制后按需填写
+  - 改代码/改 `.env` 必须**杀进程完整重启**（autoreloader 子进程会继承旧 `os.environ`；`--noreload` 不热加载）
+- 前端：`cd frontend && npm install && npm run dev`（5273）；或仓库根 `node serve-local.js`（serve 构建产物 + 代理 8005，改源码需先 `npm run build`）
 
 ## 关键约定
 - 统一响应 `{code, message, data}`；视图集继承 `BaseModelViewSet`
@@ -29,33 +31,44 @@
 - 注册（2026-09-08 恢复开放）：曾于 2026-08-21 关闭，现恢复原注册功能（教师/学生自助注册，注册即登录）；账号也可由管理员单个创建或 Excel 批量导入（`platform_admin/user_import.py`，初始密码 `Zk+用户名后6位`，导入/管理员重置密码后 `must_change_password=True`，前端 MainLayout 弹窗提示改密可跳过）
 - 登录态（2026-08-27）：access 12h / refresh 7d；前端 `api/request.js` 已实现 401 静默续期（单飞并发去重 + 重放原请求，刷新也失败才登出），登录态最长 7 天
 
-## 当前状态（2026-08-21）
-- 已完成：学习进度记录/断点续播、章节练习 UI、考试主观题批改、统一出分、作业成绩发布、学生 Excel 批量导入（模板下载/解析预览/确认三段式）、注册收口与首登改密提示
-- 待办见 `docs/需求对照排查.md` 第六节（P2/P3）
-- 测试：Django 单测 186 例全绿（`cd backend && venv\Scripts\python.exe manage.py test`）；AI 生成、PPT 解析为同步执行（待异步化）
+## 当前状态（2026-10-30）
+- 已完成：组织重构 P0–P5（学籍门控 / 整班毕业 / 权限锚点 `Course.teacher` / 三类批量导入）、**MySQL 迁移（本地 + 生产）**、AI 异步任务（AITask）、QA 质量看板 Phase 1+2、班级学习数据 Excel 导出
+- 测试基线：MySQL 与 SQLite 各 **712 例全绿**；专项 `scripts/mysql_upgrade_check.py` 57 项；P1/P4/P5 校验脚本 64/41/39
+- 待办见 `docs/阶段计划与进度.md`；QA 看板 Phase 3/4 未做
 
-## 生产部署（2026-08-24 更新）
-- SSH 密钥：本机 `~/.ssh/id_claude_server`（`ssh -i ~/.ssh/id_claude_server -o IdentitiesOnly=yes root@124.70.107.64`）；`~/.ssh/config` 若首行带 BOM 会导致所有 ssh 命令报配置错误（2026-08-24 已修复）
-- 2026-08-24 上线：学生批量导入 + 注册关闭 + 首登改密提示；后端容器启动入口会自动 `migrate`（日志确认 `users.0006` 已应用）；回滚备份 `/data/zhike-v2/backend.bak.20260824`
-- 2026-08-27 上线：仅前端（401 静默续期，登录态延长至 7 天），替换 dist + restart frontend，无后端/迁移变更
-- 2026-09-02 上线：安全加固（详见下方"安全基线"），含迁移 courses.0006 / homework.0007 / knowledge.0006 与一次性命令 `manage.py obfuscate_media`（存量 ppt_pages/ID 目录改 hash、附件改 uuid 名，已执行）
-- 2026-09-08 上线：恢复注册功能开放（后端 RegisterView 还原 + 前端登录/注册翻转面板恢复），批量导入与首登提示保留；无迁移变更；回滚备份 `/data/zhike-v2/backend.bak.20260908`
-- 自动备份（2026-09-02 起）：crontab 每日 3:30 跑 `/data/zhike-v2/backups/backup.sh`——SQLite `VACUUM INTO` 在线备份至 `data/backups/db-YYYYMMDD.sqlite3`（保留 14 天）+ media rsync 增量至 `backups/media/`；日志 `backups/backup.log`
-- 服务器：华为云 `124.70.107.64`（CentOS 7，root），代码位于 `/data/zhike-v2/`
-- 方式：Docker Compose（`deploy/`），`zhike_v2_backend`（gunicorn，容器内 8000，**不发布宿主端口**）+ `zhike_v2_frontend`（nginx，对外 **8088**，华为云安全组已放行；主线曾改 5273 但安全组未放行该端口，2026-08-17 实测外部不可达后回退 8088）
-- 数据：**bind mount 到数据盘项目目录**（`/data/zhike-v2/{data,media,staticfiles}` → 容器 `/app/{data,media,staticfiles}`），不再使用根盘 named volume；生产配置在 `deploy/.env.production`（gitignore，仅存于服务器）
-- 更新流程：本地 `npm run build`（**先确认 `dist/assets/` 产物完整再打包**，2026-08-17 曾因本地上传残缺的 dist 导致全站 404）→ 打包上传 → `cd /data/zhike-v2/deploy && docker compose up -d --build`
-- 前端 dist 更新注意：bind 挂载的是 `frontend/dist` 目录本身，**不能 `rm -rf dist` 再解压**（目录 inode 变化会导致容器内挂载失效、全站 403）；应 `rm -rf dist/*` 只清内容，或替换后 `docker compose restart frontend`
-- `.env.production` 改动注意：`env_file` 在容器创建时注入，`docker compose restart` **不会**重读，需 `docker compose up -d --force-recreate backend`
-- 生产无 TLS：`deploy/.env.production` 必须含 `DJANGO_SECURE_SSL_REDIRECT=False`（主线 settings 在非 DEBUG 下默认 301 跳转 https，前端 nginx 仅 80 端口，不开会导致 API 全部 301 不可用）
-- **打包部署会携带本地 `deploy/.env.production`**（gitignore 但本地磁盘存在，tar 不忽略）：2026-08-17 曾因本地旧版（cosyvoice-v1、无 SSL 行）上传覆盖服务器修正版，导致 TTS 与 SSL 修复被还原。服务器改过的配置必须同步回本地，当前本地已是正确版本（qwen3-tts-flash + SSL=False）
-- TTS 模型：**必须用 `qwen3-tts-flash`**（DashScope 原生 multimodal-generation 端点 + Cherry 发音人）。旧模型 `qwen-tts` 已于 2026-10-13 实测下线（404 `InvalidParameter: Model not exist`，同 Key 下 qwen3-tts-flash 正常）；更早的 `cosyvoice-v1` 不被该端点接受（400 InvalidParameter），如需 cosyvoice 要走 WebSocket（未实现）
-- AI 配音为**分段生成**（2026-08-17）：`POST /catalogs/{id}/generate-audio/` 带 `limit`（默认 3），每页合成后即时落库，前端循环调用直至 `done=true`，按钮实时显示 `配音 x/y`；此前 18 页同步合成超 nginx 180s 导致 504 无反馈
-- 讲解稿同为**分批生成**（2026-08-18）：`POST /catalogs/{id}/generate-script/` 带 `limit`（默认 6），每批一次 AI 调用、批后落库，前端循环调用显示 `讲稿 x/y`；此前 44 页一次性生成（含 retries=3 重试）超 180s 被 499。换新版本 PPT 或 `force=true` 自动重置讲稿重新生成
-- 移动端（uni-app，主线 2026-08-18 合入）：**H5 形态部署在 `http://124.70.107.64:8088/m/`**（与 Web 同域，API/media 同源零 CORS）；`app/` 构建 `npm run build:h5` → `dist/build/h5`；`manifest.json h5.router.base` 与 `vite.config.js base` 均为 `/m/`；compose 挂载到容器 `/usr/share/nginx/m`（**不可挂 html/m**——html 是 ro 的 dist 挂载，嵌套建目录会启动失败，2026-08-18 曾致 Web 中断约 2 分钟）；小程序/App 打包另行操作（`app/src/config.js` 的 `USE_PROD=true` 切生产后端地址）
-- 同机系统（2026-08-17 清理后）：仅 **cv_\***（校园车辆，8080/8081/3308 均绑 127.0.0.1，线上运行勿动）与本系统；virtual-human、chaoxingai 已停止清理（容器/镜像/孤立卷已删，项目数据目录保留在 /data/Virtual-Human、/data/AIzhike）
-- 端口占用（2026-08-17 外网实测+全端口抽样）：对外可达 22 sshd / 80 宿主机 nginx / 8088 本系统前端；**安全组放行且空闲可用：443、9527、21、1433、3389、8082、8084**（8080/8081 放行但被 cv 绑 127.0.0.1 占用勿用）；全端口间隔抽样证实**无整段开放**，放行均为上述离散端口；未放行：5273、8005、3306、3307、3308、6380 等
-- 旧代码备份：`/data/zhike-v2/backend.bak.20260817`（可回滚，确认稳定后可删）
+## 生产部署（2026-10-30 更新：迁至内网机 + MySQL）
+
+### 当前环境
+- 服务器：`192.168.3.145`（CentOS 8.3，32 核共用机，跑着 40+ 其他项目的演示容器 —— **只动 `zhike_v2_*` 容器，别碰 `test-mysql80` / `cv_*` 等**）
+- 登录：`lymatrix2020`，**密码认证**（原公钥已失效），`sudo` 免密；本机走 paramiko（`PYTHONPATH=D:/tmp/pylibs` + `D:/tmp/ssh_run.py`）。**SFTP 不可用**（put 报 ENOENT）→ 用 `D:/tmp/ssh_push.py` 分块 base64 上传（≤60KB/块，过大服务器断连；Git Bash 会把 `/home/xxx` 实参改写成 Windows 路径，远端路径用环境变量 `REMOTE_PATH` 传）
+- 访问：`http://192.168.3.145:8088`（用机器已有的 nginx 1.27.3 镜像直接发布 8088）
+- 代码：`/data/zhike-v2/`，**不是 git 仓库**，靠打包上传：`git archive HEAD backend deploy` → 上传 → 解压。Windows 导出为 CRLF（`.sh` 由 `.gitattributes` 强制 LF）
+- 华为云 `124.70.107.64` **已弃用**（2026-10-30 确认不再使用），整机备份在 `D://124.70.107.64服务器数据资源//`
+
+### 数据库（2026-10-30 起 MySQL）
+- `deploy/.env.production`：`DATABASE_URL=mysql://root:test%402021@192.10.0.3:3306/zk`（密码里的 `@` 编码为 `%40`）
+- **`192.10.0.3` 是本机 `test-mysql80` 容器**（MySQL 8.0.22 / utf8mb4_0900_ai_ci / 时区表已灌 1826 条），在 `bnet-test` 网络（192.10.0.0/16）→ compose 里 backend 必须挂 `bnet-test`(external)，否则容器根本连不上（宿主能连、容器跨 bridge 没路由）
+- 共享实例 100+ 个库：**只操作 `zk`**；`test-mysql80` 被其他项目共用，**不要 stop/restart**
+- SQLite 已冻结：旧库 `data/db.sqlite3` 保留仅作回滚；切换前备份在 `data/backups/`
+- 回滚：`.env.production` 把 `DATABASE_URL` 改回 `sqlite` → `docker compose up -d backend`；镜像回滚 `docker tag zhike-v2-backend:p5base zhike-v2-backend:latest` 再重建
+- 备份：`backups/backup.sh`（mysqldump 借 `docker run --network bnet-test mysql:8.0`，`MYSQL_PWD` 传密码，`--single-transaction` 不锁表，gzip 约 27MB/份）**每日 03:30** 由 crontab 触发，**保留 14 天**，存 `data/backups/mysql/`；media 走 `rsync -a` 增量（不带 --delete）；日志 `backups/backup.log`；仓库留档 `deploy/backup-mysql.sh`
+- 手工恢复：`zcat data/backups/mysql/db-YYYYMMDD.sql.gz | sudo docker exec -i test-mysql80 sh -c 'mysql -uroot -p"test@2021" zk'`
+
+### 构建与发布
+- 常规：`cd deploy && docker compose up -d --build backend`
+- ⚠️ `requirements.txt` 一改 → `COPY requirements.txt` 层失效 → 重装 torch（209MB，`download.pytorch.org` 国内极慢，实测卡 15 分钟）。应急用 `deploy/Dockerfile.fast`（`FROM zhike-v2-backend:p5base` + mysqlclient + `COPY . /app`，**53 秒**）；但**新增任何依赖都必须回完整 `Dockerfile.backend`**
+- `.env.production` 改动：`env_file` 在容器创建时注入，`restart` 不会重读，必须 `up -d --force-recreate backend`
+- 生产无 TLS：必须保留 `DJANGO_SECURE_SSL_REDIRECT=False`（否则非 DEBUG 下默认 301 跳 https，API 全废）
+- **打包会带上本地 `deploy/.env.production`**（gitignore 但 tar 不忽略）：2026-08-17 曾用本地旧版覆盖服务器配置，把 TTS 与 SSL 修复还原——服务器改过的配置要同步回本地
+- 前端 dist：bind 挂载的是目录本身，只能 `rm -rf dist/*` 清内容（删目录会因 inode 变化导致挂载失效、全站 403）；先确认 `dist/assets/` 完整再打包（2026-08-17 曾因残缺 dist 全站 404）
+- 移动端 H5：`/m/` 子路径，nginx 挂 `/usr/share/nginx/m`（**不可挂 `html/m`**，2026-08-18 曾致 Web 中断 2 分钟）；`app/` 用 `npm run build:h5`
+
+### 业务约束（容易踩）
+- TTS 必须用 **`qwen3-tts-flash`**（DashScope 原生 multimodal-generation 端点 + Cherry 发音人）；`qwen-tts` 2026-10-13 已下线（404），`cosyvoice-v1` 不被该端点接受（400）
+- 配音/讲稿都是**分批生成**：`generate-audio`（默认 limit 3）、`generate-script`（默认 limit 6），前端循环调用直到 `done=true`；一次性生成会超 nginx 180s 变 504/499
+
+### 历史（124.70.107.64 时代，已下线）
+- 2026-08-24 / 08-27 / 09-02 / 09-08 的几次上线记录见 git log；旧代码备份 `/data/zhike-v2/backend.bak.*`；新机 deploy 备份 `deploy.bak-20261030-1420`
 
 ## 注意事项
 - **DRF FileField 绝对 URL 依赖 Host 端口**（2026-09-17 修复）：DRF 序列化 FileField（知识库资料 file、作业/提交附件 attachment、课件 file）时会 `request.build_absolute_uri()` 生成绝对 URL，容器 nginx 必须用 `proxy_set_header Host $http_host`（保留端口）；此前用 `$host`（丢端口）导致所有文件链接变成 `http://ip/media/...`（80 端口），而 80 端口是宿主机 nginx/默认站（/media 不存在）→ 404 页来自同机 cv_nginx（1.31.2），极易误判为本系统问题。改配置只需 scp deploy/nginx.conf + `docker compose restart frontend`（scp 覆盖不换 inode，单文件 bind mount 安全）
@@ -69,4 +82,5 @@
 - 上传白名单：Material（pdf/word/ppt/txt/md，50MB）、HomeworkSubmission 附件（同教师侧，20MB）、课件（ppt/pptx/pdf，100MB）——防 media 同域存储型 XSS
 - nginx 兜底：`/media/` 全局 nosniff；html/svg/js 扩展强制 `application/octet-stream` 下载
 - 存量迁移命令 `manage.py obfuscate_media`（幂等可重跑）：改 ppt_pages 目录名并重写 parsed_pages/video scripts 引用、附件 uuid 重命名
-- 已知未修（2026-09-02 排查报告的中危项，待排期）：无 TLS（明文传输，小程序发布被阻断）、JWT 无登出吊销、考试交卷无事务行锁、SQLite 未配 WAL、AI 同步阻塞 worker 且无费用限流、Mock 静默回退、成绩外键全 CASCADE、`/api/docs/` 生产开放、Django 5.1.4 已落后安全补丁
+- 未修 / 待办（2026-10-30 复核）：无 TLS（生产仍明文，仅代码就绪）；Django 5.1.4 落后安全补丁；业务外键全 CASCADE；Django 权限体系零使用（自建 role + 自定义权限类）；向量检索全量读（片段上万需外置向量库）；QA 看板 Phase 3/4
+- 已修（原 2026-09-02 中危清单，P5 收口）：JWT 吊销、交卷行锁、全站限流、AI 日配额、Mock 回退显性化、`/api/docs/` 生产关闭；SQLite WAL 问题随切 MySQL 一并消失
