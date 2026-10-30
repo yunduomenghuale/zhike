@@ -18,6 +18,8 @@ frontend/dev_*.txt
 *.env
 *.env.*
 !*.env.example
+# MySQL 容器凭据模板（只含占位符，需入库供部署参考）
+!deploy/.env.mysql.example
 
 # ===== Python 后端 =====
 .venv/

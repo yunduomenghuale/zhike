@@ -18,7 +18,19 @@ import sys
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BASE_DIR)
+sys.path.insert(0, os.path.join(BASE_DIR, "scripts"))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+
+# 数据库隔离：必须在 django.setup() 之前决定用哪个库。
+#   E2E_DATABASE_URL=mysql://…/zk_e2e  → 独立 MySQL 库（切库后）
+#   SQLITE_PATH=…                      → SQLite 副本（历史）
+_DB_DESC = f"SQLite 副本 {os.environ.get('SQLITE_PATH', '')}"
+if os.environ.get("E2E_DATABASE_URL"):
+    from pathlib import Path as _Path
+
+    from _e2e_db import prepare as _prepare
+
+    _DB_DESC = _prepare(_Path(BASE_DIR) / "db.sqlite3", _Path(BASE_DIR) / "db.sqlite3", _Path(BASE_DIR))
 
 import django  # noqa: E402
 
@@ -256,11 +268,11 @@ def run(fx):
 
 
 def main():
-    if not os.environ.get("SQLITE_PATH"):
-        print("拒绝执行：请设置 SQLITE_PATH 指向临时副本（例 D:/tmp/p1_matrix.sqlite3），"
-              "避免在开发库上造数据。")
+    if not os.environ.get("SQLITE_PATH") and not os.environ.get("E2E_DATABASE_URL"):
+        print("拒绝执行：请设置 SQLITE_PATH（SQLite 副本）"
+              "或 E2E_DATABASE_URL（独立 MySQL 库，如 mysql://zk:pw@127.0.0.1:3306/zk_e2e）。")
         return 2
-    print(f"[0] 使用数据库 {os.environ['SQLITE_PATH']}")
+    print(f"[0] 使用数据库 {_DB_DESC}")
     with transaction.atomic():
         fx = build_fixture()
     run(fx)

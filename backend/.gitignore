@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *.sqlite3
 *.sqlite3.bak*
+# 切库前的 SQLite 冷备（db.sqlite3.pre-mysql-<日期> 等），绝不能进仓库
+*.sqlite3.pre-*
 .env
 media/
 staticfiles/

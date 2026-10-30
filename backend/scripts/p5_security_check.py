@@ -102,13 +102,16 @@ def rows(payload) -> list:
 # ---------------------------------------------------------------------------
 def prepare_env():
     sys.path.insert(0, str(BASE_DIR))
+    sys.path.insert(0, str(BASE_DIR / "scripts"))
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
-    os.environ["SQLITE_PATH"] = str(DB_PATH)
-    WORK_DIR.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(DEV_DB, DB_PATH)
+    # 数据库隔离：E2E_DATABASE_URL（独立 MySQL 库）优先，否则沿用 SQLite 副本复制
+    from _e2e_db import ensure_schema, prepare
+
+    print(f"[db] {prepare(DEV_DB, DB_PATH, WORK_DIR)}")
     import django
 
     django.setup()
+    ensure_schema()
 
 
 def _wait_ready(base: str) -> bool:

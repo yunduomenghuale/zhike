@@ -10,21 +10,27 @@ WORKDIR /app
 # 国内 apt 源；安装 LibreOffice（PPT/Word 转 PDF/docx）与全套中文开源字体
 # （PDF 出图已改为 pypdfium2 纯 pip 依赖，不再需要 poppler-utils）
 # writer：知识库旧版 .doc 转 docx 解析用；impress：PPT 渲染用
+# default-libmysqlclient-dev / pkg-config / build-essential：编译 mysqlclient 驱动用，
+# 装完即卸（见下方 pip 层），运行期只留 libmariadb3
 RUN sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
        libreoffice-impress libreoffice-writer \
        fonts-noto-cjk fonts-wqy-microhei fonts-wqy-zenhei \
        fonts-arphic-uming fonts-arphic-ukai \
+       default-libmysqlclient-dev build-essential pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 # 国内镜像加速安装依赖
 # torch 必须先于 requirements 安装 CPU 版（PyPI 的 Linux torch 是数 GB 的 CUDA 版；
 # 先装好 CPU 版后，sentence-transformers 对 torch 的依赖即被满足，不会重复拉取）
 COPY requirements.txt .
+# mysqlclient 编译完成后卸掉工具链（不加 --auto-remove，避免连 libmariadb3 一起删掉）
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir -r requirements.txt gunicorn \
-    -i https://pypi.tuna.tsinghua.edu.cn/simple
+    -i https://pypi.tuna.tsinghua.edu.cn/simple \
+    && apt-get purge -y build-essential pkg-config default-libmysqlclient-dev \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # 系统内置本地模型预下载（BGE-M3 + Qwen3-Reranker-0.6B，合计约 3.5GB）：
 # 默认开启——「部署时自动下载」；该层在 COPY 源码之前，改代码重建镜像时命中缓存不重复下载。

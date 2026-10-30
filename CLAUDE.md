@@ -6,7 +6,7 @@
 来源：https://github.com/yunduomenghuale/zhike
 
 ## 技术栈
-- 后端：Python + Django 5 + DRF（`backend/`），JWT 认证，默认 SQLite（`DATABASE_URL` 可切 Postgres）
+- 后端：Python + Django 5 + DRF（`backend/`），JWT 认证，默认 **MySQL 8**（`DATABASE_URL=mysql://…`；本地库 `zk`，专用账号 `zk`，E2E 用 `zk_e2e`）。`DATABASE_URL` 可切 SQLite（`sqlite`，零依赖/副本演练）或 Postgres；迁移细节见 `docs/MySQL切换-实施设计与冲突评审.md`
 - 前端：Vue 3 + Vite + Element Plus + Pinia（`frontend/`）
 - AI：mock / DeepSeek / 通义千问 / 本地模型服务（OpenAI 兼容）/ 系统内置模型（local）等 Provider，**按能力（chat/embed/rerank/tts）分别配置**（管理端 AICapabilityConfig 或 env 派生），TTS 配音（DashScope qwen3-tts-flash）。系统内置模型：向量化内置 BGE-M3、重排序内置 Qwen3-Reranker-0.6B（`apps/ai/local_models.py`，权重在 `backend/data/models/`，ModelScope 惰性下载/`manage.py download_models` 预热/镜像 PRELOAD_MODELS 预置）
 

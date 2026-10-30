@@ -1,5 +1,36 @@
 # 智课系统 V2 生产编排（独立网络/卷/容器名，不影响服务器现有服务）
 services:
+  mysql:
+    # 生产数据库（MySQL 8.0）。不发布宿主端口，仅经 zhike_v2_net 供 backend 访问。
+    # 时区表：mysql 官方镜像不含 /usr/share/zoneinfo，与 entrypoint 无关——
+    # 首次初始化后需执行 backend/scripts/load_mysql_timezone.py 灌时区数据，
+    # 否则 CONVERT_TZ 返回 NULL，看板按天统计会静默变空（见 docs/MySQL切换-实施设计与冲突评审.md C-13）。
+    image: mysql:8.0.40
+    container_name: zhike_v2_mysql
+    restart: unless-stopped
+    env_file: .env.mysql
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+00:00
+      - --max-allowed-packet=64M
+      - --innodb-buffer-pool-size=1G
+      - --slow-query-log=1
+      - --long-query-time=1
+      # 磁盘只有 ~24G 余量，binlog 保留 7 天、单个 256M 封顶
+      - --binlog-expire-logs-seconds=604800
+      - --max-binlog-size=256M
+    volumes:
+      - ../data/mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    mem_limit: 2g
+    networks:
+      - zhike_v2_net
+
   backend:
     build:
       context: ../backend
@@ -8,6 +39,9 @@ services:
     container_name: zhike_v2_backend
     restart: unless-stopped
     env_file: .env.production
+    depends_on:
+      mysql:
+        condition: service_healthy
     # 后端不发布宿主端口，仅经 zhike_v2_net 供前端 nginx 反向代理
     # 数据全部 bind mount 到项目目录（数据盘 /data），不再使用根盘的 named volume
     volumes:

@@ -13,7 +13,7 @@
 | 认证 | **JWT**（djangorestframework-simplejwt） | 前后端分离无状态鉴权 |
 | API 文档 | **drf-spectacular**（OpenAPI / Swagger UI） | `/api/docs/` |
 | 前端 | **Vue 3 + Vite + Element Plus + Pinia + Vue Router** | 国内后台管理主流组合 |
-| 数据库 | **SQLite（起步）** | 模型层用 `BaseModel` 抽象，可平滑迁移 PostgreSQL |
+| 数据库 | **MySQL 8（utf8mb4）** | 本地库 `zk`；`DATABASE_URL` 可回切 SQLite（`sqlite`）或 Postgres。7 条条件唯一约束用「生成列 + 唯一索引」等价实现（见 `docs/MySQL切换-实施设计与冲突评审.md`） |
 | 向量检索 | 起步用**表存 embedding + 暴力余弦**，抽象成 `VectorStore` 接口 | 后续可换 pgvector / Milvus / Qdrant |
 | 大模型 | **国内大模型**（通义千问 / DeepSeek）与本地模型服务（任意 OpenAI 兼容接口），封装为可切换 `AIProvider` | 支持 `mock` 模式先跑通业务流 |
 
