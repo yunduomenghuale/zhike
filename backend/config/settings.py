@@ -127,10 +127,43 @@ WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
 # ---------------------------------------------------------------------------
-# 数据库：起步 SQLite；DATABASE_URL 指向 postgres 时切换
+# 数据库：由 DATABASE_URL 决定后端
+#   mysql://user:pass@host:3306/dbname    → MySQL 8（当前主线，utf8mb4）
+#   postgres://user:pass@host:5432/dbname → PostgreSQL（历史分支，保留）
+#   其它/缺省                              → SQLite（零依赖起步、E2E 隔离库、迁移演练副本）
 # ---------------------------------------------------------------------------
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite")
-if DATABASE_URL.startswith("postgres"):
+if DATABASE_URL.startswith(("mysql://", "mysql2://")):
+    from urllib.parse import unquote, urlparse
+
+    parsed = urlparse(DATABASE_URL)
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.mysql",
+            "NAME": parsed.path.lstrip("/"),
+            "USER": unquote(parsed.username or ""),
+            "PASSWORD": unquote(parsed.password or ""),
+            "HOST": parsed.hostname or "127.0.0.1",
+            "PORT": parsed.port or 3306,
+            # 2 worker × 2 thread：长连接省握手，健康检查防 wait_timeout 掐断
+            "CONN_MAX_AGE": int(os.getenv("DB_CONN_MAX_AGE", "60")),
+            "CONN_HEALTH_CHECKS": True,
+            "OPTIONS": {
+                "charset": "utf8mb4",
+                # 不显式给 init_command 时 Django 会按自己的默认 SET sql_mode；
+                # 这里钉死严格模式 + 零日期保护，防止服务器侧配置漂移导致静默截断。
+                # 有意不含 ONLY_FULL_GROUP_BY：项目有 values().annotate() 组合查询，
+                # 保留它会在个别报表接口抛 1055（取舍见 docs/MySQL切换-实施设计与冲突评审.md C-12）
+                "init_command": (
+                    "SET sql_mode='STRICT_TRANS_TABLES,NO_ZERO_DATE,"
+                    "NO_ENGINE_SUBSTITUTION'"
+                ),
+            },
+            # 测试库同字符集/排序规则，避免 CI 与本地行为不一致
+            "TEST": {"CHARSET": "utf8mb4", "COLLATION": "utf8mb4_0900_ai_ci"},
+        }
+    }
+elif DATABASE_URL.startswith("postgres"):
     # 形如 postgres://user:pass@host:5432/dbname
     from urllib.parse import urlparse
 
@@ -161,6 +194,19 @@ else:
             "NAME": str(_sqlite_file),
         }
     }
+
+# 测试运行关闭持久连接：测试全程单连接、且常被 TestCase 的 atomic 包裹，
+# 任何 close_old_connections() 都会作用到这条连接上，长跑（>CONN_MAX_AGE）时
+# 会因"到期"被关掉。置 0 让 close_at 为空，消除这一类假失败。
+# （另一条关闭路径是 autocommit 与配置不一致，由 tests_ai_task._InlineThread 处理）
+if "test" in sys.argv:
+    DATABASES["default"]["CONN_MAX_AGE"] = 0
+
+# 条件唯一约束在 MySQL 上 Django 无法创建（models.W036）。本项目已用
+# 「生成列 + 普通唯一索引」等价补齐，见 apps/common/mysql_partial_unique.py
+# 与 classroom/0008、courses/0014、knowledge/0012、ai/0017 四个迁移。
+# 这里显式静音，避免每次 migrate/check 都刷 7 条警告掩盖真正的问题。
+SILENCED_SYSTEM_CHECKS = ["models.W036"]
 
 # ---------------------------------------------------------------------------
 # 用户模型与鉴权

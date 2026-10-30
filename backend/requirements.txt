@@ -4,6 +4,9 @@ djangorestframework-simplejwt==5.3.1
 django-cors-headers==4.6.0
 drf-spectacular==0.28.0
 django-filter==24.3
+# MySQL 驱动：Windows 有 cp312 官方 wheel，直接 pip 装；
+# Linux 生产镜像需 default-libmysqlclient-dev + pkg-config（见 deploy/Dockerfile.backend）
+mysqlclient==2.2.7
 python-dotenv==1.0.1
 requests==2.32.5
 cryptography==44.0.2
