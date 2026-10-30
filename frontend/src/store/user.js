@@ -43,8 +43,11 @@ export const useUserStore = defineStore('user', () => {
   function logout() {
     // P5-A2：尽力通知后端吊销 token（refresh 进黑名单 + access 作废线前移）。
     // 请求失败（已失效/网络断）都不影响本地清理，登出永远成功。
+    // 注意：token 必须在清理前取出并显式传给接口——axios 请求拦截器是异步执行的，
+    // 等它跑起来 localStorage 已被下面清空，请求就会变成无凭证 401。
+    const access = token.value || localStorage.getItem('access_token') || ''
     const refresh = localStorage.getItem('refresh_token')
-    logoutApi(refresh).catch(() => {})
+    logoutApi(refresh, access).catch(() => {})
     token.value = ''
     profile.value = null
     localStorage.removeItem('access_token')
