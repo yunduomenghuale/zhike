@@ -11,7 +11,7 @@ from apps.classroom.services import ClassServiceError, assign_students
 from apps.courses.models import Catalog, Course
 from apps.exams.models import Exam, ExamSubmission, Paper
 from apps.knowledge.models import KnowledgeChunk, Material
-from apps.questions.models import Question, WrongMastery
+from apps.questions.models import Question, SceneTag, WrongMastery
 
 
 User = get_user_model()
@@ -19,6 +19,10 @@ User = get_user_model()
 
 class PlatformFixtureMixin:
     def setUp(self):
+        # 题目可见性靠「练习」用途标签过滤；TransactionTestCase 的 flush 会清掉迁移
+        # 播种的标签，用例自己补齐，避免结果依赖测试执行顺序。
+        for code, name in (("practice", "练习"), ("homework", "作业"), ("exam", "考试")):
+            SceneTag.objects.get_or_create(code=code, defaults={"name": name})
         self.teacher1 = User.objects.create_user(
             username="teacher-one", password="StrongPass!123", role=User.Role.TEACHER
         )

@@ -45,9 +45,14 @@ class AdminUserWriteSerializer(serializers.ModelSerializer):
 
     def validate_username(self, value):
         value = str(value or "").strip()
-        # 账号规则统一：6~8 位、仅字母数字；历史账号值未变化时放行
+        # 账号规则按角色区分：学生学号 6~8 位、教师/管理员 3~10 位；
+        # 角色取「本次提交的角色」（允许同请求改角色），没有则用存量角色。
+        role = (self.initial_data or {}).get("role")
+        if not role and self.instance is not None:
+            role = self.instance.role
+        # 存量账号值未变化时放行（否则改姓名/状态都会被自己的账号挡住）
         if not is_unchanged_account(value, self.instance):
-            value = check_account(value, "用户名")
+            value = check_account(value, role)
         queryset = User.objects.filter(username__iexact=value)
         if self.instance:
             queryset = queryset.exclude(pk=self.instance.pk)

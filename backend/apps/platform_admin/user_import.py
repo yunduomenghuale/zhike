@@ -5,14 +5,14 @@ from django.contrib.auth import get_user_model
 from django.db.models.functions import Lower
 from openpyxl import Workbook, load_workbook
 
-from apps.users.validators import ACCOUNT_MIN_LENGTH, account_problem
+from apps.users.validators import STUDENT, account_problem
 
 User = get_user_model()
 
 # 初始密码规则：Zk + 用户名后 6 位
 PASSWORD_PREFIX = "Zk"
 # 账号最短位数（规则定义见 apps/users/validators.py），保留别名兼容旧引用
-MIN_USERNAME_LENGTH = ACCOUNT_MIN_LENGTH
+MIN_USERNAME_LENGTH = 6  # 学生学号下限，见 ROLE_RULES[STUDENT]
 MAX_IMPORT_ROWS = 500
 MAX_FILE_SIZE = 5 * 1024 * 1024
 
@@ -21,7 +21,9 @@ HEADER_REAL_NAME = "姓名"
 
 
 def initial_password_for(username: str) -> str:
-    return f"{PASSWORD_PREFIX}{username[-6:]}"
+    """Zk + 账号后 6 位；账号不足 6 位（教师工号允许 3 位）时左补 0 凑满 8 位密码。"""
+    tail = (username or "").strip()[-6:].rjust(6, "0")
+    return f"{PASSWORD_PREFIX}{tail}"
 
 
 def build_template() -> bytes:
@@ -131,7 +133,7 @@ def annotate_rows(rows: list[dict]) -> list[dict]:
     for item in cleaned:
         username, real_name = item["username"], item["real_name"]
         # 账号规则与统一导入管道一致：6~8 位、仅字母数字
-        message = account_problem(username, "用户名")
+        message = account_problem(username, STUDENT)
         if not message and not real_name:
             message = "姓名不能为空"
         elif not message and len(real_name) > 64:

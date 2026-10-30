@@ -237,10 +237,14 @@ class TeacherImportTests(ImportTestBase):
         self.assertEqual(User.objects.filter(role=User.Role.TEACHER).count(), 2)
 
     def test_short_username_and_missing_name_are_errors(self):
-        parsed = self.parsed(teacher_rows(["T001", "短工号"], ["T2024002", ""]), KIND_TEACHER)
+        # 教师工号允许 3~10 位：这里用 2 位（过短）与 11 位（过长）各一行
+        parsed = self.parsed(teacher_rows(["ab", "过短工号"], ["T2024001234", "过长工号"],
+                                          ["wgy", ""]), KIND_TEACHER)
         result = annotate_rows(KIND_TEACHER, parsed)
-        self.assertEqual(result["summary"]["error"], 2)
-        self.assertIn("6", result["rows"][0]["message"])
+        self.assertEqual(result["summary"]["error"], 3)
+        self.assertIn("3～10", result["rows"][0]["message"])
+        self.assertIn("3～10", result["rows"][1]["message"])
+        self.assertIn("姓名不能为空", result["rows"][2]["message"])
 
 
 # ---------------------------------------------------------------------------

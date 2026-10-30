@@ -65,7 +65,7 @@
     <el-dialog v-model="editorVisible" width="580px" align-center :title="editingId ? '编辑账号' : '新建账号'" @closed="editorRef?.clearValidate()">
       <el-form ref="editorRef" :model="form" :rules="rules" label-position="top">
         <div class="form-grid">
-          <el-form-item label="用户名" prop="username"><el-input v-model.trim="form.username" maxlength="150" placeholder="6~8 位字母或数字，用于登录" @input="onUsernameInput" /></el-form-item>
+          <el-form-item label="用户名" prop="username"><el-input v-model.trim="form.username" maxlength="150" placeholder="学生 6~8 位、教师 3~10 位，仅字母数字" @input="onUsernameInput" /></el-form-item>
           <el-form-item label="姓名" prop="real_name"><el-input v-model.trim="form.real_name" placeholder="请输入真实姓名" /></el-form-item>
           <el-form-item label="角色" prop="role"><el-select v-model="form.role" style="width:100%"><el-option label="学生" value="student" /><el-option label="教师" value="teacher" /><el-option label="管理员" value="admin" /></el-select></el-form-item>
           <el-form-item v-if="!editingId" label="初始密码" prop="password" class="full"><el-input v-model="form.password" type="password" show-password placeholder="8～12 位字符" maxlength="12" /></el-form-item>
@@ -125,12 +125,21 @@ const originUsername = ref('')
 const resetVisible = ref(false), resetTarget = ref(null), resetPassword = ref('')
 const blankForm = () => ({ username: '', real_name: '', role: 'student', is_active: true, password: '' })
 const form = reactive(blankForm())
-// 账号规则与后端 apps/users/validators.py 一致：6~8 位，仅字母数字
+// 账号规则与后端 apps/users/validators.py 一致：
+// 学生学号 6~8 位、教师/管理员账号 3~10 位，均只允许字母和数字
+function accountRule(role) {
+  const label = role === 'student' ? '学号' : role === 'teacher' ? '工号' : '账号'
+  const [low, high] = role === 'student' ? [6, 8] : [3, 10]
+  return { label, low, high }
+}
 function validateUsername(rule, value, callback) {
   const name = String(value || '').trim()
   if (!name) return callback(new Error('请输入用户名'))
   if (editingId.value && name.toLowerCase() === originUsername.value.toLowerCase()) return callback()
-  if (!/^[A-Za-z0-9]{6,8}$/.test(name)) return callback(new Error('用户名为 6~8 位字母或数字'))
+  const { label, low, high } = accountRule(form.role)
+  if (!new RegExp(`^[A-Za-z0-9]{${low},${high}}$`).test(name)) {
+    return callback(new Error(`${label}为 ${low}~${high} 位字母或数字`))
+  }
   callback()
 }
 const rules = {
@@ -149,10 +158,11 @@ async function load() {
   try { const res = await listAdminUsers({ ...filters, page: page.value, page_size: pageSize }); rows.value = res.items; total.value = res.total } finally { loading.value = false }
 }
 function openCreate() { editingId.value = null; originUsername.value = ''; Object.assign(form, blankForm()); editorVisible.value = true }
-// 新建账号时初始密码默认 Zk+用户名后6位（用户名 ≥6 位才够 8 位密码长度）；管理员改过后不再覆盖
+// 新建账号时初始密码默认 Zk+用户名后6位；不足 6 位（教师工号允许 3 位）左补 0 凑满 8 位。
+// 管理员改过密码后不再覆盖。
 function onUsernameInput() {
   const name = String(form.username || '').trim()
-  if (name.length >= 6) form.password = `Zk${name.slice(-6)}`
+  if (name.length >= 3) form.password = `Zk${name.slice(-6).padStart(6, '0')}`
 }
 function openEdit(row) { editingId.value = row.id; originUsername.value = String(row.username || ''); Object.assign(form, { username: row.username, real_name: row.real_name || '', role: row.role, is_active: row.is_active, password: '' }); editorVisible.value = true }
 async function saveUser() {

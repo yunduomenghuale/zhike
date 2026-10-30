@@ -28,7 +28,7 @@ from apps.classroom.models import ClassRoom, ClassStudent
 from apps.classroom.services import ClassServiceError, assign_students
 from apps.courses.models import Term
 from apps.users.models import User
-from apps.users.validators import ACCOUNT_RULE_TEXT, account_problem
+from apps.users.validators import STUDENT, TEACHER, account_problem, account_rule_text
 
 from .user_import import initial_password_for
 
@@ -131,12 +131,12 @@ TEACHER_SPEC = ImportSpec(
     sheet_name="教师导入",
     max_rows=500,
     columns=(
-        Column("工号", True, 22, f"教师登录账号，{ACCOUNT_RULE_TEXT}，平台内唯一"),
+        Column("工号", True, 22, f"教师登录账号，{account_rule_text(TEACHER)}，平台内唯一"),
         Column("姓名", True, 18, "用于名单与成绩展示"),
     ),
     tips=(
         "1. 请在「教师导入」页从第 2 行开始填写，每行一位教师，表头请勿修改。",
-        f"2. 工号即登录账号，{ACCOUNT_RULE_TEXT}，平台内不可重复（不区分大小写）。",
+        f"2. 工号即登录账号，{account_rule_text(TEACHER)}，平台内不可重复（不区分大小写）。",
         "3. 初始密码规则：Zk + 工号后 6 位。",
         "4. 教师首次登录后系统会提示修改密码。",
     ),
@@ -148,7 +148,7 @@ STUDENT_SPEC = ImportSpec(
     sheet_name="学生导入",
     max_rows=500,
     columns=(
-        Column("学号", True, 22, f"学生登录账号，{ACCOUNT_RULE_TEXT}，平台内唯一"),
+        Column("学号", True, 22, f"学生登录账号，{account_rule_text(STUDENT)}，平台内唯一"),
         Column("姓名", True, 18, "必填，入班前要求填写姓名"),
         Column("班级编码", False, 16, "填了才入班；系统里没有该编码时可自动建班"),
         Column("班级名称", False, 22, "自动建班时用作班名；留空则用编码兜底"),
@@ -156,7 +156,7 @@ STUDENT_SPEC = ImportSpec(
     ),
     tips=(
         "1. 请在「学生导入」页从第 2 行开始填写，每行一名学生，表头请勿修改。",
-        f"2. 学号即登录账号，{ACCOUNT_RULE_TEXT}，平台内不可重复（不区分大小写）。",
+        f"2. 学号即登录账号，{account_rule_text(STUDENT)}，平台内不可重复（不区分大小写）。",
         "3. 初始密码规则：Zk + 学号后 6 位。",
         "4. 「班级编码」留空则只建账号不入班；填了但系统里没有该编码时，"
         "预览页会列出待建班级，确认后自动建班并把学生放进去。",
@@ -318,9 +318,9 @@ def _field_of(kind: str, header: str) -> str:
 # ---------------------------------------------------------------------------
 # 逐行校验（预览与提交共用）
 # ---------------------------------------------------------------------------
-def _username_error(username: str, real_name: str, label: str = "用户名") -> str:
+def _username_error(username: str, real_name: str, role: str) -> str:
     """学号 / 工号 + 姓名的行校验。账号格式规则统一走 apps.users.validators。"""
-    problem = account_problem(username, label)
+    problem = account_problem(username, role)
     if problem:
         return problem
     if not real_name:
@@ -495,7 +495,7 @@ def _annotate_teacher(rows: list[dict], options: dict) -> dict:
 
     out = []
     for row in normalized:
-        message, status = _username_error(row["username"], row["real_name"], "工号"), "ok"
+        message, status = _username_error(row["username"], row["real_name"], TEACHER), "ok"
         if message:
             status = "error"
         elif row["username"].lower() in dup:
@@ -582,7 +582,7 @@ def _annotate_student(rows: list[dict], options: dict) -> dict:
     for row, target in zip(normalized, targets):
         username, real_name = row["username"], row["real_name"]
         existing_user = existing_map.get(username.lower())
-        message = _username_error(username, real_name, "学号")
+        message = _username_error(username, real_name, STUDENT)
         status = "ok" if not message else "error"
         reuse_user_id = None
 
