@@ -317,6 +317,12 @@ class HomeworkSubmissionViewSet(BaseModelViewSet):
         ).exists():
             raise PermissionDenied("你不在该作业所属班级中")
 
+        # 重复提交前置拦截：unique_together(homework, student) 会在 save 时抛
+        # IntegrityError 变成 500（前端重复点击/网络重试都会触发），这里先查一次
+        # 给出可读提示。并发下仍有极小概率撞约束，由事务回滚兜底（不会写脏数据）。
+        if HomeworkSubmission.objects.filter(homework=homework, student=request.user).exists():
+            raise ValidationError("该作业已提交过，不能重复提交")
+
         answers = serializer.validated_data.pop("answers", {}) or {}
         # 学生端即时上传的暂存附件引用（提交时采纳，不再随表单重复传文件）
         staged = serializer.validated_data.pop("uploaded", []) or []
