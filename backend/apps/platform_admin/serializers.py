@@ -6,6 +6,7 @@ from apps.courses.models import Course
 from apps.ai.models import AICallLog, AICapabilityChangeLog, AICapabilityConfig
 from apps.ai.providers.factory import get_env_config
 from apps.users.serializers import PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, validate_password_clean
+from apps.users.validators import check_account, is_unchanged_account
 
 from .models import AdminActionLog
 
@@ -43,7 +44,10 @@ class AdminUserWriteSerializer(serializers.ModelSerializer):
         fields = ["username", "real_name", "role", "is_active", "password"]
 
     def validate_username(self, value):
-        value = value.strip()
+        value = str(value or "").strip()
+        # 账号规则统一：6~8 位、仅字母数字；历史账号值未变化时放行
+        if not is_unchanged_account(value, self.instance):
+            value = check_account(value, "用户名")
         queryset = User.objects.filter(username__iexact=value)
         if self.instance:
             queryset = queryset.exclude(pk=self.instance.pk)

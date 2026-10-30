@@ -2,6 +2,9 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password as django_validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
+
+from .validators import check_account, is_unchanged_account
+
 User = get_user_model()
 PASSWORD_MIN_LENGTH = 8
 PASSWORD_MAX_LENGTH = 12
@@ -77,7 +80,8 @@ class RegisterSerializer(serializers.ModelSerializer):
         return value
 
     def validate_username(self, value):
-        value = value.strip()
+        # 账号规则统一：6~8 位、仅字母数字（见 apps/users/validators.py）
+        value = check_account(value, "用户名")
         if User.objects.filter(username__iexact=value).exists():
             raise serializers.ValidationError("该用户名已被使用")
         return value
@@ -98,9 +102,12 @@ class ProfileUpdateSerializer(serializers.ModelSerializer):
         fields = ["username", "real_name"]
 
     def validate_username(self, value):
-        value = value.strip()
+        value = str(value or "").strip()
         if not value:
             raise serializers.ValidationError("用户名不能为空")
+        # 历史账号（如 4 位工号）原样保存时跳过格式校验，否则改头像/姓名也会被挡
+        if not is_unchanged_account(value, self.instance):
+            value = check_account(value, "用户名")
         queryset = User.objects.filter(username__iexact=value)
         if self.instance:
             queryset = queryset.exclude(pk=self.instance.pk)

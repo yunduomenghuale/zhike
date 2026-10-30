@@ -24,7 +24,10 @@ const SHOT_DIR = path.join(ROOT, 'test/screenshots');
 const FIXTURE_DIR = path.join(ROOT, 'test/e2e/fixtures/p2-run');
 const DL_DIR = path.join('D:/tmp', `p2-downloads-${process.pid}`);
 const RUN_ID = process.pid.toString(36) + Date.now().toString(36).slice(-4);
-const TAG = `P2${Date.now().toString(36).slice(-6).toUpperCase()}`;
+// 账号规则：学号/工号 6~8 位且仅字母数字 → TAG 固定 5 位，
+// 学号 = TAG+两位序号（7 位）、工号 = T+TAG+序号（7 位）、管理员 = TAG+角色字母（6 位）；
+// 班级编码用 TAG-xx（8 位，编码规则允许短横线，不受学号规则影响）
+const TAG = `P2${Date.now().toString(36).slice(-3).toUpperCase()}`;
 const PORT = 9800 + (parseInt(RUN_ID, 36) % 150);
 const PROFILE = `D:/tmp/zhike-p2-e2e/run-${RUN_ID}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

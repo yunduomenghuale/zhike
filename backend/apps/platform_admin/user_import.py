@@ -5,12 +5,14 @@ from django.contrib.auth import get_user_model
 from django.db.models.functions import Lower
 from openpyxl import Workbook, load_workbook
 
+from apps.users.validators import ACCOUNT_MIN_LENGTH, account_problem
+
 User = get_user_model()
 
-# 初始密码规则：Zk + 用户名后 6 位（不足 6 位取整个用户名）
+# 初始密码规则：Zk + 用户名后 6 位
 PASSWORD_PREFIX = "Zk"
-# 用户名最少 6 位，保证初始密码 Zk+用户名 至少 8 位（对齐系统密码长度约束）
-MIN_USERNAME_LENGTH = 6
+# 账号最短位数（规则定义见 apps/users/validators.py），保留别名兼容旧引用
+MIN_USERNAME_LENGTH = ACCOUNT_MIN_LENGTH
 MAX_IMPORT_ROWS = 500
 MAX_FILE_SIZE = 5 * 1024 * 1024
 
@@ -34,8 +36,8 @@ def build_template() -> bytes:
     tips = wb.create_sheet("填写说明")
     tips.append(["学生账号批量导入说明"])
     tips.append(["1. 请在「学生导入」页从第 2 行开始填写，每行一名学生，表头请勿修改。"])
-    tips.append(["2. 用户名为学生登录账号（如学号），6 位以上，平台内不可重复。"])
-    tips.append(["3. 初始密码由系统自动生成，规则为：Zk + 用户名后 6 位（不足 6 位取整个用户名）。"])
+    tips.append(["2. 用户名为学生登录账号（如学号），6~8 位且只能由字母和数字组成，平台内不可重复。"])
+    tips.append(["3. 初始密码由系统自动生成，规则为：Zk + 用户名后 6 位。"])
     tips.append(["4. 例如用户名 2024012345 的初始密码为 Zk012345。"])
     tips.append(["5. 学生首次登录后，系统会提示修改密码。"])
     tips.column_dimensions["A"].width = 90
@@ -128,22 +130,15 @@ def annotate_rows(rows: list[dict]) -> list[dict]:
     annotated = []
     for item in cleaned:
         username, real_name = item["username"], item["real_name"]
-        message = ""
-        if not username:
-            message = "用户名不能为空"
-        elif len(username) < MIN_USERNAME_LENGTH:
-            message = f"用户名至少 {MIN_USERNAME_LENGTH} 位（用于生成初始密码）"
-        elif len(username) > 150:
-            message = "用户名过长"
-        elif any(ch.isspace() for ch in username):
-            message = "用户名不能包含空格"
-        elif not real_name:
+        # 账号规则与统一导入管道一致：6~8 位、仅字母数字
+        message = account_problem(username, "用户名")
+        if not message and not real_name:
             message = "姓名不能为空"
-        elif len(real_name) > 64:
+        elif not message and len(real_name) > 64:
             message = "姓名过长"
-        elif username.lower() in duplicates:
+        elif not message and username.lower() in duplicates:
             message = "与表内其他行用户名重复"
-        elif username.lower() in existing_usernames:
+        elif not message and username.lower() in existing_usernames:
             message = "该用户名已被使用"
 
         annotated.append({

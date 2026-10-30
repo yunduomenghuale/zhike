@@ -382,7 +382,7 @@ class PasswordPolicyTests(APITestCase):
         response = self.client.post(
             "/api/auth/register/",
             {
-                "username": "twelve-char-user",
+                "username": "usr2024a",
                 "password": "Abcd!2345678",
                 "role": "student",
             },
@@ -395,7 +395,7 @@ class PasswordPolicyTests(APITestCase):
         response = self.client.post(
             "/api/auth/register/",
             {
-                "username": "long-password-user",
+                "username": "longpw01",
                 "password": "Abcd!23456789",
                 "role": "student",
             },
@@ -408,7 +408,7 @@ class PasswordPolicyTests(APITestCase):
         response = self.client.post(
             "/api/auth/register/",
             {
-                "username": "weak-user",
+                "username": "weakus01",
                 "password": "123456",
                 "real_name": "Weak",
                 "role": "student",
@@ -422,7 +422,7 @@ class PasswordPolicyTests(APITestCase):
 class RegisterToggleTests(APITestCase):
     """注册通道开关：管理端 PlatformSetting register_open 控制注册接口与登录页入口（缺省关闭）。"""
 
-    def _register_payload(self, username="toggle-user"):
+    def _register_payload(self, username="toggle01"):
         return {"username": username, "password": "Passw0rd!", "role": "student"}
 
     def test_register_closed_by_default(self):
@@ -430,7 +430,7 @@ class RegisterToggleTests(APITestCase):
         response = self.client.post("/api/auth/register/", self._register_payload(), format="json")
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.data["message"], "注册通道已暂时关闭，请联系管理员开通账号")
-        self.assertFalse(User.objects.filter(username="toggle-user").exists())
+        self.assertFalse(User.objects.filter(username="toggle01").exists())
 
     def test_register_accepted_when_opened(self):
         from apps.platform_admin.models import REGISTER_OPEN_KEY, set_setting
@@ -447,7 +447,7 @@ class RegisterToggleTests(APITestCase):
         response = self.client.post("/api/auth/register/", self._register_payload(), format="json")
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.data["message"], "注册通道已暂时关闭，请联系管理员开通账号")
-        self.assertFalse(User.objects.filter(username="toggle-user").exists())
+        self.assertFalse(User.objects.filter(username="toggle01").exists())
 
     def test_auth_config_reflects_toggle_and_is_anonymous(self):
         from apps.platform_admin.models import REGISTER_OPEN_KEY, set_setting

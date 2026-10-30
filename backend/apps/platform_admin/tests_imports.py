@@ -23,6 +23,7 @@ from .imports import (
     annotate_rows,
     build_template,
     commit,
+    infer_enrollment_year,
     parse_excel,
 )
 
@@ -335,6 +336,27 @@ class StudentImportTests(ImportTestBase):
         commit(KIND_STUDENT, parsed, {"skip_invalid": False, "approved_classes": ["CS-2902"]})
         self.assertEqual(ClassRoom.objects.get(code="CS-2902").name, "CS-2902")
 
+    def test_auto_created_class_enrollment_year_falls_back_when_blank(self):
+        """行内与向导都不填入学年：自动建班按当前学期/自然年推导，不落 NULL。
+
+        NULL 会让毕业预览把 graduate_year=None 视为「已到毕业年份」，
+        一键整班毕业会误伤这批学生（生产现场问题）。
+        """
+        rows = [["20240603", "学生丙", "CS-2903", "", ""]]
+        parsed = self.parsed(student_rows(*rows), KIND_STUDENT)
+        commit(KIND_STUDENT, parsed, {"skip_invalid": False, "approved_classes": ["CS-2903"]})
+        room = ClassRoom.objects.get(code="CS-2903")
+        self.assertIsNotNone(room.enrollment_year)
+        self.assertEqual(room.enrollment_year, infer_enrollment_year())
+        self.assertIsNotNone(room.graduate_year)
+        # 预览清单里的待建班也带推导值（管理员在预览页能看到的不再是空）
+        preview = annotate_rows(
+            KIND_STUDENT,
+            self.parsed(student_rows(["20240604", "学生丁", "CS-2904", "", ""]), KIND_STUDENT),
+            {},
+        )
+        self.assertEqual(preview["pending_classes"][0]["enrollment_year"], infer_enrollment_year())
+
     def test_second_upload_is_idempotent(self):
         content = student_rows(["20240701", "赵一", "CS-2401", "", ""],
                                ["20240702", "钱二", "CS-2401", "", ""])
@@ -406,11 +428,11 @@ class StudentImportTests(ImportTestBase):
         self.assertEqual([row[2] for row in sheet[1:]], ["计算机3001班", "计算机3001班"])
 
     def test_password_rule_and_class_name_in_sheet(self):
-        parsed = self.parsed(student_rows(["2024123456", "钱七", "CS-2401", "", ""]), KIND_STUDENT)
+        parsed = self.parsed(student_rows(["20241234", "钱七", "CS-2401", "", ""]), KIND_STUDENT)
         result = commit(KIND_STUDENT, parsed, {"skip_invalid": False})
         sheet = read_sheet(result["password_file"])
         self.assertEqual(sheet[0], ["学号", "姓名", "班级", "初始密码"])
-        self.assertEqual(sheet[1], ["2024123456", "钱七", "计算机2401班", "Zk123456"])
+        self.assertEqual(sheet[1], ["20241234", "钱七", "计算机2401班", "Zk241234"])
 
     def test_bad_code_pattern_is_error(self):
         parsed = self.parsed(student_rows(["20241301", "王八", "CS_2401", "", ""]), KIND_STUDENT)

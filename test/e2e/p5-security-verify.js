@@ -23,6 +23,8 @@ const API = 'http://127.0.0.1:5273/api';
 const ROOT = path.resolve(__dirname, '../..');
 const SHOT_DIR = path.join(ROOT, 'test/screenshots');
 const RUN_ID = process.pid.toString(36) + Date.now().toString(36).slice(-4);
+// 账号规则 6~8 位纯字母数字：P5 + 3 位随机 + S1 = 7 位
+const ACC_TAG = Date.now().toString(36).slice(-3).toUpperCase();
 const PORT = 9950 + (parseInt(RUN_ID, 36) % 40);
 const PROFILE = `D:/tmp/zhike-p5-e2e/run-${RUN_ID}`;
 const PWD = 'E2ePass123!';
@@ -75,7 +77,7 @@ async function seed() {
   SEED.classId = cls.data.data.id;
 
   const u = await api('POST', '/admin-panel/users/', {
-    username: `e2ep5_${RUN_ID}_s1`, real_name: 'E2ES1', role: 'student', password: PWD,
+    username: `P5${ACC_TAG}S1`, real_name: 'E2ES1', role: 'student', password: PWD,
   }, admin);
   if (u.status !== 201) throw new Error('建学生失败：' + JSON.stringify(u.data));
   SEED.users.push({ id: u.data.data.id, username: u.data.data.username });

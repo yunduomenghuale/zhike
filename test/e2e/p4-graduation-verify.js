@@ -14,7 +14,7 @@
  *   H 全程无 console.error / 未捕获异常
  *
  * 前置：后端 8005、前端 5273（node serve-local.js）、admin/A0987654
- * 数据：脚本自建自清（班级编码 E2EP4 前缀 + e2ep4_ 用户前缀），走 API 播种、UI 驱动
+ * 数据：脚本自建自清（班级编码 E2EP4 前缀 + P4xxxS1 用户前缀），走 API 播种、UI 驱动
  * 运行：node test/e2e/p4-graduation-verify.js
  */
 const { spawn } = require('child_process');
@@ -27,6 +27,8 @@ const API = 'http://127.0.0.1:5273/api';
 const ROOT = path.resolve(__dirname, '../..');
 const SHOT_DIR = path.join(ROOT, 'test/screenshots');
 const RUN_ID = process.pid.toString(36) + Date.now().toString(36).slice(-4);
+// 账号规则 6~8 位纯字母数字：P4 + 3 位随机 + S1/S2/S3 = 7 位
+const ACC_TAG = Date.now().toString(36).slice(-3).toUpperCase();
 const PORT = 9950 + (parseInt(RUN_ID, 36) % 40);
 const PROFILE = `D:/tmp/zhike-p4-e2e/run-${RUN_ID}`;
 const PWD = 'E2ePass123!';
@@ -81,7 +83,7 @@ async function seed() {
 
   for (const key of ['s1', 's2', 's3']) {
     const u = await api('POST', '/admin-panel/users/', {
-      username: `e2ep4_${RUN_ID}_${key}`, real_name: `E2E${key.toUpperCase()}`, role: 'student', password: PWD,
+      username: `P4${ACC_TAG}${key.toUpperCase()}`, real_name: `E2E${key.toUpperCase()}`, role: 'student', password: PWD,
     }, admin);
     if (u.status !== 201) throw new Error(`建学生 ${key} 失败：` + JSON.stringify(u.data));
     SEED.users.push({ key, id: u.data.data.id, username: u.data.data.username });

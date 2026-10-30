@@ -83,7 +83,7 @@
           >
             <div class="form-grid">
               <el-form-item label="用户名" prop="username">
-                <el-input v-model="profileForm.username" maxlength="150" placeholder="请输入唯一用户名">
+                <el-input v-model="profileForm.username" maxlength="150" placeholder="6~8 位字母或数字">
                   <template #prefix><el-icon><User /></el-icon></template>
                 </el-input>
               </el-form-item>
@@ -202,12 +202,19 @@ const validateConfirmPassword = (_rule, value, callback) => {
   else callback()
 }
 
+// 账号规则与后端 apps/users/validators.py 一致：6~8 位，仅字母数字。
+// 历史账号（如 4 位工号）原样保存时放行，否则连改姓名/头像都会被自己的用户名挡住。
+const originalUsername = ref('')
+const validateUsername = (_rule, value, callback) => {
+  const name = String(value || '').trim()
+  if (!name) return callback(new Error('请输入用户名'))
+  if (name.toLowerCase() === originalUsername.value.toLowerCase()) return callback()
+  if (!/^[A-Za-z0-9]{6,8}$/.test(name)) return callback(new Error('用户名为 6~8 位字母或数字'))
+  callback()
+}
+
 const profileRules = {
-  username: [
-    { required: true, message: '请输入用户名', trigger: 'blur' },
-    { min: 2, max: 150, message: '用户名长度为 2–150 个字符', trigger: 'blur' },
-    { pattern: /^[\p{L}\p{N}_@.+-]+$/u, message: '仅支持文字、字母、数字及 @ . + - _', trigger: 'blur' },
-  ],
+  username: [{ validator: validateUsername, trigger: 'blur' }],
   real_name: [{ required: true, message: '请输入姓名', trigger: 'blur' }],
 }
 
@@ -226,6 +233,7 @@ watch(
     if (!value) return
     profileForm.username = value.username || ''
     profileForm.real_name = value.real_name || ''
+    originalUsername.value = value.username || ''
   },
   { immediate: true },
 )

@@ -52,7 +52,8 @@ def rotate_admin() -> None:
     """吃限流时开一个新管理员（限流按 user.pk 计数）。"""
     global TOKEN, rotations
     rotations += 1
-    name = f"p2imp{int(time.time()) % 100000}{rotations}"
+    # 账号规则 6~8 位纯字母数字：P2i + 4 位时间片 + 1 位轮次 = 8 位
+    name = f"P2i{int(time.time()) % 10000:04d}{rotations % 10}"
     requests.post(f"{BASE}/admin-panel/users/", headers={"Authorization": f"Bearer {TOKEN}"},
                   json={"username": name, "real_name": "导入联调", "role": "admin",
                         "password": "pw123456", "is_active": True}, timeout=20)

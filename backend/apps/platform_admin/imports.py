@@ -20,14 +20,17 @@ from dataclasses import dataclass, field
 from io import BytesIO
 
 from django.db import transaction
+from django.utils import timezone
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 
 from apps.classroom.models import ClassRoom, ClassStudent
 from apps.classroom.services import ClassServiceError, assign_students
+from apps.courses.models import Term
 from apps.users.models import User
+from apps.users.validators import ACCOUNT_RULE_TEXT, account_problem
 
-from .user_import import MIN_USERNAME_LENGTH, initial_password_for
+from .user_import import initial_password_for
 
 KIND_CLASS = "class"
 KIND_TEACHER = "teacher"
@@ -37,6 +40,22 @@ MAX_FILE_SIZE = 5 * 1024 * 1024
 CODE_PATTERN = re.compile(r"^[A-Z0-9-]{3,32}$")
 ALLOWED_DURATIONS = (2, 3, 4, 5)
 DEFAULT_DURATION = 4
+
+
+def infer_enrollment_year() -> int:
+    """自动建班时入学年留空的兜底值。
+
+    没有兜底会落 NULL，而毕业预览把 graduate_year=None 视为「已到毕业年份」
+    （graduation.py 的 year_reached 语义），一键整班毕业就会误伤这批学生。
+    推导优先级：当前学期字典（is_current）→ 按季节折算学年起始年
+    （春季学期入学属于上一学年，如 2026 春 → 入学年 2025）；
+    无学期字典时按 9 月分界取自然年。
+    """
+    term = Term.objects.filter(is_current=True).first()
+    if term is not None:
+        return term.year + (1 if term.season == Term.Season.SPRING else 0)
+    today = timezone.localdate()
+    return today.year if today.month >= 9 else today.year - 1
 MIN_YEAR, MAX_YEAR = 2000, 2100
 
 # 占用中/可入班的班级状态（其余状态视为不可再分配学生）
@@ -112,13 +131,13 @@ TEACHER_SPEC = ImportSpec(
     sheet_name="教师导入",
     max_rows=500,
     columns=(
-        Column("工号", True, 22, "教师登录账号，6 位以上，平台内唯一"),
+        Column("工号", True, 22, f"教师登录账号，{ACCOUNT_RULE_TEXT}，平台内唯一"),
         Column("姓名", True, 18, "用于名单与成绩展示"),
     ),
     tips=(
         "1. 请在「教师导入」页从第 2 行开始填写，每行一位教师，表头请勿修改。",
-        "2. 工号即登录账号，6 位以上，平台内不可重复（不区分大小写）。",
-        "3. 初始密码规则：Zk + 工号后 6 位（不足 6 位取整个工号）。",
+        f"2. 工号即登录账号，{ACCOUNT_RULE_TEXT}，平台内不可重复（不区分大小写）。",
+        "3. 初始密码规则：Zk + 工号后 6 位。",
         "4. 教师首次登录后系统会提示修改密码。",
     ),
 )
@@ -129,7 +148,7 @@ STUDENT_SPEC = ImportSpec(
     sheet_name="学生导入",
     max_rows=500,
     columns=(
-        Column("学号", True, 22, "学生登录账号，6 位以上，平台内唯一"),
+        Column("学号", True, 22, f"学生登录账号，{ACCOUNT_RULE_TEXT}，平台内唯一"),
         Column("姓名", True, 18, "必填，入班前要求填写姓名"),
         Column("班级编码", False, 16, "填了才入班；系统里没有该编码时可自动建班"),
         Column("班级名称", False, 22, "自动建班时用作班名；留空则用编码兜底"),
@@ -137,8 +156,8 @@ STUDENT_SPEC = ImportSpec(
     ),
     tips=(
         "1. 请在「学生导入」页从第 2 行开始填写，每行一名学生，表头请勿修改。",
-        "2. 学号即登录账号，6 位以上，平台内不可重复（不区分大小写）。",
-        "3. 初始密码规则：Zk + 学号后 6 位（不足 6 位取整个学号）。",
+        f"2. 学号即登录账号，{ACCOUNT_RULE_TEXT}，平台内不可重复（不区分大小写）。",
+        "3. 初始密码规则：Zk + 学号后 6 位。",
         "4. 「班级编码」留空则只建账号不入班；填了但系统里没有该编码时，"
         "预览页会列出待建班级，确认后自动建班并把学生放进去。",
         "5. 一名学生只能在一个班（单班制），已在其他班的学生会报冲突。",
@@ -299,15 +318,11 @@ def _field_of(kind: str, header: str) -> str:
 # ---------------------------------------------------------------------------
 # 逐行校验（预览与提交共用）
 # ---------------------------------------------------------------------------
-def _username_error(username: str, real_name: str) -> str:
-    if not username:
-        return "用户名不能为空"
-    if len(username) < MIN_USERNAME_LENGTH:
-        return f"用户名至少 {MIN_USERNAME_LENGTH} 位（用于生成初始密码）"
-    if len(username) > 150:
-        return "用户名过长"
-    if any(ch.isspace() for ch in username):
-        return "用户名不能包含空格"
+def _username_error(username: str, real_name: str, label: str = "用户名") -> str:
+    """学号 / 工号 + 姓名的行校验。账号格式规则统一走 apps.users.validators。"""
+    problem = account_problem(username, label)
+    if problem:
+        return problem
     if not real_name:
         return "姓名不能为空"
     if len(real_name) > 64:
@@ -480,7 +495,7 @@ def _annotate_teacher(rows: list[dict], options: dict) -> dict:
 
     out = []
     for row in normalized:
-        message, status = _username_error(row["username"], row["real_name"]), "ok"
+        message, status = _username_error(row["username"], row["real_name"], "工号"), "ok"
         if message:
             status = "error"
         elif row["username"].lower() in dup:
@@ -503,7 +518,8 @@ def _annotate_student(rows: list[dict], options: dict) -> dict:
     # 预览阶段不要求勾选（要先把清单展示出来）；提交阶段要求逐个确认，
     # 否则「编码打错一个字就造出空壳班」的口子就开了（方案 §3.4）。
     require_approval = bool(options.get("require_approval", False))
-    default_year = options.get("default_enrollment_year")
+    # 入学年兜底：行值 > 向导默认 > 当前学期推导（NULL 会让毕业预览误判「已到毕业年份」）
+    default_year = options.get("default_enrollment_year") or infer_enrollment_year()
     default_duration = options.get("default_duration_years") or DEFAULT_DURATION
 
     normalized = [{
@@ -566,7 +582,7 @@ def _annotate_student(rows: list[dict], options: dict) -> dict:
     for row, target in zip(normalized, targets):
         username, real_name = row["username"], row["real_name"]
         existing_user = existing_map.get(username.lower())
-        message = _username_error(username, real_name)
+        message = _username_error(username, real_name, "学号")
         status = "ok" if not message else "error"
         reuse_user_id = None
 
