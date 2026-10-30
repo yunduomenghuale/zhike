@@ -1,6 +1,10 @@
 # 智课系统 V2 生产编排（独立网络/卷/容器名，不影响服务器现有服务）
 services:
   mysql:
+    # 仅"自建库"场景使用，默认**不启动**——生产走服务器现有外部 MySQL
+    # （192.10.0.3:3306/zk，见 .env.production 的 DATABASE_URL）。
+    # 需要内置库时显式启用：docker compose --profile embedded-mysql up -d
+    profiles: ["embedded-mysql"]
     # 生产数据库（MySQL 8.0）。不发布宿主端口，仅经 zhike_v2_net 供 backend 访问。
     # 时区表：mysql 官方镜像不含 /usr/share/zoneinfo，与 entrypoint 无关——
     # 首次初始化后需执行 backend/scripts/load_mysql_timezone.py 灌时区数据，
@@ -39,9 +43,8 @@ services:
     container_name: zhike_v2_backend
     restart: unless-stopped
     env_file: .env.production
-    depends_on:
-      mysql:
-        condition: service_healthy
+    # 不写 depends_on mysql：生产用外部库（192.10.0.3），entrypoint 自带 60 次就绪重试；
+    # 自建库场景用 --profile embedded-mysql 显式启用即可，无需硬依赖。
     # 后端不发布宿主端口，仅经 zhike_v2_net 供前端 nginx 反向代理
     # 数据全部 bind mount 到项目目录（数据盘 /data），不再使用根盘的 named volume
     volumes:
@@ -59,8 +62,12 @@ services:
     # BGE-M3（约 2.3GB）+ Qwen3-Reranker（约 1.2GB）；2 workers 全启用建议 8g。
     # 未启用本地模型时不会加载，2g 足够。
     mem_limit: 8g
+    # bnet-test：外部 MySQL（test-mysql80 容器，192.10.0.3:3306）所在网络，
+    # 不加这个网络容器根本到不了数据库（跨 bridge 无路由）。
+    # 该网络只存在于生产服务器（docker network create 由其他项目创建）；本地开发不用 compose。
     networks:
       - zhike_v2_net
+      - bnet-test
 
   frontend:
     image: nginx:1.25-alpine
@@ -86,3 +93,7 @@ services:
 networks:
   zhike_v2_net:
     name: zhike_v2_net
+  # 外部 MySQL 所在网络（仅生产服务器存在，由其他项目创建）
+  bnet-test:
+    external: true
+    name: bnet-test

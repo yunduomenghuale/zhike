@@ -435,3 +435,118 @@ E2E_DATABASE_URL="mysql://zk:zk123456@127.0.0.1:3306/zk_e2e" \
 # 改 .env：注释 mysql 行、放开 DATABASE_URL=sqlite
 ```
 
+---
+
+## 附录 D：生产环境切换记录（192.168.3.145，2026-10-30）
+
+### D.1 环境拓扑（与本地完全不同，先摸清再动手）
+
+| 项 | 实际情况 |
+|---|---|
+| 应用 | `/data/zhike-v2/`，容器 `zhike_v2_backend` / `zhike_v2_frontend`，对外 8088 |
+| 切换前代码 | 镜像 `b6a6fc417859`（2026-10-30 11:41 构建，已含 P4+P5），SQLite **120 迁移** |
+| 切换前数据 | `data/db.sqlite3` 144MB：13 用户（含 wgy id=13）/ 8 课程 / 2868 片段 |
+| 目标数据库 | `192.10.0.3:3306/zk` = 容器 **`test-mysql80`**（MySQL 8.0.22），在 `bnet-test` 网络 |
+| 目标库状态 | `zk` **已存在且 0 张表**；字符集 utf8mb4 / utf8mb4_0900_ai_ci；**时区表已灌好**（1826 条，CONVERT_TZ 正确） |
+
+**关键发现（会卡住整个方案）**：`192.10.0.0/16` 是本机某个 Docker bridge 的网段（网关 192.10.0.1），
+所以 `192.10.0.3` 不是外部机器，而是**另一个项目的 MySQL 容器**。宿主机能连、**zhike 容器连不上**（超时）——
+因为它只接在 `zhike_v2_net`，跨 bridge 没有路由。
+解决：compose 里给 backend 同时挂 `bnet-test`（external），容器重建后自动获得 192.10.0.5，直连数据库。
+
+### D.2 镜像构建的坑（用户问过"是不是很慢"）
+
+`requirements.txt` 从 31 行变成 33 行（加 mysqlclient）→ Docker 的 `COPY requirements.txt` 层失效 →
+后面的 `pip install -r requirements.txt` 整层重跑：**重新下载 torch 209MB + 全套依赖**，
+而 torch 走 `download.pytorch.org`（国内极慢），日志 5 分钟无进展；apt 的 LibreOffice 也要重装。
+
+采用**第三条路**（不是"全家桶重建"，也不是"本地打包上传"）：
+
+```dockerfile
+# deploy/Dockerfile.fast（服务器上保留，不入库）
+FROM zhike-v2-backend:p5base          # 现有生产镜像 tag 出来，已含 LibreOffice/字体/torch/全部依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      default-libmysqlclient-dev build-essential pkg-config \
+ && pip install --no-cache-dir mysqlclient==2.2.7 -i https://pypi.tuna.tsinghua.edu.cn/simple \
+ && apt-get purge -y build-essential pkg-config default-libmysqlclient-dev \
+ && apt-get clean && rm -rf /var/lib/apt/lists/*
+COPY . /app
+```
+
+**53 秒**构建完成（vs 卡住 15 分钟）。代价：这镜像的底座是旧的完整构建，若将来 `requirements.txt`
+新增其他依赖，**必须改回 `Dockerfile.backend` 完整构建**，不能继续用 fast。
+
+> 为什么不用"本地打包镜像上传"：本机 Docker Desktop 未启动；即便启动也要在本机重新拉同样 200MB+ 依赖；
+> 现镜像 3.5GB，压缩后约 1GB，5Mbps 上传约 20-25 分钟，不比 fast 构建快。
+
+### D.3 执行步骤（停机约 2 分钟）
+
+1. 备份：`data/backups/db-pre-mysql-20261030-1420.sqlite3`（切换前）、`db-pre-mysql-final-20261030-1435.sqlite3`（停机后定稿）+ `deploy.bak-20261030-1420`
+2. 源码：`git archive HEAD backend deploy` 打包上传（1.7MB），解压覆盖；服务器 `.env`、`data/`、`media/` 均不受影响（gitignore）
+3. compose：mysql 服务加 `profiles: ["embedded-mysql"]`（默认不启）、backend 去掉 `depends_on`、挂 `bnet-test`
+4. 镜像：tag 旧镜像为 `p5base` → `Dockerfile.fast` 构建（53s）
+5. **演练**：新建 `zk_rehearsal` → migrate（124 迁移）→ 搬数据 → 校验全绿 → 删库（不碰生产）
+6. 停 backend（冻结写入）→ 最终备份 → 对 `zk` 执行 migrate + 搬数据（校验全绿）
+7. 改 `.env.production` 的 `DATABASE_URL`（保留 sqlite 行作回滚点）→ `docker compose up -d backend`（重建容器以应用新网络）
+8. 冒烟 + 清理
+
+### D.4 验证结果
+
+| 项 | 结果 |
+|---|---|
+| 容器 | `Up`，网络 `bnet-test=192.10.0.5` / `zhike_v2_net=172.18.0.2` |
+| entrypoint | `等待 MySQL 可连接` → `MySQL 就绪（第 1 次尝试）` → `No migrations to apply` → gunicorn 正常 |
+| Django 视角 | `vendor=mysql, db=zk, host=192.10.0.3` |
+| 数据 | 13 用户（wgy id=13 在位）/ 8 课程 / 2868 片段 / 124 迁移，与源库逐表校验一致 |
+| 登录 | `wgy / wgy123147` 200，返回「王国勇 / 教师」，课程列表 2 门 |
+| 首页 | 8088 → 200 |
+| 停写证据 | SQLite 文件 mtime 停在 13:42（停机时刻），MySQL 表 update_time 14:36 |
+| 容器日志 | 无 error / traceback |
+
+### D.5 回滚（1 分钟内）
+
+```bash
+cd /data/zhike-v2/deploy
+sed -i 's|^DATABASE_URL=mysql.*|DATABASE_URL=sqlite|' .env.production
+sudo docker compose up -d backend      # 旧库 data/db.sqlite3 全程未动
+```
+镜像回滚：`docker tag zhike-v2-backend:p5base zhike-v2-backend:latest && docker compose up -d backend`
+
+### D.6 遗留 / 待办
+
+| 项 | 说明 |
+|---|---|
+| MySQL 账号 | 当前用 `root/test@2021`（用户指定）。共享实例上建议后续建 `zhike@'192.10.0.5'` 专用账号，只授 `zk.*` |
+| `Dockerfile.fast` | 仅存在于服务器，用于本次加速；**新增依赖时必须回到完整构建** |
+| 本地 compose 变更 | 加了 `bnet-test`（external）与 mysql profile，服务器与仓库已一致；本地无该网络，用 runserver 开发不受影响 |
+| 备份清理 | `data/backups/` 已有 3 份 144MB SQLite（10:21 / 14:20 / 14:35），确认稳定后可删旧的 |
+| 生产备份策略 | 从 SQLite `VACUUM INTO` 改为 `mysqldump`，尚未配置定时任务 |
+
+### D.7 备份策略（切换后，已落地）
+
+原脚本是 `VACUUM INTO` 备份 SQLite + media rsync，切库后 SQLite 已冻结，改为 **mysqldump 逻辑备份**。
+
+| 项 | 说明 |
+|---|---|
+| 备份内容 | `zk` 整库逻辑备份：**建表语句 + 全部数据**（`--routines --triggers` 带上存储过程/触发器，恢复才完整） |
+| 一致性 | `--single-transaction`（InnoDB 一致性快照，**不锁表**，业务在线可跑）+ `--quick`（逐行取，不整表进内存） |
+| 执行方式 | 宿主机没装 mysql 客户端 → 借 `mysql:8.0` 镜像在 `bnet-test` 网络内跑 mysqldump；密码走 `MYSQL_PWD` 环境变量，不出现在 `ps` 里 |
+| 压缩 | gzip，当前 **27MB/份**（144MB 的 SQLite 转成 MySQL 后 JSON 更紧凑） |
+| 频率 | **每天 03:30**（凌晨低峰，`crontab -l` 可见） |
+| 保留 | **14 天**，`find -mtime +14 -delete` 自动清理；峰值占用约 380MB |
+| 三重校验 | gzip 完整性 + 文件非空 + 含建表语句（挡住"连不上库却生成空壳"的假成功） |
+| 日志 | 追加到 `/data/zhike-v2/backups/backup.log` |
+| media | 仍走 `rsync -a` 增量，**不带 `--delete`**（主目录误删不连带删备份） |
+| 恢复验证 | 实测把备份导入临时库 `zk_restore_test`：**57 表 / 13 用户 / 2868 片段**，与生产一致，验证后删库 |
+
+脚本：服务器 `/data/zhike-v2/backups/backup.sh`，仓库留档 `deploy/backup-mysql.sh`（旧 SQLite 版备份为 `backup.sh.sqlite-era`）。
+
+手工恢复（把某天的备份导回 `zk`）：
+
+```bash
+zcat /data/zhike-v2/data/backups/mysql/db-20261030.sql.gz \
+  | sudo docker exec -i test-mysql80 sh -c 'mysql -uroot -p"test@2021" zk'
+```
+
+
+
