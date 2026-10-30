@@ -96,6 +96,19 @@ class ClassRoomViewSet(BaseModelViewSet):
         # teacher 字段已降级为"建班人"留痕，仅作审计线索，不参与权限
         serializer.save(teacher=self.request.user)
 
+    def destroy(self, request, *args, **kwargs):
+        """班级不提供物理删除（P5-B5，方案 X-04）。
+
+        删班会级联清空名单、作业、考试与成绩；管理操作一律走归档
+        （PATCH status=archived），历史成绩与学籍保留。模型层 delete() 同步
+        拦截兜底；运维清理走脚本 queryset 通道。
+        """
+        return api_response(
+            message="班级不支持删除：请将班级归档（历史成绩与学籍保留）",
+            code=400,
+            status=400,
+        )
+
     @action(detail=True, methods=["post"], url_path="regenerate-code", permission_classes=[IsPlatformAdmin])
     def regenerate_code(self, request, pk=None):
         classroom = self.get_object()

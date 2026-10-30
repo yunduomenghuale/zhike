@@ -1,6 +1,8 @@
 import request from './request'
 
 export const login = (data) => request.post('/auth/login/', data)
+// 登出（P5-A2）：吊销 refresh 并推进 access 作废线；请求可能因 token 已失效而失败，调用方须自行吞错
+export const logout = (refresh) => request.post('/auth/logout/', refresh ? { refresh } : {})
 export const register = (data) => request.post('/auth/register/', data)
 // 登录页公开配置（AllowAny）：注册通道开关（register_open=false 时隐藏注册入口）
 export const getAuthConfig = () => request.get('/auth/config/')

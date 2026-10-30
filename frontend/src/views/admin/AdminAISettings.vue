@@ -10,6 +10,18 @@
       <el-tab-pane label="能力配置" name="config">
         <section class="effective-card">
           <div class="section-head"><div><h2>当前生效配置</h2></div><el-button :icon="Refresh" @click="load">刷新</el-button></div>
+          <!-- P5-B7：Mock 回退告警——有回退说明真实服务不可用/未配置，假数据被当真 -->
+          <el-alert
+            v-if="mockAlert && mockAlert.count_24h > 0"
+            type="warning"
+            :closable="false"
+            class="mock-fallback-alert"
+            show-icon
+          >
+            <template #title>
+              近 24 小时发生 {{ mockAlert.count_24h }} 次 Mock 回退调用<template v-if="mockAlert.latest_scene">（最近：{{ mockAlert.latest_scene }}{{ mockAlert.latest_error ? ' · ' + mockAlert.latest_error : '' }}）</template>，相关页面已展示「模拟数据」提示，请检查服务商配置与额度。
+            </template>
+          </el-alert>
           <el-table :data="effective" class="effective-table" scrollbar-always-on>
             <el-table-column label="能力" width="120">
               <template #default="{ row }"><strong>{{ row.capability_display }}</strong><small class="block">{{ capabilityDesc(row.capability) }}</small></template>
@@ -89,6 +101,24 @@
               <el-button :icon="Connection" size="small" :loading="testing === cap.value" @click="testConnection(cap.value)">测试连接</el-button>
             </div>
           </article>
+        </section>
+
+        <!-- P5-B6：AI 日配额（全局默认可编辑；用户级覆盖只读展示） -->
+        <section class="effective-card quota-card">
+          <div class="section-head"><div><h2>AI 日配额</h2></div></div>
+          <div class="quota-row">
+            <span class="quota-label">每人每日调用上限</span>
+            <el-input-number v-model="quotaDefault" :min="0" :step="10" controls-position="right" placeholder="不限" class="quota-input" />
+            <span class="quota-hint">留空 = 不限；0 = 全天封禁。超限请求返回 429 与中文提示。</span>
+            <el-button type="primary" :loading="quotaSaving" @click="saveQuota">保存配额</el-button>
+          </div>
+          <div v-if="quotaOverrides.length" class="quota-overrides">
+            <span class="quota-label">用户级覆盖（{{ quotaOverrides.length }}）：</span>
+            <el-tag v-for="o in quotaOverrides" :key="o.user_id" size="small" effect="plain" class="quota-tag">
+              {{ o.real_name || o.username }}（{{ o.daily_limit }}/日）
+            </el-tag>
+          </div>
+          <div v-else class="quota-hint">暂无用户级覆盖，全部用户按全局默认执行。</div>
         </section>
       </el-tab-pane>
 
@@ -556,7 +586,7 @@ import { ChatDotRound, Check, CircleCheck, CircleClose, Connection, Download, Fi
 import {
   getAdminAIConfiguration, saveAdminAIConfiguration, testAdminAIConnection,
   getAdminAICallStats, listAdminAICallLogs, exportAdminAICallLogs, listAdminActionLogs,
-  getAdminQAQualityStats,
+  getAdminQAQualityStats, getAdminAIQuota, putAdminAIQuota,
 } from '@/api/admin'
 
 // 指标说明气泡：统计字样右上角的圆形小图标（SVG 问号，非文字字形），悬停显示口径解释
@@ -625,6 +655,12 @@ const sceneOptions = [
 
 const loading=ref(false), saving=ref(false), testing=ref(''), dirty=ref(false), hydrating=ref(false)
 const effective=ref([])
+// P5-B7：Mock 回退告警（近 24h is_mock 调用聚合，来自 ai-configuration GET）
+const mockAlert=ref(null)
+// P5-B6：AI 日配额（全局默认可编辑；用户级覆盖只读展示）
+const quotaDefault=ref(null)
+const quotaOverrides=ref([])
+const quotaSaving=ref(false)
 const testDialog=reactive({
   visible:false, title:'', status:'untested', headline:'', message:'',
   capabilityLabel:'', providerModel:'', baseUrl:'', sourceLabel:'',
@@ -1098,9 +1134,10 @@ function keyPlaceholder(value){ if(isLocal(value)) return '系统内置模型无
 function formatTime(value){ return value ? new Date(value).toLocaleString('zh-CN',{hour12:false}) : '' }
 
 watch(forms,()=>{ if(!hydrating.value) dirty.value=true },{deep:true})
-function hydrate(items){
+function hydrate(items, alert){
   hydrating.value=true
   effective.value=items||[]
+  mockAlert.value=alert||null
   for(const item of items||[]){
     const form=forms[item.capability]
     if(!form) continue
@@ -1118,8 +1155,33 @@ function hydrate(items){
   }
   nextTick(()=>{ dirty.value=false; hydrating.value=false })
 }
-async function load(){ loading.value=true; try{ hydrate((await getAdminAIConfiguration()).items) } finally{ loading.value=false } }
-async function refreshEffective(){ try{ effective.value=(await getAdminAIConfiguration()).items||[] }catch{ /* 保留原状 */ } }
+async function load(){ loading.value=true; try{ const resp=await getAdminAIConfiguration(); hydrate(resp?.items, resp?.mock_fallback_alert) } finally{ loading.value=false } loadQuota() }
+async function refreshEffective(){ try{ const resp=await getAdminAIConfiguration(); effective.value=resp?.items||[]; mockAlert.value=resp?.mock_fallback_alert||null }catch{ /* 保留原状 */ } }
+
+// ---- P5-B6：AI 日配额 ----
+async function loadQuota(){
+  try{
+    const resp = await getAdminAIQuota()
+    quotaDefault.value = resp?.data?.default_daily_limit ?? null
+    quotaOverrides.value = resp?.data?.overrides || []
+  }catch{ /* 配额读取失败不阻塞配置页 */ }
+}
+async function saveQuota(){
+  const raw = quotaDefault.value
+  const value = (raw === null || raw === '' || raw === undefined) ? null : Number(raw)
+  if (value !== null && (!Number.isInteger(value) || value < 0)) {
+    ElMessage.warning('每日上限必须是非负整数，留空表示不限')
+    return
+  }
+  quotaSaving.value = true
+  try{
+    await putAdminAIQuota(value)
+    ElMessage.success('AI 日配额已保存')
+    await loadQuota()
+  } finally {
+    quotaSaving.value = false
+  }
+}
 function selectProvider(value, provider){
   const preset=presets[provider]||presets.openai
   forms[value].base_url=preset.base_url
@@ -1216,6 +1278,16 @@ onMounted(load)
 .ai-settings{color:#0f172a}.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:22px;margin-bottom:22px}.eyebrow{margin-bottom:6px;color:#2563eb;font-size:12px;font-weight:850;letter-spacing:.16em}h1,h2,h3,p{margin:0}h1{font-size:30px}.page-head p{margin-top:7px;color:#8190a8}.runtime-badge{min-width:230px;padding:12px 15px;border:1px solid #e2e8f0;border-radius:16px;display:flex;align-items:center;gap:11px;background:#fff}.runtime-badge>span{width:10px;height:10px;border-radius:50%;background:#94a3b8;box-shadow:0 0 0 5px #f1f5f9}.runtime-badge>div{display:grid;gap:2px}.runtime-badge small{color:#94a3b8}.runtime-badge.active>span{background:#22c55e;box-shadow:0 0 0 5px #dcfce7}
 .ai-tabs{--el-tabs-header-height:44px}.ai-tabs :deep(.el-tabs__header){margin-bottom:18px}.ai-tabs :deep(.el-tabs__item){font-size:15px;font-weight:700}.ai-tabs :deep(.el-tabs__nav-wrap::after){background:#e8eef7}
 .effective-card,.config-card,.stats-toolbar,.chart-card,.dist-card,.logs-card,.changes-card{border:1px solid #e5edf8;border-radius:22px;background:rgba(255,255,255,.94);box-shadow:0 16px 40px rgba(37,99,235,.07)}.effective-card{padding:20px;margin-bottom:16px}.section-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:14px}.section-head h2{font-size:18px}.effective-table{width:100%;font-size:14px}.effective-table :deep(.el-table__cell){padding:8px 0;font-size:14px}.effective-table :deep(.el-table__cell .cell){padding:0 10px}.effective-table code{background:#f1f5f9;border-radius:5px;padding:2px 7px;font-size:13px;color:#334155}.provider-name{font-weight:600;color:#0f172a}.muted{color:#64748b;font-size:14px}.warn{color:#d97706;font-size:12px}.block{display:block;margin-top:3px;color:#64748b;font-size:12px}.test-cell{display:flex;align-items:flex-start;gap:7px;color:#334155}.test-cell span{font-size:13px;font-weight:500;word-break:break-all}.test-cell small{display:block;margin-top:2px;color:#64748b;font-size:12px}.test-cell.success{color:#16a34a}.test-cell.failed{color:#dc2626}
+/* P5-B7：Mock 回退告警条 */
+.mock-fallback-alert{margin-bottom:14px;border-radius:12px}
+/* P5-B6：AI 日配额卡片 */
+.quota-card{padding:18px 20px;margin-bottom:16px}
+.quota-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.quota-label{font-weight:600;color:#0f172a;font-size:14px}
+.quota-input{width:160px}
+.quota-hint{color:#64748b;font-size:12px}
+.quota-overrides{margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.quota-tag{font-size:12px}
 .capability-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.config-card{padding:22px}.card-head{display:flex;align-items:center;gap:12px;padding-bottom:17px;border-bottom:1px solid #edf2f7}.card-title{min-width:0;flex:1}.card-head h2{font-size:17px}.card-head p{margin-top:3px;color:#94a3b8;font-size:12px}.head-icon{width:42px;height:42px;border-radius:13px;display:grid;place-items:center;flex:0 0 auto;font-size:19px}.config-form{margin-top:16px}.secret-note{margin-top:7px;color:#94a3b8;font-size:12px;display:flex;align-items:flex-start;gap:5px;line-height:1.5}.field-note{margin-top:7px;color:#94a3b8;font-size:12px;display:flex;align-items:flex-start;gap:5px;line-height:1.5}.card-foot{margin-top:14px;padding-top:13px;border-top:1px solid #edf2f7;display:flex;align-items:center;justify-content:space-between;gap:10px}.source-tag{color:#94a3b8;font-size:12px}.vision-tag{margin-top:5px}.warn-note{color:#b45309}.warn-note .el-icon{color:#d97706}
 /* 吸底保存栏：bottom:0 贴滚动视口(.main)底边；负底边距 -36px 伸进页面底边距，
    滚到底时栏底与面板底边齐平（配合布局默认的 36px 页面底边距）。

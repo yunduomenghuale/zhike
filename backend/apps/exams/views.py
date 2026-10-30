@@ -1,7 +1,7 @@
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
-from django.db import transaction
+from django.db import OperationalError, transaction
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework.decorators import action
@@ -353,7 +353,9 @@ class ExamSubmissionViewSet(BaseModelViewSet):
         """
         if not request.user.is_student:
             raise PermissionDenied("仅学生可保存答卷")
-        sub = self.get_object()
+        # 行锁重取（P5-B8）：暂存与交卷并发时，若暂存读到旧 IN_PROGRESS 而
+        # 交卷先落库，无锁的暂存会在交卷后覆盖已提交答卷的 answers。
+        sub = ExamSubmission.objects.select_for_update().get(pk=self.get_object().pk)
         if sub.status != ExamSubmission.Status.IN_PROGRESS or not sub.started_at:
             raise ValidationError("答卷不在作答状态，不能保存")
         answers = request.data.get("answers")
@@ -409,11 +411,28 @@ class ExamSubmissionViewSet(BaseModelViewSet):
         )
 
     @action(detail=True, methods=["post"], url_path="submit")
+    @transaction.atomic
     def submit(self, request, pk=None):
-        """交卷：客观题自动评分，主观题留待教师批改（需求 S-E-04 / T-E-07）。"""
+        """交卷：客观题自动评分，主观题留待教师批改（需求 S-E-04 / T-E-07）。
+
+        SQLite 开发库在极端并发下可能抛 OperationalError（写锁竞争，busy_timeout
+        内未等到）：转成可读的 400 让前端引导重试，而不是 500。Postgres/MySQL
+        （DATABASE_URL 可切）走真行锁排队，不会触发此分支。
+        """
+        try:
+            return self._do_submit(request, pk)
+        except OperationalError:
+            raise ValidationError("提交繁忙（数据库锁竞争），请稍后重试")
+
+    def _do_submit(self, request, pk):
         if not request.user.is_student:
             raise PermissionDenied("仅学生可提交答卷")
         sub = self.get_object()
+        # 行锁重取（P5-B8）：同一答卷的并发提交（手动交卷 + 前端超时自动交卷、
+        # 或网络重试连发）在此串行化，避免两个事务都读到 IN_PROGRESS 后重复判分。
+        # get_object 后必须重新 select_for_update 取行——get_object 的读取无锁。
+        # 拿不到锁的事务在此等待；等拿到时上一事务已提交，下方状态校验会拦掉。
+        sub = ExamSubmission.objects.select_for_update().get(pk=sub.pk)
         if sub.status != ExamSubmission.Status.IN_PROGRESS or not sub.started_at:
             raise ValidationError("答卷不在作答状态，请先开始考试")
         if not sub.paper:

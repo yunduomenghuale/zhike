@@ -3,6 +3,7 @@ import secrets
 from django.conf import settings
 from django.db import models
 
+from apps.common.delete_protection import ClassRoomProtectedError
 from apps.common.models import BaseModel
 from apps.courses.models import Course
 
@@ -60,6 +61,19 @@ class ClassRoom(BaseModel):
 
     def __str__(self):
         return self.name
+
+    def delete(self, *args, **kwargs):
+        """班级禁止实例级物理删除（P5-B5，方案 X-04）。
+
+        删除班级会级联清空名单、作业、考试与成绩，不可恢复。处置：管理端
+        一律「归档」（status=archived，历史成绩与学籍保留）。确有物理清理
+        需求的运维场景（冒烟空班回收）走脚本通道
+        `ClassRoom.objects.filter(...).delete()`（queryset 删除不经过本方法）。
+        """
+        raise ClassRoomProtectedError(
+            "班级不支持物理删除：请在管理端将班级归档（历史成绩与学籍保留）。"
+            "如确需清理测试空班，走脚本 queryset 通道。"
+        )
 
     def save(self, *args, **kwargs):
         """班级编码统一归一为 strip + 大写。

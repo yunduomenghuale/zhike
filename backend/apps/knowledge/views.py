@@ -10,6 +10,9 @@ from rest_framework.generics import ListAPIView
 from rest_framework.permissions import IsAuthenticated
 
 from apps.ai.providers.factory import chat_supports_vision
+from apps.ai.providers.fallback import consume_fallback
+from apps.ai.quota import check_ai_quota
+from apps.common.throttles import AIAskThrottle
 from apps.ai.services import (
     build_conversation_context,
     ingest_material,
@@ -358,6 +361,12 @@ class QARecordViewSet(BaseModelViewSet):
     filterset_fields = ["course", "classroom", "student"]
     http_method_names = ["get", "post", "head", "options"]
 
+    def get_throttles(self):
+        # P5-C9：AI 问答（含流式）按用户从严；列表/详情等常规动作走全局默认
+        if self.action in ("ask", "ask_stream"):
+            return [AIAskThrottle()]
+        return super().get_throttles()
+
     def get_queryset(self):
         user = self.request.user
         qs = QARecord.objects.select_related("student", "course", "classroom")
@@ -394,6 +403,8 @@ class QARecordViewSet(BaseModelViewSet):
         blocked = student_submit_block_detail(request.user, "提问")
         if blocked:
             raise PermissionDenied(blocked)
+        # AI 日配额（P5-B6）：超限 429
+        check_ai_quota(request.user)
         course, classroom, catalog, classroom_ids = _resolve_qa_scope(request)
         question = request.data.get("question", "").strip()
         if not question:
@@ -435,6 +446,11 @@ class QARecordViewSet(BaseModelViewSet):
         data = QARecordSerializer(record).data
         data["session_id"] = qa_session.id
         data["rewritten_question"] = rewritten
+        # P5-B7：Mock 回退显性化——前端据 provider_fallback 展示「模拟数据」角标
+        fallback = consume_fallback()
+        data["provider_fallback"] = bool(fallback)
+        if fallback:
+            data["fallback_reason"] = fallback
         return api_response(data, message="回答完成")
 
     @action(detail=False, methods=["post"], url_path="ask-stream")
@@ -449,6 +465,8 @@ class QARecordViewSet(BaseModelViewSet):
         blocked = student_submit_block_detail(request.user, "提问")
         if blocked:
             raise PermissionDenied(blocked)
+        # AI 日配额（P5-B6）：超限 429
+        check_ai_quota(request.user)
         course, classroom, catalog, classroom_ids = _resolve_qa_scope(request)
         question = (request.data.get("question") or "").strip()
         if not question:
@@ -522,7 +540,13 @@ class QARecordViewSet(BaseModelViewSet):
                 maybe_update_session_summary(qa_session)
             except Exception:
                 pass
-            yield _sse({"type": "done", "record_id": record.id if record else None})
+            # P5-B7：done 事件携带回退标记，流式前端同样能展示「模拟数据」角标
+            done_evt = {"type": "done", "record_id": record.id if record else None}
+            fallback = consume_fallback()
+            if fallback:
+                done_evt["provider_fallback"] = True
+                done_evt["fallback_reason"] = fallback
+            yield _sse(done_evt)
 
         resp = StreamingHttpResponse(event_stream(), content_type="text/event-stream")
         resp["Cache-Control"] = "no-cache"

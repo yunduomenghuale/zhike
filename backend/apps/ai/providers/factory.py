@@ -11,6 +11,7 @@ from django.conf import settings
 from django.db import DatabaseError
 
 from .base import BaseAIProvider
+from .fallback import mark_fallback
 from .mock import MockProvider
 
 DEFAULT_CAPABILITY = "chat"
@@ -38,6 +39,7 @@ def mask_api_key(key: str) -> str:
 
 def build_provider(provider: str, config: dict, capability: str = DEFAULT_CAPABILITY) -> BaseAIProvider:
     if provider == "mock":
+        # 显式配置 Mock（如演示/开发环境）不是回退，不打标
         return MockProvider()
     if provider == "local":
         # 系统内置本地模型：无需 API Key/接口地址，权重在本地推理（见 providers/local.py）
@@ -45,6 +47,8 @@ def build_provider(provider: str, config: dict, capability: str = DEFAULT_CAPABI
 
         return LocalModelsProvider(config, capability=capability)
     if not config.get("api_key"):
+        # P5-B7：配了真实 provider 但缺 Key，静默退 Mock 必须显性化
+        mark_fallback(f"provider={provider} 未配置 api_key，已回退 Mock")
         return MockProvider()
     if provider in ("deepseek", "openai", "tongyi"):
         from .openai_compat import OpenAICompatProvider
@@ -54,6 +58,7 @@ def build_provider(provider: str, config: dict, capability: str = DEFAULT_CAPABI
         model = config.get("model") or config.get(_CAPABILITY_MODEL_FIELD.get(capability, ""), "")
         normalized[_CAPABILITY_MODEL_FIELD.get(capability, "chat_model")] = model
         return OpenAICompatProvider(normalized, name=provider)
+    mark_fallback(f"未知 provider={provider}，已回退 Mock")
     return MockProvider()
 
 

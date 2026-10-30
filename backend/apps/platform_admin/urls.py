@@ -18,6 +18,7 @@ from .views import (
     AdminAIConfigurationView,
     AdminAIConnectionTestView,
 )
+from .views_ai_quota import AdminAIQuotaView
 from .views_imports import (
     AdminImportCommitView,
     AdminImportPreviewView,
@@ -69,6 +70,8 @@ urlpatterns = [
     path("action-logs/export/", AdminActionLogViewSet.as_view({"get": "export"}), name="admin-action-logs-export"),
     path("ai-configuration/", AdminAIConfigurationView.as_view(), name="admin-ai-configuration"),
     path("ai-configuration/test/", AdminAIConnectionTestView.as_view(), name="admin-ai-test"),
+    # AI 日配额（P5-B6）：全局默认 + 用户级覆盖
+    path("ai-quota/", AdminAIQuotaView.as_view(), name="admin-ai-quota"),
     path("ai-call-logs/", AdminAICallLogListView.as_view(), name="admin-ai-call-logs"),
     path("ai-call-logs/export/", AdminAICallLogExportView.as_view(), name="admin-ai-call-logs-export"),
     path("ai-call-stats/", AdminAICallStatsView.as_view(), name="admin-ai-call-stats"),

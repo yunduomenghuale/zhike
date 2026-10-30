@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import {
   getMe,
   login as loginApi,
+  logout as logoutApi,
   updateMe,
   uploadAvatar,
 } from '@/api/auth'
@@ -40,6 +41,10 @@ export const useUserStore = defineStore('user', () => {
   }
 
   function logout() {
+    // P5-A2：尽力通知后端吊销 token（refresh 进黑名单 + access 作废线前移）。
+    // 请求失败（已失效/网络断）都不影响本地清理，登出永远成功。
+    const refresh = localStorage.getItem('refresh_token')
+    logoutApi(refresh).catch(() => {})
     token.value = ''
     profile.value = null
     localStorage.removeItem('access_token')

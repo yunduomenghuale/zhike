@@ -109,6 +109,10 @@
                 </div>
                 <div v-if="m.historyDropped" class="qa-note">对话较长，已省略部分早期内容</div>
                 <div v-if="m.rewritten && !m.streaming" class="qa-note">已按上下文理解检索：{{ m.rewritten }}</div>
+                <!-- P5-B7：Mock 回退显性化——回答来自模拟数据时必须可见 -->
+                <div v-if="m.providerFallback && !m.streaming" class="qa-note mock-note">
+                  ⚠ 当前为模拟数据（AI 服务暂不可用，已回退演示模式），内容不作为真实教学依据
+                </div>
                 <CitedSources v-if="m.cited_chunks?.length" :cited="m.cited_chunks" :highlight="flashNums" />
                 <div v-if="!m.streaming && m.answer" class="qa-actions">
                   <QaFeedback :record-id="m.mid" v-model="m.feedback" />
@@ -411,6 +415,7 @@ async function ask(preset) {
   let pendingRewritten = ''
   let droppedLevel = 0
   let doneRecordId = null
+  let doneFallback = null
   try {
     const token = localStorage.getItem('access_token')
     const resp = await fetch('/api/qa-records/ask-stream/', {
@@ -426,7 +431,15 @@ async function ask(preset) {
         ...(img ? { image: img } : {}),
       }),
     })
-    if (!resp.ok || !resp.body) throw new Error('bad response')
+    if (!resp.ok || !resp.body) {
+      // 429（配额/频控）等带 message 的错误：透出后端中文提示
+      let msg = `bad response (${resp.status})`
+      try {
+        const j = await resp.json()
+        if (j?.message) msg = j.message
+      } catch { /* 保留默认 */ }
+      throw new Error(msg)
+    }
 
     const reader = resp.body.getReader()
     const decoder = new TextDecoder('utf-8')
@@ -468,6 +481,8 @@ async function ask(preset) {
           if (!flushTimer) flushTimer = setTimeout(flushAnswer, 60)
         } else if (evt.type === 'done') {
           doneRecordId = evt.record_id || null
+          // P5-B7：后端回退 Mock 时在 done 事件携带标记
+          if (evt.provider_fallback) doneFallback = evt.fallback_reason || '模拟数据'
         } else if (evt.type === 'error') {
           pendingText += `\n[出错] ${evt.message || '生成失败'}`
         }
@@ -478,13 +493,15 @@ async function ask(preset) {
     if (!messages.value[msgIndex].answer) {
       patchMsg({ answer: '抱歉，AI 助教暂时没有响应，请稍后再试。' })
     }
-  } catch {
+  } catch (e) {
     if (!messages.value[msgIndex].answer) {
-      patchMsg({ answer: '抱歉，AI 助教暂时没有响应，请稍后再试。' })
+      // 配额（429）等后端中文提示优先透出，其余保持兜底文案
+      const detail = e?.message && !e.message.startsWith('bad response') ? e.message : ''
+      patchMsg({ answer: detail ? `本次提问未完成：${detail}` : '抱歉，AI 助教暂时没有响应，请稍后再试。' })
     }
   } finally {
     // 正文已输出完（或出错收尾），此时才展示参考来源并移除流式光标
-    patchMsg({ mid: doneRecordId, cited_chunks: pendingCited, streaming: false, rewritten: pendingRewritten, historyDropped: droppedLevel })
+    patchMsg({ mid: doneRecordId, cited_chunks: pendingCited, streaming: false, rewritten: pendingRewritten, historyDropped: droppedLevel, providerFallback: doneFallback })
     asking.value = false
     scrollToBottom()
   }
@@ -988,6 +1005,16 @@ onUnmounted(() => {
   color: var(--gray-400);
   font-size: 12px;
   line-height: 1.5;
+}
+
+/* P5-B7：模拟数据角标——比普通备注醒目（琥珀色警示） */
+.qa-note.mock-note {
+  color: var(--warning, #b45309);
+  background: color-mix(in srgb, var(--warning, #f59e0b) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning, #f59e0b) 35%, transparent);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-weight: 500;
 }
 
 .qa-actions {

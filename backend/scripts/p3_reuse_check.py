@@ -190,7 +190,8 @@ def main() -> int:
         for klass in list(ClassRoom.objects.filter(name="P3验证临时班")):
             try:
                 klass_id = klass.id  # delete() 后 pk 会被置空，先取
-                klass.delete()
+                # P5-B5：班级实例 delete() 已被 X-04 拦截，运维清理走 queryset 通道
+                ClassRoom.objects.filter(pk=klass_id).delete()
                 print(f"  清理：临时班 {klass_id}")
             except Exception as exc:  # noqa: BLE001
                 leftovers.append(f"临时班 {klass.id}: {exc}")

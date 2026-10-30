@@ -16,6 +16,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 
 from apps.ai.models import AITask
+from apps.ai.quota import check_ai_quota
 from apps.ai.tasks import submit_ai_task
 from apps.common.access import courses_for_user, is_platform_admin
 from apps.common.permissions import IsStudent, IsTeacher, IsTeacherOrAdmin, IsTeacherOrReadOnly
@@ -201,6 +202,7 @@ class QuestionViewSet(BaseModelViewSet):
         前端轮询 /api/ai-tasks/<id>/；完成后 result.batch_id 即草稿批次 id。
         防重复提交：同教师同课程同时只允许一条进行中任务（模型层唯一索引）。
         """
+        check_ai_quota(request.user)  # AI 日配额（P5-B6）：超限 429
         course_id = request.data.get("course")
         catalog_id = request.data.get("catalog")
         if not catalog_id:

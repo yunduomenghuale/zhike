@@ -4,13 +4,16 @@ from uuid import uuid4
 from django.contrib.auth import get_user_model
 from django.core.cache import caches
 from django.core.files.storage import default_storage
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.generics import GenericAPIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
+from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.common.response import api_response
+from apps.common.throttles import LoginThrottle
 
 from .serializers import (
     AvatarUploadSerializer,
@@ -87,6 +90,8 @@ class LoginView(APIView):
 
     permission_classes = [AllowAny]
     serializer_class = LoginSerializer
+    # P5-C9：登录端点按 IP 从严（全局 anon/user 之上叠加；失败锁定另行兜底）
+    throttle_classes = [LoginThrottle]
 
     def post(self, request):
         identifier = str(request.data.get("username") or "").strip()
@@ -127,6 +132,39 @@ class MeView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return api_response(UserSerializer(request.user).data, message="个人资料已更新")
+
+
+class LogoutView(APIView):
+    """登出（P5-A2）：吊销当前账号的全部未过期 token。
+
+    - refresh token（若携带）进 SimpleJWT 黑名单，不能再用它换新 access；
+    - access token 无法进黑名单（黑名单只管 refresh），改为推进用户的
+      `tokens_invalid_before` 作废线：该时刻前签发的 access 全部 401。
+      语义是「全设备登出」——同一账号其他已登录端也会随之下线，取保守安全。
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        refresh = str(request.data.get("refresh") or "")
+        revoked_refresh = False
+        if refresh:
+            try:
+                RefreshToken(refresh).blacklist()
+                revoked_refresh = True
+            except TokenError:
+                pass  # 无效/过期 refresh 不影响登出（作废线已经兜住 access）
+        user = request.user
+        # 作废线取精确时刻（微秒）：JWT iat 是秒级整数，签发早于登出时刻的
+        # token 必有 int(iat) < cutoff，同秒内登出也立即生效。
+        # 已知取舍：登出后同一秒内重新登录，新 token 也会被拒（iat 整秒仍小于
+        # cutoff），前端再登一次即恢复；真实交互（页面跳转+手动登录）远大于 1s。
+        user.tokens_invalid_before = timezone.now()
+        user.save(update_fields=["tokens_invalid_before"])
+        return api_response(
+            {"refresh_revoked": revoked_refresh},
+            message="已退出登录",
+        )
 
 
 class AvatarUploadView(APIView):

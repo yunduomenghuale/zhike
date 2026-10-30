@@ -129,8 +129,8 @@ async function cleanup() {
   const admin = adminLogin.data.data.token.access;
   const teacherLogin = await api('POST', '/auth/login/', { username: 't101', password: 'pass1234' });
   const teacher = teacherLogin.status === 200 ? teacherLogin.data.data.token.access : admin;
-  // 先删班（级联作业/考试/占用关系），再删人；题目→章节→课按 PROTECT 顺序
-  if (SEED.classId) await api('DELETE', `/classes/${SEED.classId}/`, undefined, admin);
+  // 先归档班（P5-B5：班级不提供物理删除，X-04），再删人；题目→章节→课按 PROTECT 顺序
+  if (SEED.classId) await api('PATCH', `/classes/${SEED.classId}/`, { status: 'archived' }, admin);
   for (const u of SEED.users) await api('DELETE', `/admin-panel/users/${u.id}/`, undefined, admin);
   if (SEED.questionId) await api('DELETE', `/questions/${SEED.questionId}/`, undefined, teacher);
   if (SEED.catalogId) await api('DELETE', `/catalogs/${SEED.catalogId}/`, undefined, teacher);

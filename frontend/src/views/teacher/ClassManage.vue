@@ -44,7 +44,14 @@
           <template v-if="isAdmin">
             <span class="action-divider"></span>
             <el-button text circle :icon="EditPen" title="编辑班级" @click="openEdit(row)" />
-            <el-button text circle type="danger" :icon="Delete" title="删除班级" @click="openDelete(row, 'class')" />
+            <!-- P5-B5（X-04）：班级不提供删除，下线一律走归档 -->
+            <el-button
+              v-if="row.status !== 'archived'"
+              text circle type="warning"
+              :icon="Box"
+              title="归档班级"
+              @click="openArchive(row)"
+            />
           </template>
           <template v-else>
             <span class="action-divider"></span>
@@ -197,11 +204,11 @@
 
     <DeleteConfirmDialog
       v-model="deleteVisible"
-      title="删除班级"
+      title="归档班级"
       :item-name="deleteTarget?.name"
-      description="删除后，该班级及其成员关系将无法继续访问，此操作无法撤销。"
-      action-text="删除"
-      confirm-text="确认删除"
+      description="归档后班级停止使用，但历史成绩与学籍完整保留（班级不支持物理删除）。"
+      action-text="归档"
+      confirm-text="确认归档"
       :loading="deleting"
       @confirm="confirmDelete"
     />
@@ -211,7 +218,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, Delete, EditPen, User, School, Close, InfoFilled, Upload, Collection } from '@element-plus/icons-vue'
+import { Plus, Box, EditPen, User, School, Close, InfoFilled, Upload, Collection } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
 import ImportWizard from '@/components/admin/ImportWizard.vue'
@@ -220,7 +227,7 @@ import { listCourses } from '@/api/course'
 import { compareCourseName } from '@/utils/course-sort'
 import { useUserStore } from '@/store/user'
 import {
-  listClasses, createClass, updateClass, patchClass, deleteClass,
+  listClasses, createClass, updateClass, patchClass,
 } from '@/api/classroom'
 
 // 组织层（建班 / 改班 / 删班）只对管理员开放；教师进这个页面看到的是只读名单。
@@ -369,7 +376,8 @@ const deleteVisible = ref(false)
 const deleteTarget = ref(null)
 const deleting = ref(false)
 
-function openDelete(row) {
+// P5-B5（X-04）：班级不提供物理删除，下线一律归档（历史成绩与学籍保留）
+function openArchive(row) {
   deleteTarget.value = row
   deleteVisible.value = true
 }
@@ -378,8 +386,8 @@ async function confirmDelete() {
   if (!deleteTarget.value) return
   deleting.value = true
   try {
-    await deleteClass(deleteTarget.value.id)
-    ElMessage.success('已删除')
+    await patchClass(deleteTarget.value.id, { status: 'archived' })
+    ElMessage.success('已归档')
     deleteVisible.value = false
     deleteTarget.value = null
     await load()

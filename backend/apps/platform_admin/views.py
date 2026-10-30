@@ -194,16 +194,34 @@ class AdminUserDetailView(AdminThrottleMixin, APIView):
                 return api_response(message="不能移除当前账号的管理员角色", code=400, status=400)
         serializer = AdminUserWriteSerializer(user, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
+        # X-26（P5-B5）：学生停用联动退学——管理端删除学生=停用，不再物理删，
+        # 学籍置 withdrawn 与停用保持一致（复学/恢复时管理员可单独改回）。
+        # P5-A2：停用推进 token 作废线，未过期 access 立即失效（禁用即下线）。
+        save_kwargs = {}
+        deactivating = (
+            request.data.get("is_active") is False
+            and user.is_student
+            and user.edu_status != User.EduStatus.WITHDRAWN
+        )
+        if deactivating and not request.data.get("edu_status"):
+            save_kwargs["edu_status"] = User.EduStatus.WITHDRAWN
+            save_kwargs["status_changed_at"] = timezone.now()
+        if request.data.get("is_active") is False:
+            save_kwargs["tokens_invalid_before"] = timezone.now()
         # 变更前快照（仅审计关心的字段），用于 old→new 展示
         before = {
             field: getattr(user, field)
-            for field in ("username", "real_name", "role", "is_active")
+            for field in ("username", "real_name", "role", "is_active", "edu_status")
         }
-        serializer.save()
+        serializer.save(**save_kwargs)
         after = {
             field: getattr(user, field)
-            for field in ("username", "real_name", "role", "is_active")
+            for field in ("username", "real_name", "role", "is_active", "edu_status")
         }
+        # 学籍联动只在教师不可见处留痕：edu_status 不属于"管理员改动"语义时（未显式传参）不进审计快照
+        if not save_kwargs.get("edu_status"):
+            after.pop("edu_status", None)
+            before.pop("edu_status", None)
         changed = {k: {"old": before[k], "new": after[k]} for k in after if before[k] != after[k]}
         if changed:
             log_admin_action(
@@ -430,7 +448,19 @@ class AdminAIConfigurationView(AdminThrottleMixin, APIView):
     permission_classes = [IsPlatformAdmin]
 
     def get(self, request):
-        return api_response({"items": _ai_capability_payload()})
+        # P5-B7：Mock 回退告警——近 24h is_mock 调用聚合，前端配置页展示警示条
+        since = timezone.now() - timedelta(hours=24)
+        mock_logs = AICallLog.objects.filter(is_mock=True, created_at__gte=since)
+        latest = mock_logs.order_by("-created_at").first()
+        return api_response({
+            "items": _ai_capability_payload(),
+            "mock_fallback_alert": {
+                "count_24h": mock_logs.count(),
+                "latest_scene": latest.get_scene_display() if latest else "",
+                "latest_error": latest.error if latest else "",
+                "latest_at": latest.created_at if latest else None,
+            },
+        })
 
     def put(self, request):
         payload = request.data.get("capabilities")

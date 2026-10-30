@@ -18,6 +18,7 @@ from django.conf import settings
 
 from ..calllog import record_ai_call, record_stream, suppress_recording
 from .base import BaseAIProvider
+from .fallback import mark_fallback
 from .mock import MockProvider
 
 
@@ -152,6 +153,8 @@ class OpenAICompatProvider(BaseAIProvider):
             # 目录识别等场景要求「真模型或明确失败」，不接受静默回退到 Mock 的占位内容。
             if not kwargs.get("fallback_to_mock", True):
                 raise last_error or RuntimeError("AI chat 调用失败")
+            # P5-B7：回退显性化——响应体将带 provider_fallback=true
+            mark_fallback(f"chat 调用失败已回退 Mock：{last_error}")
             rec.mark_mock()
             with suppress_recording():
                 result = self._mock.chat(messages, **kwargs)
@@ -211,9 +214,10 @@ class OpenAICompatProvider(BaseAIProvider):
                             yield piece
             except _Http4xxError:
                 raise
-            except Exception:
+            except Exception as exc:
                 # 回退：分片产出 Mock 结果，前端仍表现为流式
                 state["mock"] = True
+                mark_fallback(f"chat 流式调用失败已回退 Mock：{exc}")  # P5-B7
                 with suppress_recording():
                     yield from self._mock.chat_stream(messages, **kwargs)
 
@@ -308,6 +312,7 @@ class OpenAICompatProvider(BaseAIProvider):
             # 嵌入不可用时回退，保证知识库入库/检索不中断；
             # allow_fallback=False（连接测试）时上抛真实错误，避免误报成功
             if allow_fallback:
+                mark_fallback(f"embed 调用失败已回退 Mock 向量：{exc}")  # P5-B7
                 with suppress_recording():
                     return self._mock.embed(texts), None, True
             if resp is not None and resp.status_code >= 400:

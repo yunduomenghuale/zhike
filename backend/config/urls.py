@@ -2,6 +2,7 @@
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
+from django.http import Http404
 from django.urls import include, path
 
 from apps.ai.views import AITaskActiveView, AITaskDetailView
@@ -26,14 +27,30 @@ api_patterns = [
     path("", include("apps.labs.urls")),
 ]
 
+def _gated_api_docs(view_cls, **initkwargs):
+    """OpenAPI 文档运行时门控（P5-A3）。
+
+    必须在**请求期**读 settings（而非 urls.py 导入期判断）：
+    ① URLconf 只在首次 import 时执行模块级 if，运行时改环境无法生效；
+    ② override_settings 也要能命中，便于测试验证生产关闭行为。
+    """
+
+    def handler(request, *args, **kwargs):
+        if not getattr(settings, "API_DOCS_ENABLED", False):
+            raise Http404
+        return view_cls.as_view(**initkwargs)(request, *args, **kwargs)
+
+    return handler
+
+
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/", include(api_patterns)),
-    # OpenAPI 文档
-    path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
+    # OpenAPI 文档：默认仅 DEBUG 开放，生产关闭（settings.API_DOCS_ENABLED）
+    path("api/schema/", _gated_api_docs(SpectacularAPIView), name="schema"),
     path(
         "api/docs/",
-        SpectacularSwaggerView.as_view(url_name="schema"),
+        _gated_api_docs(SpectacularSwaggerView, url_name="schema"),
         name="swagger-ui",
     ),
 ]

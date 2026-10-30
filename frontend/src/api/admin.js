@@ -63,6 +63,12 @@ export const testAdminAIConnection = (capability, overrides = {}) => (
   request.post('/admin-panel/ai-configuration/test/', { capability, ...overrides }, { timeout: 600000 })
 )
 
+// AI 日配额（P5-B6）：全局默认 + 用户级覆盖
+export const getAdminAIQuota = () => request.get('/admin-panel/ai-quota/')
+export const putAdminAIQuota = (defaultDailyLimit, overrides = []) => (
+  request.put('/admin-panel/ai-quota/', { default_daily_limit: defaultDailyLimit, overrides })
+)
+
 // AI 调用统计与追溯（流水 / 汇总 / 导出 / 配置变更记录）
 export const listAdminAICallLogs = (params) => request.get('/admin-panel/ai-call-logs/', { params })
 // CSV 导出走后端限流上限 5 万条；blob 下载（文件名由后端 Content-Disposition 决定）

@@ -41,6 +41,10 @@ if not DEBUG and not ALLOWED_HOSTS:
 if DEBUG and "testserver" not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append("testserver")  # 便于运行测试与 DRF APIClient
 
+# OpenAPI 文档（/api/schema/ /api/docs/）开关：默认跟随 DEBUG——开发开放、生产关闭
+# （P5-A3：生产关闭避免接口结构暴露）；如需在生产临时开放，显式设 DJANGO_ENABLE_API_DOCS=true
+API_DOCS_ENABLED = env_bool("DJANGO_ENABLE_API_DOCS", DEBUG)
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -51,6 +55,8 @@ INSTALLED_APPS = [
     # 第三方
     "rest_framework",
     "rest_framework_simplejwt",
+    # JWT 吊销黑名单（P5-A2）：登出/停用后 refresh 不可再换新 access
+    "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     "django_filters",
     "drf_spectacular",
@@ -168,24 +174,6 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
-REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": (
-        "apps.ai.authentication.AiCallJWTAuthentication",
-    ),
-    "DEFAULT_PERMISSION_CLASSES": (
-        "rest_framework.permissions.IsAuthenticated",
-    ),
-    "DEFAULT_PAGINATION_CLASS": "apps.common.pagination.StandardPagination",
-    "PAGE_SIZE": 20,
-    "DEFAULT_FILTER_BACKENDS": (
-        "django_filters.rest_framework.DjangoFilterBackend",
-        "rest_framework.filters.SearchFilter",
-        "rest_framework.filters.OrderingFilter",
-    ),
-    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
-    "EXCEPTION_HANDLER": "apps.common.response.custom_exception_handler",
-}
-
 # 管理端限流档位（platform_admin/throttles.py 按请求方法分档，仅管理端生效，不动全局节流）
 # admin_read 常规读 / admin_write 干预写 / admin_export 导出 / admin_heavy 重建·测试·导入
 ADMIN_THROTTLE_RATES = {
@@ -220,6 +208,64 @@ TEACHER_EXPORT_THROTTLE_RATES = {
 # 测试运行同样关闭导出限流
 if "test" in sys.argv:
     TEACHER_EXPORT_THROTTLE_RATES = {scope: None for scope in TEACHER_EXPORT_THROTTLE_RATES}
+
+# ---------------------------------------------------------------------------
+# 全站基线限流（P5-C9）：匿名 / 登录 / 登录用户 / AI 问答 分级。
+# 计数走默认 LocMem 缓存——多 worker 部署下各进程独立计数（偏宽松，不放大风险）；
+# 切 Redis 缓存后自动共享（vectorstore 同款替换位思路）。
+# 测试运行关闭全局与专项限流（LocMem 跨用例累积），限流行为由各测试用
+# override_settings 专项覆盖。
+# ---------------------------------------------------------------------------
+GLOBAL_THROTTLE_CLASSES = [
+    "apps.common.throttles.GlobalAnonThrottle",
+    "apps.common.throttles.GlobalUserThrottle",
+]
+GLOBAL_THROTTLE_RATES = {
+    "anon": "120/min",     # 匿名：登录页/公开探测，正常浏览远低于此
+    "user": "1200/min",    # 登录用户：视频 10s 心跳约 6/min，留足余量
+    "login": "30/min",     # 登录端点按 IP 从严（另有失败锁定兜底）
+    "ai_ask": "60/min",    # AI 问答从严（成本入口；用户级日配额是第二道闸）
+}
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": (
+        # 可吊销 JWT（P5-A2）：在 AI 埋点认证之上校验 tokens_invalid_before 作废线
+        "apps.users.authentication.RevocableJWTAuthentication",
+    ),
+    "DEFAULT_PERMISSION_CLASSES": (
+        "rest_framework.permissions.IsAuthenticated",
+    ),
+    "DEFAULT_PAGINATION_CLASS": "apps.common.pagination.StandardPagination",
+    "PAGE_SIZE": 20,
+    "DEFAULT_FILTER_BACKENDS": (
+        "django_filters.rest_framework.DjangoFilterBackend",
+        "rest_framework.filters.SearchFilter",
+        "rest_framework.filters.OrderingFilter",
+    ),
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "EXCEPTION_HANDLER": "apps.common.response.custom_exception_handler",
+    "DEFAULT_THROTTLE_CLASSES": GLOBAL_THROTTLE_CLASSES,
+    "DEFAULT_THROTTLE_RATES": {
+        **GLOBAL_THROTTLE_RATES,
+        "admin_read": "120/min",
+        "admin_write": "30/min",
+        "admin_export": "10/min",
+        "admin_heavy": "5/min",
+        "teacher_ai_generate": "5/min",
+        "teacher_ai_import": "10/min",
+        "teacher_export": "10/min",
+    },
+}
+
+# 测试运行（manage.py test）默认关闭限流：throttle 计数存 LocMem 会跨用例累积，
+# 干扰既有用例；限流行为由各 app 测试专项（override_settings）覆盖。
+# 自研 ScopedSettingThrottle 读到 rate=None 直接放行，无需摘类。
+if "test" in sys.argv:
+    ADMIN_THROTTLE_RATES = {scope: None for scope in ADMIN_THROTTLE_RATES}
+    GLOBAL_THROTTLE_RATES = {scope: None for scope in GLOBAL_THROTTLE_RATES}
+    REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {
+        scope: None for scope in REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]
+    }
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=12),
@@ -392,6 +438,10 @@ AI_ANALYTICS_TIMEOUT = _ai_env_int("AI_ANALYTICS_TIMEOUT", 120)
 # 完成即落库（as_completed 增量保存）——前端轮询因此在请求进行中就能看到页数
 # 推进，不会「卡住一批、响应后跳一大截」。调大减少调用次数但进度粒度变粗。
 AI_SCRIPT_CHUNK_PAGES = _ai_env_int("AI_SCRIPT_CHUNK_PAGES", 3)
+
+# AI 日配额全局默认（P5-B6）：0 = 不限（开发/测试默认）；生产由管理端在
+# AI 配置页设置全局默认与用户级覆盖（AIQuotaPolicy），此处仅作兜底。
+AI_DAILY_CHAT_QUOTA = _ai_env_int("AI_DAILY_CHAT_QUOTA", 0)
 
 # AI 调用流水（埋点见 apps/ai/calllog.py，管理端统计追溯用）：
 # - AI_CALL_LOG_RETENTION_DAYS：流水保留天数，清理命令 cleanup_ai_call_logs 按此删除；

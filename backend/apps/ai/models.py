@@ -447,3 +447,39 @@ class AITestRecord(BaseModel):
 
     def __str__(self):
         return f"{self.capability} · {self.get_status_display()}"
+
+
+class AIQuotaPolicy(BaseModel):
+    """AI 调用日配额（P5-B6）：用户级覆盖 + 全局默认。
+
+    计量数据源 = AICallLog（capability=chat、triggered_by=用户、当天），
+    事前校验在业务入口（问答/生题/讲稿等）调 apps/ai/quota.check_ai_quota。
+    - user=None 的行是全局默认（最多一行）；
+    - daily_limit=None 表示不限。
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="ai_quota_policy",
+        verbose_name="用户",
+        help_text="为空表示全局默认策略",
+    )
+    daily_limit = models.IntegerField("每日调用上限", null=True, blank=True, help_text="null 表示不限")
+
+    class Meta:
+        verbose_name = "AI 日配额"
+        verbose_name_plural = verbose_name
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user"],
+                condition=Q(user__isnull=True),
+                name="uniq_ai_quota_global_default",
+            ),
+        ]
+
+    def __str__(self):
+        who = self.user.username if self.user else "全局默认"
+        return f"{who}: {self.daily_limit if self.daily_limit is not None else '不限'}/日"

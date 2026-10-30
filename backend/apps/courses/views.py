@@ -13,6 +13,7 @@ from django.db.models import Max
 from django.http import HttpResponse
 from django.utils import timezone
 
+from apps.ai.quota import check_ai_quota
 from apps.ai.services import generate_catalog_from_plan, generate_scripts_for_video
 from apps.ai.tasks import submit_ai_task
 from apps.common.access import courses_for_user, student_study_block_detail
@@ -254,6 +255,7 @@ class CatalogViewSet(BaseModelViewSet):
         分批生成：limit 指定本批最多生成页数（默认 6，上限 12），前端循环调用直至
         done=true，避免一次生成几十页讲解稿超过网关 180s 超时（499）。
         """
+        check_ai_quota(request.user)  # AI 日配额（P5-B6）：超限 429
         from apps.ai.services import generate_script_pages_batched
 
         catalog = self.get_object()
@@ -341,12 +343,13 @@ class CatalogViewSet(BaseModelViewSet):
             message=f"已完成 {audio_pages}/{total} 页配音",
         )
 
-    @action(detail=False, methods=["post"], url_path="generate-from-plan")
+    @action(detail=False, methods=["post"], url_path="generate-from-plan", permission_classes=[IsTeacher])
     def generate_from_plan(self, request):
         """上传授课计划文本，调用大模型识别章节结构生成初始目录（需求 T-D-02）。
 
         教师确认后才落库：这里返回识别结果，前端确认后逐条创建。
         """
+        check_ai_quota(request.user)  # AI 日配额（P5-B6）：超限 429
         course_id = request.data.get("course")
         plan_text = request.data.get("plan_text", "")
         result = generate_catalog_from_plan(plan_text)

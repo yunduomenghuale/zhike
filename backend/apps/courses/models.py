@@ -71,7 +71,10 @@ class Course(BaseModel):
     term_text = models.CharField("学期（原始文本）", max_length=50, blank=True)
     teacher = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        # P5-B5（方案 X-25）：教师离职走停用（is_active=False），不物理删；
+        # 有课的教师被删会连带级联整门课及课件/讲稿/作业/考试/成绩，故库层
+        # PROTECT 兜底（含 queryset 删除通道），必须先转移课程归属。
+        on_delete=models.PROTECT,
         related_name="courses",
         verbose_name="授课教师",
     )

@@ -2,6 +2,7 @@ from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 
+from apps.common.delete_protection import UserProtectedError
 from apps.common.models import BaseModel
 
 
@@ -46,6 +47,10 @@ class User(AbstractUser):
     duration_years = models.PositiveSmallIntegerField("学制（年）", null=True, blank=True)
     status_changed_at = models.DateTimeField("学籍状态变更时间", null=True, blank=True)
     status_note = models.CharField("学籍状态说明", max_length=200, blank=True)
+    # P5-A2：登出/停用时置为当前时刻，认证链拒绝该时刻之前签发的 access
+    tokens_invalid_before = models.DateTimeField(
+        "token 作废线（该时刻前签发全部失效）", null=True, blank=True
+    )
 
     class Meta:
         verbose_name = "用户"
@@ -53,6 +58,20 @@ class User(AbstractUser):
 
     def __str__(self):
         return f"{self.real_name or self.username}({self.get_role_display()})"
+
+    def delete(self, *args, **kwargs):
+        """用户禁止实例级物理删除（P5-B5，方案 X-25 / X-26）。
+
+        删教师会级联删课程及全部教学内容，删学生会级联清空作业/答卷/成绩，
+        均不可恢复。处置：离职/退学一律停用（is_active=False，学生另置
+        edu_status=withdrawn，管理端用户详情 PATCH 已联动）。确有物理清理
+        需求的运维场景（测试数据回收）走脚本通道
+        `User.objects.filter(...).delete()`（queryset 删除不经过本方法）。
+        """
+        raise UserProtectedError(
+            "用户账号不支持物理删除：请在管理端停用账号（离职/退学走停用，"
+            "学生停用会自动置为退学）。如确需清理测试数据，走脚本 queryset 通道。"
+        )
 
     @property
     def is_teacher(self) -> bool:

@@ -7,6 +7,7 @@ from apps.common.response import api_response
 from .calllog import ai_scene
 from .models import AICallLog
 from .providers.factory import get_provider
+from .providers.fallback import consume_fallback
 
 
 class AIProviderInfoSerializer(serializers.Serializer):
@@ -48,7 +49,13 @@ class TTSPreviewView(APIView):
                 url = get_provider("tts").tts(text, voice=voice, speed=speed)
         except NotImplementedError as exc:
             return api_response(message=str(exc), code=501, status=501)
-        return api_response({"audio_url": url})
+        data = {"audio_url": url}
+        # P5-B7：Mock 回退显性化（配音试听是演示高频入口）
+        fallback = consume_fallback()
+        data["provider_fallback"] = bool(fallback)
+        if fallback:
+            data["fallback_reason"] = fallback
+        return api_response(data)
 
 
 class AITaskSerializer(serializers.Serializer):
