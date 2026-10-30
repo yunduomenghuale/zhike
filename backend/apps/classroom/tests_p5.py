@@ -49,3 +49,43 @@ class ClassRoomDeleteProtectionTests(APITestCase):
         self.assertEqual(resp.status_code, 200, resp.data)
         self.classroom.refresh_from_db()
         self.assertEqual(self.classroom.status, ClassRoom.Status.ARCHIVED)
+
+
+class ClassStudentRosterFilterTests(APITestCase):
+    """transferred/removed 是历史留痕，不出现在教师/管理端名单里。
+
+    生产现场问题：迁移处置的转出学生在名单里可见（学习状态列显示「未活跃」），
+    点详情却因 build_class_stats 只算占用中学生而报「该学生不在此班级」。
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin = User.objects.create_user(username="p5ros-admin", password="pw123456!", role=User.Role.ADMIN)
+        cls.classroom = ClassRoom.objects.create(name="P5名单班", code="P5-ROSTER-01")
+        cls.staying = User.objects.create_user(username="p5ros-stay", password="pw123456!", role=User.Role.STUDENT)
+        cls.transferred = User.objects.create_user(username="p5ros-gone", password="pw123456!", role=User.Role.STUDENT)
+        from apps.classroom.models import ClassStudent
+
+        ClassStudent.objects.create(classroom=cls.classroom, student=cls.staying, learn_status="active")
+        ClassStudent.objects.create(
+            classroom=cls.classroom, student=cls.transferred, learn_status="transferred"
+        )
+
+    def test_roster_excludes_transferred(self):
+        client = APIClient()
+        client.force_authenticate(user=self.admin)
+        resp = client.get(f"/api/class-students/?classroom={self.classroom.id}")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        rows = resp.data["data"]["results"] if isinstance(resp.data.get("data"), dict) else resp.data["data"]
+        usernames = {r["username"] for r in rows}
+        self.assertIn("p5ros-stay", usernames)
+        self.assertNotIn("p5ros-gone", usernames)
+
+    def test_all_status_filter_still_shows_occupying_only(self):
+        """「全部状态」也只能看到占用中学生，不会带出历史留痕。"""
+        client = APIClient()
+        client.force_authenticate(user=self.admin)
+        resp = client.get(f"/api/class-students/?classroom={self.classroom.id}&learn_status=")
+        rows = resp.data["data"]["results"] if isinstance(resp.data.get("data"), dict) else resp.data["data"]
+        usernames = {r["username"] for r in rows}
+        self.assertNotIn("p5ros-gone", usernames)

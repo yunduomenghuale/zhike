@@ -73,7 +73,7 @@
         <el-table-column label="学习状态" width="100" align="center">
           <template #default="{ row }">
             <el-tag :type="row.learn_status === 'active' ? 'success' : 'info'" effect="light" round>
-              {{ row.learn_status === 'active' ? '学习中' : '未活跃' }}
+              {{ learnStatusText(row.learn_status) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -230,6 +230,13 @@ const statusFilter = ref('all')
 const sortBy = ref('joined_desc')
 const page = ref(1)
 const pageSize = 20
+
+// learn_status 四值文案：active/inactive 是占用中（名单常态），
+// transferred/removed 是历史留痕——正常名单接口已不返回，映射仅作兜底
+const LEARN_STATUS_TEXT = { active: '学习中', inactive: '未活跃', transferred: '已转出', removed: '已移除' }
+function learnStatusText(status) {
+  return LEARN_STATUS_TEXT[status] || '未活跃'
+}
 
 const AVATAR_COLORS = ['#2563eb', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4', '#f97316']
 function avatarBg(name) {

@@ -1,0 +1,12 @@
+# docker build 上下文排除（backend 目录里的运行时数据不入镜像）
+data/
+media/
+venv/
+p5_check_tmp/
+login_fail_cache/
+__pycache__/
+*.pyc
+*.log
+db.sqlite3
+.env
+.git/
