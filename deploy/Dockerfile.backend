@@ -26,8 +26,10 @@ RUN sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.li
 # 先装好 CPU 版后，sentence-transformers 对 torch 的依赖即被满足，不会重复拉取）
 COPY requirements.txt .
 # mysqlclient 编译完成后卸掉工具链（不加 --auto-remove，避免连 libmariadb3 一起删掉）
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --no-cache-dir -r requirements.txt gunicorn \
+# --default-timeout=1000：服务器出网带宽有限，大包（torch 209MB）慢速下载时
+# pip 默认 15s 超时会反复 ReadTimeout 中断构建（生产实测踩坑）
+RUN pip install --no-cache-dir --default-timeout=1000 torch --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir --default-timeout=1000 -r requirements.txt gunicorn \
     -i https://pypi.tuna.tsinghua.edu.cn/simple \
     && apt-get purge -y build-essential pkg-config default-libmysqlclient-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
