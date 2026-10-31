@@ -717,6 +717,23 @@ watch(
   line-height: 1.5;
 }
 
+.term-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.term-picker-year {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.term-picker-season {
+  flex: 0 0 96px;
+  width: 96px;
+}
+
 .course-card {
   position: relative;
   min-height: 148px;
@@ -812,6 +829,7 @@ watch(
   white-space: nowrap;
 }
 
+/* 操作按钮常驻显示：hover 才出现会让教师找不到入口（现场反馈） */
 .course-actions {
   position: absolute;
   top: 16px;
@@ -820,16 +838,8 @@ watch(
   display: flex;
   align-items: center;
   gap: 6px;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(-4px);
-  transition: opacity 0.2s ease, transform 0.2s ease;
-}
-
-.course-card:hover .course-actions {
   opacity: 1;
   pointer-events: auto;
-  transform: translateY(0);
 }
 
 .course-actions :deep(.el-button) {
