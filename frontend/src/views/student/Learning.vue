@@ -454,9 +454,6 @@
       <div>
         <div class="page-title">课程学习</div>
         <div class="page-subtitle">按章节学习课件与讲解，并完成章节练习</div>
-        <div v-if="activeCourseIntro" class="learn-course-intro" :title="activeCourseIntro">
-          {{ activeCourseIntro }}
-        </div>
       </div>
       <el-select
         v-if="!fixedCourseId"
@@ -468,6 +465,12 @@
       >
         <el-option v-for="c in filteredCourses" :key="c.id" :label="c.name" :value="c.id" />
       </el-select>
+    </div>
+
+    <!-- 当前课程简介：课程空间壳把子页面的 .page-header 整个隐藏了，
+         所以简介必须放在 header 外面才看得见 -->
+    <div v-if="activeCourseIntro" class="learn-course-intro" :title="activeCourseIntro">
+      {{ activeCourseIntro }}
     </div>
 
     <el-empty v-if="!courseId">
@@ -1573,9 +1576,9 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* 当前课程简介（教师填写）：头部标题下一行，两行截断 */
+/* 当前课程简介（教师填写）：内容区首行，两行截断 */
 .learn-course-intro {
-  margin-top: 6px;
+  margin: 0 0 14px;
   max-width: 760px;
   color: var(--gray-500, #8a94a2);
   font-size: 12px;
