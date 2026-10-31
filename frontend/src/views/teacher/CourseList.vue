@@ -775,9 +775,10 @@ watch(
 }
 
 .course-main {
+  /* 给右上角常驻的四个操作按钮让位（4×36 + 3×8 + 余量），避免长课程名被压住 */
+  padding-right: 192px;
   min-width: 0;
   flex: 1;
-  padding-right: 18px;
 }
 
 .course-name {
@@ -832,20 +833,33 @@ watch(
 /* 操作按钮常驻显示：hover 才出现会让教师找不到入口（现场反馈） */
 .course-actions {
   position: absolute;
-  top: 16px;
-  right: 18px;
+  top: 14px;
+  right: 16px;
   z-index: 2;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   opacity: 1;
   pointer-events: auto;
 }
 
+/* 操作按钮放大到 36px：28px 点击热区太小（现场反馈不好点） */
 .course-actions :deep(.el-button) {
-  width: 28px;
-  height: 28px;
-  background: rgba(255, 255, 255, 0.86);
+  width: 36px;
+  height: 36px;
+  border: 1px solid #e6e9ee;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
+}
+
+.course-actions :deep(.el-button .el-icon) {
+  font-size: 17px;
+}
+
+.course-actions :deep(.el-button:hover) {
+  background: #eff5ff;
+  border-color: #c7d9f7;
+  color: #2563eb;
 }
 
 .course-arrow {
