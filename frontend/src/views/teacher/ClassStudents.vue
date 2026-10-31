@@ -309,15 +309,12 @@ const sortJoined = (a, b) => new Date(a.joined_at) - new Date(b.joined_at)
 const sortLastLogin = (a, b) => new Date(a.last_login || 0) - new Date(b.last_login || 0)
 
 // ---- 学生详情 ----
-const courseOptions = computed(() => {
-  const ids = cls.value?.courses?.length
-    ? cls.value.courses
-    : (cls.value?.course ? [cls.value.course] : [])
-  const names = cls.value?.course_names || []
-  return ids.map((id, i) => ({ id, name: names[i] || cls.value?.course_name || `课程 ${id}` }))
-})
 function openDetail(stu) {
-  const course = courseOptions.value[0]?.id
+  // 默认课程取「我在该班任课的第一门」（my_course_ids，管理员=全部）；
+  // 取不到就不传 course，由后端自动落我的课——原实现盲取班级第一门课，
+  // 多教师共用班级时会取到别人的课，详情接口直接 403
+  const mine = cls.value?.my_course_ids || []
+  const course = mine[0] || null
   router.push({
     name: isAdmin.value ? 'admin-class-student-detail' : 'class-student-detail',
     params: { classId, studentId: stu.student },

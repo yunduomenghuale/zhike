@@ -17,6 +17,8 @@ class ClassRoomSerializer(serializers.ModelSerializer):
     )
     course_name = serializers.SerializerMethodField()
     course_names = serializers.SerializerMethodField()
+    # 当前用户在该班任课的课程 id（管理员=全部）：列表页点学生详情时用它选默认课程
+    my_course_ids = serializers.SerializerMethodField()
     student_count = serializers.IntegerField(source="students.count", read_only=True)
     teacher_name = serializers.CharField(source="teacher.real_name", read_only=True, default="")
     status_display = serializers.CharField(source="get_status_display", read_only=True)
@@ -25,7 +27,7 @@ class ClassRoomSerializer(serializers.ModelSerializer):
     class Meta:
         model = ClassRoom
         fields = [
-            "id", "course", "course_name", "courses", "course_names", "code", "name",
+            "id", "course", "course_name", "courses", "course_names", "my_course_ids", "code", "name",
             "teacher", "teacher_name", "enrollment_year", "duration_years", "graduate_year",
             "invite_code", "invite_enabled", "start_at", "end_at",
             "status", "status_display", "student_count", "created_at",
@@ -39,6 +41,19 @@ class ClassRoomSerializer(serializers.ModelSerializer):
 
     def get_course_names(self, obj) -> list[str]:
         return [link.course.name for link in obj.course_links.all()]
+
+    def get_my_course_ids(self, obj) -> list[int]:
+        """当前用户在该班任课的课程 id（管理员=全部）。
+
+        列表页点学生详情时用它取默认课程：原来前端取「班级第一门课」，
+        多教师共用班级时会取到别人的课，详情接口直接 403。
+        """
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            return []
+        qs = obj.courses.all() if is_platform_admin(user) else obj.courses.filter(teacher=user)
+        return list(qs.order_by("id").values_list("id", flat=True))
 
     def validate(self, attrs):
         legacy_course = attrs.get("course")

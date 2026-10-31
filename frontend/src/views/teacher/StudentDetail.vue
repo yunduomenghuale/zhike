@@ -353,7 +353,10 @@ async function loadCourseOptions() {
   const names = classroom?.course_names || []
   courseOptions.value = ids.map((id, i) => ({ id, name: names[i] || classroom?.course_name || `课程 ${id}` }))
   if (!courseId.value && courseOptions.value.length) {
-    courseId.value = courseOptions.value[0].id
+    // 默认落「我在该班任课的第一门」（my_course_ids）：班级可能由多教师共用，
+    // 盲取第一门会选到别人的课、详情接口 403
+    const mine = classroom?.my_course_ids || []
+    courseId.value = mine[0] || courseOptions.value[0].id
   }
 }
 
