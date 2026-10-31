@@ -351,12 +351,14 @@ async function loadCourseOptions() {
     ? classroom.courses
     : (classroom?.course ? [classroom.course] : [])
   const names = classroom?.course_names || []
-  courseOptions.value = ids.map((id, i) => ({ id, name: names[i] || classroom?.course_name || `课程 ${id}` }))
+  const nameById = new Map(ids.map((id, i) => [id, names[i] || classroom?.course_name || `课程 ${id}`]))
+  // 下拉只列「我在该班任课的课」（my_course_ids；管理员=全部）。
+  // 列全部课程的话，选到别的老师的课必定 403（现场反馈）
+  const mine = classroom?.my_course_ids || []
+  const visibleIds = mine.length ? mine : ids
+  courseOptions.value = visibleIds.map((id) => ({ id, name: nameById.get(id) || `课程 ${id}` }))
   if (!courseId.value && courseOptions.value.length) {
-    // 默认落「我在该班任课的第一门」（my_course_ids）：班级可能由多教师共用，
-    // 盲取第一门会选到别人的课、详情接口 403
-    const mine = classroom?.my_course_ids || []
-    courseId.value = mine[0] || courseOptions.value[0].id
+    courseId.value = courseOptions.value[0].id
   }
 }
 
