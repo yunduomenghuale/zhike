@@ -123,7 +123,10 @@ async function main() {
       // 元素矩形含 padding，真正要判断的是文本内容区右边界
       const titlePadRight = titleEl ? parseFloat(getComputedStyle(titleEl).paddingRight) || 0 : 0
       const contentRight = title ? title.right - titlePadRight : 0
-      const overlapsTitle = !!(title && firstBtn) && contentRight > rect.left
+      // 重叠 = 水平与垂直同时相交（按钮已在底栏，垂直上不占标题区）
+      const horizontalHit = !!(title && firstBtn) && contentRight > rect.left
+      const verticalHit = !!(title && firstBtn) && rect.top < title.bottom && rect.bottom > title.top
+      const overlapsTitle = horizontalHit && verticalHit
       return JSON.stringify({
         count: buttons.length,
         opacity: cs.opacity,

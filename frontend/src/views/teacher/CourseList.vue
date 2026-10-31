@@ -737,10 +737,15 @@ watch(
 .course-card {
   position: relative;
   min-height: 148px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 20px 48px 20px 20px;
+  /* 两行网格：上排「图标 + 课程信息」占满宽度，下排操作按钮独立成栏。
+     按钮不能再绝对定位压住标题——多课程时每列只有 320px，
+     168px 的按钮组会把标题挤成一字一列的竖排（现场截图） */
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  column-gap: 16px;
+  align-items: start;
+  padding: 18px 20px 14px;
   border: 1px solid var(--gray-100);
   border-radius: 14px;
   background: #fff;
@@ -757,6 +762,8 @@ watch(
 }
 
 .course-icon {
+  grid-column: 1;
+  grid-row: 1;
   width: 62px;
   height: 62px;
   border-radius: 15px;
@@ -775,10 +782,9 @@ watch(
 }
 
 .course-main {
-  /* 给右上角常驻的四个操作按钮让位（4×36 + 3×8 + 余量），避免长课程名被压住 */
-  padding-right: 192px;
+  grid-column: 2;
+  grid-row: 1;
   min-width: 0;
-  flex: 1;
 }
 
 .course-name {
@@ -830,17 +836,17 @@ watch(
   white-space: nowrap;
 }
 
-/* 操作按钮常驻显示：hover 才出现会让教师找不到入口（现场反馈） */
+/* 操作按钮常驻：底栏独立一行（36px 热区，不压标题） */
 .course-actions {
-  position: absolute;
-  top: 14px;
-  right: 16px;
-  z-index: 2;
+  grid-column: 1 / -1;
+  grid-row: 2;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
-  opacity: 1;
-  pointer-events: auto;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--gray-100);
 }
 
 /* 操作按钮放大到 36px：28px 点击热区太小（现场反馈不好点） */
@@ -863,10 +869,7 @@ watch(
 }
 
 .course-arrow {
-  position: absolute;
-  top: 50%;
-  right: 20px;
-  transform: translateY(-50%) translateX(-4px);
+  display: none;
   color: var(--el-text-color-placeholder);
   font-size: 24px;
   opacity: 0.62;
