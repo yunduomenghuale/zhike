@@ -34,6 +34,7 @@
 
           <div class="course-actions" @click.stop>
             <el-button text circle :icon="Edit" @click="openDialog(row)" />
+            <el-button text circle :icon="School" title="授课班级" @click="openClassrooms(row)" />
             <el-button text circle :icon="CopyDocument" title="复用课程" @click="openReuse(row)" />
             <el-button text circle type="danger" :icon="Delete" title="删除课程" @click="openDelete(row)" />
           </div>
@@ -78,7 +79,15 @@
             <el-input v-model="form.name" placeholder="请输入课程名称" />
           </el-form-item>
           <el-form-item label="学期">
-            <el-input v-model="form.term" placeholder="如 2026 春" />
+            <div class="term-picker">
+              <el-select v-model="form.termYear" placeholder="年份" class="term-picker-year">
+                <el-option v-for="year in termYears" :key="year" :label="`${year} 年`" :value="year" />
+              </el-select>
+              <el-select v-model="form.termSeason" class="term-picker-season">
+                <el-option label="春季" value="spring" />
+                <el-option label="秋季" value="autumn" />
+              </el-select>
+            </div>
           </el-form-item>
           <el-form-item label="状态">
             <el-select v-model="form.status" style="width: 100%">
@@ -253,6 +262,13 @@
       </template>
     </el-dialog>
 
+    <CourseClassroomDrawer
+      v-model="classroomVisible"
+      :course-id="classroomCourse?.id"
+      :course-name="classroomCourse?.name || ''"
+      @done="load"
+    />
+
     <CourseReuseDialog v-model="reuseVisible" :course="reuseTarget" @done="load" />
 
     <DeleteConfirmDialog
@@ -280,12 +296,14 @@ import {
   Close,
   Plus,
   UploadFilled,
+  School,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import TableSkeleton from '@/components/TableSkeleton.vue'
 import { genUid } from '@/utils/uid'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
 import CourseReuseDialog from '@/components/CourseReuseDialog.vue'
+import CourseClassroomDrawer from '@/components/CourseClassroomDrawer.vue'
 import {
   listCourses,
   createCourse,
@@ -313,7 +331,38 @@ const deleteTarget = ref(null)
 const deleting = ref(false)
 const reuseVisible = ref(false)
 const reuseTarget = ref(null)
-const form = reactive({ name: '', term: '', intro: '', status: 'active' })
+const classroomVisible = ref(false)
+const classroomCourse = ref(null)
+
+function openClassrooms(row) {
+  classroomCourse.value = row
+  classroomVisible.value = true
+}
+
+const form = reactive({ name: '', termYear: null, termSeason: 'spring', intro: '', status: 'active' })
+
+// 学期 = 年份下拉 + 春秋下拉（2026-10-31 统一下拉交互，默认今年春季）；
+// 提交时拼成「2026春」文本，后端 ensure_term 自动解析/建学期字典
+const TERM_SEASON_LABEL = { spring: '春', autumn: '秋' }
+const termYears = (() => {
+  const current = new Date().getFullYear()
+  const years = []
+  for (let y = current - 3; y <= current + 3; y += 1) years.push(y)
+  return years.reverse()
+})()
+
+function parseTermText(text) {
+  const raw = String(text || '')
+  const yearMatch = raw.match(/(20\d{2})/)
+  const year = yearMatch ? Number(yearMatch[1]) : new Date().getFullYear()
+  const season = /春|上/.test(raw) ? 'spring' : /秋|下/.test(raw) ? 'autumn' : 'spring'
+  return { year, season }
+}
+
+function termText() {
+  if (!form.termYear) return ''
+  return `${form.termYear}${TERM_SEASON_LABEL[form.termSeason] || '春'}`
+}
 
 const catalogVisible = ref(false)
 const catalogSaving = ref(false)
@@ -339,7 +388,12 @@ async function load() {
 
 function openDialog(row) {
   editing.value = row || null
-  Object.assign(form, row ? { ...row } : { name: '', term: '', intro: '', status: 'active' })
+  if (row) {
+    const { year, season } = parseTermText(row.term)
+    Object.assign(form, { name: row.name, termYear: year, termSeason: season, intro: row.intro || '', status: row.status })
+  } else {
+    Object.assign(form, { name: '', termYear: new Date().getFullYear(), termSeason: 'spring', intro: '', status: 'active' })
+  }
   dialogVisible.value = true
 }
 
@@ -353,7 +407,7 @@ async function saveCourse() {
   try {
     const payload = {
       name: form.name,
-      term: form.term,
+      term: termText(),
       intro: form.intro,
       status: form.status,
     }

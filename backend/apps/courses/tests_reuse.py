@@ -583,8 +583,7 @@ class ReuseApiTests(ReuseTestBase):
             submit.return_value = AITask(id=99, status=AITask.Status.PENDING)
             resp = self.client.post(
                 f"/api/courses/{self.course.id}/reuse/",
-                {"name": "新学期的课", "term_year": 2027, "term_season": "spring",
-                 "include_questions": True},
+                {"name": "新学期的课", "term": "2027春", "include_questions": True},
                 format="json",
             )
         self.assertEqual(resp.status_code, 200)
@@ -599,45 +598,39 @@ class ReuseApiTests(ReuseTestBase):
         })
         self.assertEqual(kwargs["progress"]["stage"], "pending")
 
-    def test_reuse_auto_creates_term_from_year_and_season(self):
-        """学期由教师直接选年份+春/秋：字典没有就自动建，且重复提交不重复建。"""
+    def test_reuse_auto_creates_term_from_text(self):
+        """学期由教师直接选年份+春/秋（前端拼文本）：字典没有就自动建，重复提交不重复建。"""
         self.client.force_authenticate(user=self.teacher)
         with patch("apps.courses.views.submit_ai_task") as submit:
             submit.return_value = AITask(id=102, status=AITask.Status.PENDING)
             resp = self.client.post(
                 f"/api/courses/{self.course.id}/reuse/",
-                {"term_year": 2030, "term_season": "autumn"}, format="json",
+                {"term": "2030秋"}, format="json",
             )
             self.assertEqual(resp.status_code, 200, resp.json())
             term = Term.objects.get(year=2030, season=Term.Season.AUTUMN)
             self.assertEqual(term.name, "2030秋")
             self.assertEqual(submit.call_args.kwargs["progress"]["options"]["term_id"], term.id)
 
-            # 幂等：同组合再提交一次，不新增学期记录
+            # 幂等：同学期再提交一次，不新增学期记录
             self.client.post(
                 f"/api/courses/{self.course.id}/reuse/",
-                {"term_year": 2030, "term_season": "autumn"}, format="json",
+                {"term": "2030秋"}, format="json",
             )
         self.assertEqual(Term.objects.filter(year=2030, season=Term.Season.AUTUMN).count(), 1)
 
-    def test_reuse_rejects_bad_term_year_or_season(self):
+    def test_reuse_rejects_bad_term_text(self):
         self.client.force_authenticate(user=self.teacher)
         with patch("apps.courses.views.submit_ai_task") as submit:
-            bad_type = self.client.post(
-                f"/api/courses/{self.course.id}/reuse/", {"term_year": "abc"}, format="json")
-            out_of_range = self.client.post(
-                f"/api/courses/{self.course.id}/reuse/", {"term_year": 1999}, format="json")
-            bad_season = self.client.post(
-                f"/api/courses/{self.course.id}/reuse/",
-                {"term_year": 2031, "term_season": "summer"}, format="json")
-        self.assertEqual(bad_type.status_code, 400)
-        self.assertIn("学期年份", bad_type.json()["message"])
-        self.assertEqual(out_of_range.status_code, 400)
-        self.assertIn("2000", out_of_range.json()["message"])
-        self.assertEqual(bad_season.status_code, 400)
-        self.assertIn("春季或秋季", bad_season.json()["message"])
+            no_year = self.client.post(
+                f"/api/courses/{self.course.id}/reuse/", {"term": "春季"}, format="json")
+            no_season = self.client.post(
+                f"/api/courses/{self.course.id}/reuse/", {"term": "2031"}, format="json")
+        self.assertEqual(no_year.status_code, 400)
+        self.assertIn("学期格式", no_year.json()["message"])
+        self.assertEqual(no_season.status_code, 400)
+        self.assertIn("学期格式", no_season.json()["message"])
         submit.assert_not_called()
-        self.assertFalse(Term.objects.filter(year=2031).exists())
 
     def test_reuse_defaults_name_and_term(self):
         self.client.force_authenticate(user=self.teacher)

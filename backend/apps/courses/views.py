@@ -16,7 +16,7 @@ from django.utils import timezone
 from apps.ai.quota import check_ai_quota
 from apps.ai.services import generate_catalog_from_plan, generate_scripts_for_video
 from apps.ai.tasks import submit_ai_task
-from apps.common.access import courses_for_user, student_study_block_detail
+from apps.common.access import courses_for_user, is_platform_admin, student_study_block_detail
 from apps.common.error_pages import render_block_page
 from apps.common.permissions import IsStudent, IsTeacher, IsTeacherOrReadOnly
 from apps.common.response import api_response
@@ -26,6 +26,7 @@ from apps.knowledge.models import KnowledgeChunk
 from . import resource_gate
 from .models import Catalog, Course, CourseResource, PPTResource, TeachingVideo, VideoWatchProgress
 from .reuse import course_asset_stats
+from .terms import ensure_term
 from .serializers import (
     CatalogSerializer,
     CourseResourceSerializer,
@@ -163,7 +164,6 @@ class CourseViewSet(BaseModelViewSet):
     def reuse(self, request, pk=None):
         """提交复用任务：秒级返回 task_id，前端轮询 /api/ai-tasks/<id>/ 看进度。"""
         from apps.ai.models import AITask
-        from .models import Term
 
         course = self.get_object()
         denied = self._reuse_denied(request, course)
@@ -175,28 +175,18 @@ class CourseViewSet(BaseModelViewSet):
         name = str(request.data.get("name") or "").strip() or f"{course.name}（复用）"
         if len(name) > 200:
             return api_response(message="课程名称不能超过 200 字", code=400, status=400)
-        # 学期选择（2026-10-31）：教师直接选「年份 + 春/秋」，字典里没有就自动建，
-        # 不再要求管理员预维护学期字典；年份留空 = 沿用原课程学期。
-        term_year = request.data.get("term_year")
-        if term_year in ("", None):
+        # 学期选择（2026-10-31）：教师直接选「年份 + 春/秋」，前端拼成「2027春」文本；
+        # 与建课走同一条 ensure_term 解析（字典没有就自动建），年份留空 = 沿用原课程学期。
+        term_raw = request.data.get("term")
+        if term_raw in ("", None):
             term_id = course.term_id
         else:
-            try:
-                term_year = int(term_year)
-            except (TypeError, ValueError):
-                return api_response(message="学期年份不合法", code=400, status=400)
-            if not (2000 <= term_year <= 2100):
-                return api_response(message="学期年份需在 2000–2100 之间", code=400, status=400)
-            season = str(request.data.get("term_season") or "").strip()
-            if season not in (Term.Season.SPRING, Term.Season.AUTUMN):
-                return api_response(message="学期季节只能是春季或秋季", code=400, status=400)
-            # get_or_create 按 (year, season) 定位；name 与组合一一对应（2027春/2026秋），
-            # 并发下 name 唯一约束兜底，撞了就把已存在的取回来
-            term, _ = Term.objects.get_or_create(
-                year=term_year,
-                season=season,
-                defaults={"name": f"{term_year}{'春' if season == Term.Season.SPRING else '秋'}"},
-            )
+            term = ensure_term(str(term_raw))
+            if term is None:
+                return api_response(
+                    message="学期格式不合法，应为「年份+春/秋」，如 2027春",
+                    code=400, status=400,
+                )
             term_id = term.id
 
         # 同一门课不允许同时挂两个复用任务（避免撞出两份半成品）
@@ -228,6 +218,82 @@ class CourseViewSet(BaseModelViewSet):
         )
         return api_response({"task_id": task.id, "status": task.status},
                             message="已开始复用，可在任务进度中查看")
+
+    # ------------------------------------------------------------------
+    # 授课班级（2026-10-31）：教师新建课程后需要把课程挂到班级上课。
+    # 班级维护归管理员（P1），但「这门课在哪些班上课」是教学动作：
+    # 只追加 ClassCourse 关联，不改班级任何属性，且仅课程负责人可操作。
+    # 注意：教师无法用 ClassRoomViewSet.PATCH 做这件事——他的可见班级
+    # 是"自己课挂过的班"，新课程没挂班就取不到任何班（死锁），故单开接口。
+    # ------------------------------------------------------------------
+    def _assert_course_owner(self, request, course):
+        if is_platform_admin(request.user) or course.teacher_id == request.user.id:
+            return None
+        raise PermissionDenied("只有课程负责人可以管理授课班级")
+
+    @action(detail=True, methods=["get"], url_path="classroom-options")
+    def classroom_options(self, request, pk=None):
+        """授课班级选择器：全校班级精简列表 + 本课程是否已关联。
+
+        只返回班级元信息（名称/编码/状态/在读人数），不含学生名单。
+        """
+        from django.db.models import Count, Q
+
+        from apps.classroom.models import ClassRoom, ClassStudent
+
+        course = self.get_object()
+        self._assert_course_owner(request, course)
+        occupying = Q(
+            students__learn_status__in=ClassStudent.OCCUPYING_STATUSES
+        )
+        rooms = (
+            ClassRoom.objects.exclude(status=ClassRoom.Status.ARCHIVED)
+            .annotate(occupied_count=Count("students", filter=occupying, distinct=True))
+            .order_by("id")
+        )
+        linked_ids = set(course.classes.values_list("id", flat=True))
+        return api_response({
+            "classrooms": [
+                {
+                    "id": room.id,
+                    "name": room.name,
+                    "code": room.code,
+                    "status": room.status,
+                    "status_display": room.get_status_display(),
+                    "student_count": room.occupied_count,
+                    "linked": room.id in linked_ids,
+                }
+                for room in rooms
+            ],
+        })
+
+    @action(detail=True, methods=["post"], url_path="link-classrooms")
+    def link_classrooms(self, request, pk=None):
+        """把课程关联到所选班级（只追加，不删除已有关系）。"""
+        from apps.classroom.models import ClassCourse, ClassRoom
+
+        course = self.get_object()
+        self._assert_course_owner(request, course)
+        ids = request.data.get("classroom_ids")
+        if not isinstance(ids, list) or not ids:
+            return api_response(message="请选择至少一个班级", code=400, status=400)
+        rooms = ClassRoom.objects.filter(id__in=ids).exclude(
+            status=ClassRoom.Status.ARCHIVED
+        )
+        if not rooms.exists():
+            return api_response(message="所选班级不存在或已归档", code=400, status=400)
+        created = 0
+        for room in rooms:
+            _, is_new = ClassCourse.objects.get_or_create(classroom=room, course=course)
+            created += 1 if is_new else 0
+        if not created:
+            return api_response(
+                {"linked": 0, "total": rooms.count()}, message="所选班级已关联本课程"
+            )
+        return api_response(
+            {"linked": created, "total": rooms.count()},
+            message=f"已关联 {created} 个班级",
+        )
 
 
 class CatalogViewSet(BaseModelViewSet):

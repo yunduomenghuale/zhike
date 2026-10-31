@@ -72,10 +72,14 @@
                 >
                   <el-option v-for="year in termYears" :key="year" :label="`${year} 年`" :value="year" />
                 </el-select>
-                <el-radio-group v-model="form.termSeason" :disabled="!form.termYear">
-                  <el-radio-button value="autumn">秋季</el-radio-button>
-                  <el-radio-button value="spring">春季</el-radio-button>
-                </el-radio-group>
+                <el-select
+                  v-model="form.termSeason"
+                  :disabled="!form.termYear"
+                  class="reuse-select-season"
+                >
+                  <el-option label="春季" value="spring" />
+                  <el-option label="秋季" value="autumn" />
+                </el-select>
               </div>
             </el-form-item>
             <el-form-item label="题库">
@@ -193,7 +197,7 @@ const preview = ref(null)
 
 // 学期直接选「年份 + 春/秋」（2026-10-31）：不再依赖管理员预维护的学期字典，
 // 后端按年份+季节自动建；年份留空 = 沿用原课程学期
-const form = reactive({ name: '', termYear: null, termSeason: 'autumn', includeQuestions: false })
+const form = reactive({ name: '', termYear: null, termSeason: 'spring', includeQuestions: false })
 
 const termYears = (() => {
   const current = new Date().getFullYear()
@@ -306,7 +310,7 @@ async function loadPreview() {
     preview.value = data
     form.name = data.default_name || `${data.course?.name || ''}（复用）`
     form.termYear = data.course?.term_year ?? null
-    form.termSeason = data.course?.term_season || 'autumn'
+    form.termSeason = data.course?.term_season || 'spring'
     form.includeQuestions = (data.assets?.question_count || 0) > 0
   } catch (error) {
     loadError.value = error?.message || '资产清单加载失败'
@@ -334,8 +338,9 @@ async function submit() {
   try {
     const res = await reuseCourse(props.course.id, {
       name,
-      term_year: form.termYear || null,
-      term_season: form.termYear ? form.termSeason : null,
+      term: form.termYear
+        ? `${form.termYear}${form.termSeason === 'spring' ? '春' : '秋'}`
+        : '',
       include_questions: form.includeQuestions,
     })
     startPolling(res.task_id, { onSuccess, onFailed })
@@ -557,6 +562,11 @@ watch(
 .reuse-select-year {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+.reuse-select-season {
+  width: 96px;
+  flex: 0 0 96px;
 }
 
 .reuse-check {

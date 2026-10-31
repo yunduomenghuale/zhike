@@ -91,3 +91,8 @@ export const unpublishCourseResource = (id) => request.post(`/course-resources/$
 export const signCourseResource = (id) => request.post(`/course-resources/${id}/sign/`)
 // 教师添加资源前预览平台预置页（按路径签发）
 export const signPresetPage = (path) => request.post('/course-resources/preset-sign/', { path })
+
+// 授课班级：课程负责人把课程挂到班级（只追加关联，不改班级属性）
+export const getClassroomOptions = (courseId) => request.get(`/courses/${courseId}/classroom-options/`)
+export const linkClassrooms = (courseId, classroomIds) =>
+  request.post(`/courses/${courseId}/link-classrooms/`, { classroom_ids: classroomIds })
