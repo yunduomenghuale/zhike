@@ -150,7 +150,10 @@ class CourseViewSet(BaseModelViewSet):
         stats = course_asset_stats(course)
         return api_response({
             "course": {"id": course.id, "name": course.name,
-                       "term_id": course.term_id, "term_name": course.term.name if course.term else ""},
+                       "term_id": course.term_id, "term_name": course.term.name if course.term else "",
+                       # 学期改为「年份 + 春/秋」直接选（2026-10-31），预填原课程的学期分量
+                       "term_year": course.term.year if course.term else None,
+                       "term_season": course.term.season if course.term else None},
             "assets": stats.as_dict(),
             "default_name": f"{course.name}（复用）"[:200],
             "terms": list(Term.objects.order_by("-year", "season").values("id", "name")),
@@ -160,6 +163,7 @@ class CourseViewSet(BaseModelViewSet):
     def reuse(self, request, pk=None):
         """提交复用任务：秒级返回 task_id，前端轮询 /api/ai-tasks/<id>/ 看进度。"""
         from apps.ai.models import AITask
+        from .models import Term
 
         course = self.get_object()
         denied = self._reuse_denied(request, course)
@@ -171,18 +175,29 @@ class CourseViewSet(BaseModelViewSet):
         name = str(request.data.get("name") or "").strip() or f"{course.name}（复用）"
         if len(name) > 200:
             return api_response(message="课程名称不能超过 200 字", code=400, status=400)
-        term_id = request.data.get("term_id")
-        if term_id in ("", None):
+        # 学期选择（2026-10-31）：教师直接选「年份 + 春/秋」，字典里没有就自动建，
+        # 不再要求管理员预维护学期字典；年份留空 = 沿用原课程学期。
+        term_year = request.data.get("term_year")
+        if term_year in ("", None):
             term_id = course.term_id
         else:
             try:
-                term_id = int(term_id)
+                term_year = int(term_year)
             except (TypeError, ValueError):
-                return api_response(message="学期参数不合法", code=400, status=400)
-            from .models import Term
-
-            if not Term.objects.filter(id=term_id).exists():
-                return api_response(message="学期不存在", code=400, status=400)
+                return api_response(message="学期年份不合法", code=400, status=400)
+            if not (2000 <= term_year <= 2100):
+                return api_response(message="学期年份需在 2000–2100 之间", code=400, status=400)
+            season = str(request.data.get("term_season") or "").strip()
+            if season not in (Term.Season.SPRING, Term.Season.AUTUMN):
+                return api_response(message="学期季节只能是春季或秋季", code=400, status=400)
+            # get_or_create 按 (year, season) 定位；name 与组合一一对应（2027春/2026秋），
+            # 并发下 name 唯一约束兜底，撞了就把已存在的取回来
+            term, _ = Term.objects.get_or_create(
+                year=term_year,
+                season=season,
+                defaults={"name": f"{term_year}{'春' if season == Term.Season.SPRING else '秋'}"},
+            )
+            term_id = term.id
 
         # 同一门课不允许同时挂两个复用任务（避免撞出两份半成品）
         running = AITask.objects.filter(

@@ -26,7 +26,6 @@ from openpyxl.styles import Alignment, Font, PatternFill
 
 from apps.classroom.models import ClassRoom, ClassStudent
 from apps.classroom.services import ClassServiceError, assign_students
-from apps.courses.models import Term
 from apps.users.models import User
 from apps.users.validators import STUDENT, TEACHER, account_problem, account_rule_text
 
@@ -43,19 +42,13 @@ DEFAULT_DURATION = 4
 
 
 def infer_enrollment_year() -> int:
-    """自动建班时入学年留空的兜底值。
+    """自动建班时入学年留空的兜底值：取当前自然年（今年 2026 即得 2026）。
 
-    没有兜底会落 NULL，而毕业预览把 graduate_year=None 视为「已到毕业年份」
-    （graduation.py 的 year_reached 语义），一键整班毕业就会误伤这批学生。
-    推导优先级：当前学期字典（is_current）→ 按季节折算学年起始年
-    （春季学期入学属于上一学年，如 2026 春 → 入学年 2025）；
-    无学期字典时按 9 月分界取自然年。
+    用户拍板（2026-10-31）：不做学期字典推导，属性不填就给个合理默认值、
+    不允许为空即可，后续管理员有需要自己改（为空会让毕业预览把
+    graduate_year=None 误判为「已到毕业年份」）。
     """
-    term = Term.objects.filter(is_current=True).first()
-    if term is not None:
-        return term.year + (1 if term.season == Term.Season.SPRING else 0)
-    today = timezone.localdate()
-    return today.year if today.month >= 9 else today.year - 1
+    return timezone.localdate().year
 MIN_YEAR, MAX_YEAR = 2000, 2100
 
 # 占用中/可入班的班级状态（其余状态视为不可再分配学生）

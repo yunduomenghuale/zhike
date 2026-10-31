@@ -63,9 +63,20 @@
           </el-form-item>
           <div class="reuse-form-row">
             <el-form-item label="学期">
-              <el-select v-model="form.termId" placeholder="沿用原课程学期" clearable class="reuse-select">
-                <el-option v-for="term in terms" :key="term.id" :label="term.name" :value="term.id" />
-              </el-select>
+              <div class="reuse-term-picker">
+                <el-select
+                  v-model="form.termYear"
+                  placeholder="沿用原课程学期"
+                  clearable
+                  class="reuse-select reuse-select-year"
+                >
+                  <el-option v-for="year in termYears" :key="year" :label="`${year} 年`" :value="year" />
+                </el-select>
+                <el-radio-group v-model="form.termSeason" :disabled="!form.termYear">
+                  <el-radio-button value="autumn">秋季</el-radio-button>
+                  <el-radio-button value="spring">春季</el-radio-button>
+                </el-radio-group>
+              </div>
             </el-form-item>
             <el-form-item label="题库">
               <label class="reuse-check">
@@ -180,7 +191,16 @@ const loadError = ref('')
 const submitting = ref(false)
 const preview = ref(null)
 
-const form = reactive({ name: '', termId: null, includeQuestions: false })
+// 学期直接选「年份 + 春/秋」（2026-10-31）：不再依赖管理员预维护的学期字典，
+// 后端按年份+季节自动建；年份留空 = 沿用原课程学期
+const form = reactive({ name: '', termYear: null, termSeason: 'autumn', includeQuestions: false })
+
+const termYears = (() => {
+  const current = new Date().getFullYear()
+  const years = []
+  for (let y = current - 3; y <= current + 3; y += 1) years.push(y)
+  return years.reverse()
+})()
 
 const visible = computed({
   get: () => props.modelValue,
@@ -189,7 +209,6 @@ const visible = computed({
 
 const running = computed(() => step.value === 'running')
 
-const terms = computed(() => preview.value?.terms || [])
 const questionCount = computed(() => preview.value?.assets?.question_count || 0)
 
 const assetRows = computed(() => {
@@ -286,7 +305,8 @@ async function loadPreview() {
     const data = await getReusePreview(props.course.id)
     preview.value = data
     form.name = data.default_name || `${data.course?.name || ''}（复用）`
-    form.termId = data.course?.term_id ?? null
+    form.termYear = data.course?.term_year ?? null
+    form.termSeason = data.course?.term_season || 'autumn'
     form.includeQuestions = (data.assets?.question_count || 0) > 0
   } catch (error) {
     loadError.value = error?.message || '资产清单加载失败'
@@ -314,7 +334,8 @@ async function submit() {
   try {
     const res = await reuseCourse(props.course.id, {
       name,
-      term_id: form.termId,
+      term_year: form.termYear || null,
+      term_season: form.termYear ? form.termSeason : null,
       include_questions: form.includeQuestions,
     })
     startPolling(res.task_id, { onSuccess, onFailed })
@@ -523,6 +544,19 @@ watch(
 
 .reuse-select {
   width: 100%;
+}
+
+/* 学期 = 年份下拉 + 春/秋单选，横向一行（年份留空表示沿用原课程学期） */
+.reuse-term-picker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.reuse-select-year {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .reuse-check {
