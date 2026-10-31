@@ -9,6 +9,7 @@
             </span>
             <div class="class-main">
               <div class="class-name" :title="c.courseName">{{ c.courseName }}</div>
+              <div v-if="c.intro" class="class-intro" :title="c.intro">{{ c.intro }}</div>
               <div class="class-meta">
                 <span class="class-chip" :title="c.className">{{ c.className }}</span>
                 <el-tag :type="classStatusMeta(c.status).type" effect="light" round class="class-status">
@@ -41,7 +42,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { Reading, ArrowRight } from '@element-plus/icons-vue'
 import { listClasses } from '@/api/classroom'
 import { classStatusMeta } from '@/utils/classStatus'
-import { listCatalogs, listWatchProgress } from '@/api/course'
+import { listCatalogs, listCourses, listWatchProgress } from '@/api/course'
 import { chapterProgress } from '@/utils/learningProgress'
 
 const route = useRoute()
@@ -49,6 +50,7 @@ const router = useRouter()
 const classes = ref([])
 const loading = ref(false)
 const courseProgress = ref({}) // courseId -> 总进度百分比
+const courseIntro = ref({})    // courseId -> 课程简介（教师填写，学生端展示）
 
 // 课程总进度：各章进度平均（无记录的章计 0%）
 async function loadCourseProgress(courseIds) {
@@ -87,6 +89,7 @@ const courseCards = computed(() => {
         classId: item.id,
         className: item.name,
         courseName: item.course_names?.[index] || item.course_name || `课程 ${id}`,
+        intro: courseIntro.value[id] || '',
         status: item.status,
       })
     })
@@ -104,8 +107,18 @@ const filteredClasses = computed(() => {
 async function load() {
   loading.value = true
   try {
-    const data = await listClasses()
+    // 班级接口只有课程名，课程简介要单独从课程接口取（学生可见课程，含 intro）
+    const [data, courseData] = await Promise.all([
+      listClasses(),
+      listCourses({ page_size: 100 }).catch(() => ({})),
+    ])
     classes.value = data.results ?? data
+    const courseRows = courseData?.results ?? courseData
+    const introMap = {}
+    ;(Array.isArray(courseRows) ? courseRows : []).forEach((row) => {
+      if (row?.intro) introMap[Number(row.id)] = row.intro
+    })
+    courseIntro.value = introMap
     const ids = [...new Set(courseCards.value.map((c) => c.id))]
     if (ids.length) loadCourseProgress(ids)
   } finally {
@@ -174,6 +187,17 @@ onMounted(load)
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* 课程简介：教师填写的介绍，两行截断，全文在 title 里悬停可见 */
+.class-intro {
+  margin-top: 4px;
+  color: var(--gray-500, #8a94a2);
+  font-size: 12px;
+  line-height: 1.5;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 .class-meta {
   display: flex;

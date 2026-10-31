@@ -454,6 +454,9 @@
       <div>
         <div class="page-title">课程学习</div>
         <div class="page-subtitle">按章节学习课件与讲解，并完成章节练习</div>
+        <div v-if="activeCourseIntro" class="learn-course-intro" :title="activeCourseIntro">
+          {{ activeCourseIntro }}
+        </div>
       </div>
       <el-select
         v-if="!fixedCourseId"
@@ -552,7 +555,7 @@ import {
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { listClasses } from '@/api/classroom'
-import { listCatalogs, listPpts, listVideos, listWatchProgress, reportVideoProgress } from '@/api/course'
+import { listCatalogs, listCourses, listPpts, listVideos, listWatchProgress, reportVideoProgress } from '@/api/course'
 import { chapterProgress } from '@/utils/learningProgress'
 import { listQuestions, practiceSubmit } from '@/api/question'
 import { listMaterials, getQaVisionCapability } from '@/api/knowledge'
@@ -580,6 +583,11 @@ const keyword = computed(() => String(route.query.search || '').trim().toLowerCa
 const filteredCourses = computed(() => {
   if (!keyword.value) return courses.value
   return courses.value.filter((c) => String(c.name || '').toLowerCase().includes(keyword.value))
+})
+let courseIntroMap = {}
+const activeCourseIntro = computed(() => {
+  const course = courses.value.find((item) => Number(item.id) === Number(courseId.value))
+  return course?.intro || ''
 })
 const activeCourseName = computed(() => {
   const course = courses.value.find((item) => Number(item.id) === Number(courseId.value))
@@ -609,13 +617,26 @@ const chapterRows = computed(() => {
 })
 
 async function loadCourses() {
-  const data = await listClasses()
+  // 课程简介（intro）在课程接口里，班级接口只带课程名
+  const [data, courseData] = await Promise.all([
+    listClasses(),
+    listCourses({ page_size: 100 }).catch(() => ({})),
+  ])
+  const courseRows = courseData?.results ?? courseData
+  courseIntroMap = {}
+  ;(Array.isArray(courseRows) ? courseRows : []).forEach((row) => {
+    if (row?.intro) courseIntroMap[Number(row.id)] = row.intro
+  })
   const rows = data.results ?? data
   const map = new Map()
   rows.forEach((row) => {
     const ids = row.courses?.length ? row.courses : [row.course]
     ids.filter(Boolean).forEach((id, index) => {
-      map.set(id, { id, name: row.course_names?.[index] || row.course_name || `课程 ${id}` })
+      map.set(id, {
+        id,
+        name: row.course_names?.[index] || row.course_name || `课程 ${id}`,
+        intro: courseIntroMap[Number(id)] || '',
+      })
     })
   })
   courses.value = [...map.values()]
@@ -1552,6 +1573,19 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* 当前课程简介（教师填写）：头部标题下一行，两行截断 */
+.learn-course-intro {
+  margin-top: 6px;
+  max-width: 760px;
+  color: var(--gray-500, #8a94a2);
+  font-size: 12px;
+  line-height: 1.6;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
 .learn-shell {
   display: flex;
   flex-direction: column;
