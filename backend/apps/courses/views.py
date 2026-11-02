@@ -455,49 +455,101 @@ class CatalogViewSet(BaseModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="generate-audio", permission_classes=[IsTeacher])
     def generate_audio(self, request, pk=None):
-        """基于讲解稿逐页 AI 配音（需求 T-V-03）。
+        """提交章节配音任务（队列化，需求 T-V-03）。
 
-        分段生成：limit 指定本批最多合成页数（默认 3，上限 10），前端循环调用直至
-        done=true，避免多页同步合成超过网关 180s 超时导致前端无反馈。
+        三态依赖判定（§6.2/评审 C6）：
+        - 有 pending/running 的讲稿任务 → 409 {code:"wait_script", task_id}，
+          提示「讲稿正在生成，完成后可配音」，前端可凭 task_id 跟踪；
+        - 讲稿全齐 → 正常入队整章配音；
+        - 讲稿部分齐且无在跑任务 → 允许入队（执行体只补有讲稿无音频的页，
+          不会把前半章先合成后永久缺失）。
         """
-        from apps.ai.services import synthesize_audio_for_video
+        # TODO(2026-12) remove：旧前端垫片（与 generate-script 同口径）
+        if request.headers.get("X-AI-Task-Mode") != "queue":
+            return api_response(message="生成方式已升级，请刷新页面后重试", code=410, status=410)
 
         catalog = self.get_object()
-        video = TeachingVideo.objects.filter(catalog=catalog).first()
+        # 三态①最先判：讲稿在跑时 video.scripts 往往还是空（任务刚入队），
+        # 必须先给 409 wait_script 而不是 400「请先生成讲解稿」（评审 C6）
+        script_task = AITask.objects.filter(
+            task_type=AITask.TaskType.SCRIPT_GEN,
+            catalog=catalog,
+            status__in=[AITask.Status.PENDING, AITask.Status.RUNNING],
+        ).first()
+        if script_task is not None:
+            return api_response(
+                {"code": "wait_script", "task_id": script_task.id},
+                message="讲稿正在生成中，完成后可配音",
+                code=409,
+                status=409,
+            )
+
+        video = TeachingVideo.objects.filter(catalog=catalog).select_related("ppt").first()
         if not video or not video.scripts:
             return api_response(message="请先生成讲解稿", code=400, status=400)
-        try:
-            limit = int(request.data.get("limit") or 3)
-        except (TypeError, ValueError):
-            limit = 3
-        limit = max(1, min(limit, 10))
-        created = synthesize_audio_for_video(video, limit=limit)
-        video.refresh_from_db()
+
         scripts = video.scripts or []
-        total = len([item for item in scripts if item.get("script")])
-        audio_pages = sum(1 for item in scripts if item.get("audio_url"))
-        # 仅把明确合成失败（有 audio_error）的页计为失败；尚未轮到的页不算失败。
-        # failed_details 带上失败原因（provider 报错截断 300 字），供前端在配音
-        # 服务不可用（模型下线/Key 失效等）时展示具体错误并终止循环，而非无限重试。
-        failed_details = [
-            {"page": item.get("page"), "error": item.get("audio_error")}
-            for item in scripts
-            if item.get("script") and not item.get("audio_url") and item.get("audio_error")
-        ]
-        failed_pages = [item["page"] for item in failed_details]
-        remaining = total - audio_pages
-        return api_response(
-            {
-                "created_pages": created,
-                "audio_pages": audio_pages,
-                "total_pages": total,
-                "failed_pages": failed_pages,
-                "failed_details": failed_details,
-                "remaining": remaining,
-                "done": remaining == 0,
-            },
-            message=f"已完成 {audio_pages}/{total} 页配音",
-        )
+        filled_pages = {int(item.get("page") or 0) for item in scripts if str(item.get("script") or "").strip()}
+        ppt_pages = len(video.ppt.parsed_pages) if video.ppt else len(scripts)
+        only_pages = sorted(filled_pages)
+
+        def _queued_response(task: AITask, *, dedupe_hit: bool = False):
+            video.refresh_from_db(fields=["scripts"])
+            audio_pages = sum(1 for item in (video.scripts or []) if item.get("audio_url"))
+            position = ai_queue.queue_position(task) or 1
+            return api_response(
+                {
+                    "task_id": task.id,
+                    "status": task.status,
+                    "queue_position": position,
+                    "eta_seconds": max(0, position - 1) * 90,
+                    "audio_pages": audio_pages,
+                    "total_pages": ppt_pages,
+                    "remaining": ppt_pages - audio_pages,
+                    "done": False,
+                    "queued": True,
+                    "dedupe_hit": dedupe_hit,
+                },
+                message="配音任务已提交，完成后自动发布",
+            )
+
+        active = AITask.objects.filter(
+            task_type=AITask.TaskType.AUDIO_GEN,
+            catalog=catalog,
+            status__in=[AITask.Status.PENDING, AITask.Status.RUNNING],
+        ).first()
+        if active is not None:
+            return _queued_response(active, dedupe_hit=True)
+
+        try:
+            task, created = ai_queue.enqueue(
+                task_type=AITask.TaskType.AUDIO_GEN,
+                user=request.user,
+                catalog=catalog,
+                course=catalog.course,
+                payload={
+                    "video_id": video.id,
+                    "voice": str(request.data.get("voice") or "") or None,
+                    "only_pages": only_pages,  # 部分齐时按已有讲稿页配音（§6.2 三态）
+                },
+                dedupe_key=f"audio:{catalog.id}",
+                # 分母按当前 PPT 页数算，避免提前判 done（§6.2）
+                progress={"stage": "queued", "done": 0, "total": ppt_pages, "message": "排队中…"},
+            )
+        except Exception as exc:
+            from django.db import IntegrityError
+
+            if not isinstance(exc, IntegrityError):
+                raise
+            existing = AITask.objects.filter(
+                task_type=AITask.TaskType.AUDIO_GEN,
+                catalog=catalog,
+                status__in=[AITask.Status.PENDING, AITask.Status.RUNNING],
+            ).first()
+            if existing is None:
+                raise
+            return _queued_response(existing, dedupe_hit=True)
+        return _queued_response(task)
 
     @action(detail=False, methods=["post"], url_path="generate-from-plan", permission_classes=[IsTeacher])
     def generate_from_plan(self, request):

@@ -10,6 +10,7 @@ from django.test import SimpleTestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
+from apps.ai.models import AITask
 from apps.ai.providers.mock import MockProvider
 from apps.courses.models import Catalog, Course, CourseResource, PPTResource, TeachingVideo, VideoWatchProgress
 from apps.knowledge.models import KnowledgeChunk
@@ -176,6 +177,100 @@ class PptReplacementTests(APITestCase):
         self.assertEqual(self.video.scripts, [{"page": 1, "script": "新讲解稿"}])
         self.assertTrue(self.video.is_published)
         self.assertIsNotNone(self.video.published_at)
+
+
+class AudioQueueDependencyTests(APITestCase):
+    """配音入队三态依赖（§6.2/评审 C6）与执行体终态。"""
+
+    def setUp(self):
+        self.teacher = User.objects.create_user(
+            username="audio-q-teacher", password="StrongPass!123", role=User.Role.TEACHER
+        )
+        self.client.force_authenticate(self.teacher)
+        self.course = Course.objects.create(name="配音队列课", teacher=self.teacher)
+        self.catalog = Catalog.objects.create(course=self.course, title="第一章", order=1)
+        self.ppt = PPTResource.objects.create(
+            course=self.course, catalog=self.catalog, file_name="a.pptx",
+            version=1, is_active=True, parse_status="done",
+            parsed_pages=[{"page": i, "title": f"t{i}", "body": "b"} for i in range(1, 4)],
+        )
+        self.video = TeachingVideo.objects.create(
+            course=self.course, catalog=self.catalog, ppt=self.ppt
+        )
+
+    def _post_audio(self, headers=True):
+        extra = {"HTTP_X_AI_TASK_MODE": "queue"} if headers else {}
+        return self.client.post(
+            f"/api/catalogs/{self.catalog.id}/generate-audio/", {}, format="json", **extra
+        )
+
+    def test_old_client_410(self):
+        self.video.scripts = [{"page": 1, "script": "x"}]
+        self.video.save(update_fields=["scripts"])
+        response = self._post_audio(headers=False)
+        self.assertEqual(response.status_code, 410)
+
+    def test_no_script_400(self):
+        response = self._post_audio()
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("讲解稿", response.data["message"])
+
+    def test_script_running_409_wait_script(self):
+        AITask.objects.create(
+            task_type=AITask.TaskType.SCRIPT_GEN, status=AITask.Status.RUNNING,
+            catalog=self.catalog, course=self.course, triggered_by=self.teacher,
+        )
+        # C6 精确场景：讲稿刚入队、video.scripts 还是空——也必须 409 而非 400
+        response = self._post_audio()
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data["data"]["code"], "wait_script")
+        self.assertIn("task_id", response.data["data"])
+
+    def test_script_done_enqueues_and_dedupes(self):
+        self.video.scripts = [{"page": i, "script": f"s{i}"} for i in range(1, 4)]
+        self.video.save(update_fields=["scripts"])
+        response = self._post_audio()
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertTrue(response.data["data"]["queued"])
+        task_id = response.data["data"]["task_id"]
+        # 再提交 → 命中已有任务（dedupe_hit，不新建）
+        again = self._post_audio()
+        self.assertEqual(again.status_code, 200)
+        self.assertEqual(again.data["data"]["task_id"], task_id)
+        self.assertTrue(again.data["data"]["dedupe_hit"])
+        self.assertEqual(
+            AITask.objects.filter(task_type=AITask.TaskType.AUDIO_GEN, catalog=self.catalog).count(),
+            1,
+        )
+
+    def test_partial_script_allowed_with_full_denominator(self):
+        self.video.scripts = [{"page": 1, "script": "s1"}, {"page": 2, "script": ""}]
+        self.video.save(update_fields=["scripts"])
+        response = self._post_audio()
+        self.assertEqual(response.status_code, 200, response.data)
+        task = AITask.objects.get(id=response.data["data"]["task_id"])
+        self.assertEqual(task.payload.get("only_pages"), [1])
+        # 分母按 PPT 页数算，避免提前判 done（§6.2）
+        self.assertEqual(task.progress.get("total"), 3)
+
+    def test_audio_task_runs_to_completion_and_publishes(self):
+        """执行体整章跑通（mock tts）：逐页补音频、完成自动发布（D5）。"""
+        from apps.ai import queue as ai_queue
+        from apps.ai.tasks import run_task
+
+        self.video.scripts = [{"page": i, "script": f"第{i}页讲解稿内容。"} for i in range(1, 3)]
+        self.video.save(update_fields=["scripts"])
+        response = self._post_audio()
+        task_id = response.data["data"]["task_id"]
+        claimed = ai_queue.claim("test-worker", {"audio_gen": 2})
+        self.assertIsNotNone(claimed)
+        run_task(claimed)
+        task = AITask.objects.get(id=task_id)
+        self.assertEqual(task.status, AITask.Status.SUCCESS, task.error)
+        self.video.refresh_from_db()
+        self.assertTrue(all(item.get("audio_url") for item in self.video.scripts))
+        self.assertEqual(self.video.gen_status, TeachingVideo.GenStatus.AUDIO_READY)
+        self.assertTrue(self.video.is_published)
 
 
 class CatalogOrderTests(APITestCase):
