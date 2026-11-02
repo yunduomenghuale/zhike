@@ -1256,6 +1256,13 @@ def _gather_course_context(
     3. 逐页讲解稿原文兜底（同样仅未入向量库时启用；讲稿已入检索体系，
        正常走第 1 步同页融合，不再无差别全量拼接）。
 
+    第 2/3 步是「向量库缺数据时的保险」，受三道门控（AI_QA_FALLBACK_*）：
+    检索已注入够用（>= min_hits）就不再兜底、检索已命中的章节不再补
+    （同章「讲稿+课件」不重复上引用）、兜底合计最多 max_units 个单元。
+    历史教训（2026-11-02）：旧实现无条件遍历全课程章节，一份课件没建索引
+    就把整门课每章都铺进上下文——9 章课程的引用列表 15 条，其中 7 条来自
+    兜底且不含相关性分数，用户感知为「标签又多又重复」。
+
     每个注入单元带结构化标头（【资料N｜类型｜名称｜页码】），编号与 cited
     一一对应——模型知道每段出处并可标注 [N] 引用，前端可做引用回链；预算
     按 token 估算（est_tokens）并在单元边界截断。
@@ -1285,6 +1292,7 @@ def _gather_course_context(
     units: list[str] = []  # 注入单元（标头+内容），按优先级序
     cited: list[dict] = []
     used_tokens = 0
+    hit_catalogs: set = set()  # 检索已覆盖的章节，兜底不再重复补
 
     def _try_add(source: str, name: str, content: str, cited_item: dict, page=None) -> bool:
         """预算内追加一个注入单元；返回是否成功。编号 = 单元序号，与 cited 对齐。"""
@@ -1317,6 +1325,8 @@ def _gather_course_context(
                 chunk = unit.chunk
                 source_key = "+".join(unit.sources)  # ppt / material / ppt+script
                 name = _chunk_display_name(chunk)
+                if chunk.catalog_id:
+                    hit_catalogs.add(chunk.catalog_id)
                 added = _try_add(
                     source_key,
                     name,
@@ -1335,6 +1345,17 @@ def _gather_course_context(
         except Exception:
             pass
 
+    # 兜底门控（见 settings.AI_QA_FALLBACK_*）：检索注入已经够用就不整章铺开；
+    # 检索已命中的章节不重复补；兜底合计最多 max_units 个单元（0 = 关闭兜底）
+    fallback_min_hits = max(int(getattr(settings, "AI_QA_FALLBACK_MIN_HITS", 3) or 0), 0)
+    fallback_max_units = max(int(getattr(settings, "AI_QA_FALLBACK_MAX_UNITS", 2) or 0), 0)
+    fallback_used = 0
+
+    def _fallback_allowed(catalog_key) -> bool:
+        if len(cited) >= fallback_min_hits or fallback_used >= fallback_max_units:
+            return False
+        return not (catalog_key and catalog_key in hit_catalogs)
+
     # 2) 课件 PPT 讲义原文兜底：仅当该课件没有任何向量片段（向量模型不可用/
     #    从未重建）时启用，避免同一份内容既进检索结果又进原文、挤占预算。
     ppt_qs = PPTResource.objects.filter(course_id=course_id, is_active=True).select_related("catalog")
@@ -1349,6 +1370,8 @@ def _gather_course_context(
         seen_catalogs.add(ppt.catalog_id)
         if ppt.chunks.exists():
             continue  # 已入向量库：走检索，不重复拼接原文
+        if not _fallback_allowed(ppt.catalog_id):
+            continue  # 检索已够用 / 该章已命中 / 兜底额度用完
         page_segs = []
         for pg in (ppt.parsed_pages or [])[:40]:
             seg = f"{pg.get('title', '')} {pg.get('body', '')}".strip()
@@ -1359,12 +1382,13 @@ def _gather_course_context(
         ppt_name = (
             f"{ppt.catalog.title}课件" if ppt.catalog_id and ppt.catalog else (ppt.file_name or "课程课件")
         )
-        _try_add(
+        if _try_add(
             "ppt",
             ppt_name,
             "\n".join(page_segs),
             {"material_name": ppt_name, "page": None, "snippet": page_segs[0][:120]},
-        )
+        ):
+            fallback_used += 1
 
     # 3) 逐页讲解稿原文兜底：仅当该视频讲稿未入向量库（向量模型不可用/尚未
     #    回填/回滚开关关闭讲稿检索）时才原文限量拼接——正常已走第 1 步检索。
@@ -1377,6 +1401,8 @@ def _gather_course_context(
     for vid in vid_qs.order_by("catalog_id"):
         if not script_disabled and vid.chunks.exists():
             continue  # 已入向量库：走检索与同页融合，不重复拼接原文
+        if not _fallback_allowed(vid.catalog_id):
+            continue  # 检索已够用 / 该章已命中 / 兜底额度用完
         texts = []
         for s in (vid.scripts or []):
             t = (s.get("script") or "").strip()
@@ -1388,12 +1414,13 @@ def _gather_course_context(
         script_name = (
             f"{vid.catalog.title}讲解稿" if vid.catalog_id and vid.catalog else "课程讲解稿"
         )
-        _try_add(
+        if _try_add(
             "script",
             script_name,
             "\n".join(texts),
             {"material_name": script_name, "page": None, "snippet": texts[0][:120]},
-        )
+        ):
+            fallback_used += 1
 
     # 上下文快照：预算与命中片段元数据（QARecord 审计 / 追问兜底用）
     snapshot = {

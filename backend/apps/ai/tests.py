@@ -723,6 +723,96 @@ class CourseOutlineContextTests(TestCase):
             self.assertEqual(snapshot_chapter["budgets"]["rag_tokens"], 3000)
 
 
+class QaFallbackGateTests(TestCase):
+    """课件/讲稿「整章原文兜底」的三道门控。
+
+    背景（2026-11-02 生产实测）：旧实现只要有一部课件没建索引，就把整门课
+    每章都拼进上下文——9 章课程的引用列表 15 条，其中 7 条来自兜底、无相关性
+    分数，且与检索命中的章节重复。现在：检索够用不兜底、已命中章节不重复补、
+    兜底合计最多 AI_QA_FALLBACK_MAX_UNITS 个单元。
+    """
+
+    def setUp(self):
+        from apps.courses.models import Catalog, Course, PPTResource
+
+        self.teacher = User.objects.create_user(
+            username="fallback-teacher", password="StrongPass!123", role=User.Role.TEACHER
+        )
+        self.course = Course.objects.create(name="Java 程序设计", teacher=self.teacher)
+        self.chapters = []
+        for i in range(1, 4):  # 3 章，每章 1 部课件，全部未入向量库
+            cat = Catalog.objects.create(
+                course=self.course, title=f"第{i}章", order=i, is_published=True
+            )
+            PPTResource.objects.create(
+                course=self.course,
+                catalog=cat,
+                file_name=f"c{i}.pptx",
+                version=1,
+                is_active=True,
+                parse_status=PPTResource.ParseStatus.DONE,
+                parsed_pages=[{"page": 1, "title": f"标题{i}", "body": "正文"}],
+            )
+            self.chapters.append(cat)
+
+    def _chunks(self, catalogs):
+        return [
+            KnowledgeChunk.objects.create(
+                course_id=self.course.id,
+                catalog_id=cat.id,
+                source="script",
+                content=f"{cat.title} 讲稿片段",
+                page=1,
+                embedding=[0.1] * 4,
+            )
+            for cat in catalogs
+        ]
+
+    def _patch_search(self, chunks):
+        from unittest.mock import patch
+
+        from apps.ai.services import RetrievalUnit
+
+        units = [RetrievalUnit(chunk, 0.5) for chunk in chunks]
+        return patch("apps.ai.services._search_relevant_chunks", return_value=units)
+
+    def test_no_fallback_when_search_hits_enough(self):
+        """检索注入 3 条（= min_hits）→ 不再整章兜底。"""
+        chunks = self._chunks(self.chapters)
+        with self._patch_search(chunks):
+            _, cited, _ = _gather_course_context(self.course.id, "这门课主要讲哪些内容？")
+        self.assertEqual(len(cited), 3)
+        self.assertTrue(all(item["page"] is not None for item in cited))  # 全是检索片段
+        self.assertFalse(any(item["material_name"].endswith("课件") for item in cited))
+
+    def test_fallback_capped_when_search_empty(self):
+        """检索为空 → 兜底最多补 AI_QA_FALLBACK_MAX_UNITS（默认 2）个单元。"""
+        with self._patch_search([]):
+            _, cited, _ = _gather_course_context(self.course.id, "这门课主要讲哪些内容？")
+        self.assertEqual(len(cited), 2)
+        self.assertTrue(all(item["page"] is None for item in cited))  # 全是原文兜底
+
+    def test_hit_chapter_not_duplicated_by_fallback(self):
+        """检索命中第 1 章 → 兜底跳过第 1 章，只补第 2、3 章。"""
+        hit = self._chunks(self.chapters[:1])
+        with self._patch_search(hit):
+            _, cited, _ = _gather_course_context(self.course.id, "这门课主要讲哪些内容？")
+        names = [item["material_name"] for item in cited]
+        self.assertEqual(len(cited), 3)  # 1 条检索 + 2 条兜底
+        self.assertFalse(names[0].endswith("课件"))  # 第 1 条是检索片段
+        self.assertNotIn("第1章课件", names)  # 已命中章节不再补
+        self.assertIn("第2章课件", names)
+        self.assertIn("第3章课件", names)
+
+    def test_fallback_disabled_when_max_units_zero(self):
+        """AI_QA_FALLBACK_MAX_UNITS=0 → 完全关闭兜底，只走检索。"""
+        from django.test import override_settings
+
+        with override_settings(AI_QA_FALLBACK_MAX_UNITS=0), self._patch_search([]):
+            _, cited, _ = _gather_course_context(self.course.id, "这门课主要讲哪些内容？")
+        self.assertEqual(cited, [])
+
+
 class IngestPptPagesTests(TestCase):
     """课件 PPT 逐页入向量库（ingest_ppt_pages）。
 

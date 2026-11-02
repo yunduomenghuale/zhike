@@ -24,6 +24,16 @@
           >
             <el-option v-for="c in catalogs" :key="c.id" :label="c.title" :value="c.id" />
           </el-select>
+          <el-tooltip
+            v-if="courseId && indexHealth.ppt_missing > 0"
+            placement="bottom"
+            :content="`${indexHealth.ppt_missing} 部课件还没有向量索引，学生提问时检索不到它们的内容，只能整章拼接兜底。建议点右侧「重建向量」补齐。`"
+          >
+            <span class="kb-index-warn">
+              <el-icon :size="13"><WarningFilled /></el-icon>
+              {{ indexHealth.ppt_missing }} 部课件未建索引
+            </span>
+          </el-tooltip>
           <el-button v-if="courseId" :icon="Brush" @click="openRebuild">重建向量</el-button>
           <el-upload
             v-if="courseId"
@@ -169,13 +179,14 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import {
-  UploadFilled, Refresh, Delete, Document, View, Brush, Loading,
+  UploadFilled, Refresh, Delete, Document, View, Brush, Loading, WarningFilled,
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
 import { listCourses, listCatalogs } from '@/api/course'
 import {
   listMaterials, uploadMaterial, updateMaterial, reparseMaterial, toggleQa, deleteMaterial, rebuildVectors,
+  getIndexHealth,
 } from '@/api/knowledge'
 
 const courses = ref([])
@@ -237,6 +248,28 @@ function onCourseChange() {
   uploadCatalogId.value = null
   loadMaterials()
   loadCatalogs()
+  loadIndexHealth()
+}
+
+// 课件向量索引缺口：有课件没建索引时问答会退回整章原文兜底（引用条目多且不可控），
+// 故在「重建向量」旁直接提示，别让教师猜什么时候该点
+const indexHealth = reactive({ ppt_total: 0, ppt_missing: 0 })
+
+async function loadIndexHealth() {
+  if (!courseId.value) {
+    indexHealth.ppt_total = 0
+    indexHealth.ppt_missing = 0
+    return
+  }
+  try {
+    const data = await getIndexHealth(courseId.value)
+    indexHealth.ppt_total = data.ppt_total ?? 0
+    indexHealth.ppt_missing = data.ppt_missing ?? 0
+  } catch {
+    // 健康度只是辅助提示，查询失败不打扰教师正常使用
+    indexHealth.ppt_total = 0
+    indexHealth.ppt_missing = 0
+  }
 }
 
 async function handleUpload(file) {
@@ -309,6 +342,7 @@ async function openRebuild() {
   try {
     rebuildDialog.report = await rebuildVectors({ course: courseId.value })
     loadMaterials()
+    loadIndexHealth()
   } catch (err) {
     // 拦截器已将 {code,message} 转为 Error(message)：400 的 message 即事前校验失败原因
     rebuildDialog.error = err?.message || '重建失败，请稍后重试'
@@ -377,6 +411,21 @@ onMounted(loadCourses)
   align-items: center;
   gap: 10px;
 }
+/* 课件未建索引提示：低饱和度警示，避免和「重建向量」主操作抢视觉 */
+.kb-index-warn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.1);
+  color: #b45309;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  cursor: default;
+}
 .kb-upload-btn {
   height: 40px;
   padding: 0 20px;
@@ -386,8 +435,7 @@ onMounted(loadCourses)
   background: linear-gradient(135deg, #3b82f6, #2563eb);
   box-shadow: 0 4px 10px rgba(37, 99, 235, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.2);
   transition: transform 0.18s ease, box-shadow 0.18s ease;
-}
-.kb-upload-btn:hover {
+}.kb-upload-btn:hover {
   transform: translateY(-1px);
   box-shadow: 0 6px 14px rgba(37, 99, 235, 0.2);
 }

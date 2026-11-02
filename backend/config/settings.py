@@ -554,6 +554,15 @@ AI_QA_COURSE_BUDGET_RATIO = _ai_env_float("AI_QA_COURSE_BUDGET_RATIO", 1.5)  # �
 # 讲稿入检索体系的回滚开关：置 1 后讲稿片段不参与向量检索（QA 侧退回
 # 原文限量兜底）——检索结果分布异常时一键退回，无需回滚代码与数据。
 AI_QA_DISABLE_SCRIPT_SOURCE = os.getenv("AI_QA_DISABLE_SCRIPT_SOURCE", "").lower() in ("1", "true", "yes", "on")
+# 原文兜底门控（课件/讲稿都没有向量片段时把整章原文拼进上下文）。
+# 旧实现是无条件遍历全课程章节：只要有一份课件没建索引，就会把整门课每章都塞进
+# 上下文——生产实测（2026-11-02）9 章课程的引用列表 15 条，其中 7 条来自兜底、
+# 不带相关性分数，且与检索命中的章节重复。现在三个门控：
+#   - min_hits：检索实际注入的片段数达到该值就不再兜底（检索够用；
+#   - 已命中章节不再补（避免同章「讲稿 + 课件」两条重复）；
+#   - max_units：兜底合计最多注入几个单元，置 0 = 完全关闭兜底（只走检索）。
+AI_QA_FALLBACK_MIN_HITS = _ai_env_int("AI_QA_FALLBACK_MIN_HITS", 3)
+AI_QA_FALLBACK_MAX_UNITS = _ai_env_int("AI_QA_FALLBACK_MAX_UNITS", 2)
 
 # 系统内置本地模型的权重目录：生产容器内 /app/data 是 bind mount（见 docker-compose），
 # 故默认落点随之持久化、重建容器不丢；本地开发即 backend/data/models。

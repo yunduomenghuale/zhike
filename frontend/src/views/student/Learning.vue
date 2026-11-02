@@ -149,7 +149,7 @@
                   <div v-for="(m, i) in chatMessages" :key="i" class="chat-row" :class="m.role" @click="onChatAreaClick">
                     <div class="chat-bubble" :class="{ bare: m.imageOnly }">
                       <span v-if="m.streaming && !m.content" class="chat-typing"><i></i><i></i><i></i></span>
-                      <div v-else-if="m.role === 'assistant'" class="chat-text chat-md" v-html="renderMd(m.content + (m.streaming ? ' ▍' : ''))"></div>
+                      <div v-else-if="m.role === 'assistant'" class="chat-text chat-md" v-html="renderMd(m.content + (m.streaming ? ' ▍' : ''), m.cited_chunks)"></div>
                       <div v-else class="chat-text">
                         <img v-if="m.image" :src="m.image" class="q-image" alt="提问图片" />
                         <template v-if="!m.imageOnly">{{ m.content }}</template>
@@ -160,6 +160,7 @@
                       <CitedSources
                         v-if="m.role === 'assistant' && m.cited_chunks?.length && !m.streaming"
                         :cited="m.cited_chunks"
+                        :answer="m.content"
                         :highlight="flashNums"
                       />
                       <div v-if="m.role === 'assistant' && !m.streaming && m.content" class="chat-actions">

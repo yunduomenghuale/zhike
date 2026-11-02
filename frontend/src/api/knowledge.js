@@ -28,6 +28,10 @@ export const deleteMaterial = (id) => request.delete(`/materials/${id}/`)
 // 重建课程/资料向量（换向量模型后必须执行；全量重算耗时较长，超时放到 10 分钟）
 export const rebuildVectors = (data) => request.post('/materials/rebuild-vectors/', data, { timeout: 600000 })
 
+// 课件向量索引缺口（{ppt_total, ppt_missing}）：ppt_missing>0 说明有课件没建索引，
+// 问答会退回整章原文兜底，需提示教师重建向量
+export const getIndexHealth = (course) => request.get('/materials/index-health/', { params: { course } })
+
 // 在线预览（PDF/Word/PPT 逐页图；txt 返回文本）
 export const previewMaterial = (id) => request.get(`/materials/${id}/preview/`)
 

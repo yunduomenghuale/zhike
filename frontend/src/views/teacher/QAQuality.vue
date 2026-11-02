@@ -259,8 +259,8 @@
         </div>
         <div class="detail-block">
           <h4>AI 回答</h4>
-          <div class="qa-answer" v-html="renderQaAnswer(drawer.row.answer || '')"></div>
-          <CitedSources v-if="drawer.row.cited_chunks?.length" :cited="drawer.row.cited_chunks" />
+          <div class="qa-answer" v-html="renderQaAnswer(drawer.row.answer || '', drawer.row.cited_chunks)"></div>
+          <CitedSources v-if="drawer.row.cited_chunks?.length" :cited="drawer.row.cited_chunks" :answer="drawer.row.answer" />
           <p v-else-if="!drawer.row.skip_retrieval" class="empty-cite">该回答未引用任何课程片段（检索为空）</p>
           <p v-else class="empty-cite">纯图片提问：直接走视觉理解，未检索课程资料</p>
         </div>

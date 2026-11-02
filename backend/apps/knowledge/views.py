@@ -268,6 +268,28 @@ class MaterialViewSet(BaseModelViewSet):
             message += f"，失败 {len(report['failed'])} 项（详见返回清单，可修复后重试）"
         return api_response(report, message=message)
 
+    @action(detail=False, methods=["get"], url_path="index-health")
+    def index_health(self, request):
+        """课件向量索引缺口：给教师端提示「有几部课件没建索引」。
+
+        课件本该在解析成功时自动入库（见 ai.services.ingest_ppt_pages），
+        但两个原因会留下缺口：① 入库功能上线前就解析好的老课件不会自动补建；
+        ② 入库失败是静默的（返回 0、PPT 状态仍是 done），页面上看不出来。
+        缺口存在时问答会退回「整章原文兜底」，引用条目多且不含相关性分数，
+        所以在教师端把缺口直接暴露出来，引导点「重建向量」。
+        """
+        from apps.courses.models import PPTResource
+
+        course_id = request.query_params.get("course")
+        if not course_id:
+            raise ValidationError({"course": "缺少 course 参数"})
+        ppt_qs = PPTResource.objects.filter(
+            course_id=course_id, is_active=True, course__in=courses_for_user(request.user)
+        ).annotate(n_chunks=Count("chunks"))
+        total = ppt_qs.count()
+        missing = ppt_qs.filter(n_chunks=0).count()
+        return api_response({"ppt_total": total, "ppt_missing": missing})
+
     @action(detail=True, methods=["post"], url_path="toggle-qa")
     def toggle_qa(self, request, pk=None):
         """开启/关闭该资料对学生的自由提问（需求 T-K-04）。"""

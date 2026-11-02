@@ -80,13 +80,13 @@
           <div class="message answer">
             <div class="message-content">
               <div class="answer-plain">
-                <div v-if="m.answer" class="answer-md" v-html="renderMd(m.answer + (m.streaming ? ' ▍' : ''))"></div>
+                <div v-if="m.answer" class="answer-md" v-html="renderMd(m.answer + (m.streaming ? ' ▍' : ''), m.cited_chunks)"></div>
                 <div v-else class="answer-thinking">
                   <el-icon class="is-loading" :size="15"><Loading /></el-icon> 正在检索课程资料…
                 </div>
                 <div v-if="m.historyDropped" class="qa-note">对话较长，已省略部分早期内容</div>
                 <div v-if="m.rewritten && !m.streaming" class="qa-note">已按上下文理解检索：{{ m.rewritten }}</div>
-                <CitedSources v-if="m.cited_chunks?.length" :cited="m.cited_chunks" :highlight="flashNums" />
+                <CitedSources v-if="m.cited_chunks?.length" :cited="m.cited_chunks" :answer="m.answer" :highlight="flashNums" />
                 <div v-if="!m.streaming && m.answer" class="qa-actions">
                   <QaFeedback :record-id="m.mid" v-model="m.feedback" />
                 </div>

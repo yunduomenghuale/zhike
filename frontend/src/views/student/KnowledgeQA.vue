@@ -103,7 +103,7 @@
           <div class="message answer">
             <div class="message-content">
               <div class="answer-plain">
-                <div v-if="m.answer" class="answer-md" v-html="renderMd(m.answer + (m.streaming ? ' ▍' : ''))"></div>
+                <div v-if="m.answer" class="answer-md" v-html="renderMd(m.answer + (m.streaming ? ' ▍' : ''), m.cited_chunks)"></div>
                 <div v-else class="answer-thinking">
                   <el-icon class="is-loading" :size="15"><Loading /></el-icon> 正在检索课程资料…
                 </div>
@@ -113,7 +113,7 @@
                 <div v-if="m.providerFallback && !m.streaming" class="qa-note mock-note">
                   ⚠ 当前为模拟数据（AI 服务暂不可用，已回退演示模式），内容不作为真实教学依据
                 </div>
-                <CitedSources v-if="m.cited_chunks?.length" :cited="m.cited_chunks" :highlight="flashNums" />
+                <CitedSources v-if="m.cited_chunks?.length" :cited="m.cited_chunks" :answer="m.answer" :highlight="flashNums" />
                 <div v-if="!m.streaming && m.answer" class="qa-actions">
                   <QaFeedback :record-id="m.mid" v-model="m.feedback" />
                 </div>

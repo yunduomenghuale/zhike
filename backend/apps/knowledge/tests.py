@@ -786,3 +786,62 @@ class TeacherQAIssueTests(TestCase):
         student_client = APIClient()
         student_client.force_authenticate(user=self.student)
         self.assertEqual(student_client.get("/api/qa-issues/").status_code, 403)
+
+
+class IndexHealthActionTests(TestCase):
+    """课件向量索引缺口接口（教师端「N 部课件未建索引」提示的数据来源）。
+
+    背景：课件本该解析时自动入库，但历史课件不会补建、入库失败又是静默的，
+    教师在页面上看不出「解析完成但检索不到」，问答会退回整章原文兜底。
+    """
+
+    def setUp(self):
+        from apps.courses.models import Catalog, PPTResource
+
+        self.teacher = User.objects.create_user(
+            username="index-teacher", password="StrongPwd!123", role=User.Role.TEACHER
+        )
+        self.course = Course.objects.create(name="Java 程序设计", teacher=self.teacher)
+        self.catalog = Catalog.objects.create(
+            course=self.course, title="第1章", order=1, is_published=True
+        )
+        common = dict(
+            course=self.course,
+            catalog=self.catalog,
+            version=1,
+            is_active=True,
+            parse_status=PPTResource.ParseStatus.DONE,
+            parsed_pages=[{"page": 1, "title": "标题", "body": "正文"}],
+        )
+        self.indexed = PPTResource.objects.create(file_name="ok.pptx", **common)
+        self.missing = PPTResource.objects.create(file_name="no-chunk.pptx", **common)
+        KnowledgeChunk.objects.create(
+            course_id=self.course.id,
+            ppt=self.indexed,
+            catalog_id=self.catalog.id,
+            source="ppt",
+            content="页1",
+            page=1,
+            embedding=[0.1] * 4,
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.teacher)
+
+    def test_reports_missing_count(self):
+        resp = self.client.get(f"/api/materials/index-health/?course={self.course.id}")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["data"], {"ppt_total": 2, "ppt_missing": 1})
+
+    def test_requires_course_param(self):
+        resp = self.client.get("/api/materials/index-health/")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_other_teacher_sees_nothing(self):
+        """行级过滤：查别人的课程拿不到数据。"""
+        other = User.objects.create_user(
+            username="index-other", password="StrongPwd!123", role=User.Role.TEACHER
+        )
+        client = APIClient()
+        client.force_authenticate(user=other)
+        resp = client.get(f"/api/materials/index-health/?course={self.course.id}")
+        self.assertEqual(resp.data["data"], {"ppt_total": 0, "ppt_missing": 0})
