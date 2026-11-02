@@ -95,10 +95,11 @@ def _task_visible(task, user) -> bool:
 
 
 class AITaskDetailView(APIView):
-    """AI 异步任务轮询（班级学情分析 / 章节学习总结 / AI 生题通用）。
+    """AI 异步任务轮询（班级学情分析 / 章节学习总结 / AI 生题/讲稿/配音通用）。
 
     前端 2.5s 轮询（与讲稿生成同款）：{status, progress, result, error}；
     进度与结果全程落 AITask 行，刷新/重登后轮询同一 task_id 继续。
+    queue_position/eta_seconds 读时现算不落库（评审 C5）。
     """
 
     permission_classes = [IsAuthenticated]
@@ -106,10 +107,12 @@ class AITaskDetailView(APIView):
 
     def get(self, request, task_id):
         from .models import AITask
+        from .queue import queue_position
 
         task = AITask.objects.filter(id=task_id).first()
         if not task or not _task_visible(task, request.user):
             return api_response(message="任务不存在或无权查看", code=404, status=404)
+        position = queue_position(task)
         return api_response({
             "id": task.id,
             "task_type": task.task_type,
@@ -118,44 +121,105 @@ class AITaskDetailView(APIView):
             "progress": task.progress,
             "result": task.result,
             "error": task.error,
+            "queue_position": position,
+            "eta_seconds": max(0, (position or 1) - 1) * 60 if position else 0,
+            "cancel_requested": task.cancel_requested,
             "created_at": task.created_at,
             "finished_at": task.finished_at,
         })
 
 
 class AITaskActiveView(APIView):
-    """当前用户进行中的 AI 任务列表（「离开页面不丢失」的恢复入口）。
+    """当前用户进行中的 AI 任务列表（任务中心「离开页面不丢失」恢复入口）。
 
-    生题任务提交后前端开始轮询；离开页面/刷新/重登后凭本端点取回
-    pending/running 任务继续轮询（默认 question_gen 类型，
-    ?task_type=all 可查全部）。只返回本人发起的任务（triggered_by）。
+    ?task_type=all 返回全部类型（任务中心用）；默认 question_gen 兼容旧前端。
+    只返回本人发起的任务（triggered_by）。结果按用户 3s 文件缓存（C10：
+    多教师轮询不会放大成 DB 常驻压力；文件缓存跨 gunicorn worker 一致）。
     """
 
     permission_classes = [IsAuthenticated]
     serializer_class = AITaskSerializer
 
     def get(self, request):
+        from django.core.cache import caches
+
         from .models import AITask
+        from .queue import queue_position
 
         task_type = request.query_params.get("task_type", AITask.TaskType.QUESTION_GEN)
+        cache = caches["oversight"]
+        cache_key = f"ai_active:{request.user.id}:{task_type or 'all'}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return api_response(cached)
+
         qs = AITask.objects.filter(
             triggered_by=request.user,
             status__in=[AITask.Status.PENDING, AITask.Status.RUNNING],
         ).select_related("course", "catalog").order_by("-created_at")
         if task_type and task_type != "all":
             qs = qs.filter(task_type=task_type)
-        return api_response([
+        data = [
             {
                 "id": t.id,
                 "task_type": t.task_type,
                 "status": t.status,
                 "version": t.version,
                 "progress": t.progress,
+                "queue_position": queue_position(t),
                 "course": t.course_id,
                 "course_name": t.course.name if t.course_id else "",
                 "catalog": t.catalog_id,
                 "catalog_title": t.catalog.title if t.catalog_id else "",
                 "created_at": t.created_at,
             }
-            for t in qs[:10]
-        ])
+            for t in qs[:20]
+        ]
+        cache.set(cache_key, data, 3)
+        return api_response(data)
+
+
+class AITaskCancelView(APIView):
+    """取消任务（任务中心取消按钮，§6）：pending 立即取消；running 在批次边界退出。"""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, task_id):
+        from .models import AITask
+        from .queue import cancel
+
+        task = AITask.objects.filter(id=task_id).first()
+        if not task or not _task_visible(task, request.user):
+            return api_response(message="任务不存在或无权操作", code=404, status=404)
+        outcome = cancel(task.id)
+        if outcome == "invalid_state":
+            return api_response(message="任务已结束，无法取消", code=400, status=400)
+        task.refresh_from_db()
+        return api_response({"id": task.id, "status": task.status, "cancel_outcome": outcome}, message="已取消")
+
+
+class AITaskRetryView(APIView):
+    """重试失败/已取消的任务（复用同一行，attempts 归零回 pending，§7.2）。"""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, task_id):
+        from django.utils import timezone
+
+        from .models import AITask
+
+        task = AITask.objects.filter(id=task_id).first()
+        if not task or not _task_visible(task, request.user):
+            return api_response(message="任务不存在或无权操作", code=404, status=404)
+        if task.status not in (AITask.Status.FAILED, AITask.Status.CANCELLED):
+            return api_response(message="仅失败或已取消的任务可重试", code=400, status=400)
+        task.status = AITask.Status.PENDING
+        task.attempts = 0
+        task.error = ""
+        task.cancel_requested = False
+        task.finished_at = None
+        task.claimed_by = ""
+        task.heartbeat_at = None
+        task.next_run_at = timezone.now()
+        task.save(update_fields=["status", "attempts", "error", "cancel_requested", "finished_at", "claimed_by", "heartbeat_at", "next_run_at", "updated_at"])
+        return api_response({"id": task.id, "status": task.status}, message="已重新排队")

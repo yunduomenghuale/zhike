@@ -1,295 +1,319 @@
 import { defineStore } from 'pinia'
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { generateScript, generateAudio, listVideos } from '@/api/course'
+import { generateScript, generateAudio } from '@/api/course'
+import { getAiTask, listActiveAiTasks, cancelAiTask, retryAiTask } from '@/api/ai-task'
 
-const SCRIPT_BATCH_SIZE = 6
-const AUDIO_BATCH_SIZE = 3
-// 批内轮询间隔：后端每个小块/每页完成即落库，轮询让按钮进度在请求进行中也实时推进
-const PROGRESS_POLL_MS = 2500
+// 队列化后的生成 store：浏览器不再是执行器（旧版 localStorage 分批循环已删除）。
+// 提交即入队秒返，服务端 ai_worker 整章执行；本 store 只做：
+//   1) 提交（连点防抖——服务端的唯一索引兜底，前端不该制造并发请求）；
+//   2) 节流轮询（C10）：有任务才 2.5s 轮询、无任务完全停轮询、document.hidden 暂停；
+//   3) 恢复：服务端是唯一真相（/ai-tasks/active/），刷新/关页/多标签页天然一致，
+//      不再有标签页认领（runnerId）那套本地协商。
+const POLL_MS = 2500
+const LEGACY_KEY = 'zhike:generation-tasks' // 旧前端续跑记录：启动即清（坑 22）
 
-// 从服务端拉取某个章节的真实生成进度（讲稿/配音）。
-// 用途：1) 刷新恢复时用真实进度纠正 localStorage 旧种子（批次响应可能在刷新途中
-// 丢失，旧记录会落后于数据库，表现为按钮页数比左侧标签少一截）；
-// 2) 循环期间轮询，进度只增不减地追赶数据库。
-async function fetchServerProgress(kind, catalogId) {
-  try {
-    const data = await listVideos({ catalog: catalogId })
-    const list = Array.isArray(data?.results) ? data : Array.isArray(data) ? data : []
-    const video = list[0]
-    if (!video) return null
-    const scripts = Array.isArray(video.scripts) ? video.scripts : []
-    if (kind === 'audio') {
-      return {
-        done: scripts.filter((s) => s.audio_url).length,
-        total: scripts.filter((s) => String(s.script || '').trim()).length,
-      }
-    }
-    return {
-      done: scripts.filter((s) => String(s.script || '').trim()).length,
-      total: scripts.length,
-    }
-  } catch {
-    return null // 轮询/种子拉取失败静默：批次响应与旧记录仍是有效兜底
-  }
+const TYPE_LABEL = {
+  script_gen: '讲稿',
+  audio_gen: '配音',
+  question_gen: 'AI 生题',
+  chapter_summary: '章节总结',
+  class_analytics: '学情分析',
+  course_reuse: '课程复用',
+  ppt_parse: '课件解析',
+  embed_ingest: '向量入库',
 }
 
-// 生成任务持久化：刷新/关闭页面不丢任务，重新打开自动续跑。
-// 记录含 runnerId（标签页认领）与 updatedAt（心跳），防止多标签页同时恢复导致重复生成：
-// 心跳新鲜且属于其他标签页 → 让位；心跳过期或已被释放（beforeunload 释放）→ 本页接管。
-const STORAGE_KEY = 'zhike:generation-tasks'
-const STALE_MS = 60000
-const TAB_ID = Math.random().toString(36).slice(2)
-
-function readRecords() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}')
-  } catch {
-    return {}
-  }
-}
-function writeRecords(records) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(records))
-  } catch {
-    /* 存储不可用（隐私模式等）时静默降级为不持久化 */
-  }
-}
-function saveRecord(kind, catalogId, progress) {
-  const records = readRecords()
-  records[`${kind}:${catalogId}`] = {
-    kind,
-    catalogId: Number(catalogId),
-    done: progress?.done || 0,
-    total: progress?.total || 0,
-    runnerId: TAB_ID,
-    updatedAt: Date.now(),
-  }
-  writeRecords(records)
-}
-function clearRecord(kind, catalogId) {
-  const records = readRecords()
-  delete records[`${kind}:${catalogId}`]
-  writeRecords(records)
-}
-// 记录仍归本标签页所有（或已被释放/清除）时才继续——其他标签页接管后本页让位
-function stillMine(kind, catalogId) {
-  const record = readRecords()[`${kind}:${catalogId}`]
-  return !record || !record.runnerId || record.runnerId === TAB_ID
-}
-// 页面卸载前释放本标签页的认领（保留进度）：刷新后新页面可立即接管，不必等心跳过期
-function releaseMyClaims() {
-  const records = readRecords()
-  let changed = false
-  for (const record of Object.values(records)) {
-    if (record && record.runnerId === TAB_ID) {
-      record.runnerId = null
-      changed = true
-    }
-  }
-  if (changed) writeRecords(records)
-}
-let unloadHooked = false
-function hookUnloadRelease() {
-  if (unloadHooked) return
-  unloadHooked = true
-  window.addEventListener('beforeunload', releaseMyClaims)
-  // bfcache 场景（前进/后退缓存）同样需要释放
-  window.addEventListener('pagehide', releaseMyClaims)
+function bucket(kind) {
+  return kind === 'script' ? 'scriptTasks' : 'audioTasks'
 }
 
-/**
- * 全局 AI 生成任务（讲解稿/配音分批循环）。
- *
- * 循环放在 store 而非组件中执行：路由切换导致组件卸载时，分批循环继续进行、
- * 进度状态保留；返回页面后按钮仍实时显示「讲稿 x/y」「配音 x/y」。
- * 每批结果由后端落库，即使浏览器关闭也不丢已生成进度（增量续传）。
- * 任务记录持久化在 localStorage：刷新/关闭页面后重新打开会自动从断点续跑，
- * 按钮上的进度用记录中的最近值立即占位，再由真实响应刷新。
- * 实时性：后端批内按小块/逐页增量落库，前端循环期间每 2.5s 轮询服务端进度
- * （只增不减），请求进行中按钮页数也持续推进，不再「卡一批、跳一大截」。
- */
 export const useGenerationStore = defineStore('generation', () => {
-  // catalogId -> { done, total }；键存在即任务进行中
+  // catalogId -> { taskId, status, done, total, queued, queuePosition }
+  // 键存在即「该章节生成进行中」——按钮据此显示进度/排队态（坑 25）
   const scriptTasks = reactive({})
   const audioTasks = reactive({})
-  // 任务完成信号：恢复的任务在后台跑完后，页面据此刷新数据（按钮从任务态回到持久化进度）
+  // 任务中心跟踪集合 taskId -> { kind, catalogId, taskType, status, done, total,
+  //   queuePosition, courseName, catalogTitle, error }；含刚终结的任务（供重试/查看）
+  const tracked = reactive({})
   const completedTick = ref(0)
-  // 进行中的循环（与展示态分离：恢复任务时先占位展示，再进循环）
-  const runningScript = new Set()
-  const runningAudio = new Set()
+  const activeCount = computed(
+    () => Object.values(tracked).filter((t) => t.status === 'pending' || t.status === 'running').length,
+  )
+
+  let pollTimer = null
   let restored = false
 
-  hookUnloadRelease()
+  // ---- 跟踪与状态推进 -------------------------------------------------------
+  function trackTask(kind, catalogId, info) {
+    tracked[info.taskId] = {
+      kind,
+      catalogId: Number(catalogId),
+      taskType: info.taskType || (kind === 'script' ? 'script_gen' : 'audio_gen'),
+      status: info.status || 'pending',
+      done: info.done || 0,
+      total: info.total || 0,
+      queuePosition: info.queuePosition || null,
+      courseName: info.courseName || '',
+      catalogTitle: info.catalogTitle || '',
+      error: info.error || '',
+      fell: false,
+    }
+    syncBucket(kind, catalogId)
+    ensurePolling()
+  }
+
+  // bucket（章节维度的按钮态）从 tracked 派生：同章节同 kind 取最新任务
+  function syncBucket(kind, catalogId) {
+    const map = bucket(kind) === 'scriptTasks' ? scriptTasks : audioTasks
+    const task = Object.values(tracked)
+      .filter((t) => t.kind === kind && t.catalogId === Number(catalogId))
+      .sort((a, b) => b.taskId - a.taskId)[0]
+    if (!task || task.status === 'success') {
+      delete map[catalogId]
+      return
+    }
+    map[catalogId] = {
+      taskId: task.taskId,
+      status: task.status,
+      done: task.done,
+      total: task.total,
+      queued: task.status === 'pending',
+      queuePosition: task.queuePosition,
+      error: task.error,
+    }
+  }
+
+  function applyDetail(taskId, detail) {
+    const item = tracked[taskId]
+    if (!item) return
+    const progress = detail.progress || {}
+    // 进度只增不减（轮询途中页面也可能在刷新数据）
+    item.done = Math.max(item.done, Number(progress.done) || 0)
+    item.total = item.total || Number(progress.total) || 0
+    item.queuePosition = detail.queue_position ?? item.queuePosition
+    item.status = detail.status
+    if (detail.error) item.error = detail.error
+    syncBucket(item.kind, item.catalogId)
+  }
+
+  function finishTask(taskId, detail) {
+    const item = tracked[taskId]
+    if (!item || item.fell) return
+    item.fell = true
+    item.status = detail.status
+    const label = TYPE_LABEL[item.taskType] || '任务'
+    if (detail.status === 'success') {
+      completedTick.value += 1
+      const total = Number((detail.progress || {}).total) || item.total
+      ElMessage.success(item.kind === 'script' ? `已生成 ${total} 页讲解稿` : `已完成 ${total} 页配音`)
+    } else {
+      const reason = detail.error || (detail.status === 'cancelled' ? '已取消' : '生成失败')
+      ElMessage.warning({ message: `${label}${reason}：可在任务中心重试`, duration: 6000, showClose: true })
+    }
+    syncBucket(item.kind, item.catalogId)
+  }
+
+  // ---- 节流轮询（C10）------------------------------------------------------
+  function ensurePolling() {
+    if (pollTimer || document.hidden) return
+    pollTimer = setInterval(pollOnce, POLL_MS)
+  }
+  function stopPollingIfIdle() {
+    const anyActive = Object.values(tracked).some(
+      (t) => (t.status === 'pending' || t.status === 'running') && !t.fell,
+    )
+    if (!anyActive && pollTimer) {
+      clearInterval(pollTimer)
+      pollTimer = null
+    }
+  }
+  async function pollOnce() {
+    const ids = Object.keys(tracked).filter((id) => {
+      const t = tracked[id]
+      return !t.fell && (t.status === 'pending' || t.status === 'running')
+    })
+    if (!ids.length) {
+      stopPollingIfIdle()
+      return
+    }
+    await Promise.all(
+      ids.map(async (id) => {
+        try {
+          const detail = await getAiTask(id)
+          if (detail.status === 'success' || detail.status === 'failed' || detail.status === 'cancelled') {
+            finishTask(id, detail)
+          } else {
+            applyDetail(id, detail)
+          }
+        } catch {
+          /* 单任务轮询失败静默：下一轮再试 */
+        }
+      }),
+    )
+  }
+  // 页面隐藏时暂停轮询，回前台立刻补一拍（C10 第二层）
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      if (pollTimer) {
+        clearInterval(pollTimer)
+        pollTimer = null
+      }
+    } else {
+      pollOnce()
+      ensurePolling()
+    }
+  })
+
+  // ---- 提交（连点防抖：键存在即忽略，服务端唯一索引兜底）--------------------
+  function normalizeSubmit(kind, catalogId, res, taskType) {
+    const isScript = kind === 'script'
+    return {
+      taskId: res.task_id,
+      taskType,
+      status: res.status || 'pending',
+      done: isScript ? res.script_pages || 0 : res.audio_pages || 0,
+      total: isScript ? res.pages || 0 : res.total_pages || 0,
+      queuePosition: res.queue_position ?? null,
+      dedupeHit: !!res.dedupe_hit,
+    }
+  }
 
   async function runScript(catalogId) {
     const id = Number(catalogId)
-    if (runningScript.has(id)) return
-    runningScript.add(id)
-    if (!scriptTasks[id]) scriptTasks[id] = { done: 0, total: 0 }
-    // 恢复/首启都以服务端真实进度为种子：刷新页面后 localStorage 记录可能落后于
-    // 数据库（批次响应在刷新途中丢失），先用真实值纠正，避免按钮显示过期页数
-    const seed = await fetchServerProgress('script', id)
-    if (scriptTasks[id]) {
-      scriptTasks[id] = {
-        done: Math.max(scriptTasks[id].done, seed?.done || 0),
-        total: scriptTasks[id].total || seed?.total || 0,
-      }
-    }
-    saveRecord('script', id, scriptTasks[id])
-    // 批内轮询：请求进行中后端也在增量落库，轮询把最新页数同步进按钮（只增不减）
-    const poll = setInterval(async () => {
-      const p = await fetchServerProgress('script', id)
-      if (!p || !scriptTasks[id]) return
-      if (p.done > scriptTasks[id].done || (p.total && !scriptTasks[id].total)) {
-        scriptTasks[id] = {
-          done: Math.max(scriptTasks[id].done, p.done),
-          total: scriptTasks[id].total || p.total,
-        }
-        saveRecord('script', id, scriptTasks[id])
-      }
-    }, PROGRESS_POLL_MS)
+    if (scriptTasks[id]) return // 已在跟踪（连点防抖，T4）
     try {
-      for (;;) {
-        if (!stillMine('script', id)) return // 已被其他标签页接管，静默让位
-        const res = await generateScript(id, { limit: SCRIPT_BATCH_SIZE })
-        scriptTasks[id] = { done: res.script_pages, total: res.pages }
-        saveRecord('script', id, scriptTasks[id])
-        if (res.done) break
-      }
-      if (!stillMine('script', id)) return
-      clearRecord('script', id)
-      completedTick.value += 1
-      ElMessage.success(`已生成 ${scriptTasks[id].total} 页讲解稿`)
-    } catch {
-      // 失败不保留记录（不自动续跑）：用户看到提示后可手动再次点击，与既有交互一致
-      clearRecord('script', id)
-      // 拦截器已弹接口错误，这里补充进度说明（增量语义，可安全重试）
-      const p = scriptTasks[id] || { done: 0, total: 0 }
-      ElMessage.warning(`讲解稿生成中断：已完成 ${p.done}/${p.total} 页，可再次点击继续`)
-    } finally {
-      clearInterval(poll)
-      runningScript.delete(id)
-      delete scriptTasks[id]
+      const res = await generateScript(id, {})
+      const info = normalizeSubmit('script', id, res, 'script_gen')
+      trackTask('script', id, info)
+      if (info.dedupeHit) ElMessage.info('该章节已有进行中的讲稿任务')
+      return res
+    } catch (error) {
+      return handleSubmitError(error, 'script', id)
     }
   }
 
   async function runAudio(catalogId) {
     const id = Number(catalogId)
-    if (runningAudio.has(id)) return
-    runningAudio.add(id)
-    if (!audioTasks[id]) audioTasks[id] = { done: 0, total: 0 }
-    // 同讲稿：恢复时先以服务端真实进度纠正种子，再进循环
-    const seed = await fetchServerProgress('audio', id)
-    if (audioTasks[id]) {
-      audioTasks[id] = {
-        done: Math.max(audioTasks[id].done, seed?.done || 0),
-        total: audioTasks[id].total || seed?.total || 0,
-      }
-    }
-    saveRecord('audio', id, audioTasks[id])
-    const poll = setInterval(async () => {
-      const p = await fetchServerProgress('audio', id)
-      if (!p || !audioTasks[id]) return
-      if (p.done > audioTasks[id].done || (p.total && !audioTasks[id].total)) {
-        audioTasks[id] = {
-          done: Math.max(audioTasks[id].done, p.done),
-          total: audioTasks[id].total || p.total,
-        }
-        saveRecord('audio', id, audioTasks[id])
-      }
-    }, PROGRESS_POLL_MS)
-    let stallBatches = 0
-    let aborted = false
+    if (audioTasks[id]) return
     try {
-      for (;;) {
-        if (!stillMine('audio', id)) return
-        const res = await generateAudio(id, AUDIO_BATCH_SIZE)
-        const before = audioTasks[id]?.done || 0
-        audioTasks[id] = { done: res.audio_pages, total: res.total_pages }
-        saveRecord('audio', id, audioTasks[id])
-        if (res.done) break
-        // 失败终止：本批一页都没合成成功、且有明确失败页 → 配音服务不可用
-        // （模型下线/Key 失效/限流等）。失败页下轮虽会重试，但根因不消除就会
-        // 无限重试同一批且界面无任何提示（用户实测「配音 0/18」卡死）。
-        // 立即终止并展示失败原因，引导去管理端检查语音合成配置。
-        const failedDetails = Array.isArray(res.failed_details) ? res.failed_details : []
-        const noProgress = res.audio_pages <= before && (res.created_pages || 0) === 0
-        if (noProgress && failedDetails.length > 0) {
-          const first = failedDetails[0]
-          const reason = first?.error ? `（如第 ${first.page} 页：${first.error}）` : ''
-          ElMessage.error({
-            message: `配音失败：${failedDetails.length} 页合成出错${reason}。请检查「管理端 → 大模型配置 → 语音合成」后重试；已完成 ${res.audio_pages}/${res.total_pages} 页，修复后可再次点击「配音」继续补齐。`,
-            duration: 10000,
-            showClose: true,
-          })
-          aborted = true
-          break
-        }
-        // 防御：无失败记录但也连续 3 批无进展（异常形态），同样终止避免死循环
-        if (noProgress) {
-          stallBatches += 1
-          if (stallBatches >= 3) {
-            ElMessage.error({
-              message: `配音中断：连续多批无进展（已完成 ${res.audio_pages}/${res.total_pages} 页），可再次点击「配音」继续。`,
-              duration: 8000,
-              showClose: true,
-            })
-            aborted = true
-            break
-          }
-        } else {
-          stallBatches = 0
-        }
-      }
-      if (!stillMine('audio', id)) return
-      // 失败终止时不保留持久化记录（根因未除，自动续跑只会再次失败），
-      // 由错误提示引导用户修复后手动重试
-      clearRecord('audio', id)
-      completedTick.value += 1
-      if (!aborted) ElMessage.success(`已完成 ${audioTasks[id].total} 页配音`)
-    } catch {
-      clearRecord('audio', id)
-      const p = audioTasks[id] || { done: 0, total: 0 }
-      ElMessage.warning(`配音中断：已完成 ${p.done}/${p.total} 页，可再次点击「配音」继续补齐`)
-    } finally {
-      clearInterval(poll)
-      runningAudio.delete(id)
-      delete audioTasks[id]
+      const res = await generateAudio(id, {})
+      const info = normalizeSubmit('audio', id, res, 'audio_gen')
+      trackTask('audio', id, info)
+      if (info.dedupeHit) ElMessage.info('该章节已有进行中的配音任务')
+      return res
+    } catch (error) {
+      return handleSubmitError(error, 'audio', id)
     }
   }
 
-  // 页面加载后恢复未完成任务（由根组件 App.vue 挂载时调用一次，覆盖所有布局）：
-  // 刷新/关闭前正在跑的任务从断点续跑；按钮进度先用记录值占位，再由响应刷新。
+  // 409：两种语义——task_running（同 kind 的生成正在跑）并入继续跟踪；
+  // wait_script（配音撞上讲稿，data.task_id 是讲稿任务）按 script kind 跟踪，
+  // 让讲稿按钮推进度，配音按钮保持可点（不残留假态）。拦截器已全局静默。
+  function handleSubmitError(error, kind, catalogId) {
+    const data = error?.data || {}
+    if (error?.code === 409 && data.task_id) {
+      const isWaitScript = data.code === 'wait_script'
+      trackTask(isWaitScript ? 'script' : kind, catalogId, {
+        taskId: data.task_id,
+        taskType: isWaitScript ? 'script_gen' : kind === 'script' ? 'script_gen' : 'audio_gen',
+        status: 'running',
+      })
+      ElMessage.info(error.message || '任务正在进行中')
+      return undefined
+    }
+    // 410（旧端点垫片）/400/网络错：拦截器已弹提示；不上抛——旧调用方按
+    // 「提交后照常刷新」的契约使用本函数， rejection 会变成 unhandled
+    return undefined
+  }
+
+  // ---- 任务中心操作 ---------------------------------------------------------
+  async function cancelTask(taskId) {
+    try {
+      const res = await cancelAiTask(taskId)
+      const item = tracked[taskId]
+      if (item) {
+        item.status = res.status
+        item.queuePosition = null
+        syncBucket(item.kind, item.catalogId)
+      }
+      stopPollingIfIdle()
+    } catch {
+      /* 拦截器已提示 */
+    }
+  }
+
+  async function retryTask(taskId) {
+    try {
+      const res = await retryAiTask(taskId)
+      const item = tracked[taskId]
+      if (item) {
+        item.status = res.status
+        item.error = ''
+        item.fell = false
+        item.done = 0
+        syncBucket(item.kind, item.catalogId)
+        ensurePolling()
+      }
+    } catch {
+      /* 拦截器已提示 */
+    }
+  }
+
+  function dismissTask(taskId) {
+    delete tracked[taskId]
+  }
+
+  // ---- 启动恢复：服务端是唯一真相（坑 22：先清旧前端续跑记录）--------------
+  async function refreshActive() {
+    try {
+      const list = await listActiveAiTasks({ task_type: 'all' })
+      for (const t of list || []) {
+        if (!t.catalog || !(t.task_type === 'script_gen' || t.task_type === 'audio_gen')) continue
+        const kind = t.task_type === 'script_gen' ? 'script' : 'audio'
+        if (tracked[t.id]) continue
+        trackTask(kind, t.catalog, {
+          taskId: t.id,
+          taskType: t.task_type,
+          status: t.status,
+          done: (t.progress || {}).done || 0,
+          total: (t.progress || {}).total || 0,
+          queuePosition: t.queue_position ?? null,
+          courseName: t.course_name || '',
+          catalogTitle: t.catalog_title || '',
+        })
+      }
+    } catch {
+      /* 未登录/网络错静默：下次提交或手动打开任务中心时再拉 */
+    }
+  }
+
   function restoreTasks() {
     if (restored) return
     restored = true
-    // 未登录页（如登录页）不恢复：无凭证时生成接口必然 401
-    if (!localStorage.getItem('access_token')) return
-    resumeRecords()
-  }
-
-  function resumeRecords() {
-    const skipped = []
-    for (const record of Object.values(readRecords())) {
-      if (!record || !record.catalogId || !record.kind) continue
-      // 其他标签页正在跑（心跳新鲜）→ 让位，避免重复生成
-      if (record.runnerId && record.runnerId !== TAB_ID && Date.now() - (record.updatedAt || 0) < STALE_MS) {
-        skipped.push(record)
-        continue
-      }
-      const seed = { done: record.done || 0, total: record.total || 0 }
-      if (record.kind === 'script') {
-        scriptTasks[record.catalogId] = seed
-        runScript(record.catalogId)
-      } else if (record.kind === 'audio') {
-        audioTasks[record.catalogId] = seed
-        runAudio(record.catalogId)
-      }
+    // 一次性废掉旧前端的 localStorage 续跑记录（队列化后服务端即真相，
+    // 旧记录只会让按钮显示过期页数；垫片删除前每次启动都清，幂等无害）
+    try {
+      localStorage.removeItem(LEGACY_KEY)
+    } catch {
+      /* 存储不可用时忽略 */
     }
-    // 被让位的记录：等其心跳过期后再尝试接管（覆盖 beforeunload 未触发的崩溃/强杀场景）
-    if (skipped.length) setTimeout(resumeRecords, STALE_MS + 5000)
+    if (!localStorage.getItem('access_token')) return
+    refreshActive()
   }
 
-  return { scriptTasks, audioTasks, completedTick, runScript, runAudio, restoreTasks }
+  return {
+    scriptTasks,
+    audioTasks,
+    tracked,
+    completedTick,
+    activeCount,
+    runScript,
+    runAudio,
+    restoreTasks,
+    refreshActive,
+    cancelTask,
+    retryTask,
+    dismissTask,
+  }
 })

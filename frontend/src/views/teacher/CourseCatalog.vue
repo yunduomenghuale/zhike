@@ -342,9 +342,11 @@
                 <el-button class="node-action-btn" :icon="Upload" @click.stop="openPpt(data)">课件</el-button>
                 <el-button class="node-action-btn" :icon="Microphone" :loading="!!genStore.scriptTasks[data.id]" @click.stop="openScript(data)">
                   {{ genStore.scriptTasks[data.id]
-                    ? (genStore.scriptTasks[data.id].total
-                        ? `讲稿 ${genStore.scriptTasks[data.id].done}/${genStore.scriptTasks[data.id].total}`
-                        : '讲稿生成中…')
+                    ? (genStore.scriptTasks[data.id].status === 'pending'
+                        ? `排队中（第 ${genStore.scriptTasks[data.id].queuePosition || '…'} 位）`
+                        : genStore.scriptTasks[data.id].total
+                          ? `讲稿 ${genStore.scriptTasks[data.id].done}/${genStore.scriptTasks[data.id].total}`
+                          : '讲稿生成中…')
                     : scriptState(data).complete
                       ? '讲稿'
                       : scriptState(data).done
@@ -353,9 +355,11 @@
                 </el-button>
                 <el-button class="node-action-btn" :icon="Headset" :loading="!!genStore.audioTasks[data.id]" @click.stop="genAudio(data)">
                   {{ genStore.audioTasks[data.id]
-                    ? (genStore.audioTasks[data.id].total
-                        ? `配音 ${genStore.audioTasks[data.id].done}/${genStore.audioTasks[data.id].total}`
-                        : '配音生成中…')
+                    ? (genStore.audioTasks[data.id].status === 'pending'
+                        ? `排队中（第 ${genStore.audioTasks[data.id].queuePosition || '…'} 位）`
+                        : genStore.audioTasks[data.id].total
+                          ? `配音 ${genStore.audioTasks[data.id].done}/${genStore.audioTasks[data.id].total}`
+                          : '配音生成中…')
                     : audioState(data).done && !audioState(data).complete
                       ? `续配音 ${audioState(data).done}/${audioState(data).total}`
                       : '配音' }}
@@ -838,7 +842,12 @@
         >
           <el-icon class="is-loading"><Loading /></el-icon>
           <span v-if="genStore.scriptTasks[videoNode.id]">
-            正在生成讲解稿 {{ genStore.scriptTasks[videoNode.id].done }}/{{ genStore.scriptTasks[videoNode.id].total || videoScripts.length || '…' }}
+            <template v-if="genStore.scriptTasks[videoNode.id].status === 'pending'">
+              讲稿排队中（第 {{ genStore.scriptTasks[videoNode.id].queuePosition || '…' }} 位），完成后自动开始
+            </template>
+            <template v-else>
+              正在生成讲解稿 {{ genStore.scriptTasks[videoNode.id].done }}/{{ genStore.scriptTasks[videoNode.id].total || videoScripts.length || '…' }}
+            </template>
           </span>
           <span v-else>
             正在合成配音 {{ genStore.audioTasks[videoNode.id].done }}/{{ genStore.audioTasks[videoNode.id].total || audioTotalFallback || '…' }}

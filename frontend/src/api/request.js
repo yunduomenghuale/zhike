@@ -10,13 +10,14 @@ const request = axios.create({
 // 记录已经处理过的失效令牌，避免多个并发请求重复提示、重复跳转。
 let handledUnauthorizedToken = ''
 
-// 请求拦截：附带 JWT
+// 请求拦截：附带 JWT + 队列模式标识（新前端的全局投名状：无此头旧的生成端点会 410）
 request.interceptors.request.use((config) => {
   const token = localStorage.getItem('access_token')
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
     if (token !== handledUnauthorizedToken) handledUnauthorizedToken = ''
   }
+  config.headers['X-AI-Task-Mode'] = 'queue'
   return config
 })
 
@@ -73,8 +74,9 @@ request.interceptors.response.use(
     return body
   },
   async (error) => {
-    // 静默请求（如登出）：失败既不弹提示，也不续期/跳登录页——调用方自己吞错。
-    // 登出时本地 token 已被清掉，后端 401 属于预期内结果，不该打扰用户。
+    // 静默请求（如登出；或调用方自管提示的生成提交）：失败既不弹提示，也不续期/
+    // 跳登录页——调用方自己吞错。登出时本地 token 已被清掉，后端 401 属于预期内
+    // 结果，不该打扰用户；生成端点的 409/410 业务提示也由调用方按场景措辞。
     if (error.config?.silent) return Promise.reject(error)
 
     const status = error.response?.status

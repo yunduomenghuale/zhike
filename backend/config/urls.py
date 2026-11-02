@@ -5,7 +5,7 @@ from django.contrib import admin
 from django.http import Http404
 from django.urls import include, path
 
-from apps.ai.views import AITaskActiveView, AITaskDetailView
+from apps.ai.views import AITaskActiveView, AITaskCancelView, AITaskDetailView, AITaskRetryView
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 api_patterns = [
@@ -15,6 +15,8 @@ api_patterns = [
     # AI 异步任务轮询（班级学情分析/章节学习总结/AI 生题通用，设计方案 §2.3）
     path("ai-tasks/active/", AITaskActiveView.as_view(), name="ai-task-active"),
     path("ai-tasks/<int:task_id>/", AITaskDetailView.as_view(), name="ai-task-detail"),
+    path("ai-tasks/<int:task_id>/cancel/", AITaskCancelView.as_view(), name="ai-task-cancel"),
+    path("ai-tasks/<int:task_id>/retry/", AITaskRetryView.as_view(), name="ai-task-retry"),
     path("analytics/", include("apps.analytics.urls")),
     path("admin-panel/", include("apps.platform_admin.urls")),
     # 各业务模块 router 直接挂在 /api/ 根下（resource 名即完整路径）
