@@ -96,16 +96,30 @@ node serve-local.js          # 5273；改源码要重新 build
 
 ### 2.5.4 推送规范
 
-- **分支**：从当前 HEAD 切 `feature/ai-queue`，每个阶段一个 commit；不要直接推
-  `feature/org-refactor` 或 master。
+- **分支**：已建好 `feature/ai-queue`（基于 `3ed91d9`，从 `feature/org-refactor` 切出），新会话直接
+  `git checkout feature/ai-queue` 工作，每个阶段一个 commit；不要切回 `feature/org-refactor`。
 - **只提交本阶段相关的明确路径**：`git add backend/apps/ai/queue.py backend/apps/ai/models.py ...`。
-  ⚠️ 当前工作区有 **73 项未提交改动**（含 `docs/manual/` 与若干后端文件，属于其它工作），
-  **禁止 `git add -A` / `git add -u`**，否则会把别人的改动卷进来。
+  工作区已于 2026-11-02 清理（历史杂项分 4 个 commit 入库），但仍**禁止 `git add -A` / `git add -u`**
+  ——规则不变，防止今后混入无关改动。
 - **commit message**：`feat(队列): 阶段N <做了什么>` / `fix(队列): <修了什么>`，中文，模块在前。
 - **同一 commit 必须包含**：代码改动 + 迁移文件（若有）+ 该阶段的验证脚本/用例。
 - **不得入库**：`.env`、`media/`、`*.sqlite3`、`data/`、临时日志。
 - **禁止** `--no-verify`、禁止 force push、禁止 amend 已推送的 commit。
 - push 遇到 502 属沙箱已知问题，重试即可；连续 3 次失败再上报。
+
+### 2.5.6 本地覆盖边界（必须知道哪些测不了）
+
+以下三项**在 Windows 本地环境无法验证**，不是测试偷懒，是平台限制：
+
+| 缺口 | 为什么本地测不了 | 闭环途径（三选一） |
+|---|---|---|
+| **soffice 并发 2**（阶段 6 关键判据） | 本地开发走 PowerPoint COM 路径（`_render_with_powerpoint` 优先，COM 单实例），`AI_RENDER_CONCURRENCY` 强制 1——**Windows 上永远看不到 2 个 soffice** | ① 过渡机 124.70.107.64（CentOS+Docker，公网可连）起容器验证；② 本地 Docker Desktop 用 `Dockerfile.fast` 起 backend+worker（首次构建要下 torch，慢）；③ 放到生产灰度第一步验证，**前提是 worker 日志自报槽位**（见下） |
+| **容器编排语义**（ENTRYPOINT 覆盖 / stop_grace_period / depends_on / 双容器共享 `/app/data` 锁库） | compose 的这些行为只在 Linux 容器成立；本地 `bnet-test` 是生产专属网络，compose 起不来 | 同上①②；阶段 0 的 compose 语法检查（`docker compose config`）本地可做，但语义验证必须容器环境 |
+| **L6 生产灰度** | 定义上就在生产 | 观察指标 + 分步开关（测试方案 §7） |
+
+**配套要求（让缺口可兜底）**：渲染获取槽位时必须打日志 `[render] slot=1/2 acquired, file=xxx`；
+`worker-health` 端点必须输出 `AI_RENDER_CONCURRENCY` 与当前占用的槽位号。
+这样途径③不靠 `ps` 也能验证并发生效。
 
 ### 2.5.5 每阶段汇报必须包含推送结果
 
@@ -311,8 +325,8 @@ worker:
   并留下命令与关键数字；单测通过不等于实测通过；mock 结果不能冒充实测。
 - 失败时先定位根因再改，禁止注释断言/放宽阈值/跳过用例；修复后要重跑该阶段全部验证项，
   不能只重跑失败项。同一原因连续两次修不好，停下来问我。
-- 分支从当前 HEAD 切 feature/ai-queue；只 git add 本阶段相关路径——
-  当前工作区有 73 项其它未提交改动，禁止 git add -A / -u。
+- 分支 feature/ai-queue 已建好（基于 3ed91d9），直接 git checkout feature/ai-queue 工作；
+  只 git add 本阶段相关路径，禁止 git add -A / -u。
 - commit 格式 feat(队列): 阶段N …；不得 --no-verify、不得 force push；push 502 重试即可。
 - 每阶段汇报：改动路径:行 / 实测命令与关键数字 / 回归结果 / commit hash / 回滚点。
 

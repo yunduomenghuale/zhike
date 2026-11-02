@@ -99,9 +99,15 @@
 ### 4.2 课件渲染
 
 - 4 个教师并发上传 60 页 PPT；
-- 渲染期间在 worker 容器里 `ps -ef | grep soffice` 采样，**应看到 2 个**（并发 2 生效）；
+- 渲染期间采样 `ps -ef | grep soffice`，**应看到 2 个**（并发 2 生效）；
 - 若只看到 1 个 → 说明 F2（`_RENDER_THREAD_LOCK` 未删）或槽位=1 没改，直接判失败；
 - 同时传 4 个 PDF：`soffice` 应为 0 个（PDF 不走 soffice），pypdfium2 并发 ≤ 3。
+
+> **⚠️ 本组用例在 Windows 本地测不了**（本地走 PowerPoint COM 路径、并发强制 1，永远看不到
+> 2 个 soffice）。闭环途径三选一（详见交接书 §2.5.6）：过渡机 124 起容器 / 本地 Docker Desktop /
+> 生产灰度期验证。无论走哪条，**实现时必须在获取渲染槽位打日志**
+> `[render] slot=1/2 acquired, file=xxx`，并让 `worker-health` 输出槽位占用——
+> 这样灰度验证不必依赖 `ps`。
 
 > 这组是本次改造唯一的"性能效果验证"。**看不到 2 个 soffice 就等于没做**。
 
