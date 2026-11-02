@@ -137,6 +137,12 @@ class Command(BaseCommand):
                 ai_queue.reap_stale()
             except Exception:  # noqa: BLE001 - 回收失败不该拖垮主循环
                 self._err("reap_stale")
+            try:
+                from apps.ai.quota import release_expired_reservations
+
+                release_expired_reservations()
+            except Exception:  # noqa: BLE001
+                self._err("release_expired_reservations")
 
             # 回收已退出线程的槽位
             with running_lock:

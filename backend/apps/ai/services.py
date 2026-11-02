@@ -577,7 +577,10 @@ def synthesize_audio_for_video(video, voice: str | None = None, limit: int | Non
             # 每个 item 是独立 dict，线程间无共享状态；provider 只读配置，requests 线程安全
             page = item.get("page")
             try:
-                url = provider.tts(item["script"].strip(), voice=voice)
+                from .gate import gated  # 调用闸门：全局在飞 TTS ≤ AI_MAX_CONCURRENT_TTS（坑 15）
+
+                with gated("tts"):
+                    url = provider.tts(item["script"].strip(), voice=voice)
             except Exception as exc:
                 # 失败也走页级合并：记 audio_error，与主线程写入互不覆盖（评审 C2）
                 merge_pages(video.id, {page: {"audio_error": str(exc)[:300]}})

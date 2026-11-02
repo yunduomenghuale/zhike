@@ -250,6 +250,79 @@ class MergePagesTests(TransactionTestCase):
         self.assertEqual([item["page"] for item in self.video.scripts], [1, 2, 3, 5])
 
 
+class QuotaReservationTests(TransactionTestCase):
+    """Q8：配额预留/结算/过期释放（D4/评审 C7，§13.5 五步生命周期）。"""
+
+    def setUp(self):
+        self.teacher = _user("Q_quota")
+        from apps.courses.models import Course, Catalog
+
+        self.course = Course.objects.create(name="Q配额课", teacher=self.teacher, status="active")
+        self.catalog = Catalog.objects.create(course=self.course, title="Q章节", order=1)
+
+    def _task(self, trace=""):
+        return AITask.objects.create(
+            task_type=AITask.TaskType.SCRIPT_GEN, status=AITask.Status.RUNNING,
+            catalog=self.catalog, course=self.course, triggered_by=self.teacher, trace_id=trace,
+        )
+
+    def test_q8_reserve_settle_and_release(self):
+        from apps.ai.models import AIQuotaReservation
+        from apps.ai.quota import (
+            active_reserved,
+            release_expired_reservations,
+            reserve_quota,
+            settle_quota,
+        )
+
+        task = self._task(trace="q8trace")
+        reserve_quota(task, self.teacher, 10)
+        self.assertEqual(active_reserved(self.teacher), 10, "预留中应计入占用")
+
+        # 结算 = 同 trace_id 的 AICallLog 实际条数（一个任务 = 一个 trace_id，C1）
+        from apps.ai.models import AICallLog
+
+        AICallLog.objects.create(scene="script_gen", capability="chat", provider="q8", trace_id="q8trace", triggered_by=self.teacher)
+        AICallLog.objects.create(scene="script_gen", capability="chat", provider="q8", trace_id="q8trace", triggered_by=self.teacher)
+        settle_quota(task)
+        reservation = AIQuotaReservation.objects.get(task=task)
+        self.assertEqual(reservation.status, AIQuotaReservation.Status.SETTLED)
+        self.assertEqual(reservation.settled_amount, 2)
+        self.assertEqual(active_reserved(self.teacher), 0, "结算后不再占用")
+
+        # 过期释放：预留 6h 到期仍 pending → 释放（泄漏兜底）。
+        # 换一个章节建第二个任务——同一章节同时只允许一条 running 讲稿（唯一索引）
+        from apps.courses.models import Catalog
+
+        catalog2 = Catalog.objects.create(course=self.course, title="Q章节2", order=2)
+        task2 = AITask.objects.create(
+            task_type=AITask.TaskType.SCRIPT_GEN, status=AITask.Status.RUNNING,
+            catalog=catalog2, course=self.course, triggered_by=self.teacher, trace_id="q8t2",
+        )
+        reserve_quota(task2, self.teacher, 5)
+        AIQuotaReservation.objects.filter(task=task2).update(
+            expires_at=timezone.now() - timedelta(hours=1)
+        )
+        released = release_expired_reservations()
+        self.assertGreaterEqual(released, 1)
+        self.assertEqual(active_reserved(self.teacher), 0)
+
+    def test_q8_check_includes_active_reserved(self):
+        """校验口径 = 已用 + 预留中 >= 上限（D4）：预留占满即 429。"""
+        from apps.ai.models import AIQuotaPolicy
+        from apps.ai.quota import check_ai_quota, reserve_quota
+        from rest_framework.exceptions import Throttled
+
+        AIQuotaPolicy.objects.create(user=self.teacher, daily_limit=10)
+        task = self._task()
+        reserve_quota(task, self.teacher, 10)
+        try:
+            check_ai_quota(self.teacher)
+            self.fail("预留占满上限后应 429")
+        except Throttled as exc:
+            self.assertEqual(exc.get_codes(), "ai_quota")
+
+
 class QueueContextTests(TransactionTestCase):
     """Q10/Q11：C1 上下文重建与长驻身份隔离（run_task 直跑，_dispatch 打桩）。"""
 

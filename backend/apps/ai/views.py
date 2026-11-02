@@ -225,6 +225,71 @@ class AITaskRetryView(APIView):
         return api_response({"id": task.id, "status": task.status}, message="已重新排队")
 
 
+class AIQueueDashboardView(APIView):
+    """管理端「任务队列」看板（C9/方案 §10）：全量统计与近期失败列表。
+
+    pending/running/failed 按类型分布、近 24h 平均排队时长（created→started）、
+    失败原因 Top5、当前 worker 心跳（另见 worker-health 的槽位明细）。
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.common.access import is_platform_admin
+
+        if not is_platform_admin(request.user):
+            return api_response(message="仅平台管理员可查看", code=403, status=403)
+
+        from django.db.models import Count
+        from django.utils import timezone
+
+        from .models import AITask
+
+        by_status = {
+            row["status"]: row["n"]
+            for row in AITask.objects.filter(
+                status__in=[AITask.Status.PENDING, AITask.Status.RUNNING, AITask.Status.FAILED]
+            ).values("status").annotate(n=Count("id"))
+        }
+        by_type = {
+            row["task_type"]: row["n"]
+            for row in AITask.objects.filter(
+                status__in=[AITask.Status.PENDING, AITask.Status.RUNNING]
+            ).values("task_type").annotate(n=Count("id"))
+        }
+        day_ago = timezone.now() - timezone.timedelta(hours=24)
+        # 平均排队时长（created→started）：样本量小（近 24h 启动的任务），
+        # Python 侧算均值，不依赖 ORM 时间差方言（ExtractEpoch 是第三方库的）
+        rows = AITask.objects.filter(started_at__isnull=False, created_at__gte=day_ago).values_list(
+            "created_at", "started_at"
+        )[:500]
+        waits = [(s - c).total_seconds() for c, s in rows if c and s]
+        avg_wait = sum(waits) / len(waits) if waits else None
+        top_errors = [
+            {"error": row["error"][:120], "count": row["n"]}
+            for row in AITask.objects.filter(status=AITask.Status.FAILED, error__gt="")
+            .values("error").annotate(n=Count("id")).order_by("-n")[:5]
+        ]
+        recent_failed = [
+            {"id": t.id, "task_type": t.task_type, "error": t.error[:200],
+             "created_at": t.created_at, "finished_at": t.finished_at}
+            for t in AITask.objects.filter(status=AITask.Status.FAILED).order_by("-id")[:10]
+        ]
+        last_hb = AITask.objects.filter(
+            status=AITask.Status.RUNNING, heartbeat_at__isnull=False
+        ).values_list("heartbeat_at", flat=True).order_by("-heartbeat_at").first()
+        return api_response(
+            {
+                "by_status": by_status,
+                "active_by_type": by_type,
+                "avg_wait_seconds_24h": round(avg_wait, 1) if avg_wait is not None else None,
+                "top_errors": top_errors,
+                "recent_failed": recent_failed,
+                "worker_last_heartbeat": last_hb,
+            }
+        )
+
+
 class AIWorkerHealthView(APIView):
     """worker/队列健康（管理端，§2.5.6 兜底：渲染并发在 Windows 本地看不到
     2 个 soffice，靠槽位占用自报验证并发生效）。

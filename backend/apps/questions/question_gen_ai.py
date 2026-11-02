@@ -209,13 +209,16 @@ def _chat_group(provider, qtype: str, count: int, score, context: str, objective
     from apps.ai.services import _safe_json
 
     messages = _group_messages(qtype, count, score, context, objective, catalog_title)
-    raw = provider.chat(
-        messages,
-        temperature=0.3,
-        timeout=_chat_timeout(provider),
-        retries=2,
-        enable_thinking=False,
-    )
+    from apps.ai.gate import gated  # 调用闸门：全局在飞 chat ≤ AI_MAX_CONCURRENT_CHAT（坑 15）
+
+    with gated("chat"):
+        raw = provider.chat(
+            messages,
+            temperature=0.3,
+            timeout=_chat_timeout(provider),
+            retries=2,
+            enable_thinking=False,
+        )
     result = _safe_json(raw, default=[])
     return result if isinstance(result, list) else []
 

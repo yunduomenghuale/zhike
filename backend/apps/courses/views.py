@@ -40,6 +40,21 @@ from .serializers import (
 )
 
 
+def _script_reserve_amount(ppt, catalog) -> int:
+    """讲稿任务的配额预留量（D4）：ceil(空页数 / chunk) × 1.2（20% 重试余量）。"""
+    import math
+
+    from django.conf import settings
+
+    video = TeachingVideo.objects.filter(catalog=catalog).first()
+    filled = sum(1 for item in (video.scripts or []) if str(item.get("script") or "").strip()) if video else 0
+    pending = max(0, len(ppt.parsed_pages or []) - filled)
+    if not pending:
+        return 0
+    chunk = max(1, int(getattr(settings, "AI_SCRIPT_CHUNK_PAGES", 3) or 3))
+    return math.ceil(math.ceil(pending / chunk) * 1.2)
+
+
 def _invalidate_teaching_video_for_new_ppt(catalog, ppt):
     """课件换版后清除旧衍生内容，防止学生继续访问旧讲稿或配音。"""
     video = TeachingVideo.objects.select_for_update().filter(catalog=catalog).first()
@@ -345,7 +360,6 @@ class CatalogViewSet(BaseModelViewSet):
         # 410——返回 done:true 是谎报完成，什么都不返会让旧 for(;;) 循环死循环。
         if request.headers.get("X-AI-Task-Mode") != "queue":
             return api_response(message="生成方式已升级，请刷新页面后重试", code=410, status=410)
-        check_ai_quota(request.user)  # AI 日配额（P5-B6）：超限 429
 
         catalog = self.get_object()
         ppt = (
@@ -359,6 +373,13 @@ class CatalogViewSet(BaseModelViewSet):
         if not ppt or not ppt.parsed_pages:
             return api_response(message="该章节还没有已解析的 PPT", code=400, status=400)
         force = str(request.data.get("force", "")).lower() in ("1", "true", "yes", "on")
+
+        # 配额按预估页数预留（D4/评审 C7）：口径 = 已用 + 预留中 + 本次预估。
+        # 讲稿消耗 chat 调用（每 chunk 一次）；配音走 TTS 不计 chat 配额，不预留。
+        from apps.ai.quota import check_ai_quota
+
+        reserve_amount = _script_reserve_amount(ppt, catalog)
+        check_ai_quota(request.user, extra_reserved=reserve_amount)
 
         # 换版：旧讲稿与新课件不匹配，立即下线（清学生观看进度）——排队期间学生
         # 看不到该章节是正确行为；同版本 force 重生成不清空、不下线（§6.3）
@@ -451,6 +472,10 @@ class CatalogViewSet(BaseModelViewSet):
             if existing is None:
                 raise
             return _queued_response(existing, dedupe_hit=True)
+        # 预留落库（D4/评审 C7）：仅新建路径——dedupe_hit 的首次提交已预留过
+        from apps.ai.quota import reserve_quota
+
+        reserve_quota(task, request.user, reserve_amount)
         return _queued_response(task)
 
     @action(detail=True, methods=["post"], url_path="generate-audio", permission_classes=[IsTeacher])

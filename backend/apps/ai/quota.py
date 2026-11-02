@@ -41,18 +41,91 @@ def chat_calls_today(user) -> int:
     ).count()
 
 
-def check_ai_quota(user):
+def check_ai_quota(user, extra_reserved: int = 0):
     """超限抛 429；返回 None 表示放行。
 
     limit=0 的语义是「当天 0 次」即完全封禁（区别于 None 不限），
     管理端可临时封禁某账号的 AI 调用。
     code="ai_quota"：异常处理器据此透传本业务文案，而非泛化频控提示。
+
+    extra_reserved（D4/评审 C7）：长任务提交时把本次预估占用并入校验——
+    口径 = 已用 + 预留中 + 本次预估 >= 上限 → 429。普通入口（问答/试听）不传，
+    行为与改造前完全一致。
     """
     limit = get_effective_daily_limit(user)
     if limit is None:
         return
-    if chat_calls_today(user) >= limit:
+    if chat_calls_today(user) + active_reserved(user) + max(0, int(extra_reserved or 0)) >= limit:
         raise Throttled(
             detail=f"今日 AI 调用次数已达上限（{limit} 次），请明天再试或联系管理员调整配额",
             code="ai_quota",
         )
+
+
+# ---------------------------------------------------------------------------
+# 长任务配额预留（D4/评审 C7，§13.5）
+# ---------------------------------------------------------------------------
+RESERVATION_TTL_HOURS = 6
+
+
+def active_reserved(user) -> int:
+    """该用户当前「预留中」的总量（先把过期行释放掉，再求和）。"""
+    release_expired_reservations()
+    if user is None or not getattr(user, "is_authenticated", False):
+        return 0
+    from django.db.models import Sum
+
+    from .models import AIQuotaReservation
+
+    total = AIQuotaReservation.objects.filter(
+        user=user, status=AIQuotaReservation.Status.PENDING
+    ).aggregate(s=Sum("amount"))["s"]
+    return int(total or 0)
+
+
+def reserve_quota(task, user, amount: int) -> None:
+    """提交成功后在任务上登记预留（与任务行同生共死，CASCADE）。"""
+    from .models import AIQuotaReservation
+
+    AIQuotaReservation.objects.update_or_create(
+        task=task,
+        defaults={
+            "user": user,
+            "amount": max(1, int(amount)),
+            "settled_amount": 0,
+            "status": AIQuotaReservation.Status.PENDING,
+            "expires_at": timezone.now() + timezone.timedelta(hours=RESERVATION_TTL_HOURS),
+        },
+    )
+
+
+def settle_quota(task) -> None:
+    """任务终结：按 trace_id 数 AICallLog 实际条数结算（一个任务=一个 trace_id，C1）。
+
+    只在终态调用一次；重试期间预留保持 pending，继续占额度（防超额提交）。
+    """
+    from .models import AIQuotaReservation
+
+    reservation = getattr(task, "quota_reservation", None)
+    if reservation is None or reservation.status != AIQuotaReservation.Status.PENDING:
+        return
+    settled = AICallLog.objects.filter(trace_id=task.trace_id).count() if task.trace_id else 0
+    AIQuotaReservation.objects.filter(id=reservation.id, status=AIQuotaReservation.Status.PENDING).update(
+        settled_amount=settled,
+        status=AIQuotaReservation.Status.SETTLED,
+    )
+
+
+def release_expired_reservations() -> int:
+    """过期/孤儿释放（§13.5 ⑤）：expires_at 到期仍 pending，或任务已终态但预留未结。"""
+    from .models import AIQuotaReservation
+
+    now = timezone.now()
+    n1 = AIQuotaReservation.objects.filter(
+        status=AIQuotaReservation.Status.PENDING, expires_at__lt=now
+    ).update(status=AIQuotaReservation.Status.RELEASED)
+    n2 = AIQuotaReservation.objects.filter(
+        status=AIQuotaReservation.Status.PENDING,
+        task__status__in=["success", "failed", "cancelled"],
+    ).update(status=AIQuotaReservation.Status.RELEASED)
+    return n1 + n2

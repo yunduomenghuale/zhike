@@ -86,6 +86,7 @@ def run_task(task: AITask) -> None:
             from .queue import cancel
 
             cancel(task.id)
+            settle_reservation(task)
             logger.info("[task] skip cancelled task=%s", task.id)
             return
         scene = SCENE_OF.get(task.task_type, AICallLog.Scene.OTHER)
@@ -95,13 +96,26 @@ def run_task(task: AITask) -> None:
             task.refresh_from_db(fields=["trace_id"])
             _dispatch(task)
         mark_success(task.id)
+        settle_reservation(task)
     except Exception as exc:  # 流水线未自行兜底的异常：退避重试或落 FAILED
         logger.exception("AI 任务执行失败（task_id=%s, type=%s）", task.id, task.task_type)
-        mark_error(task.id, f"{type(exc).__name__}: {exc}")
+        outcome = mark_error(task.id, f"{type(exc).__name__}: {exc}")
+        if outcome == "failed":
+            settle_reservation(task)  # 终态结算；重试期间预留继续占位（防超额）
     finally:
         clear_current_user()  # 防 A 教师身份串到 B 教师（评审 C1 补充）
         if threading.current_thread() is not threading.main_thread():
             close_old_connections()
+
+
+def settle_reservation(task: AITask) -> None:
+    """终态结算配额预留（D4）：按 trace_id 数 AICallLog 实际条数。"""
+    try:
+        from .quota import settle_quota
+
+        settle_quota(task)
+    except Exception:  # noqa: BLE001 - 结算失败不影响任务本身
+        logger.exception("[task] quota settle failed task=%s", task.id)
 
 
 def _dispatch(task: AITask) -> None:

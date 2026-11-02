@@ -34,9 +34,19 @@ class AdminAIQuotaView(AdminThrottleMixin, APIView):
                 "role": row.user.role,
                 "daily_limit": row.daily_limit,
             })
+        # 三段用量（评审 C7）：已用 / 预留中 / 上限——否则教师看到的"剩余"和
+        # 实际拦截阈值（已用+预留中 >= 上限，D4）永远对不上
+        from apps.ai.quota import active_reserved, chat_calls_today, get_effective_daily_limit
+
+        usage = {
+            "used_today": chat_calls_today(request.user),
+            "reserved_now": active_reserved(request.user),
+            "limit": get_effective_daily_limit(request.user),
+        }
         return api_response({
             "default_daily_limit": default_row.daily_limit if default_row else None,
             "overrides": overrides,
+            "usage": usage,
         })
 
     def put(self, request):

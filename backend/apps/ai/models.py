@@ -530,3 +530,44 @@ class AIQuotaPolicy(BaseModel):
     def __str__(self):
         who = self.user.username if self.user else "全局默认"
         return f"{who}: {self.daily_limit if self.daily_limit is not None else '不限'}/日"
+
+
+class AIQuotaReservation(BaseModel):
+    """长任务配额预留（D4/评审 C7）：提交时按预估页数预留，终结按实际结算。
+
+    一条 30 页讲稿作业在跑完前没有任何 AICallLog，不预留 → 教师能连提 5 个作业，
+    跑到第三个额度耗尽、任务中途 429。预留后校验口径变为「已用 + 预留中 >= 上限」。
+
+    生命周期（§13.5）：提交时预留（amount=ceil(空页/chunk)×1.2，6h 过期）→
+    任务终结（success/failed/cancelled）按 trace_id 数 AICallLog 结算 →
+    过期/孤儿由 prune_ai_tasks 与 worker 启动回收释放。
+    超额（重试导致 settled > amount）不拦截——调用已发生，表现为当日剩余变少。
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "预留中"
+        SETTLED = "settled", "已结算"
+        RELEASED = "released", "已释放"
+
+    task = models.OneToOneField(
+        AITask, on_delete=models.CASCADE, related_name="quota_reservation", verbose_name="任务"
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ai_quota_reservations",
+        verbose_name="用户",
+    )
+    amount = models.IntegerField("预留量")
+    settled_amount = models.IntegerField("实际结算", default=0)
+    status = models.CharField("状态", max_length=16, choices=Status.choices, default=Status.PENDING)
+    expires_at = models.DateTimeField("过期时间")
+
+    class Meta:
+        verbose_name = "AI 配额预留"
+        verbose_name_plural = verbose_name
+
+    def __str__(self):
+        return f"task={self.task_id} {self.amount}（结算 {self.settled_amount}）{self.get_status_display()}"
