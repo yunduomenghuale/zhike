@@ -285,6 +285,10 @@ class AITask(BaseModel):
         CHAPTER_SUMMARY = "chapter_summary", "章节学习总结"
         QUESTION_GEN = "question_gen", "题目生成"
         COURSE_REUSE = "course_reuse", "课程复用"
+        SCRIPT_GEN = "script_gen", "章节讲稿"
+        AUDIO_GEN = "audio_gen", "章节配音"
+        PPT_PARSE = "ppt_parse", "课件解析"
+        EMBED_INGEST = "embed_ingest", "向量入库"
 
     class Status(models.TextChoices):
         PENDING = "pending", "排队中"
@@ -349,12 +353,40 @@ class AITask(BaseModel):
     started_at = models.DateTimeField("开始时间", null=True, blank=True)
     finished_at = models.DateTimeField("完成时间", null=True, blank=True)
 
+    # ===== 队列化扩展字段（AI 长任务队列，见 docs/AI长任务队列化改造方案.md §4）=====
+    # 作业参数：{ppt_id, ppt_version, limit, force, voice, only_pages, ...}；
+    # 队列层只写 status/心跳等元信息，progress 归业务流水线独占（评审 C5）。
+    payload = models.JSONField("作业参数", default=dict, blank=True)
+    # 越小越先：ppt_parse=50（教师正等着上传），教师生成=100，后台衍生=200
+    priority = models.IntegerField("优先级", default=100)
+    dedupe_key = models.CharField("去重键", max_length=120, null=True, blank=True, db_index=True)
+    attempts = models.IntegerField("已尝试次数", default=0)
+    max_attempts = models.IntegerField("最大尝试次数", default=3)
+    # 退避重试用；空 = 立即可跑
+    next_run_at = models.DateTimeField("下次可执行时间", null=True, blank=True)
+    claimed_by = models.CharField("认领者", max_length=64, blank=True)
+    heartbeat_at = models.DateTimeField("心跳时间", null=True, blank=True)
+    cancel_requested = models.BooleanField("请求取消", default=False)
+    # C1：worker 重建上下文后回写；配额结算按它 count AICallLog（评审 C7）
+    trace_id = models.CharField("调用链 ID", max_length=32, null=True, blank=True)
+    # ppt_parse 的归属键：一个章节可有多个 PPT 版本，去重按 ppt 不按 catalog（自审 F3）
+    ppt = models.ForeignKey(
+        "courses.PPTResource",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="ai_tasks",
+        verbose_name="关联课件",
+    )
+
     class Meta:
         verbose_name = "AI 异步任务"
         verbose_name_plural = verbose_name
         indexes = [
             models.Index(fields=["task_type", "status", "-created_at"]),
             models.Index(fields=["student", "catalog", "-version"]),
+            models.Index(fields=["status", "priority", "next_run_at", "id"]),
+            models.Index(fields=["claimed_by", "heartbeat_at"]),
         ]
         constraints = [
             # 章节总结防并发双跑：同一学生同一章节只允许一条进行中/排队中任务
@@ -369,6 +401,20 @@ class AITask(BaseModel):
                 fields=["task_type", "triggered_by", "course"],
                 condition=Q(task_type="question_gen", status__in=["pending", "running"]),
                 name="uniq_active_question_gen",
+            ),
+            # 讲稿/配音防双跑：同一章节同类型同时只能有一条 pending/running。
+            # MySQL 侧由迁移以"生成列 + 普通唯一索引"落地（本条件约束被静默跳过）。
+            models.UniqueConstraint(
+                fields=["task_type", "catalog"],
+                condition=Q(task_type__in=["script_gen", "audio_gen"], status__in=["pending", "running"]),
+                name="uniq_active_catalog_gen",
+            ),
+            # 课件解析防重复：按 PPT 资源去重而非 catalog（自审 F3，第二版课件
+            # 不会被判成重复）。MySQL 侧同走生成列方案。
+            models.UniqueConstraint(
+                fields=["task_type", "ppt"],
+                condition=Q(task_type="ppt_parse", status__in=["pending", "running"]),
+                name="uniq_active_ppt_parse",
             ),
         ]
 

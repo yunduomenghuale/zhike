@@ -502,6 +502,85 @@ def g8_constraints(t, fx):
 
 
 # ---------------------------------------------------------------------------
+# G9 AI 队列 schema（阶段 1：AITask 队列化扩展的迁移断言）
+# ---------------------------------------------------------------------------
+def g9_queue_schema(fx):
+    """队列化迁移 0018 的 schema 与约束断言：新字段、生成列唯一索引真实存在，
+    且同章节讲稿/配音互双跑、课件解析按 ppt 去重（评审 C17 / 自审 F3）。"""
+    print("\n== G9 AI 队列 schema ==")
+    from apps.courses.models import PPTResource
+
+    NEW_COLUMNS = [
+        "payload", "priority", "dedupe_key", "attempts", "max_attempts",
+        "next_run_at", "claimed_by", "heartbeat_at", "cancel_requested",
+        "trace_id", "ppt_id",
+    ]
+    with connection.cursor() as cur:
+        cur.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = DATABASE() AND table_name = 'ai_aitask' "
+            "AND column_name IN (%s)" % ",".join(["%s"] * len(NEW_COLUMNS)),
+            NEW_COLUMNS,
+        )
+        existing = {r[0] for r in cur.fetchall()}
+    missing = [c for c in NEW_COLUMNS if c not in existing]
+    check("AITask 队列字段 11 列齐全", not missing, f"缺 {missing}" if missing else "11/11")
+
+    with connection.cursor() as cur:
+        cur.execute(
+            "SELECT index_name, GROUP_CONCAT(column_name ORDER BY seq_in_index) "
+            "FROM information_schema.statistics "
+            "WHERE table_schema = DATABASE() AND table_name = 'ai_aitask' "
+            "AND index_name IN ('uniq_active_catalog_gen_mysql', 'uniq_active_ppt_parse_mysql') "
+            "GROUP BY index_name"
+        )
+        indexes = {r[0]: r[1] for r in cur.fetchall()}
+    check(
+        "讲稿/配音防双跑唯一索引存在且含 task_type",
+        indexes.get("uniq_active_catalog_gen_mysql") == "occ_active_catalog_gen,task_type,catalog_id",
+        str(indexes.get("uniq_active_catalog_gen_mysql")),
+    )
+    check(
+        "课件解析按 ppt 去重唯一索引存在",
+        indexes.get("uniq_active_ppt_parse_mysql") == "occ_active_ppt_parse,ppt_id",
+        str(indexes.get("uniq_active_ppt_parse_mysql")),
+    )
+
+    # 功能断言：生成列唯一索引真的拦重复（不是只在 information_schema 里）
+    catalog = fx["course"].catalogs.first()
+    base = dict(status=AITask.Status.PENDING, catalog=catalog, triggered_by=fx["s1"])
+    AITask.objects.create(task_type=AITask.TaskType.SCRIPT_GEN, **base)
+    try:
+        with transaction.atomic():
+            AITask.objects.create(task_type=AITask.TaskType.SCRIPT_GEN, **base)
+        check("同章节第二条讲稿任务被拦截", False, "未拦截")
+    except IntegrityError as exc:
+        check("同章节第二条讲稿任务被拦截", True, str(exc)[:90])
+    # 同章节配音不受讲稿任务阻塞（评审 C17：索引组合含 task_type）
+    AITask.objects.create(task_type=AITask.TaskType.AUDIO_GEN, **base)
+    check("同章节配音与讲稿并存", True)
+
+    ppt = PPTResource.objects.first()
+    if ppt:
+        ppt_base = dict(status=AITask.Status.PENDING, ppt=ppt, triggered_by=fx["s1"])
+        AITask.objects.create(task_type=AITask.TaskType.PPT_PARSE, **ppt_base)
+        try:
+            with transaction.atomic():
+                AITask.objects.create(task_type=AITask.TaskType.PPT_PARSE, **ppt_base)
+            check("同课件第二条解析任务被拦截", False, "未拦截")
+        except IntegrityError as exc:
+            check("同课件第二条解析任务被拦截", True, str(exc)[:90])
+        # 任务终结后同 ppt 可再次入队（生成列回到 NULL，不占唯一键）
+        AITask.objects.filter(task_type=AITask.TaskType.PPT_PARSE, ppt=ppt, status="pending").update(
+            status=AITask.Status.SUCCESS
+        )
+        AITask.objects.create(task_type=AITask.TaskType.PPT_PARSE, **ppt_base)
+        check("成功后同课件可再次入队", True)
+    else:
+        check("同课件第二条解析任务被拦截", False, "库中无 PPTResource 样本")
+
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 def main():
@@ -531,6 +610,7 @@ def main():
         g6_stats(t, s, fx)
         g7_query(t)
         g8_constraints(t, fx)
+        g9_queue_schema(fx)
     finally:
         if fx:
             cleanup(fx)
