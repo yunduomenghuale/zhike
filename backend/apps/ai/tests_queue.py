@@ -177,6 +177,79 @@ class QueueKernelTests(TransactionTestCase):
         self.assertGreater(task.next_run_at, timezone.now())
 
 
+class MergePagesTests(TransactionTestCase):
+    """Q9：page_store.merge_pages 合并语义（评审 C2 的页级覆盖矩阵）。"""
+
+    def setUp(self):
+        from apps.courses.models import Catalog, Course, TeachingVideo
+
+        from apps.courses.page_store import merge_pages
+
+        self.merge_pages = merge_pages
+        self.teacher = _user("Q_merge")
+        self.course = Course.objects.create(name="Q合并课", teacher=self.teacher, status="active")
+        self.catalog = Catalog.objects.create(course=self.course, title="Q章节", order=1)
+        self.video = TeachingVideo.objects.create(
+            catalog=self.catalog,
+            course=self.course,
+            scripts=[
+                {"page": 1, "script": "教师手改的一页"},
+                {"page": 2, "script": ""},
+                {"page": 3, "script": "第三页", "audio_url": "https://old/audio.mp3"},
+            ],
+        )
+
+    def _page(self, n):
+        self.video.refresh_from_db(fields=["scripts"])
+        return next(item for item in self.video.scripts if item["page"] == n)
+
+    # -- Q9-①：worker 不覆盖已有非空 script / audio_url，只填空页 ------------------
+    def test_q9_worker_fill_only_empty(self):
+        self.merge_pages(
+            self.video.id,
+            {
+                1: {"script": "worker 的新文本"},          # 已有非空 → 跳过
+                2: {"script": "worker 填充第二页"},        # 空 → 写入
+                3: {"audio_url": "https://new/audio.mp3"}, # 已有非空 → 跳过
+            },
+        )
+        self.assertEqual(self._page(1)["script"], "教师手改的一页")
+        self.assertEqual(self._page(2)["script"], "worker 填充第二页")
+        self.assertEqual(self._page(3)["audio_url"], "https://old/audio.mp3")
+
+    # -- Q9-②：overwrite_pages 才覆盖（教师显式重生成/手改/重配音）----------------
+    def test_q9_overwrite_pages(self):
+        self.merge_pages(
+            self.video.id,
+            {
+                1: {"script": "重新生成的版本", "audio_url": None, "audio_error": None},
+                3: {"audio_url": "https://new/audio.mp3"},
+            },
+            overwrite_pages={1, 3},
+        )
+        p1 = self._page(1)
+        self.assertEqual(p1["script"], "重新生成的版本")
+        self.assertNotIn("audio_url", p1)  # None 值 = 删除键（配音失效）
+        self.assertEqual(self._page(3)["audio_url"], "https://new/audio.mp3")
+
+    # -- Q9-③：audio_url 独立判定——写 script 不动 audio，清 audio 不动 script ----
+    def test_q9_audio_independent(self):
+        self.merge_pages(self.video.id, {3: {"script": "worker 想改但被跳过"}})
+        self.assertEqual(self._page(3)["script"], "第三页")
+        self.assertEqual(self._page(3)["audio_url"], "https://old/audio.mp3")
+        # 教师手改第 3 页：清 audio_url，script 覆盖
+        self.merge_pages(self.video.id, {3: {"script": "手改三", "audio_url": None}}, overwrite_pages={3})
+        p3 = self._page(3)
+        self.assertEqual(p3["script"], "手改三")
+        self.assertNotIn("audio_url", p3)
+
+    # -- 缺失页自动建条目并按页码排序 ------------------------------------------------
+    def test_q9_creates_missing_page_sorted(self):
+        self.merge_pages(self.video.id, {5: {"script": "新页"}})
+        self.video.refresh_from_db(fields=["scripts"])
+        self.assertEqual([item["page"] for item in self.video.scripts], [1, 2, 3, 5])
+
+
 class QueueContextTests(TransactionTestCase):
     """Q10/Q11：C1 上下文重建与长驻身份隔离（run_task 直跑，_dispatch 打桩）。"""
 

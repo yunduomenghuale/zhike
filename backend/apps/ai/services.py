@@ -17,6 +17,9 @@ from .models import AICallLog
 from .providers.factory import get_provider
 from .vectorstore import search_chunks
 
+# 页级合并唯一入口（评审 C2）。courses.models 不反向依赖 apps.ai，无循环。
+from apps.courses.page_store import merge_pages
+
 
 def _safe_json(text: str, default):
     try:
@@ -139,24 +142,24 @@ def generate_script_pages_batched(video, pages: list[dict], batch_size: int = 6)
         chunks = [
             compact_pages[i : i + chunk_pages] for i in range(0, len(compact_pages), chunk_pages)
         ]
-        filled: set = set()  # 已拿到 AI 结果并合并落库的页
+        filled: set = set()  # 已拿到结果并合并落库的页（DB 视角）
 
         def _absorb(chunk_result: dict) -> bool:
-            """把一个小块的结果合并进 scripts 并立即落库，返回是否有新增。"""
-            added = False
+            """把一个小块的结果经 page_store 页级合并落库，返回是否有新增。
+
+            只填空页：DB 已有非空 script 的页不被覆盖（尊重教师手改，评审 C2）；
+            本函数不再持有/改写本地 scripts 快照，权威状态在 DB。
+            """
+            updates = {}
             for pg, script in (chunk_result or {}).items():
                 if pg in filled or not script:
                     continue
-                for item in batch:
-                    if item.get("page") == pg and not str(item.get("script") or "").strip():
-                        item["script"] = _polish_script_text(script)
-                        filled.add(pg)
-                        added = True
-                        break
-            if added:
-                video.scripts = scripts
-                video.save(update_fields=["scripts", "updated_at"])
-            return added
+                updates[pg] = {"script": _polish_script_text(script)}
+                filled.add(pg)
+            if updates:
+                merge_pages(video.id, updates)
+                return True
+            return False
 
         if len(chunks) > 1:
             with ThreadPoolExecutor(max_workers=min(4, len(chunks))) as pool:
@@ -185,21 +188,21 @@ def generate_script_pages_batched(video, pages: list[dict], batch_size: int = 6)
             except Exception:
                 pass  # 无结果页走本地兜底
         # AI 没覆盖到的页（失败/超时/漏页）：本地兜底文本补上再落库
-        fallback_added = False
-        for item in batch:
-            if item.get("page") in filled:
+        fallback_updates = {}
+        for entry in compact_pages:
+            pg = entry["page"]
+            if pg in filled:
                 continue
-            page_data = page_map.get(item.get("page"), {})
-            item["script"] = _local_script_for_page(page_data)["script"]
-            filled.add(item.get("page"))
-            fallback_added = True
-        if fallback_added:
-            video.scripts = scripts
-            video.save(update_fields=["scripts", "updated_at"])
+            fallback_updates[pg] = {"script": _local_script_for_page(page_map.get(pg, {}))["script"]}
+            filled.add(pg)
+        if fallback_updates:
+            merge_pages(video.id, fallback_updates)
         generated = len(batch)
 
-    total = len(scripts)
-    script_pages = sum(1 for item in scripts if str(item.get("script") or "").strip())
+    # 权威状态回读 DB（本地 scripts 快照不再作为判定依据）
+    video.refresh_from_db()
+    total = len(video.scripts or [])
+    script_pages = sum(1 for item in (video.scripts or []) if str(item.get("script") or "").strip())
     all_done = total > 0 and script_pages == total
     if all_done:
         from django.utils import timezone
@@ -570,42 +573,43 @@ def synthesize_audio_for_video(video, voice: str | None = None, limit: int | Non
 
     ok = 0
     if todo:
-        def _persist():
-            video.scripts = scripts
-            video.save(update_fields=["scripts", "updated_at"])
-
         def _synthesize(item):
             # 每个 item 是独立 dict，线程间无共享状态；provider 只读配置，requests 线程安全
+            page = item.get("page")
             try:
-                item["audio_url"] = provider.tts(item["script"].strip(), voice=voice)
+                url = provider.tts(item["script"].strip(), voice=voice)
             except Exception as exc:
-                item["audio_error"] = str(exc)[:300]
+                # 失败也走页级合并：记 audio_error，与主线程写入互不覆盖（评审 C2）
+                merge_pages(video.id, {page: {"audio_error": str(exc)[:300]}})
                 return False
-            item.pop("audio_error", None)
+            item["audio_url"] = url  # 仅本地统计用；落库以 merge_pages 为准
             return True
 
         with ThreadPoolExecutor(max_workers=min(3, len(todo))) as pool:
             # 与讲稿分批同理：复制调用上下文带进 worker，保留场景/trace_id/触发人
-            futures = [
-                pool.submit(run_in_context, copy_call_context(), _synthesize, item)
+            futures = {
+                pool.submit(run_in_context, copy_call_context(), _synthesize, item): item
                 for item in todo
-            ]
+            }
             # as_completed：每合成成功一页立即落库，前端轮询可实时看到配音页数推进
             for future in as_completed(futures):
+                item = futures[future]
                 if future.result():
                     ok += 1
-                    _persist()
+                    merge_pages(video.id, {item.get("page"): {"audio_url": item["audio_url"], "audio_error": None}})
 
+    # 权威状态回读 DB（本地 scripts 快照不再整数组回写）
+    video.refresh_from_db()
+    scripts = video.scripts or []
     audio_count = sum(1 for item in scripts if item.get("audio_url"))
     script_count = len([item for item in scripts if item.get("script")])
     all_done = script_count > 0 and audio_count == script_count
-    video.scripts = scripts
     video.gen_status = (
         video.GenStatus.AUDIO_READY if all_done else video.GenStatus.SCRIPT_READY
     )
     if all_done:
         video.is_published = True  # 全部配音完成后自动对学生发布
-    video.save(update_fields=["scripts", "gen_status", "is_published", "updated_at"])
+    video.save(update_fields=["gen_status", "is_published", "updated_at"])
     return ok
 
 

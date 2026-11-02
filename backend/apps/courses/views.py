@@ -14,6 +14,8 @@ from django.http import HttpResponse
 from django.utils import timezone
 
 from apps.ai.quota import check_ai_quota
+from apps.ai import queue as ai_queue
+from apps.ai.models import AITask
 from apps.ai.services import generate_catalog_from_plan, generate_scripts_for_video
 from apps.ai.tasks import submit_ai_task
 from apps.common.access import courses_for_user, is_platform_admin, student_study_block_detail
@@ -25,6 +27,7 @@ from apps.knowledge.models import KnowledgeChunk
 
 from . import resource_gate
 from .models import Catalog, Course, CourseResource, PPTResource, TeachingVideo, VideoWatchProgress
+from .page_store import merge_pages
 from .reuse import course_asset_stats
 from .terms import ensure_term
 from .serializers import (
@@ -331,13 +334,18 @@ class CatalogViewSet(BaseModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="generate-script", permission_classes=[IsTeacher])
     def generate_script(self, request, pk=None):
-        """基于该章节 PPT 分批生成讲解稿并保存到教学视频（需求 T-V-01）。
+        """提交章节讲稿生成任务（队列化，需求 T-V-01）。
 
-        分批生成：limit 指定本批最多生成页数（默认 6，上限 12），前端循环调用直至
-        done=true，避免一次生成几十页讲解稿超过网关 180s 超时（499）。
+        语义变更（方案 §7.1）：不再同步分批生成，只入队由 ai_worker 整章执行；
+        前端凭 task_id 轮询 /api/ai-tasks/<id>/。force/dedupe 协议见 §6.1：
+        命中 pending/running 返回原任务（dedupe_hit）；force 遇 running 拒绝 409，
+        遇 pending 原子替换。换 PPT 版本立即下线（C4/Q7）；同版本 force 保持可见。
         """
+        # TODO(2026-12) remove：旧前端垫片（评审 C8/Q9）。无 X-AI-Task-Mode 头一律
+        # 410——返回 done:true 是谎报完成，什么都不返会让旧 for(;;) 循环死循环。
+        if request.headers.get("X-AI-Task-Mode") != "queue":
+            return api_response(message="生成方式已升级，请刷新页面后重试", code=410, status=410)
         check_ai_quota(request.user)  # AI 日配额（P5-B6）：超限 429
-        from apps.ai.services import generate_script_pages_batched
 
         catalog = self.get_object()
         ppt = (
@@ -350,40 +358,100 @@ class CatalogViewSet(BaseModelViewSet):
         )
         if not ppt or not ppt.parsed_pages:
             return api_response(message="该章节还没有已解析的 PPT", code=400, status=400)
-        try:
-            limit = int(request.data.get("limit") or 6)
-        except (TypeError, ValueError):
-            limit = 6
-        limit = max(1, min(limit, 12))
         force = str(request.data.get("force", "")).lower() in ("1", "true", "yes", "on")
 
+        # 换版：旧讲稿与新课件不匹配，立即下线（清学生观看进度）——排队期间学生
+        # 看不到该章节是正确行为；同版本 force 重生成不清空、不下线（§6.3）
         video, _ = TeachingVideo.objects.get_or_create(
             catalog=catalog, defaults={"course": catalog.course, "ppt": ppt}
         )
-        # 换了新版本 PPT 或明确 force 时重置衍生内容（含学生观看进度，沿用主线换版逻辑）。
-        # 只把这段写操作包进事务：_invalidate 内部走 select_for_update，SQLite 下是空操作，
-        # MySQL 下 autocommit 中会抛 TransactionManagementError；而后面的 AI 分批生成
-        # 可能耗时数分钟，绝不能一起放进事务（会长时间持有行锁）。
-        with transaction.atomic():
-            if force or video.ppt_id != ppt.id:
+        if video.ppt_id != ppt.id:
+            with transaction.atomic():
                 _invalidate_teaching_video_for_new_ppt(catalog, ppt)
-                # _invalidate 内部重新查询并落库了重置结果，本地 video 实例已陈旧；
-                # 不刷新会把旧的 scripts/audio_url/gen_status 又写回去（换版重置失效）
-                video.refresh_from_db()
-            video.course = catalog.course
-            video.ppt = ppt
-            video.save()
+            video.refresh_from_db()
 
-        result = generate_script_pages_batched(video, ppt.parsed_pages, batch_size=limit)
-        if result.get("done"):
-            # 整章讲稿生成完成：入库向量库参与检索（失败静默，QA 侧有兜底）
-            from apps.ai.services import ingest_video_scripts
+        payload = {"ppt_id": ppt.id, "ppt_version": ppt.version, "force": force}
+        now = timezone.now()
 
-            ingest_video_scripts(video)
-        return api_response(
-            result,
-            message=f"已生成 {result['script_pages']}/{result['pages']} 页讲解稿",
-        )
+        def _queued_response(task: AITask, *, dedupe_hit: bool = False):
+            video.refresh_from_db(fields=["scripts"])
+            script_pages = sum(
+                1 for item in (video.scripts or []) if str(item.get("script") or "").strip()
+            )
+            total = len(ppt.parsed_pages)
+            position = ai_queue.queue_position(task) or 1
+            return api_response(
+                {
+                    "task_id": task.id,
+                    "status": task.status,
+                    "queue_position": position,
+                    "eta_seconds": max(0, position - 1) * 60,  # 粗糙 ETA（§7.3 允许）
+                    "script_pages": script_pages,
+                    "pages": total,
+                    "remaining": total - script_pages,
+                    "done": False,
+                    "queued": True,
+                    "dedupe_hit": dedupe_hit,
+                },
+                message="讲稿生成任务已提交，完成后自动发布",
+            )
+
+        active = AITask.objects.filter(
+            task_type=AITask.TaskType.SCRIPT_GEN,
+            catalog=catalog,
+            status__in=[AITask.Status.PENDING, AITask.Status.RUNNING],
+        ).first()
+        if active is not None and not force:
+            return _queued_response(active, dedupe_hit=True)
+        if active is not None and force:
+            if active.status == AITask.Status.RUNNING:
+                return api_response(
+                    {"code": "task_running", "task_id": active.id},
+                    message="讲稿正在生成中，如需重做请先取消",
+                    code=409,
+                    status=409,
+                )
+            # pending + force：原子替换（条件更新防并发双替换），旧任务放弃
+            with transaction.atomic():
+                replaced = AITask.objects.filter(id=active.id, status=AITask.Status.PENDING).update(
+                    status=AITask.Status.CANCELLED, finished_at=now
+                )
+            if not replaced:
+                active.refresh_from_db()
+                if active.status == AITask.Status.RUNNING:
+                    return api_response(
+                        {"code": "task_running", "task_id": active.id},
+                        message="讲稿正在生成中，如需重做请先取消",
+                        code=409,
+                        status=409,
+                    )
+                return _queued_response(active, dedupe_hit=True)
+
+        try:
+            task, created = ai_queue.enqueue(
+                task_type=AITask.TaskType.SCRIPT_GEN,
+                user=request.user,
+                catalog=catalog,
+                course=catalog.course,
+                ppt=ppt,
+                payload=payload,
+                dedupe_key=f"script:{catalog.id}",
+            )
+        except Exception as exc:
+            from django.db import IntegrityError
+
+            if not isinstance(exc, IntegrityError):
+                raise
+            # 并发竞态兜底（坑 11：硬保证只在 IntegrityError 处）——返回已有任务
+            existing = AITask.objects.filter(
+                task_type=AITask.TaskType.SCRIPT_GEN,
+                catalog=catalog,
+                status__in=[AITask.Status.PENDING, AITask.Status.RUNNING],
+            ).first()
+            if existing is None:
+                raise
+            return _queued_response(existing, dedupe_hit=True)
+        return _queued_response(task)
 
     @action(detail=True, methods=["post"], url_path="generate-audio", permission_classes=[IsTeacher])
     def generate_audio(self, request, pk=None):
@@ -651,21 +719,17 @@ class TeachingVideoViewSet(BaseModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="generate-scripts")
     def generate_scripts(self, request, pk=None):
-        """基于章节 PPT 逐页生成讲解稿（需求 T-V-01）。"""
-        video = self.get_object()
-        pages = video.ppt.parsed_pages if video.ppt else []
-        video.scripts = generate_scripts_for_video(pages)
-        video.audio_url = ""
-        video.subtitle_url = ""
-        video.video_url = ""
-        video.gen_status = TeachingVideo.GenStatus.SCRIPT_READY
-        video.is_published = True
-        video.save(update_fields=["scripts", "audio_url", "subtitle_url", "video_url", "gen_status", "is_published", "updated_at"])
-        # 讲稿整体就绪：入库向量库参与检索（失败静默，QA 侧有兜底）
-        from apps.ai.services import ingest_video_scripts
+        """旧版一次性全量同步生成（需求 T-V-01 历史入口）——已下线为 410。
 
-        ingest_video_scripts(video)
-        return api_response(self.get_serializer(video).data, message="讲解稿生成完成")
+        它绕过队列且长时间占住请求线程，是这条链路上最危险的历史入口
+        （方案 §7.1/D6）。新前端走 catalogs/<id>/generate-script/ 入队。
+        """
+        # TODO(2026-12) remove：垫片保留一个版本后删除
+        return api_response(
+            message="该生成方式已下线，请刷新页面后从章节重新提交",
+            code=410,
+            status=410,
+        )
 
     @action(detail=True, methods=["post"], url_path="update-script", permission_classes=[IsTeacher])
     def update_script(self, request, pk=None):
@@ -682,34 +746,31 @@ class TeachingVideoViewSet(BaseModelViewSet):
         except (TypeError, ValueError):
             return api_response(message="页码格式不正确", code=400, status=400)
 
-        scripts = list(video.scripts or [])
-        target = None
-        for item in scripts:
-            if int(item.get("page") or 0) == page:
-                target = item
-                break
-        if target is None:
-            target = {"page": page}
-            scripts.append(target)
-            scripts.sort(key=lambda item: int(item.get("page") or 0))
+        existing_scripts = video.scripts or []
+        target = next(
+            (item for item in existing_scripts if int(item.get("page") or 0) == page), None
+        )
+        changed = (target.get("script") or "").strip() != script if target else True
 
-        changed = (target.get("script") or "").strip() != script
-        target["script"] = script
+        # 教师显式手改：强制覆盖该页 + 同事务清该页配音（C2：防"新讲稿+旧配音"错配）
+        patch = {"script": script}
         if changed:
-            target.pop("audio_url", None)
-            target.pop("audio_error", None)
-            video.audio_url = ""
-            video.subtitle_url = ""
-            video.video_url = ""
-            video.gen_status = TeachingVideo.GenStatus.SCRIPT_READY
-
-        video.scripts = scripts
-        video.save(update_fields=["scripts", "audio_url", "subtitle_url", "video_url", "gen_status", "is_published", "updated_at"])
+            patch["audio_url"] = None
+            patch["audio_error"] = None
+        merge_pages(video.id, {page: patch}, overwrite_pages={page})
         if changed:
+            TeachingVideo.objects.filter(id=video.id).update(
+                audio_url="",
+                subtitle_url="",
+                video_url="",
+                gen_status=TeachingVideo.GenStatus.SCRIPT_READY,
+                updated_at=timezone.now(),
+            )
             # 讲稿内容变化：重建该视频讲稿片段（幂等全量替换，失败静默）
             from apps.ai.services import ingest_video_scripts
 
             ingest_video_scripts(video)
+        video.refresh_from_db()
         return api_response(self.get_serializer(video).data, message="讲稿已保存，修改页需要重新配音")
 
     @action(detail=True, methods=["post"], url_path="regenerate-script-page", permission_classes=[IsTeacher])
@@ -740,30 +801,24 @@ class TeachingVideoViewSet(BaseModelViewSet):
         if not generated:
             return api_response(message="未能生成该页讲稿", code=502, status=502)
 
-        scripts = list(video.scripts or [])
-        target = None
-        for item in scripts:
-            if int(item.get("page") or 0) == page:
-                target = item
-                break
-        if target is None:
-            target = {"page": page}
-            scripts.append(target)
-            scripts.sort(key=lambda item: int(item.get("page") or 0))
-
-        target["script"] = generated[0].get("script") or ""
-        target.pop("audio_url", None)
-        target.pop("audio_error", None)
-        video.scripts = scripts
-        video.audio_url = ""
-        video.subtitle_url = ""
-        video.video_url = ""
-        video.gen_status = TeachingVideo.GenStatus.SCRIPT_READY
-        video.save(update_fields=["scripts", "audio_url", "subtitle_url", "video_url", "gen_status", "is_published", "updated_at"])
+        # 教师显式重生成：强制覆盖该页 + 同事务清该页配音（C2 三条纪律）
+        merge_pages(
+            video.id,
+            {page: {"script": generated[0].get("script") or "", "audio_url": None, "audio_error": None}},
+            overwrite_pages={page},
+        )
+        TeachingVideo.objects.filter(id=video.id).update(
+            audio_url="",
+            subtitle_url="",
+            video_url="",
+            gen_status=TeachingVideo.GenStatus.SCRIPT_READY,
+            updated_at=timezone.now(),
+        )
         # 单页讲稿重生成：重建该视频讲稿片段（幂等全量替换，失败静默）
         from apps.ai.services import ingest_video_scripts
 
         ingest_video_scripts(video)
+        video.refresh_from_db()
         return api_response(self.get_serializer(video).data, message="该页讲稿已重新生成，需要重新配音")
 
     @action(detail=True, methods=["post"], url_path="regenerate-audio-page", permission_classes=[IsTeacher])
@@ -778,12 +833,10 @@ class TeachingVideoViewSet(BaseModelViewSet):
         except (TypeError, ValueError):
             return api_response(message="页码格式不正确", code=400, status=400)
 
-        scripts = list(video.scripts or [])
-        target = None
-        for item in scripts:
-            if int(item.get("page") or 0) == page:
-                target = item
-                break
+        scripts = video.scripts or []
+        target = next(
+            (item for item in scripts if int(item.get("page") or 0) == page), None
+        )
         if target is None or not str(target.get("script") or "").strip():
             return api_response(message="该页还没有讲解稿，请先生成讲稿", code=400, status=400)
 
@@ -801,20 +854,22 @@ class TeachingVideoViewSet(BaseModelViewSet):
             with ai_scene(AICallLog.Scene.TTS, course_id=video.course_id):
                 audio_url = provider.tts(target["script"].strip(), voice=voice)
         except Exception as exc:
-            target["audio_error"] = str(exc)[:300]
-            video.scripts = scripts
-            video.save(update_fields=["scripts", "updated_at"])
+            # 失败记 audio_error 也走页级合并（不与并发写互相覆盖）
+            merge_pages(video.id, {page: {"audio_error": str(exc)[:300]}})
             return api_response(message=f"配音合成失败：{str(exc)[:200]}", code=502, status=502)
 
-        target["audio_url"] = audio_url
-        target.pop("audio_error", None)
-        video.scripts = scripts
+        # 教师显式重配音：强制覆盖该页音频
+        merge_pages(video.id, {page: {"audio_url": audio_url, "audio_error": None}}, overwrite_pages={page})
         # 该页补齐后若全部页均有配音，回到配音就绪态
+        video.refresh_from_db(fields=["scripts"])
+        scripts = video.scripts or []
         script_count = len([item for item in scripts if (item.get("script") or "").strip()])
         audio_count = len([item for item in scripts if item.get("audio_url")])
         if script_count > 0 and audio_count == script_count:
-            video.gen_status = TeachingVideo.GenStatus.AUDIO_READY
-        video.save(update_fields=["scripts", "gen_status", "updated_at"])
+            TeachingVideo.objects.filter(id=video.id).update(
+                gen_status=TeachingVideo.GenStatus.AUDIO_READY, updated_at=timezone.now()
+            )
+            video.refresh_from_db(fields=["gen_status"])
         return api_response(self.get_serializer(video).data, message=f"第 {page} 页配音已重新生成")
 
     @action(detail=True, methods=["post"], url_path="report-progress", permission_classes=[IsStudent])

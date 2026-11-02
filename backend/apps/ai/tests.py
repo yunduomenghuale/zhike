@@ -77,7 +77,11 @@ class _FakeGenStatus:
 
 
 class _FakeVideo:
-    """教学视频替身：只保留生成函数用到的属性，避开数据库。"""
+    """教学视频替身：只保留生成函数用到的属性，避开数据库。
+
+    写路径已收敛到 page_store.merge_pages（真实语义见 tests_queue.MergePagesTests）；
+    本替身由测试打桩 merge_pages 后只补 id/refresh_from_db 供函数签名调用。
+    """
 
     GenStatus = _FakeGenStatus
 
@@ -86,9 +90,13 @@ class _FakeVideo:
         self.gen_status = None
         self.is_published = False
         self.published_at = None
+        self.id = None  # 打桩 merge_pages 后不会被消费
         self.save_calls = []
         # 每次 save 时的进度快照（有讲稿页数, 有配音页数）：验证增量落库行为
         self.save_snapshots = []
+
+    def refresh_from_db(self, *args, **kwargs):
+        return None
 
     def save(self, update_fields=None):
         self.save_calls.append(update_fields)
@@ -99,6 +107,43 @@ class _FakeVideo:
                 sum(1 for s in scripts if s.get("audio_url")),
             )
         )
+
+
+def _install_fake_merge(testcase, video):
+    """打桩 apps.ai.services.merge_pages：以 fake 语义就地合并到 video.scripts。
+
+    语义与 page_store.merge_pages 对齐（空页才填/overwrite_pages 强覆/None 删键/
+    缺失页创建排序），并记录调用顺序到 video.merge_calls 供增量落库断言。
+    """
+    from apps.ai import services as svc
+
+    def fake_merge(video_id, updates, *, overwrite_pages=()):
+        overwrite = {int(p) for p in (overwrite_pages or ())}
+        scripts = video.scripts
+        index = {int(item.get("page") or 0): item for item in scripts}
+        for page, patch in (updates or {}).items():
+            pg = int(page)
+            item = index.get(pg)
+            if item is None:
+                item = {"page": pg}
+                scripts.append(item)
+                index[pg] = item
+            for key, value in (patch or {}).items():
+                if key in ("script", "audio_url") and pg not in overwrite:
+                    if str(item.get(key) or "").strip():
+                        continue
+                if value is None:
+                    item.pop(key, None)
+                else:
+                    item[key] = value
+        scripts.sort(key=lambda item: int(item.get("page") or 0))
+        video.merge_calls.append(dict(updates))
+        return scripts
+
+    patcher = patch.object(svc, "merge_pages", side_effect=fake_merge)
+    patcher.start()
+    testcase.addCleanup(patcher.stop)
+    video.merge_calls = []
 
 
 class _FakeChat:
@@ -150,6 +195,7 @@ class GenerationConcurrencyTests(SimpleTestCase):
     def test_script_chunks_run_concurrently_and_persist_incrementally(self):
         pages = [{"page": i, "title": f"标题{i}", "body": f"第{i}页正文内容。"} for i in range(1, 13)]
         video = _FakeVideo([])
+        _install_fake_merge(self, video)
         # 错峰延迟：小块按提交顺序依次完成，落库进度确定性地 3→6→9→12
         chat = _FakeChat(delays=[0.1, 0.2, 0.3, 0.4])
         with patch("apps.ai.services.get_provider", return_value=chat):
@@ -167,11 +213,17 @@ class GenerationConcurrencyTests(SimpleTestCase):
         self.assertTrue(all(item.get("script") for item in video.scripts))
         self.assertEqual([item["page"] for item in video.scripts], list(range(1, 13)))
         self.assertTrue(result["done"])
-        # 增量落库：每个小块完成即保存一次（4 次）+ 全部完成后的发布状态落库（1 次）
-        self.assertEqual(len(video.save_calls), 5)
+        # 增量落库：每个小块完成即 merge 一次（4 次，累计 3→6→9→12）+ 发布状态 save（1 次）
+        self.assertEqual(len(video.merge_calls), 4)
+        cumulative = []
+        filled = set()
+        for call in video.merge_calls:
+            filled.update(call.keys())
+            cumulative.append(len(filled))
         # 关键回归：第一次落库时请求仍在进行（只完成了 3 页），进度对轮询实时可见，
         # 不再「整批结束才落库、前端跳一大截」
-        self.assertEqual([snap[0] for snap in video.save_snapshots], [3, 6, 9, 12, 12])
+        self.assertEqual(cumulative, [3, 6, 9, 12])
+        self.assertEqual(len(video.save_calls), 1)  # 仅终态发布落库
         self.assertEqual(video.gen_status, _FakeGenStatus.SCRIPT_READY)
         self.assertTrue(video.is_published)
 
@@ -185,6 +237,7 @@ class GenerationConcurrencyTests(SimpleTestCase):
                 raise RuntimeError("provider down")
 
         video = _FakeVideo([])
+        _install_fake_merge(self, video)
         with patch("apps.ai.services.get_provider", return_value=_Boom()):
             result = generate_script_pages_batched(video, pages, batch_size=6)
 
@@ -200,6 +253,7 @@ class GenerationConcurrencyTests(SimpleTestCase):
             {"page": 3, "script": ""},
             {"page": 4, "script": ""},
         ])
+        _install_fake_merge(self, video)
         chat = _FakeChat(delay=0.01)
         with patch("apps.ai.services.get_provider", return_value=chat):
             result = generate_script_pages_batched(video, pages, batch_size=6)
@@ -214,12 +268,14 @@ class GenerationConcurrencyTests(SimpleTestCase):
         """批内小块页数可配（AI_SCRIPT_CHUNK_PAGES）：默认 3 页/块，调大则调用变少。"""
         pages = [{"page": i, "title": f"标题{i}", "body": f"第{i}页正文。"} for i in range(1, 7)]
         video = _FakeVideo([])
+        _install_fake_merge(self, video)
         chat = _FakeChat(delay=0.01)
         with patch("apps.ai.services.get_provider", return_value=chat):
             generate_script_pages_batched(video, pages, batch_size=6)
         self.assertEqual(len(chat.calls), 2)  # 6 页 / 默认 3 页每块
 
         video2 = _FakeVideo([])
+        _install_fake_merge(self, video2)
         chat2 = _FakeChat(delay=0.01)
         with patch("apps.ai.services.get_provider", return_value=chat2), override_settings(
             AI_SCRIPT_CHUNK_PAGES=6
@@ -233,6 +289,7 @@ class GenerationConcurrencyTests(SimpleTestCase):
     def test_synthesize_runs_concurrently_and_persists_per_page(self):
         scripts = [{"page": i, "script": f"第{i}页的讲解稿文本。"} for i in range(1, 5)]
         video = _FakeVideo(scripts)
+        _install_fake_merge(self, video)
         # 错峰延迟：第 3 页最先完成，落库进度确定性地 1→2→3
         tts = _FakeTTS(delays=[0.3, 0.2, 0.1])
         with patch("apps.ai.services.get_provider", return_value=tts):
@@ -245,10 +302,16 @@ class GenerationConcurrencyTests(SimpleTestCase):
         self.assertLess(elapsed, 0.5)
         self.assertTrue(all(scripts[i].get("audio_url") for i in range(3)))
         self.assertFalse(scripts[3].get("audio_url"))
-        # 每页合成成功即落库（3 次，进度 1/2/3 递增）+ 批末状态落库（1 次）：
+        # 每页合成成功即 merge 落库（3 次）+ 批末状态落库（1 次）：
         # 轮询可实时看到配音页数推进，中断不丢已合成页
-        self.assertEqual(len(video.save_calls), 4)
-        self.assertEqual([snap[1] for snap in video.save_snapshots], [1, 2, 3, 3])
+        self.assertEqual(len(video.merge_calls), 3)
+        cumulative = []
+        done_pages = set()
+        for call in video.merge_calls:
+            done_pages.update(call.keys())
+            cumulative.append(len(done_pages))
+        self.assertEqual(cumulative, [1, 2, 3])
+        self.assertEqual(len(video.save_calls), 1)
         # 未完成全部配音：gen_status 仍为 SCRIPT_READY、不发布
         self.assertEqual(video.gen_status, _FakeGenStatus.SCRIPT_READY)
         self.assertFalse(video.is_published)
@@ -259,6 +322,7 @@ class GenerationConcurrencyTests(SimpleTestCase):
             {"page": 2, "script": "第二页会失败的讲解稿。"},
         ]
         video = _FakeVideo(scripts)
+        _install_fake_merge(self, video)
         tts = _FakeTTS(delay=0.01, fail_marker="会失败")
         with patch("apps.ai.services.get_provider", return_value=tts):
             ok = synthesize_audio_for_video(video, limit=2)
@@ -283,6 +347,7 @@ class LocalModelTimeoutTests(SimpleTestCase):
     def test_script_batch_timeout_from_settings(self):
         pages = [{"page": 1, "title": "标题", "body": "正文。"}]
         video = _FakeVideo([])
+        _install_fake_merge(self, video)
         chat = _FakeChat(delay=0.01)
         with patch("apps.ai.services.get_provider", return_value=chat), override_settings(AI_SCRIPT_TIMEOUT=180):
             generate_script_pages_batched(video, pages, batch_size=6)
@@ -293,6 +358,7 @@ class LocalModelTimeoutTests(SimpleTestCase):
     def test_synthesize_default_voice_from_settings(self):
         scripts = [{"page": 1, "script": "第一页讲解稿。"}]
         video = _FakeVideo(scripts)
+        _install_fake_merge(self, video)
 
         class _VoiceRecorder(_FakeTTS):
             def __init__(self):
@@ -312,6 +378,7 @@ class LocalModelTimeoutTests(SimpleTestCase):
     def test_synthesize_explicit_voice_wins_over_settings(self):
         scripts = [{"page": 1, "script": "第一页讲解稿。"}]
         video = _FakeVideo(scripts)
+        _install_fake_merge(self, video)
 
         class _VoiceRecorder(_FakeTTS):
             def __init__(self):
@@ -332,6 +399,7 @@ class LocalModelTimeoutTests(SimpleTestCase):
         """管理端给对话能力配了超时：优先于 settings.AI_SCRIPT_TIMEOUT。"""
         pages = [{"page": 1, "title": "标题", "body": "正文。"}]
         video = _FakeVideo([])
+        _install_fake_merge(self, video)
         chat = _FakeChat(delay=0.01)
         chat.timeout = 180  # 管理端配置经 build_provider 物化到 provider 上
         with patch("apps.ai.services.get_provider", return_value=chat), override_settings(AI_SCRIPT_TIMEOUT=45):
@@ -343,6 +411,7 @@ class LocalModelTimeoutTests(SimpleTestCase):
         """管理端给语音能力配了发音人：优先于 settings.AI_TTS_VOICE。"""
         scripts = [{"page": 1, "script": "第一页讲解稿。"}]
         video = _FakeVideo(scripts)
+        _install_fake_merge(self, video)
 
         class _VoiceRecorder(_FakeTTS):
             def __init__(self):
