@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JDK 开发环境配置演示</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    background: #f5f8fc; color: #22303f; padding: 36px 40px 48px; min-height: 100vh;
+  }
+  h1 { font-size: 26px; color: #1f4e8c; text-align: center; }
+  .sub { text-align: center; margin: 10px 0 28px; font-size: 13.5px; color: #7a8a9c; }
+  .steps { display: flex; justify-content: center; gap: 12px; margin-bottom: 26px; flex-wrap: wrap; }
+  .step {
+    padding: 9px 20px; border-radius: 22px; font-size: 14px; cursor: pointer;
+    background: #fff; border: 1px solid #d9e4f1; color: #4a6279; transition: .18s;
+  }
+  .step:hover { border-color: #2f6cb3; color: #1f4e8c; }
+  .step.active { background: #1f4e8c; border-color: #1f4e8c; color: #fff; font-weight: 600; }
+  .panel {
+    max-width: 860px; margin: 0 auto; background: #fff; border: 1px solid #e2ebf6;
+    border-radius: 14px; padding: 30px 34px; box-shadow: 0 6px 22px rgba(31,78,140,.08);
+    min-height: 300px; display: none;
+  }
+  .panel.show { display: block; animation: fade .25s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  .panel h2 { font-size: 18px; color: #1f4e8c; margin-bottom: 16px; display: flex; gap: 10px; align-items: center; }
+  .num {
+    width: 26px; height: 26px; border-radius: 50%; background: #eaf2fb; color: #2f6cb3;
+    font-size: 13px; display: grid; place-items: center; font-weight: 700;
+  }
+  .panel p { font-size: 14px; line-height: 1.9; color: #44586c; }
+  .code {
+    margin: 14px 0; padding: 14px 18px; background: #1f2933; color: #d7e3f4;
+    border-radius: 8px; font-family: Consolas, Menlo, monospace; font-size: 13px; line-height: 1.8;
+    overflow-x: auto;
+  }
+  .code .k { color: #7fd1a8; }
+  .hint {
+    margin-top: 16px; padding: 12px 16px; border-left: 3px solid #2f6cb3;
+    background: #f4f8fd; font-size: 13px; color: #4a6279; border-radius: 0 6px 6px 0;
+  }
+  .nav { text-align: center; margin-top: 26px; }
+  .nav button {
+    padding: 9px 22px; border-radius: 8px; border: 1px solid #d9e4f1; background: #fff;
+    color: #4a6279; font-size: 14px; cursor: pointer;
+  }
+  .nav button:hover { border-color: #2f6cb3; color: #1f4e8c; }
+</style>
+</head>
+<body>
+<h1>JDK 开发环境配置</h1>
+<p class="sub">三步完成：安装 → 配置环境变量 → 编译运行第一个程序</p>
+
+<div class="steps">
+  <div class="step active" data-i="0">① 安装 JDK</div>
+  <div class="step" data-i="1">② 配置 Path</div>
+  <div class="step" data-i="2">③ Hello World</div>
+</div>
+
+<div class="panel show" data-p="0">
+  <h2><span class="num">1</span>安装 JDK 并确认版本</h2>
+  <p>从官网下载与操作系统匹配的 JDK 安装包（Windows x64 / macOS ARM 等），按向导默认路径安装。<br>安装完成后打开命令行，执行版本查询命令确认安装成功。</p>
+  <div class="code">C:\&gt; <span class="k">java -version</span><br>java version "17.0.9" 2026-01-16 LTS<br>Java(TM) SE Runtime Environment (build 17.0.9+9-LTS)</div>
+  <div class="hint">提示：若提示「不是内部或外部命令」，说明环境变量尚未配置，继续第 2 步。</div>
+</div>
+
+<div class="panel" data-p="1">
+  <h2><span class="num">2</span>配置 Path 与 JAVA_HOME</h2>
+  <p>在「系统属性 → 环境变量」中新建 <b>JAVA_HOME</b> 指向 JDK 安装根目录，再把 <b>%JAVA_HOME%\bin</b> 追加到 <b>Path</b> 中。配置完成后重新打开命令行窗口（环境变量需新会话生效）。</p>
+  <div class="code">JAVA_HOME = C:\Program Files\Java\jdk-17<br>Path += %JAVA_HOME%\bin</div>
+  <div class="hint">易错点：Path 中是 <b>bin</b> 目录；修改后必须重开命令行窗口，旧窗口不会刷新变量。</div>
+</div>
+
+<div class="panel" data-p="2">
+  <h2><span class="num">3</span>编译并运行 Hello World</h2>
+  <p>新建 HelloWorld.java，写入入口方法 <b>main</b>，用 javac 编译成字节码再由 java 运行。注意文件名必须与 public 类名完全一致（区分大小写）。</p>
+  <div class="code">public class HelloWorld {<br>&nbsp;&nbsp;public static void main(String[] args) {<br>&nbsp;&nbsp;&nbsp;&nbsp;System.out.println("Hello, Java!");<br>&nbsp;&nbsp;}<br>}<br><br>C:\demo&gt; <span class="k">javac HelloWorld.java</span><br>C:\demo&gt; <span class="k">java HelloWorld</span><br>Hello, Java!</div>
+  <div class="hint">.java 经 javac 编译生成 .class 字节码，由 JVM 解释执行 —— 这正是 Java「一次编写，到处运行」的基础。</div>
+</div>
+
+<div class="nav"><button id="prev">上一步</button> &nbsp; <button id="next">下一步</button></div>
+
+<script>
+  var steps = document.querySelectorAll('.step');
+  var panels = document.querySelectorAll('.panel');
+  var cur = 0;
+  function show(i) {
+    cur = Math.max(0, Math.min(panels.length - 1, i));
+    steps.forEach(function (s, k) { s.classList.toggle('active', k === cur); });
+    panels.forEach(function (p, k) { p.classList.toggle('show', k === cur); });
+  }
+  steps.forEach(function (s) { s.addEventListener('click', function () { show(+s.dataset.i); }); });
+  document.getElementById('prev').addEventListener('click', function () { show(cur - 1); });
+  document.getElementById('next').addEventListener('click', function () { show(cur + 1); });
+</script>
+</body>
+</html>

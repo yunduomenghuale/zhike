@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Java 程序设计知识体系</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    background: #f5f8fc; color: #22303f;
+    min-height: 100vh; padding: 40px 48px 60px;
+  }
+  header { text-align: center; margin-bottom: 36px; }
+  h1 { font-size: 30px; letter-spacing: 1px; color: #1f4e8c; }
+  header p { margin-top: 10px; font-size: 14px; color: #7a8a9c; }
+  .canvas { position: relative; max-width: 1180px; margin: 0 auto; }
+  .root {
+    width: 260px; margin: 0 auto 8px; padding: 18px 20px; text-align: center;
+    background: linear-gradient(135deg, #1f4e8c, #2f6cb3); color: #fff;
+    border-radius: 14px; font-size: 19px; font-weight: 700; letter-spacing: .5px;
+    box-shadow: 0 8px 20px rgba(31,78,140,.22);
+  }
+  .root small { display: block; margin-top: 6px; font-size: 12px; font-weight: 400; opacity: .82; }
+  .stem { width: 2px; height: 26px; background: #c3d4e8; margin: 0 auto; }
+  .branches { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+  .branch {
+    background: #fff; border: 1px solid #e2ebf6; border-radius: 12px; padding: 18px 18px 14px;
+    box-shadow: 0 2px 10px rgba(31,78,140,.06);
+  }
+  .branch h2 {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 16px; color: #1f4e8c; margin-bottom: 12px;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #2f6cb3; }
+  .branch ul { list-style: none; }
+  .branch li {
+    position: relative; padding: 6px 0 6px 16px; font-size: 13.5px; color: #44586c;
+    border-bottom: 1px dashed #eef3f9;
+  }
+  .branch li:last-child { border-bottom: none; }
+  .branch li::before {
+    content: ""; position: absolute; left: 2px; top: 13px;
+    width: 5px; height: 5px; border-radius: 50%; background: #9fbcdd;
+  }
+  .tag { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 4px;
+         font-size: 11px; background: #eaf2fb; color: #2f6cb3; }
+  footer { margin-top: 40px; text-align: center; font-size: 12px; color: #9aa9ba; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Java 程序设计 · 知识体系</h1>
+  <p>第 1—2 章核心概念全景（点击下方分支卡片可逐块复习）</p>
+</header>
+<div class="canvas">
+  <div class="root">Java 程序设计<small>48 学时 · 32 讲授 + 16 实验</small></div>
+  <div class="stem"></div>
+  <div class="branches">
+    <section class="branch">
+      <h2><span class="dot"></span>语言基础</h2>
+      <ul>
+        <li>变量与基本数据类型 <span class="tag">8 种</span></li>
+        <li>运算符与表达式</li>
+        <li>流程控制：分支与循环</li>
+        <li>数组与字符串处理</li>
+        <li>包与访问控制</li>
+      </ul>
+    </section>
+    <section class="branch">
+      <h2><span class="dot"></span>面向对象</h2>
+      <ul>
+        <li>类与对象、构造方法</li>
+        <li>封装 / 继承 / 多态 <span class="tag">三大特性</span></li>
+        <li>抽象类与接口</li>
+        <li>方法重载与重写</li>
+        <li>内部类与匿名对象</li>
+      </ul>
+    </section>
+    <section class="branch">
+      <h2><span class="dot"></span>运行机制</h2>
+      <ul>
+        <li>JDK 安装与环境变量 <span class="tag">Path</span></li>
+        <li>字节码与 JVM 虚拟机</li>
+        <li>编译与运行：javac / java</li>
+        <li>三大平台：ME / SE / EE</li>
+        <li>异常处理与调试</li>
+      </ul>
+    </section>
+  </div>
+</div>
+<footer>智课系统 · 课程资源示例 · 思维导图类</footer>
+</body>
+</html>

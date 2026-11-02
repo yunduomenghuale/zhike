@@ -128,8 +128,8 @@ class Builder:
             doc.add_paragraph()
 
         info = [('适用系统版本', '智课系统 V2（Web 端）'),
-                ('手册版本', 'v1.0'),
-                ('发布日期', '2026 年 10 月 26 日'),
+                ('手册版本', 'v1.1'),
+                ('发布日期', '2026 年 10 月 30 日'),
                 ('编制', '智课平台项目组')]
         tbl = doc.add_table(rows=len(info), cols=2)
         tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
