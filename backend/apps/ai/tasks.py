@@ -1,94 +1,107 @@
-"""AI 异步任务框架：AITask 提交与后台执行（班级学情分析 / 章节学习总结）。
+"""AI 异步任务框架：AITask 提交与 worker 侧执行（队列化改造，阶段 2）。
 
-设计要点（见 docs/AI学情分析深化与章节学习总结设计方案.md §2.2）：
-- submit_ai_task：建 PENDING 任务记录并拉起 daemon 线程执行，秒级返回；
-- 线程不继承 contextvars：提交时 copy_call_context() 带进线程，在 _run_task
-  内经 run_in_context 恢复，否则流水线内的 AICallLog 丢场景/触发人/trace_id（F3）；
-- 入口 close_old_connections()：daemon 线程复用进程内 DB 连接前先清理残留（F11）；
-- 全局 BoundedSemaphore(2) 限制并发分析任务数（LLM 端 QPS 有限），超限任务
-  保持 PENDING，由前端轮询自然排队；
-- 执行体按 task_type 分发到 apps/ai/analytics_ai.py（学情分析/章节总结）
-   或 apps/questions/question_gen_ai.py（AI 多类型生题）（懒加载防环），
-   单任务失败只落自身 error，不影响其它任务；
-- 不上 Celery：当前无任务队列基础设施，daemon 线程 + 进度轮询与项目现有
-  形态（讲稿/配音分批）一致；规模化后把 _run_task 换成队列 consumer 即可，
-  对外接口不变。
+改造要点（见 docs/AI长任务队列化改造方案.md v2.0 §13.1-B5 与评审 C1）：
+- submit_ai_task 只入队（apps/ai/queue.py），不再拉 daemon 线程——执行收拢到
+  独立 worker 进程（manage.py ai_worker），请求线程秒返；
+- 已删除进程内 _TASK_SEMAPHORE 与提交侧 copy_call_context()（跨进程复制不到
+  任何东西，留着是死代码误导）；线程池内的 copy_call_context 仍然保留
+  （同进程线程池，services.py 分批并发仍然必要）；
+- worker 任务线程入口 run_task：set_current_user(task.triggered_by) +
+  ai_scene(...) 显式重建调用上下文（评审 C1）——否则 AICallLog 的
+  triggered_by/scene/trace_id 全部为空，QA 看板、成本统计、按教师用量
+  三条线静默归零；每任务进出一次 ai_scene → 一个任务 = 一个 trace_id；
+- 长驻循环里每任务结束 clear_current_user()，否则 A 教师身份串到 B 教师日志；
+- 每线程入口/出口 close_old_connections()，防长驻进程连接泄漏（F11 同款）。
 """
 from __future__ import annotations
 
 import logging
-import threading
 
+from django.conf import settings
 from django.db import close_old_connections
 
-from .calllog import copy_call_context, run_in_context
-from .models import AITask
+from .calllog import ai_scene, clear_current_user, set_current_user
+from .models import AICallLog, AITask
+from .queue import enqueue, mark_error, mark_success
 
 logger = logging.getLogger(__name__)
 
-# 全局并发上限：分析类任务输入长（约 6k tokens）、单次跑时长，同时 2 个
-# 已是 DashScope/本地模型 QPS 友好上限；超限任务在线程内阻塞等待（保持
-# PENDING），worker 结束释放，前端 2.5s 轮询自然看到排队推进。
-_TASK_SEMAPHORE = threading.BoundedSemaphore(2)
+# task_type → AICallLog.Scene（C1 上下文重建的 scene 映射）
+SCENE_OF = {
+    AITask.TaskType.SCRIPT_GEN: AICallLog.Scene.SCRIPT_GEN,
+    AITask.TaskType.AUDIO_GEN: AICallLog.Scene.TTS,
+    AITask.TaskType.PPT_PARSE: AICallLog.Scene.PPT_EMBED,
+    AITask.TaskType.EMBED_INGEST: AICallLog.Scene.MATERIAL_EMBED,
+    AITask.TaskType.CLASS_ANALYTICS: AICallLog.Scene.ANALYTICS,
+    AITask.TaskType.CHAPTER_SUMMARY: AICallLog.Scene.CHAPTER_SUMMARY,
+    AITask.TaskType.QUESTION_GEN: AICallLog.Scene.QUESTION_GEN,
+    AITask.TaskType.COURSE_REUSE: AICallLog.Scene.OTHER,
+}
 
 
 def submit_ai_task(task_type, *, user=None, **biz_fields) -> AITask:
-    """建任务记录（PENDING）并拉起 daemon 线程执行。
+    """建 PENDING 任务并入队（worker 消费）。返回任务对象（含 id）。
 
     task_type: AITask.TaskType 之一；biz_fields: course/classroom/catalog/
-    student 等业务外键（按任务类型传其中一两个）。返回任务对象（含 id）。
+    student 等业务外键（按任务类型传其中一两个）。同键已有 pending/running
+    任务时返回已有行（created 丢弃，dedupe 语义见 queue.enqueue）。
+
+    AI_QUEUE_MODE=inline（测试/本地调试）：提交后在当前进程内同步执行
+    （语义等价改造前的"daemon 线程同步化"，免起 worker）。
     """
-    task = AITask.objects.create(
-        task_type=task_type,
-        status=AITask.Status.PENDING,
-        triggered_by=user,
-        **biz_fields,
-    )
-    # 提交时复制请求上下文（触发人/请求引用）带进线程；pipeline 内再经
-    # ai_scene 生成 trace_id，与分批讲稿的线程池做法一致
-    ctx = copy_call_context()
-    threading.Thread(
-        target=_run_task,
-        args=(task.id, ctx),
-        daemon=True,
-        name=f"ai-task-{task.id}",
-    ).start()
+    task, _ = enqueue(task_type=task_type, user=user, on_duplicate="raise", **biz_fields)
+    if getattr(settings, "AI_QUEUE_MODE", "worker") == "inline" and task.status == AITask.Status.PENDING:
+        from django.utils import timezone
+
+        AITask.objects.filter(id=task.id, status=AITask.Status.PENDING).update(
+            status=AITask.Status.RUNNING,
+            attempts=1,
+            started_at=timezone.now(),
+            heartbeat_at=timezone.now(),
+        )
+        # 用 DB 新副本执行：流水线会改写传入实例的状态字段，而旧语义（daemon
+        # 线程内重新加载任务）保证返回给调用方的是"提交时的未刷新快照"
+        run_task(AITask.objects.get(id=task.id))
     return task
 
 
-def _run_task(task_id: int, ctx) -> None:
-    """daemon 线程入口：排队 → 恢复上下文 → 分发执行 → 异常落 FAILED。"""
-    close_old_connections()  # 线程入口清理残留连接（F11）
-    acquired = _TASK_SEMAPHORE.acquire(timeout=600)
+def run_task(task: AITask) -> None:
+    """worker 任务线程入口：重建上下文 → 分发 → 终结（success / 退避重试 / failed）。
+
+    幂等前提：调用前任务已被 claim 置 RUNNING；流水线若自行置 SUCCESS，
+    mark_success 的条件更新不会二次改写。
+
+    close_old_connections 只在真正的任务线程（非主线程）执行：worker 里每任务
+    一线程必须清理防连接泄漏；inline/测试在主线程直调时清理只会误关调用方
+    的事务连接（TestCase 的 atomic 块内关连接 = 毒化事务）。
+    """
+    import threading
+
+    if threading.current_thread() is not threading.main_thread():
+        close_old_connections()  # 线程入口清理残留连接（F11）
+    set_current_user(task.triggered_by)
     try:
-        if not acquired:
-            # 排队超时（10 分钟）：极少发生（前面任务卡死），标记失败可重试
-            _mark_failed(task_id, "排队超时，请重试")
+        if task.cancel_requested:
+            # 排队期间被"取消并重新生成"替换掉的旧任务：放弃执行
+            from .queue import cancel
+
+            cancel(task.id)
+            logger.info("[task] skip cancelled task=%s", task.id)
             return
-        _execute(task_id, ctx)
+        scene = SCENE_OF.get(task.task_type, AICallLog.Scene.OTHER)
+        with ai_scene(scene, course_id=task.course_id) as scene_ctx:
+            # 一个任务 = 一个 trace_id；回写供配额按它结算（评审 C7/D4）
+            AITask.objects.filter(id=task.id).update(trace_id=scene_ctx["trace_id"])
+            task.refresh_from_db(fields=["trace_id"])
+            _dispatch(task)
+        mark_success(task.id)
+    except Exception as exc:  # 流水线未自行兜底的异常：退避重试或落 FAILED
+        logger.exception("AI 任务执行失败（task_id=%s, type=%s）", task.id, task.task_type)
+        mark_error(task.id, f"{type(exc).__name__}: {exc}")
     finally:
-        if acquired:
-            _TASK_SEMAPHORE.release()
-        close_old_connections()
-
-
-def _execute(task_id: int, ctx) -> None:
-    """加载任务、切 RUNNING、在恢复的上下文中分发到业务流水线。"""
-    try:
-        task = AITask.objects.get(id=task_id)
-    except AITask.DoesNotExist:
-        return
-    # 幂等：任务已被终结（如清理任务删除 FAILED 行）则不再执行
-    if task.status not in (AITask.Status.PENDING,):
-        return
-    task.status = AITask.Status.RUNNING
-    task.started_at = _now()
-    task.save(update_fields=["status", "started_at", "updated_at"])
-    try:
-        run_in_context(ctx, _dispatch, task)
-    except Exception as exc:  # 流水线未自行兜底的异常：落库可诊断
-        logger.exception("AI 任务执行失败（task_id=%s, type=%s）", task_id, task.task_type)
-        _mark_failed(task_id, f"{type(exc).__name__}: {exc}"[:300])
+        clear_current_user()  # 防 A 教师身份串到 B 教师（评审 C1 补充）
+        if threading.current_thread() is not threading.main_thread():
+            close_old_connections()
 
 
 def _dispatch(task: AITask) -> None:
@@ -115,21 +128,24 @@ def _dispatch(task: AITask) -> None:
 
         run_course_reuse(task)
         return
-    _mark_failed(task.id, f"未知任务类型：{task.task_type}")
+    if task.task_type == AITask.TaskType.SCRIPT_GEN:
+        from apps.courses.gen_script import run_script_gen
 
+        run_script_gen(task)
+        return
+    if task.task_type == AITask.TaskType.AUDIO_GEN:
+        from apps.courses.gen_audio import run_audio_gen
 
-def _mark_failed(task_id: int, error: str) -> None:
-    """把任务标记为失败（行可能已被删除，静默处理）。"""
-    from django.utils import timezone
+        run_audio_gen(task)
+        return
+    if task.task_type == AITask.TaskType.PPT_PARSE:
+        from apps.courses.ppt_parse import run_ppt_parse
 
-    AITask.objects.filter(id=task_id).update(
-        status=AITask.Status.FAILED,
-        error=str(error or "")[:300],
-        finished_at=timezone.now(),
-    )
+        run_ppt_parse(task)
+        return
+    if task.task_type == AITask.TaskType.EMBED_INGEST:
+        from apps.ai.embed_ingest import run_embed_ingest
 
-
-def _now():
-    from django.utils import timezone
-
-    return timezone.now()
+        run_embed_ingest(task)
+        return
+    raise ValueError(f"未知任务类型：{task.task_type}")

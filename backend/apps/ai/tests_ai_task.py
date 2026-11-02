@@ -34,48 +34,6 @@ from apps.ai.tasks import submit_ai_task
 User = get_user_model()
 
 
-class _InlineThread:
-    """测试替身：同步执行线程目标（替代 daemon 线程）。
-
-    测试库是内存 shared-cache SQLite：表级锁不做 busy 重试，daemon 线程与
-    主线程并发读写同一张表（ai_aitask）会随机 SQLITE_LOCKED——真实文件库
-    有 busy handler 不受影响（本地冒烟已覆盖真线程全路径）。同步执行后
-    状态机/埋点/限流断言完全确定性；copy_call_context / run_in_context /
-    信号量 等机制原样执行，未被绕过。
-
-    唯一例外是 `close_old_connections()`：它的语义是"清理线程自己残留的连接"，
-    真线程里拿到的是全新连接，本就不需要清理；同步执行时它落到测试自身的连接上，
-    而该连接正被 TestCase 的 atomic 包裹（autocommit 已关）——
-    `close_if_unusable_or_obsolete()` 会判定 autocommit 与配置不一致而直接关连接，
-    后续查询在 MySQL 上报 "server has gone away"（SQLite 因可重开文件连接而未暴露）。
-    因此这里把它替换为空操作，属于"线程边界不存在时该机制无意义"，不是绕过被测逻辑。
-    """
-
-    def __init__(self, target=None, args=(), kwargs=None, daemon=None, name=None):
-        self._target = target
-        self._args = args
-        self._kwargs = kwargs or {}
-
-    def start(self):
-        from apps.ai import tasks as ai_tasks
-
-        original = ai_tasks.close_old_connections
-        ai_tasks.close_old_connections = lambda: None
-        try:
-            self._target(*self._args, **self._kwargs)
-        finally:
-            ai_tasks.close_old_connections = original
-
-    def join(self, timeout=None):
-        return
-
-
-class _FakeThreading:
-    """仅替换 apps.ai.tasks 命名空间里的 threading（不影响全局模块）。"""
-
-    Thread = _InlineThread
-
-
 class _ScriptedProvider(BaseAIProvider):
     """按 prompt 关键词返回确定性 JSON 的测试替身（经 record_ai_call 埋点）。"""
 
@@ -183,10 +141,7 @@ class AnalyticsTaskTests(TransactionTestCase):
             student_answer={"key": "B"},
             is_correct=True,
         )
-        # daemon 线程改同步执行（见 _InlineThread 说明）
-        thread_patcher = patch("apps.ai.tasks.threading", _FakeThreading)
-        thread_patcher.start()
-        self.addCleanup(thread_patcher.stop)
+        # 任务提交即同步执行（settings AI_QUEUE_MODE=inline，替代旧 _FakeThreading）
 
     # -- 工具 -------------------------------------------------------------
     def _wait(self, task_id, timeout=45):
@@ -404,10 +359,7 @@ class ChapterSummaryTaskTests(TransactionTestCase):
         self.video = TeachingVideo.objects.create(
             course=self.course, catalog=self.catalog, is_published=True
         )
-        # daemon 线程改同步执行（见 _InlineThread 说明）
-        thread_patcher = patch("apps.ai.tasks.threading", _FakeThreading)
-        thread_patcher.start()
-        self.addCleanup(thread_patcher.stop)
+        # 任务提交即同步执行（settings AI_QUEUE_MODE=inline，替代旧 _FakeThreading）
 
     # -- 工具 -------------------------------------------------------------
     def _wait(self, task_id, timeout=45):

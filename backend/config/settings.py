@@ -198,7 +198,8 @@ else:
 # 测试运行关闭持久连接：测试全程单连接、且常被 TestCase 的 atomic 包裹，
 # 任何 close_old_connections() 都会作用到这条连接上，长跑（>CONN_MAX_AGE）时
 # 会因"到期"被关掉。置 0 让 close_at 为空，消除这一类假失败。
-# （另一条关闭路径是 autocommit 与配置不一致，由 tests_ai_task._InlineThread 处理）
+# （另一条关闭路径是 autocommit 与配置不一致，由 tasks.submit_ai_task 的
+# inline 分支把 close_old_connections 置空处理）
 if "test" in sys.argv:
     DATABASES["default"]["CONN_MAX_AGE"] = 0
 
@@ -486,6 +487,13 @@ AI_ANALYTICS_TIMEOUT = _ai_env_int("AI_ANALYTICS_TIMEOUT", 120)
 AI_SCRIPT_CHUNK_PAGES = _ai_env_int("AI_SCRIPT_CHUNK_PAGES", 3)
 
 # ===== AI 长任务队列（ai_worker，见 docs/AI长任务队列化改造方案.md v2.0）=====
+# 消费模式：worker=独立进程消费（默认，生产/开发正式用法，manage.py ai_worker）；
+# inline=提交时在当前进程内同步执行——仅测试与本地调试（语义等价旧 daemon 线程
+# 同步化，免起 worker）；不要在 runserver/autoreload 下对真实提交开 inline。
+AI_QUEUE_MODE = os.getenv("AI_QUEUE_MODE", "worker")
+# manage.py test 下提交即同步执行（替代旧 _FakeThreading 补丁），免起 worker
+if "test" in sys.argv:
+    AI_QUEUE_MODE = "inline"
 # 三层并发之地基：作业槽位（每类型同时在跑的整作业数）。调用闸门与用户并发上限
 # 在阶段 2 随队列内核落地。worker 单副本，槽位为进程内计数（取任务用 DB 原子
 # claim，未来扩副本时槽位需改 DB 计数，见方案 §5.1）。
@@ -497,6 +505,22 @@ AI_JOB_SLOTS_ANALYTICS = _ai_env_int("AI_JOB_SLOTS_ANALYTICS", 2)
 AI_JOB_SLOTS_PPT = _ai_env_int("AI_JOB_SLOTS_PPT", 2)
 # worker 主循环轮询间隔（秒）
 AI_WORKER_POLL_SECONDS = _ai_env_int("AI_WORKER_POLL_SECONDS", 2)
+# 调用闸门：同时在飞的 provider 调用上限（进程级信号量，见 apps/ai/gate.py）。
+# 挂在任务流水线单次调用外层，不挂 factory.get_provider()（否则学生 SSE 问答
+# 也被罩进来，评审 §5.1）。调大作业槽位不会再突破上游 QPS。
+AI_MAX_CONCURRENT_CHAT = _ai_env_int("AI_MAX_CONCURRENT_CHAT", 6)
+AI_MAX_CONCURRENT_TTS = _ai_env_int("AI_MAX_CONCURRENT_TTS", 4)
+# 用户并发/容量：同用户同时 running ≤ AI_USER_RUNNING_CAP（claim 时子查询判定）；
+# 同用户 pending 超过 AI_USER_PENDING_CAP 返回 429；全局 pending 上限 AI_QUEUE_MAX。
+AI_USER_RUNNING_CAP = _ai_env_int("AI_USER_RUNNING_CAP", 1)
+AI_USER_PENDING_CAP = _ai_env_int("AI_USER_PENDING_CAP", 5)
+AI_QUEUE_MAX = _ai_env_int("AI_QUEUE_MAX", 50)
+# 心跳：任务线程每 AI_WORKER_HEARTBEAT_SECONDS 秒打一次；running 超过
+# AI_WORKER_STALE_SECONDS 未心跳视为卡死，回收为 pending（attempts 不增）。
+AI_WORKER_HEARTBEAT_SECONDS = _ai_env_int("AI_WORKER_HEARTBEAT_SECONDS", 30)
+AI_WORKER_STALE_SECONDS = _ai_env_int("AI_WORKER_STALE_SECONDS", 300)
+# 退避重试：整任务异常后 next_run_at = now + AI_TASK_RETRY_BASE_SECONDS × 2^(n-1)
+AI_TASK_RETRY_BASE_SECONDS = _ai_env_int("AI_TASK_RETRY_BASE_SECONDS", 30)
 
 # AI 日配额全局默认（P5-B6）：0 = 不限（开发/测试默认）；生产由管理端在
 # AI 配置页设置全局默认与用户级覆盖（AIQuotaPolicy），此处仅作兜底。

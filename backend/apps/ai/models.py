@@ -295,6 +295,7 @@ class AITask(BaseModel):
         RUNNING = "running", "进行中"
         SUCCESS = "success", "已完成"
         FAILED = "failed", "失败"
+        CANCELLED = "cancelled", "已取消"
 
     task_type = models.CharField(
         "任务类型", max_length=24, choices=TaskType.choices, db_index=True

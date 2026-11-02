@@ -29,7 +29,6 @@ from rest_framework.test import force_authenticate
 from apps.ai.models import AITask
 from apps.ai.providers.base import BaseAIProvider
 from apps.ai.providers.mock import MockProvider
-from apps.ai.tests_ai_task import _FakeThreading
 from apps.courses.models import Catalog, Course
 from apps.questions.grading import blank_items, grade_objective
 from apps.questions.import_parser import parse_questions
@@ -1464,10 +1463,8 @@ class QuestionAiGenApiTests(APITestCase):
         cls.outsider_catalog = Catalog.objects.create(course=cls.outsider_course, title="第一章")
 
     def setUp(self):
-        # daemon 线程改同步执行 + mock provider：提交即完整跑完，断言确定性
-        thread_patcher = patch("apps.ai.tasks.threading", _FakeThreading)
-        thread_patcher.start()
-        self.addCleanup(thread_patcher.stop)
+        # 任务提交即同步执行（settings AI_QUEUE_MODE=inline，替代旧 _FakeThreading）
+        # + mock provider：提交即完整跑完，断言确定性
         provider_patcher = _patch_pipeline_provider(MockProvider())
         self.addCleanup(provider_patcher.stop)
 
@@ -1700,14 +1697,17 @@ class QuestionGenPipelineTests(APITestCase):
                 run_question_gen(task)
 
     def test_all_groups_failed_marks_task_failed_via_executor(self):
-        """经 _execute 的全失败路径：任务落 FAILED，error 带组失败原因。"""
-        import contextvars
-
-        from apps.ai.tasks import _execute
+        """经 run_task 的全失败路径（attempts 已达上限）：任务落 FAILED，error 带组失败原因。"""
+        from apps.ai.tasks import run_task
 
         task = self._task([{"qtype": "judge", "count": 1, "score": 2}])
+        # run_task 前置条件：已被 claim 认领；attempts 达到上限 → 失败即终态
+        # （未达上限时队列语义是退避重试回 pending，见 queue.mark_error）
+        task.status = AITask.Status.RUNNING
+        task.attempts = task.max_attempts
+        task.save(update_fields=["status", "attempts"])
         with patch("apps.questions.question_gen_ai.get_provider", return_value=_QGenProvider(fail_qtypes={"judge"})):
-            _execute(task.id, contextvars.copy_context())
+            run_task(task)
         task.refresh_from_db()
         self.assertEqual(task.status, AITask.Status.FAILED)
         self.assertIn("判断题", task.error)
