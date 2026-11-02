@@ -485,6 +485,19 @@ AI_ANALYTICS_TIMEOUT = _ai_env_int("AI_ANALYTICS_TIMEOUT", 120)
 # 推进，不会「卡住一批、响应后跳一大截」。调大减少调用次数但进度粒度变粗。
 AI_SCRIPT_CHUNK_PAGES = _ai_env_int("AI_SCRIPT_CHUNK_PAGES", 3)
 
+# ===== AI 长任务队列（ai_worker，见 docs/AI长任务队列化改造方案.md v2.0）=====
+# 三层并发之地基：作业槽位（每类型同时在跑的整作业数）。调用闸门与用户并发上限
+# 在阶段 2 随队列内核落地。worker 单副本，槽位为进程内计数（取任务用 DB 原子
+# claim，未来扩副本时槽位需改 DB 计数，见方案 §5.1）。
+# AI_JOB_SLOTS_PPT 必须等于 AI_RENDER_CONCURRENCY（课件方案自审 F1），否则渲染
+# 并发 2 永远用不上。
+AI_JOB_SLOTS_SCRIPT = _ai_env_int("AI_JOB_SLOTS_SCRIPT", 2)
+AI_JOB_SLOTS_AUDIO = _ai_env_int("AI_JOB_SLOTS_AUDIO", 2)
+AI_JOB_SLOTS_ANALYTICS = _ai_env_int("AI_JOB_SLOTS_ANALYTICS", 2)
+AI_JOB_SLOTS_PPT = _ai_env_int("AI_JOB_SLOTS_PPT", 2)
+# worker 主循环轮询间隔（秒）
+AI_WORKER_POLL_SECONDS = _ai_env_int("AI_WORKER_POLL_SECONDS", 2)
+
 # AI 日配额全局默认（P5-B6）：0 = 不限（开发/测试默认）；生产由管理端在
 # AI 配置页设置全局默认与用户级覆盖（AIQuotaPolicy），此处仅作兜底。
 AI_DAILY_CHAT_QUOTA = _ai_env_int("AI_DAILY_CHAT_QUOTA", 0)

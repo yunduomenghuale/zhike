@@ -69,6 +69,36 @@ services:
       - zhike_v2_net
       - bnet-test
 
+  worker:
+    # AI 长任务队列消费者（讲稿/配音/课件解析，见 docs/AI长任务队列化改造方案.md）。
+    # 关键：必须显式覆盖 entrypoint——Dockerfile.backend 的 ENTRYPOINT 是
+    # deploy-entrypoint.sh（migrate + exec gunicorn，不读 command 参数），
+    # 只写 command 会让本服务静默变成第二个 gunicorn（评审 C3）。
+    image: zhike-v2-backend
+    container_name: zhike_v2_worker
+    restart: unless-stopped
+    entrypoint: ["python", "manage.py", "ai_worker"]
+    command: []
+    env_file: .env.production
+    depends_on:
+      # 迁移由 backend 独占（worker 不跑 migrate，启动自带 SELECT 1 FROM ai_task
+      # 就绪自检，60 次重试）；service_started 即可——自检兜住迁移未完成的窗口。
+      backend: { condition: service_started }
+    stop_grace_period: 15s
+    # 与 backend 对齐 8g：课件解析在 worker 内渲染（2×soffice ~0.8GB），
+    # 若 embed 配 local 还会懒加载 BGE-M3 ~2.3GB（评审 C11）。
+    mem_limit: 8g
+    volumes:
+      # 渲染锁库 /app/data/render-guard 与 LibreOffice profile 池 /app/data/lo-profiles
+      # 必须跨容器共享，故不能放 /tmp（坑清单 4.1-4）；本地模型缓存在 /app/data/models。
+      - ../data:/app/data
+      - ../media:/app/media
+      # PPT 渲染（soffice）在 worker 内发生，字体替换映射必须与 backend 一致
+      - ./fonts.conf:/etc/fonts/local.conf:ro
+    networks:
+      - zhike_v2_net
+      - bnet-test
+
   frontend:
     image: nginx:1.25-alpine
     container_name: zhike_v2_frontend
