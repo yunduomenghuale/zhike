@@ -646,69 +646,64 @@ class PPTResourceViewSet(BaseModelViewSet):
             qs = qs.filter(catalog__is_published=True, is_active=True)
         return qs.order_by("-version", "-id")
 
-    def perform_create(self, serializer):
-        """上传 PPT 后自动逐页解析文本（需求 T-P-02）。
+    def create(self, request, *args, **kwargs):
+        """上传课件：存文件 + 建 PARSING 记录 + 入队，秒返 {ppt_id, task_id}（W2/F9）。
 
-        解析仍在请求内同步完成（响应契约不变），但各阶段进度实时写入
-        ppt.parse_progress，前端轮询列表即可展示「上传 → 解析文本 x/y 页 →
-        渲染图片 x/y 页 → 建立索引」的细粒度进度。
+        DRF 的 perform_create 改不了响应体，必须 override create()。解析/渲染/
+        向量入库全部在 ai_worker 的 ppt_parse 任务内执行（priority=50 教师正等着），
+        前端凭 ppt_id 轮询 parse_progress。旧同步解析链路收敛到 courses/ppt_parse.py。
         """
-        from .ppt_parser import attach_slide_images, parse_teaching_file_pages, render_presentation_slide_images
-
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
         course = serializer.validated_data["course"]
         catalog = serializer.validated_data["catalog"]
         existing = PPTResource.objects.filter(course=course, catalog=catalog)
         next_version = (existing.aggregate(max_version=Max("version"))["max_version"] or 0) + 1
-
         ppt = serializer.save(
             version=next_version,
             is_active=False,
             parse_status=PPTResource.ParseStatus.PARSING,
+            # 入队即写一次进度（F7）：排队等待期 updated_at 保持新鲜，
+            # 前端 20 分钟 stale 阈值不会把排队中的课件误判为失败
+            parse_progress=_parse_progress_payload("text", 0, 0),
         )
-        write_progress = _make_parse_progress_writer(ppt)
-        pages = []
-        parse_error = ""
-        if ppt.file:
-            try:
-                write_progress("text", force=True)
-                pages = parse_teaching_file_pages(
-                    ppt.file.path,
-                    on_page=lambda done, total: write_progress("text", done, total),
-                )
-                # 页数在文本解析后已知：渲染阶段直接带总数，全局锁排队期间也显示 0/N
-                write_progress("render", 0, len(pages), force=True)
-                images = render_presentation_slide_images(
-                    ppt.file.path,
-                    resource_id=ppt.id,
-                    on_progress=lambda done, total: write_progress("render", done, total),
-                )
-                pages = attach_slide_images(pages, images)
-            except Exception as exc:
-                # 解析异常不再让请求 500：落失败状态与原因，前端轮询能看到
-                parse_error = str(exc)[:200]
-                pages = []
-
-        with transaction.atomic():
-            ppt.parsed_pages = pages
-            ppt.parse_status = ppt.ParseStatus.DONE if pages else ppt.ParseStatus.FAILED
-            ppt.is_active = bool(pages)
-            ppt.parse_progress = _parse_progress_payload(
-                "done" if pages else "failed", len(pages), len(pages), parse_error
+        try:
+            task, _ = ai_queue.enqueue(
+                task_type=AITask.TaskType.PPT_PARSE,
+                user=request.user,
+                course=course,
+                catalog=catalog,
+                ppt=ppt,
+                payload={"ppt_id": ppt.id, "version": ppt.version},
+                priority=50,  # 教师正在上传页等着，最高优先级
+                dedupe_key=f"ppt_parse:{ppt.id}",
             )
-            ppt.save(update_fields=["parsed_pages", "parse_status", "is_active", "parse_progress", "updated_at"])
-            if pages:
-                existing.exclude(pk=ppt.pk).update(is_active=False)
-                _invalidate_teaching_video_for_new_ppt(catalog, ppt)
-                # 旧版本课件的向量片段随之失效（可能还是另一套向量空间），先删后建
-                KnowledgeChunk.objects.filter(ppt__in=existing.exclude(pk=ppt.pk)).delete()
+        except Exception as exc:
+            from django.db import IntegrityError
 
-        # 课件是向量库的主要内容：解析成功即逐页入库（失败静默，QA 有原文兜底）
-        if pages:
-            from apps.ai.services import ingest_ppt_pages
+            if not isinstance(exc, IntegrityError):
+                raise
+            # 唯一索引兜底（坑 11）：同课件已有在跑解析，返回其任务
+            task = (
+                AITask.objects.filter(
+                    task_type=AITask.TaskType.PPT_PARSE,
+                    ppt=ppt,
+                    status__in=[AITask.Status.PENDING, AITask.Status.RUNNING],
+                )
+                .order_by("id")
+                .first()
+            )
+            if task is None:
+                raise
+        return api_response(
+            {"ppt_id": ppt.id, "task_id": task.id, "version": ppt.version},
+            message="课件已上传，正在后台解析",
+        )
 
-            write_progress("embed", 0, len(pages), force=True)
-            ingest_ppt_pages(ppt, on_progress=lambda d, t: write_progress("embed", d, t))
-            write_progress("done", len(pages), len(pages), force=True)
+    def perform_create(self, serializer):
+        """兼容保留：只建 PARSING 记录不解析（create() 已覆盖正常入口；
+        reparse 是显式手动重解析入口）。旧同步解析链路已移至 courses/ppt_parse.py。"""
+        serializer.save(parse_status=PPTResource.ParseStatus.PARSING, is_active=False)
 
     @action(detail=True, methods=["post"], url_path="reparse")
     def reparse(self, request, pk=None):

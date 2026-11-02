@@ -73,49 +73,164 @@ def _notify(callback, *args) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 渲染全局锁（跨进程 + 跨线程）
+# 渲染槽位（W0/W4：并发 2 的前置条件）
 # ---------------------------------------------------------------------------
-# PowerPoint COM 是单实例应用（Dispatch 拿到的是同一个 Application），
-# LibreOffice headless 无独立 profile 时也无法并发转换：两个上传同时渲染会
-# 互相干扰（页面图片缺失/导出失败）。PDF 的 pypdfium2 本身可并发，但并发渲染
-# 峰值内存高，统一排队更稳（docker-compose 有内存额度注释）。
+# 旧实现是"全局互斥 1"：一把 SQLite 锁 + 进程内 threading.Lock 包住整个渲染
+# 函数——一边说并发 2 一边留着互斥锁，结果并发永远是 1（自审 F2，已删
+# _RENDER_THREAD_LOCK）。槽位化后：
 #
-# 为什么用独立 SQLite 锁库而不是业务库：BEGIN IMMEDIATE 持锁期间会阻塞其他
-# 写入——若用业务库，并发上传方的 parse_progress 进度写库会被挡住，进度条反而
-# 不实时。独立锁库与业务库零干扰；SQLite 锁在进程退出时由 OS 自动释放，无死锁、
-# 无残留锁文件。覆盖 gunicorn 多 worker（生产 2×2）与本地 runserver 多线程。
-_RENDER_LOCK_DB_NAME = "zhike-render-guard.sqlite"
-_RENDER_LOCK_TIMEOUT = 600  # 排队上限（秒）：单次渲染最多几十秒，600 足够
-_RENDER_THREAD_LOCK = threading.Lock()
+#   AI_RENDER_GUARD_DIR/            ← 跨容器共享（/app/data），不能放 /tmp（坑 4.1-4）
+#     slot-0.sqlite / slot-1.sqlite ← 每槽一把 BEGIN IMMEDIATE 互斥锁
+#     lo-profiles/0/ 1/             ← 与槽位一一对应的 LibreOffice profile 池
+#     slots.json                    ← 槽位占用登记（worker-health 端点读取）
+#
+# - 渲染时抢任意空闲槽（逐槽 timeout=0.2 轮询，全忙 sleep 0.5 重试，总超时 600s——
+#   对每个槽用长 timeout 会卡死在 0 号槽，自审 F11）；
+# - 用**同一个下标**的 profile 转 PDF（无独立 profile 时多 soffice 互相锁
+#   user profile，这正是"必须串行"的历史根源；P-C 的解法是给它独立 profile）；
+# - 进程崩溃由 OS 自动释放 SQLite 锁（当初选 SQLite 锁库的理由，E4）；
+# - Windows COM 单实例：AI_RENDER_CONCURRENCY 强制 1，槽位退化为现状（E6），
+#   且只有 Windows 单槽模式允许"抢锁异常退化为直接渲染"（F12——多槽模式下
+#   退化等于取消并发保护）。
+import logging
+import time
+
+logger = logging.getLogger(__name__)
+
+_PDF_SEMAPHORE = None
+_PDF_SEMAPHORE_LOCK = threading.Lock()
+
+
+def _pdf_semaphore() -> threading.BoundedSemaphore:
+    """PDF 渲染独立并发限制（默认 3，F4）：不占 PPT 槽位、不经过 soffice。"""
+    global _PDF_SEMAPHORE
+    with _PDF_SEMAPHORE_LOCK:
+        if _PDF_SEMAPHORE is None:
+            from django.conf import settings
+
+            _PDF_SEMAPHORE = threading.BoundedSemaphore(
+                max(1, int(getattr(settings, "AI_PDF_RENDER_CONCURRENCY", 3) or 3))
+            )
+    return _PDF_SEMAPHORE
+
+
+def _guard_dir() -> Path:
+    from django.conf import settings
+
+    path = Path(getattr(settings, "AI_RENDER_GUARD_DIR", Path(tempfile.gettempdir()) / "zhike-render-guard"))
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _effective_render_concurrency() -> int:
+    """Windows 强制 1 槽（PowerPoint COM 单实例，E6）；其余按配置。"""
+    import sys
+
+    from django.conf import settings
+
+    configured = max(1, int(getattr(settings, "AI_RENDER_CONCURRENCY", 2) or 2))
+    if sys.platform == "win32":
+        return 1
+    return configured
+
+
+def _slot_registry_path() -> Path:
+    return _guard_dir() / "slots.json"
+
+
+def _record_slot_occupancy(slot: int) -> None:
+    """登记槽位占用（尽力而为）：worker-health 端点据此输出占用槽位号。"""
+    try:
+        import json as _json
+
+        path = _slot_registry_path()
+        data = {}
+        if path.exists():
+            data = _json.loads(path.read_text(encoding="utf-8") or "{}")
+        import os as _os
+        import socket as _socket
+
+        data[f"{_socket.gethostname()}:{_os.getpid()}"] = slot
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(_json.dumps(data), encoding="utf-8")
+        _os.replace(tmp, path)
+    except Exception:
+        pass
+
+
+def _clear_slot_occupancy() -> None:
+    try:
+        import json as _json
+        import os as _os
+        import socket as _socket
+
+        path = _slot_registry_path()
+        if not path.exists():
+            return
+        data = _json.loads(path.read_text(encoding="utf-8") or "{}")
+        data.pop(f"{_socket.gethostname()}:{_os.getpid()}", None)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(_json.dumps(data), encoding="utf-8")
+        _os.replace(tmp, path)
+    except Exception:
+        pass
+
+
+def _try_acquire_slot(slot: int) -> sqlite3.Connection | None:
+    """非阻塞抢一个槽：拿到 BEGIN IMMEDIATE 即占用，否则 0.2s 内返回 None。"""
+    db_path = _guard_dir() / f"slot-{slot}.sqlite"
+    conn = sqlite3.connect(str(db_path), timeout=0.2)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        return conn
+    except Exception:
+        conn.close()
+        return None
 
 
 @contextmanager
-def _render_guard():
-    """渲染阶段全局互斥（见上方注释）。
+def render_slot(total_timeout: float = 600.0, label: str = ""):
+    """渲染槽位许可：yield 槽位下标（同时作为 profile 池下标）。
 
-    进程内 threading.Lock 先排队（避免同进程多线程同时抢进程间锁）；进程间用
-    独立 SQLite 文件的 BEGIN IMMEDIATE。抢锁超时/异常时退化为不排队直接渲染
-    （好过让上传失败）。
+    逐槽 0.2s 轮询（F11），全忙 sleep 0.5 后重来；总超时 600s。
+    获取时打 stdout 日志 `[render] slot=i/N acquired, file=...`——并发 2 生效与否靠
+    这一行与 worker-health 的槽位占用验证（交接书 §2.5.6 本地覆盖边界；
+    logging 在 worker 里不保证输出，必须 print 才能进 docker logs）。
     """
-    with _RENDER_THREAD_LOCK:
-        conn = None
-        try:
-            db_path = Path(tempfile.gettempdir()) / _RENDER_LOCK_DB_NAME
-            conn = sqlite3.connect(str(db_path), timeout=_RENDER_LOCK_TIMEOUT)
-            conn.execute("BEGIN IMMEDIATE")
-        except Exception:
+    total = _effective_render_concurrency()
+    deadline = time.monotonic() + total_timeout
+    conn = None
+    slot = -1
+    try:
+        while True:
+            for candidate in range(total):
+                conn = _try_acquire_slot(candidate)
+                if conn is not None:
+                    slot = candidate
+                    break
+                if time.monotonic() > deadline:
+                    raise TimeoutError(f"等待渲染槽位超时（{total_timeout}s，{total} 槽全忙）")
             if conn is not None:
-                conn.close()
-                conn = None
-        try:
-            yield
-        finally:
-            if conn is not None:
-                try:
-                    conn.rollback()  # 结束事务即释放 RESERVED 锁
-                except Exception:
-                    pass
-                conn.close()
+                break
+            time.sleep(0.5)
+        print(f"[render] slot={slot + 1}/{total} acquired, file={label or 'unknown'}", flush=True)
+        _record_slot_occupancy(slot)
+        yield slot
+    finally:
+        _clear_slot_occupancy()
+        if conn is not None:
+            try:
+                conn.rollback()  # 结束事务即释放 RESERVED 锁
+            except Exception:
+                pass
+            conn.close()
+
+
+def _libreoffice_profile_uri(slot: int) -> str:
+    """槽位对应的 LibreOffice profile 目录（池化预建，见文件头注释）。"""
+    profile_dir = _guard_dir() / "lo-profiles" / str(slot)
+    profile_dir.mkdir(parents=True, exist_ok=True)
+    return profile_dir.resolve().as_uri()
 
 
 def render_presentation_slide_images(
@@ -147,14 +262,23 @@ def render_presentation_slide_images(
         shutil.rmtree(out_dir, ignore_errors=True)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # 渲染全局排队：PowerPoint COM / LibreOffice 非并发安全（见 _render_guard）
-    with _render_guard():
-        if ext == ".pdf":
+    # 渲染并发化（W0/W4）：PDF 不占 PPT 槽位、走独立信号量（F4），全程零 soffice；
+    # PPT/PPTX 抢渲染槽位（Windows 单槽退化），LibreOffice 用槽位同下标的独立
+    # profile 转换——多槽并发时互不干扰。
+    if ext == ".pdf":
+        with _pdf_semaphore():
             return _render_pdf_pages(file_path, out_dir, rel_dir, on_progress=on_progress)
-        rendered = _render_with_powerpoint(file_path, out_dir, rel_dir, on_progress=on_progress)
-        if not rendered:
-            rendered = _render_with_libreoffice(file_path, out_dir, rel_dir, on_progress=on_progress)
-        return rendered
+    try:
+        with render_slot(label=file_path) as slot:
+            rendered = _render_with_powerpoint(file_path, out_dir, rel_dir, on_progress=on_progress)
+            if not rendered:
+                rendered = _render_with_libreoffice(
+                    file_path, out_dir, rel_dir, on_progress=on_progress, slot=slot
+                )
+            return rendered
+    except TimeoutError:
+        logger.exception("[render] slot acquire timeout file=%s", file_path)
+        return {}
 
 
 def _render_pdf_pages(file_path: str, out_dir: Path, rel_dir: Path, on_progress=None) -> dict[int, str]:
@@ -255,17 +379,21 @@ def _render_with_powerpoint(
 
 
 def _render_with_libreoffice(
-    file_path: str, out_dir: Path, rel_dir: Path, on_progress=None
+    file_path: str, out_dir: Path, rel_dir: Path, on_progress=None, slot: int = 0
 ) -> dict[int, str]:
     """Linux：LibreOffice headless 转 PDF，再用 pypdfium2 逐页出 PNG。
 
     老格式 .ppt 先预转 .pptx 再转 PDF——LibreOffice 对 OOXML 的排版保真度
     明显好于二进制 .ppt，可减少文字错位/图形变形。
     转换阶段无页粒度（soffice 整文件转换），出 PDF 后由 _pdf_to_images 逐页回调。
+    每次转换使用槽位同下标的独立 -env:UserInstallation profile（P-C/W4）：
+    无独立 profile 时多 soffice 实例共享 user profile 会互相锁死，这正是
+    "LibreOffice 必须串行"的历史根源。
     """
     import subprocess
     import tempfile
 
+    profile_uri = _libreoffice_profile_uri(slot)
     try:
         with tempfile.TemporaryDirectory() as tmp:
             source = file_path
@@ -273,7 +401,8 @@ def _render_with_libreoffice(
             if file_path.lower().endswith(".ppt"):
                 # .ppt -> .pptx 预转换（失败则退回直接转 PDF）
                 subprocess.run(
-                    ["soffice", "--headless", "--convert-to", "pptx", "--outdir", tmp, file_path],
+                    ["soffice", f"-env:UserInstallation={profile_uri}",
+                     "--headless", "--convert-to", "pptx", "--outdir", tmp, file_path],
                     timeout=300,
                     check=True,
                     capture_output=True,
@@ -283,7 +412,8 @@ def _render_with_libreoffice(
                     source = str(pptx_path)
             # PPT/PPTX -> PDF（中文字体由容器内 fonts-noto-cjk / wqy 等提供）
             subprocess.run(
-                ["soffice", "--headless", "--convert-to", "pdf", "--outdir", tmp, source],
+                ["soffice", f"-env:UserInstallation={profile_uri}",
+                 "--headless", "--convert-to", "pdf", "--outdir", tmp, source],
                 timeout=300,
                 check=True,
                 capture_output=True,

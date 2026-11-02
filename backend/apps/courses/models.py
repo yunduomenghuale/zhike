@@ -142,6 +142,9 @@ class PPTResource(BaseModel):
     # 解析进度（上传解析过程的实时可视化）：
     # {"stage": "text|render|embed|done|failed", "done": int, "total": int, "error": str}
     parse_progress = models.JSONField("解析进度", default=dict, blank=True)
+    # 文件内容哈希（W5 复用）：worker 内计算（F10：100MB 文件不在上传请求里算，
+    # 拖慢秒返）；命中同 md5 的历史资源可复制页图目录与 parsed_pages，跳过解析渲染
+    file_md5 = models.CharField("文件MD5", max_length=64, blank=True, db_index=True)
 
     class Meta:
         verbose_name = "PPT 资源"

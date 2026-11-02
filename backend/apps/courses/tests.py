@@ -75,28 +75,24 @@ class PptReplacementTests(APITestCase):
         self.media_directory.cleanup()
 
     def upload(self, parsed_pages):
+        """队列化口径：POST 秒返受理，随后直调 worker 执行体跑到终态（§8 改写口径）。
+
+        补丁改指到 apps.courses.ppt_parse 命名空间（执行体的模块级导入）；向量入库
+        走模拟替身：ingest 返回 0 → 按 F5 语义保留旧版本片段。
+        """
         upload = SimpleUploadedFile(
             "new.pptx",
             b"test presentation",
             content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         )
         with (
-            patch(
-                "apps.courses.ppt_parser.parse_teaching_file_pages",
-                return_value=parsed_pages,
-            ),
-            patch(
-                "apps.courses.ppt_parser.render_presentation_slide_images",
-                return_value=[],
-            ),
-            patch(
-                "apps.courses.ppt_parser.attach_slide_images",
-                side_effect=lambda pages, images: pages,
-            ),
+            patch("apps.courses.ppt_parse.parse_teaching_file_pages", return_value=parsed_pages),
+            patch("apps.courses.ppt_parse.render_presentation_slide_images", return_value=[]),
+            patch("apps.courses.ppt_parse.attach_slide_images", side_effect=lambda pages, images: pages),
             # 向量入库走模拟替身：上传测试不依赖真实 embedding 服务
             patch("apps.ai.services.get_provider", return_value=MockProvider()),
         ):
-            return self.client.post(
+            response = self.client.post(
                 "/api/ppts/",
                 {
                     "course": self.course.id,
@@ -106,12 +102,35 @@ class PptReplacementTests(APITestCase):
                 },
                 format="multipart",
             )
+            self._run_parse_task(response)
+            return response
+
+    @staticmethod
+    def _run_parse_task(response):
+        """把入队的 ppt_parse 任务直调执行体跑到终态（替代旧同步请求内解析）。"""
+        data = response.data.get("data") or {}
+        task_id = data.get("task_id")
+        if response.status_code != 200 or not task_id:
+            return
+        from apps.ai import queue as ai_queue
+        from apps.ai.models import AITask
+        from apps.ai.tasks import run_task
+
+        claimed = ai_queue.claim("test-worker", {"ppt_parse": 2})
+        if claimed is not None:
+            run_task(claimed)
+        else:  # claim 被并发拿走时兜底：直接按任务行驱动
+            task = AITask.objects.get(id=task_id)
+            task.status = AITask.Status.RUNNING
+            task.attempts = 1
+            task.save(update_fields=["status", "attempts"])
+            run_task(task)
 
     def test_successful_upload_replaces_active_ppt_and_invalidates_old_content(self):
         response = self.upload([{"page": 1, "title": "新课件", "body": "新内容"}])
 
-        self.assertEqual(response.status_code, 201)
-        new_ppt = PPTResource.objects.get(pk=response.data["data"]["id"])
+        self.assertEqual(response.status_code, 200)
+        new_ppt = PPTResource.objects.get(pk=response.data["data"]["ppt_id"])
         self.old_ppt.refresh_from_db()
         self.video.refresh_from_db()
         self.progress.refresh_from_db()
@@ -134,8 +153,8 @@ class PptReplacementTests(APITestCase):
     def test_failed_upload_keeps_previous_content_active(self):
         response = self.upload([])
 
-        self.assertEqual(response.status_code, 201)
-        failed_ppt = PPTResource.objects.get(pk=response.data["data"]["id"])
+        self.assertEqual(response.status_code, 200)
+        failed_ppt = PPTResource.objects.get(pk=response.data["data"]["ppt_id"])
         self.old_ppt.refresh_from_db()
         self.video.refresh_from_db()
         self.progress.refresh_from_db()
@@ -796,12 +815,12 @@ class PptVectorIngestTests(APITestCase):
             content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         )
         with (
-            patch("apps.courses.ppt_parser.parse_teaching_file_pages", return_value=parsed_pages),
-            patch("apps.courses.ppt_parser.render_presentation_slide_images", return_value=[]),
-            patch("apps.courses.ppt_parser.attach_slide_images", side_effect=lambda pages, images: pages),
+            patch("apps.courses.ppt_parse.parse_teaching_file_pages", return_value=parsed_pages),
+            patch("apps.courses.ppt_parse.render_presentation_slide_images", return_value=[]),
+            patch("apps.courses.ppt_parse.attach_slide_images", side_effect=lambda pages, images: pages),
             patch("apps.ai.services.get_provider", return_value=_FakePptEmbedProvider()),
         ):
-            return self.client.post(
+            response = self.client.post(
                 "/api/ppts/",
                 {
                     "course": self.course.id,
@@ -811,6 +830,14 @@ class PptVectorIngestTests(APITestCase):
                 },
                 format="multipart",
             )
+            # 队列化：秒返受理后直调 worker 执行体跑到终态（先建后删，F5）
+            from apps.ai import queue as ai_queue
+            from apps.ai.tasks import run_task
+
+            claimed = ai_queue.claim("test-worker", {"ppt_parse": 2})
+            if claimed is not None:
+                run_task(claimed)
+            return response
 
     def test_upload_ingests_new_ppt_and_clears_old_version_chunks(self):
         response = self._upload(
@@ -819,8 +846,8 @@ class PptVectorIngestTests(APITestCase):
                 {"page": 2, "title": "第二章", "body": "更多内容"},
             ]
         )
-        self.assertEqual(response.status_code, 201)
-        new_ppt = PPTResource.objects.get(pk=response.data["data"]["id"])
+        self.assertEqual(response.status_code, 200)
+        new_ppt = PPTResource.objects.get(pk=response.data["data"]["ppt_id"])
 
         chunks = list(new_ppt.chunks.order_by("page"))
         self.assertEqual([c.page for c in chunks], [1, 2])
@@ -832,8 +859,8 @@ class PptVectorIngestTests(APITestCase):
 
     def test_failed_upload_keeps_old_chunks_and_ingests_nothing(self):
         response = self._upload([])
-        self.assertEqual(response.status_code, 201)
-        failed_ppt = PPTResource.objects.get(pk=response.data["data"]["id"])
+        self.assertEqual(response.status_code, 200)
+        failed_ppt = PPTResource.objects.get(pk=response.data["data"]["ppt_id"])
         self.assertEqual(failed_ppt.chunks.count(), 0)
         self.assertEqual(self.old_ppt.chunks.count(), 1)
 
@@ -845,10 +872,10 @@ class PptVectorIngestTests(APITestCase):
             content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         )
         with (
-            patch("apps.courses.ppt_parser.parse_teaching_file_pages",
+            patch("apps.courses.ppt_parse.parse_teaching_file_pages",
                   return_value=[{"page": 1, "title": "新课件", "body": "新内容"}]),
-            patch("apps.courses.ppt_parser.render_presentation_slide_images", return_value=[]),
-            patch("apps.courses.ppt_parser.attach_slide_images", side_effect=lambda pages, images: pages),
+            patch("apps.courses.ppt_parse.render_presentation_slide_images", return_value=[]),
+            patch("apps.courses.ppt_parse.attach_slide_images", side_effect=lambda pages, images: pages),
             patch("apps.ai.services.get_provider", return_value=MockProvider()),
         ):
             response = self.client.post(
@@ -861,11 +888,18 @@ class PptVectorIngestTests(APITestCase):
                 },
                 format="multipart",
             )
-        self.assertEqual(response.status_code, 201)
-        new_ppt = PPTResource.objects.get(pk=response.data["data"]["id"])
-        # 新课件暂不入库（等配置好向量模型后重建）；旧版本被替换、其片段按设计清理
+            from apps.ai import queue as ai_queue
+            from apps.ai.tasks import run_task
+
+            claimed = ai_queue.claim("test-worker", {"ppt_parse": 2})
+            if claimed is not None:
+                run_task(claimed)
+        self.assertEqual(response.status_code, 200)
+        new_ppt = PPTResource.objects.get(pk=response.data["data"]["ppt_id"])
+        # 新课件暂不入库（等配置好向量模型后重建）；ingest=0 时按 F5 保留旧版本
+        # 片段（QA 空窗保护），不先删后建
         self.assertEqual(new_ppt.chunks.count(), 0)
-        self.assertEqual(self.old_ppt.chunks.count(), 0)
+        self.assertEqual(self.old_ppt.chunks.count(), 1)
 
     def test_reparse_reingests_chunks(self):
         with (
@@ -886,31 +920,118 @@ class PptVectorIngestTests(APITestCase):
         self.assertEqual(chunks[1].content, "重解析二\n内容二")
 
 
+class PptMd5ReuseTests(APITestCase):
+    """W5：同 md5 再传复用页图目录与 parsed_pages（E7：embed 仍重跑），跳过解析渲染。"""
+
+    def setUp(self):
+        self.media_directory = TemporaryDirectory()
+        self.media_override = override_settings(MEDIA_ROOT=self.media_directory.name)
+        self.media_override.enable()
+        self.teacher = User.objects.create_user(
+            username="ppt-md5-teacher", password="StrongPass!123", role=User.Role.TEACHER
+        )
+        self.course = Course.objects.create(name="MD5复用课", teacher=self.teacher)
+        self.catalog = Catalog.objects.create(course=self.course, title="第一章")
+        self.source = PPTResource.objects.create(
+            course=self.course, catalog=self.catalog, file_name="a.pptx",
+            version=1, is_active=True, parse_status=PPTResource.ParseStatus.DONE,
+            file_md5="same-md5",
+            parsed_pages=[{"page": 1, "title": "源页", "body": "内容", "image": "/media/ppt_pages/srcdir/slide-001.png"}],
+        )
+        self.client.force_authenticate(user=self.teacher)
+
+    def tearDown(self):
+        self.media_override.disable()
+        self.media_directory.cleanup()
+
+    def test_same_md5_reuses_pages_and_skips_parse(self):
+        upload = SimpleUploadedFile(
+            "b.pptx", b"test presentation",
+            content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        )
+        boom = AssertionError("同 md5 复用不应重新解析/渲染")
+        with (
+            patch("apps.courses.ppt_parse._compute_md5", return_value="same-md5"),
+            patch("apps.courses.ppt_parse.parse_teaching_file_pages", side_effect=boom),
+            patch("apps.courses.ppt_parse.render_presentation_slide_images", side_effect=boom),
+            patch("apps.ai.services.get_provider", return_value=MockProvider()),
+        ):
+            response = self.client.post(
+                "/api/ppts/",
+                {"course": self.course.id, "catalog": self.catalog.id,
+                 "file_name": upload.name, "file": upload},
+                format="multipart",
+            )
+            from apps.ai import queue as ai_queue
+            from apps.ai.tasks import run_task
+
+            claimed = ai_queue.claim("test-worker", {"ppt_parse": 2})
+            if claimed is not None:
+                run_task(claimed)
+        self.assertEqual(response.status_code, 200)
+        new_ppt = PPTResource.objects.get(pk=response.data["data"]["ppt_id"])
+        self.assertEqual(new_ppt.parse_status, PPTResource.ParseStatus.DONE)
+        # 页图 URL 目录重写为新资源的派生目录（E7 复制目录 + 路径改写）
+        self.assertEqual(len(new_ppt.parsed_pages), 1)
+        image = new_ppt.parsed_pages[0].get("image")
+        self.assertIsNotNone(image)
+        self.assertNotIn("srcdir", image)
+        # 源资源不受影响；新版本转正
+        self.source.refresh_from_db()
+        self.assertFalse(self.source.is_active)
+        self.assertTrue(new_ppt.is_active)
+
+
 class RenderGuardTests(SimpleTestCase):
-    """渲染全局锁（_render_guard）：可重复获取/释放，持锁期间阻塞其他连接的写事务。"""
+    """渲染槽位（render_slot，W0/W4）：可重复获取/释放；持锁期间同槽其他连接被阻塞；
+    并发 2 时两槽可同时占用（槽位化的核心语义，Windows 强制 1 槽退化为串行）。"""
 
-    def test_guard_reacquire_after_release(self):
-        from apps.courses.ppt_parser import _render_guard
+    def test_slot_reacquire_after_release(self):
+        from apps.courses.ppt_parser import render_slot
 
-        with _render_guard():
+        with render_slot(total_timeout=5):
             pass
         # 释放后可再次获取（无残留、无死锁）
-        with _render_guard():
+        with render_slot(total_timeout=5):
             pass
 
-    def test_guard_blocks_other_connection_while_held(self):
+    def test_slot_blocks_other_connection_while_held(self):
         import sqlite3
-        import tempfile
-        from pathlib import Path
 
-        from apps.courses.ppt_parser import _RENDER_LOCK_DB_NAME, _render_guard
+        from apps.courses.ppt_parser import _guard_dir, render_slot
 
-        with _render_guard():
-            other = sqlite3.connect(
-                str(Path(tempfile.gettempdir()) / _RENDER_LOCK_DB_NAME), timeout=0.2
-            )
+        with render_slot(total_timeout=5) as slot:
+            other = sqlite3.connect(str(_guard_dir() / f"slot-{slot}.sqlite"), timeout=0.2)
             try:
                 with self.assertRaises(sqlite3.OperationalError):
                     other.execute("BEGIN IMMEDIATE")
             finally:
                 other.close()
+
+    def test_two_slots_available_under_multi_mode(self):
+        import threading
+
+        from apps.courses.ppt_parser import _effective_render_concurrency, render_slot
+
+        grabbed = []
+        lock = threading.Lock()
+
+        def grab():
+            with render_slot(total_timeout=15) as slot:
+                with lock:
+                    grabbed.append(slot)
+                import time
+
+                time.sleep(0.3)  # 让两个线程重叠持有
+
+        threads = [threading.Thread(target=grab) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+        if _effective_render_concurrency() > 1:
+            # 多槽模式（Linux）：两个线程拿到不同槽——并发 2 的语义地基
+            self.assertEqual(sorted(grabbed), [0, 1])
+        else:
+            # Windows 单槽：串行获取同一槽（E6 退化，行为不变）
+            self.assertEqual(len(grabbed), 2)

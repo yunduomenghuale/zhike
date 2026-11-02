@@ -503,6 +503,13 @@ AI_JOB_SLOTS_SCRIPT = _ai_env_int("AI_JOB_SLOTS_SCRIPT", 2)
 AI_JOB_SLOTS_AUDIO = _ai_env_int("AI_JOB_SLOTS_AUDIO", 2)
 AI_JOB_SLOTS_ANALYTICS = _ai_env_int("AI_JOB_SLOTS_ANALYTICS", 2)
 AI_JOB_SLOTS_PPT = _ai_env_int("AI_JOB_SLOTS_PPT", 2)
+# 渲染并发（课件方案 W0/W4）：PPT 走槽位化 soffice（独立 -env:UserInstallation
+# profile 池；锁库在 AI_RENDER_GUARD_DIR——跨容器共享 /app/data，不能放 /tmp，
+# 坑 4.1-4）。Windows 下 PowerPoint COM 单实例，进程内强制 1 槽（E6）。
+# PDF 不占 PPT 槽位，走独立信号量（F4：可并发 ≠ 无限并发）。
+AI_RENDER_CONCURRENCY = _ai_env_int("AI_RENDER_CONCURRENCY", 2)
+AI_PDF_RENDER_CONCURRENCY = _ai_env_int("AI_PDF_RENDER_CONCURRENCY", 3)
+AI_RENDER_GUARD_DIR = os.getenv("AI_RENDER_GUARD_DIR", str(BASE_DIR / "data" / "render-guard"))
 # worker 主循环轮询间隔（秒）
 AI_WORKER_POLL_SECONDS = _ai_env_int("AI_WORKER_POLL_SECONDS", 2)
 # 调用闸门：同时在飞的 provider 调用上限（进程级信号量，见 apps/ai/gate.py）。

@@ -1758,11 +1758,12 @@ watch(playerPageIndex, () => {
 const pptVisible = ref(false)
 // 每章一个上传/解析任务 { phase, percent, done, total, error, httpPending }：
 // 各章课件弹窗只渲染自己的任务，互不串台；也支持同时上传多个章节的课件
-// （服务端渲染阶段有全局锁排队，见 ppt_parser._render_guard）
+// （解析在 ai_worker 异步执行，多章并发由服务端槽位/队列调度，见 courses/ppt_parse.py）
 const uploadTasks = reactive({})
 let pptParsePollTimer = null
-// 进度停更超过该时长视为服务端已中断（崩溃/重启）：恢复轮询不拉起、进行中则判失败，避免永冻
-const PPT_PARSE_STALE_MS = 10 * 60 * 1000
+// 进度停更超过该时长视为服务端已中断（崩溃/重启）：恢复轮询不拉起、进行中则判失败，避免永冻。
+// 20 分钟（F7）：异步化后「排队等待」也算在解析时长里，10 分钟会把排队中的课件误判失败。
+const PPT_PARSE_STALE_MS = 20 * 60 * 1000
 // 服务端 ingest 发生在 parse_status 翻 done 之后（阶段仍为 embed），
 // 因此「进行中」必须按阶段判定而不能只看 parse_status——否则响应到达前轮询失明、进度冻结
 const PPT_PARSE_ACTIVE_STAGES = ['text', 'render', 'embed']
@@ -1852,8 +1853,10 @@ async function pollPptParse() {
         task.error = progress.error || ''
         continue
       }
-      // 没有进行中的资源：解析已结束。HTTP 在途时等上传响应收尾；恢复轮询在此收尾
+      // 没有进行中的资源：解析已结束/尚未开始。HTTP 在途或首拍宽限期内等下一拍
+      // （坑 23：秒返后解析记录可能还没入库，宽限 2 拍再判完成，不立即 done）
       if (task.httpPending) continue
+      if ((task.grace || 0) > 0) { task.grace -= 1; continue }
       const failed = rows.find((p) => p.parse_status === 'failed' || p.parse_progress?.stage === 'failed')
       await finishUploadTask(key, failed ? 'failed' : 'done', failed?.parse_progress?.error || '')
     } catch { /* 单章轮询失败：等下一轮 */ }
@@ -1926,11 +1929,12 @@ async function handlePptUpload(file) {
   }
   const catalogId = currentNode.value.id
   const key = String(catalogId)
-  uploadTasks[key] = { phase: 'upload', percent: 0, done: 0, total: 0, error: '', httpPending: true }
-  // 上传请求返回即解析完成（后端同步链路）；轮询只负责展示解析中间进度
+  // 队列化（W2/W3）：上传只「存文件+入队」，响应秒返表示已受理；
+  // 解析进度（text→render→embed）由下方轮询按 ppt_id 收尾，响应到达不立即置 done
+  uploadTasks[key] = { phase: 'text', percent: 0, done: 0, total: 0, error: '', httpPending: true, grace: 2 }
   ensurePptParsePoll()
   try {
-    const created = await uploadPpt({
+    const accepted = await uploadPpt({
       course: courseId,
       catalog: catalogId,
       file,
@@ -1938,26 +1942,24 @@ async function handlePptUpload(file) {
         const task = uploadTasks[key]
         if (!task || !e.total) return
         task.percent = Math.min(99, Math.round((e.loaded / e.total) * 100))
-        if (e.loaded >= e.total && task.phase === 'upload') {
-          task.phase = 'text' // 字节传完，进入服务端解析
-        }
       },
     })
-    const savedPpt = created && typeof created === 'object'
-      ? created
-      : { catalog: catalogId, file_name: file.name, parsed_pages: [] }
-    setPptMapItem(savedPpt, catalogId)
-    ElMessage.success((savedPpt.parsed_pages || []).length ? '上传并解析完成' : '已上传，但未解析到页面文本')
-    loadPpts({ reset: false }).catch(() => {})
-    // 展示一小会儿「解析完成」再收起进度条
+    setPptMapItem(
+      {
+        id: accepted?.ppt_id,
+        catalog: catalogId,
+        file_name: file.name,
+        parsed_pages: [],
+        parse_status: 'parsing',
+        version: accepted?.version,
+        is_active: false,
+      },
+      catalogId,
+    )
+    // 已受理：交给轮询收尾（首拍可能还查不到解析记录，宽限 2 拍，坑 23）
     const task = uploadTasks[key]
-    if (task) {
-      task.phase = 'done'
-      task.percent = 100
-      if (!task.total) task.total = (savedPpt.parsed_pages || []).length
-      task.done = task.total
-    }
-    await new Promise((resolve) => setTimeout(resolve, 500))
+    if (task) task.httpPending = false
+    ElMessage.success('课件已上传，正在后台解析')
   } catch (err) {
     const message = err?.response?.data?.message || err?.message || '请重试'
     const task = uploadTasks[key]
@@ -1967,7 +1969,6 @@ async function handlePptUpload(file) {
     }
     ElMessage.error(`上传失败：${message}`)
     await new Promise((resolve) => setTimeout(resolve, 1200))
-  } finally {
     delete uploadTasks[key]
   }
   return false

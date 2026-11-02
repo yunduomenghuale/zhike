@@ -223,3 +223,63 @@ class AITaskRetryView(APIView):
         task.next_run_at = timezone.now()
         task.save(update_fields=["status", "attempts", "error", "cancel_requested", "finished_at", "claimed_by", "heartbeat_at", "next_run_at", "updated_at"])
         return api_response({"id": task.id, "status": task.status}, message="已重新排队")
+
+
+class AIWorkerHealthView(APIView):
+    """worker/队列健康（管理端，§2.5.6 兜底：渲染并发在 Windows 本地看不到
+    2 个 soffice，靠槽位占用自报验证并发生效）。
+
+    输出：各类型 pending/running 深度、最近心跳（worker 存活）、渲染并发配置
+    与当前占用的槽位号（读 render-guard 的 slots.json，worker 与 API 共享
+    /app/data 卷；读不到/过期则报 unknown 而不是编造）。
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.common.access import is_platform_admin
+
+        if not is_platform_admin(request.user):
+            return api_response(message="仅平台管理员可查看", code=403, status=403)
+
+        import json as _json
+        import sys
+        from pathlib import Path
+
+        from django.conf import settings
+        from django.db.models import Count
+        from django.utils import timezone
+
+        from .models import AITask
+
+        by_type: dict = {}
+        for row in AITask.objects.filter(status__in=[AITask.Status.PENDING, AITask.Status.RUNNING]).values(
+            "task_type", "status"
+        ).annotate(n=Count("id")):
+            bucket = by_type.setdefault(row["task_type"], {"pending": 0, "running": 0})
+            bucket[row["status"]] = row["n"]
+        last_heartbeat = AITask.objects.filter(
+            status=AITask.Status.RUNNING, heartbeat_at__isnull=False
+        ).values_list("heartbeat_at", flat=True).order_by("-heartbeat_at").first()
+
+        occupied_slots: list = []
+        try:
+            registry = Path(getattr(settings, "AI_RENDER_GUARD_DIR", "")) / "slots.json"
+            if registry.exists():
+                data = _json.loads(registry.read_text(encoding="utf-8") or "{}")
+                occupied_slots = sorted({int(v) for v in data.values()})
+        except Exception:
+            occupied_slots = []
+
+        return api_response(
+            {
+                "queue_depth": by_type,
+                "worker_last_heartbeat": last_heartbeat,
+                "worker_heartbeat_seconds_ago": (
+                    (timezone.now() - last_heartbeat).total_seconds() if last_heartbeat else None
+                ),
+                "ai_render_concurrency": getattr(settings, "AI_RENDER_CONCURRENCY", None),
+                "render_slots_occupied": occupied_slots,
+                "render_slot_mode": "windows-1" if sys.platform == "win32" else "multi",
+            }
+        )
