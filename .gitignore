@@ -67,3 +67,4 @@ deploy/tls/certs/*.pem
 deploy/tls/certs/*.key
 deploy/tls/certs/*.crt
 deploy/tls/certs/*.csr
+backend/data/
