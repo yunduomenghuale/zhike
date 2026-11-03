@@ -112,54 +112,6 @@
             <span class="quota-hint">留空 = 不限；0 = 全天封禁。超限请求返回 429 与中文提示。</span>
             <el-button type="primary" :loading="quotaSaving" @click="saveQuota">保存配额</el-button>
           </div>
-          <div class="quota-overrides">
-            <span class="quota-label">用户级覆盖（{{ quotaOverrides.length }}）：</span>
-            <el-tag
-              v-for="o in quotaOverrides"
-              :key="o.user_id"
-              size="small"
-              effect="plain"
-              class="quota-tag"
-              closable
-              :title="`点击 × 删除该覆盖（回到全局默认）`"
-              @close="removeOverride(o)"
-            >
-              {{ o.real_name || o.username }}（{{ o.daily_limit }}/日）
-            </el-tag>
-            <span v-if="!quotaOverrides.length" class="quota-hint">暂无用户级覆盖，全部用户按全局默认执行。</span>
-          </div>
-          <div class="quota-add">
-            <el-select
-              v-model="overridePick"
-              filterable
-              remote
-              :remote-method="searchOverrideUsers"
-              :loading="overrideUserLoading"
-              placeholder="搜索用户（姓名/账号）"
-              size="small"
-              class="quota-add-user"
-            >
-              <el-option
-                v-for="u in overrideUserOptions"
-                :key="u.id"
-                :value="u.id"
-                :label="`${u.real_name || u.username}（${u.username}）`"
-              />
-            </el-select>
-            <el-input-number
-              v-model="overrideLimit"
-              :min="0"
-              :step="10"
-              controls-position="right"
-              placeholder="每日上限"
-              size="small"
-              class="quota-add-num"
-            />
-            <el-button size="small" :disabled="overridePick == null || overrideLimit == null" @click="addOverride">
-              添加覆盖
-            </el-button>
-            <span class="quota-hint">0 = 封禁该账号 AI；覆盖优先于全局默认</span>
-          </div>
         </section>
       </el-tab-pane>
 
@@ -700,61 +652,7 @@ const effective=ref([])
 const mockAlert=ref(null)
 // P5-B6：AI 日配额（全局默认可编辑；用户级覆盖只读展示）
 const quotaDefault=ref(null)
-const quotaOverrides=ref([])
 const quotaSaving=ref(false)
-const overridePick=ref(null)
-const overrideLimit=ref(null)
-const overrideUserOptions=ref([])
-const overrideUserLoading=ref(false)
-const overridePickUser=ref(null)
-
-async function searchOverrideUsers(keyword){
-  // 选中后 EP 会以空 query 重查——不在此清空 options，否则 addOverride 找不到选中对象
-  if(!keyword){ return }
-  overrideUserLoading.value=true
-  try{
-    const resp=await listAdminUsers({ search: keyword, page_size: 20 })
-    // 响应拦截器已解包 {code,data}：data 是 {items,total} 分页结构（对齐 AdminUsers 用法）
-    const list=resp?.items ?? resp?.results ?? (Array.isArray(resp) ? resp : [])
-    overrideUserOptions.value=(Array.isArray(list)?list:[]).filter(u=>!quotaOverrides.value.some(o=>o.user_id===u.id))
-  }finally{
-    overrideUserLoading.value=false
-  }
-}
-async function saveOverrides(next){
-  quotaSaving.value=true
-  try{
-    // 后端 overrides 是「按条目增删」语义：daily_limit=null 删除该用户覆盖，
-    // 空数组什么都不做——必须显式把被移除的用户标记为 null 传过去
-    const removed = quotaOverrides.value
-      .filter(o => !next.some(n => n.user_id === o.user_id))
-      .map(o => ({ user_id: o.user_id, daily_limit: null }))
-    await putAdminAIQuota(
-      quotaDefault.value === '' || quotaDefault.value === undefined ? null : quotaDefault.value,
-      [...next.map(o=>({ user_id: o.user_id, daily_limit: o.daily_limit })), ...removed],
-    )
-    ElMessage.success('用户级覆盖已保存')
-    await loadQuota()
-  } finally {
-    quotaSaving.value=false
-  }
-}
-watch(overridePick, (id) => {
-  // 同步缓存选中对象：EP 选中后会异步重查空 query 替换 options，此刻旧 options 还在
-  overridePickUser.value = overrideUserOptions.value.find(x => x.id === id) || null
-})
-function addOverride(){
-  const u=overridePickUser.value
-  if(!u) return
-  const next=[...quotaOverrides.value, { user_id: u.id, username: u.username, real_name: u.real_name, daily_limit: Number(overrideLimit.value) }]
-  saveOverrides(next)
-  overridePick.value=null
-  overrideLimit.value=null
-  overrideUserOptions.value=[]
-}
-function removeOverride(o){
-  saveOverrides(quotaOverrides.value.filter(x=>x.user_id!==o.user_id))
-}
 const testDialog=reactive({
   visible:false, title:'', status:'untested', headline:'', message:'',
   capabilityLabel:'', providerModel:'', baseUrl:'', sourceLabel:'',
@@ -1257,7 +1155,6 @@ async function loadQuota(){
   try{
     const resp = await getAdminAIQuota()
     quotaDefault.value = resp?.default_daily_limit ?? null  // 拦截器已解包，resp 即 data
-    quotaOverrides.value = resp?.overrides || []
   }catch{ /* 配额读取失败不阻塞配置页 */ }
 }
 async function saveQuota(){
@@ -1380,10 +1277,7 @@ onMounted(load)
 .quota-label{font-weight:600;color:#0f172a;font-size:14px}
 .quota-input{width:160px}
 .quota-hint{color:#64748b;font-size:12px}
-.quota-overrides{margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.quota-add{margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.quota-add-user{width:240px}
-.quota-add-num{width:140px}
+
 .quota-tag{font-size:12px}
 .capability-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.config-card{padding:22px}.card-head{display:flex;align-items:center;gap:12px;padding-bottom:17px;border-bottom:1px solid #edf2f7}.card-title{min-width:0;flex:1}.card-head h2{font-size:17px}.card-head p{margin-top:3px;color:#94a3b8;font-size:12px}.head-icon{width:42px;height:42px;border-radius:13px;display:grid;place-items:center;flex:0 0 auto;font-size:19px}.config-form{margin-top:16px}.secret-note{margin-top:7px;color:#94a3b8;font-size:12px;display:flex;align-items:flex-start;gap:5px;line-height:1.5}.field-note{margin-top:7px;color:#94a3b8;font-size:12px;display:flex;align-items:flex-start;gap:5px;line-height:1.5}.card-foot{margin-top:14px;padding-top:13px;border-top:1px solid #edf2f7;display:flex;align-items:center;justify-content:space-between;gap:10px}.source-tag{color:#94a3b8;font-size:12px}.vision-tag{margin-top:5px}.warn-note{color:#b45309}.warn-note .el-icon{color:#d97706}
 /* 吸底保存栏：bottom:0 贴滚动视口(.main)底边；负底边距 -36px 伸进页面底边距，
