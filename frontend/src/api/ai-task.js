@@ -8,3 +8,8 @@ export const listActiveAiTasks = (params) => request.get('/ai-tasks/active/', { 
 export const cancelAiTask = (taskId) => request.post(`/ai-tasks/${taskId}/cancel/`)
 // 重试：仅 failed/cancelled，复用同一行 attempts 归零（§7.2）
 export const retryAiTask = (taskId) => request.post(`/ai-tasks/${taskId}/retry/`)
+
+// 管理端全局队列看板（仅平台管理员；401/403 时组件静默不展示数据）
+export const getQueueBoard = () => request.get('/ai-tasks/queue/')
+// worker 健康：槽位占用/心跳/渲染并发（仅平台管理员）
+export const getWorkerHealth = () => request.get('/ai-tasks/worker-health/')

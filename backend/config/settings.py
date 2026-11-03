@@ -526,7 +526,9 @@ AI_MAX_CONCURRENT_TTS = _ai_env_int("AI_MAX_CONCURRENT_TTS", 4)
 AI_USER_RUNNING_CAP = _ai_env_int("AI_USER_RUNNING_CAP", 1)
 AI_USER_PENDING_CAP = _ai_env_int("AI_USER_PENDING_CAP", 10)
 AI_USER_PENDING_CAP_LOCAL = _ai_env_int("AI_USER_PENDING_CAP_LOCAL", 50)
-AI_QUEUE_MAX = _ai_env_int("AI_QUEUE_MAX", 50)
+# 全局 pending 上限：不按排队数限流（11-03 产品决策——排队本身不耗资源，执行已被
+# 槽位节流；防刷由每用户上限负责）。保留高水位兜底仅为异常洪水/程序 bug 保险丝。
+AI_QUEUE_MAX = _ai_env_int("AI_QUEUE_MAX", 10000)
 # 心跳：任务线程每 AI_WORKER_HEARTBEAT_SECONDS 秒打一次；running 超过
 # AI_WORKER_STALE_SECONDS 未心跳视为卡死，回收为 pending（attempts 不增）。
 AI_WORKER_HEARTBEAT_SECONDS = _ai_env_int("AI_WORKER_HEARTBEAT_SECONDS", 30)

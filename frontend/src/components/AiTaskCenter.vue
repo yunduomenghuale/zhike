@@ -1,6 +1,9 @@
 <template>
   <!-- AI 任务面板：嵌入通知铃铛的「任务」页签（MainLayout）。队列化后服务端是唯一真相。 -->
   <div class="task-center-body">
+    <div v-if="isAdmin" class="task-board-entry">
+      <AdminQueueBoard />
+    </div>
     <el-empty v-if="!sorted.length" description="暂无任务" :image-size="70" />
     <div v-for="item in sorted" :key="item.taskId" class="task-item">
       <div class="task-item-head">
@@ -49,9 +52,14 @@
 
 <script setup>
 import { computed, onMounted } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useGenerationStore } from '@/store/generation'
+import { useUserStore } from '@/store/user'
+import AdminQueueBoard from '@/components/AdminQueueBoard.vue'
 
 const genStore = useGenerationStore()
+const { profile } = storeToRefs(useUserStore())
+const isAdmin = computed(() => profile.value?.role === 'admin')
 
 onMounted(() => genStore.refreshActive())
 
@@ -114,6 +122,10 @@ function progressPercent(item) {
   gap: 10px;
   max-height: 420px;
   overflow-y: auto;
+}
+.task-board-entry {
+  display: flex;
+  justify-content: flex-end;
 }
 .task-item {
   border: 1px solid var(--el-border-color-lighter);

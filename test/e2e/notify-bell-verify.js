@@ -114,6 +114,17 @@ async function main() {
       const panelText = await evalJs(`document.querySelector('.notify-panel').textContent`);
       check('A2 任务页显示空态「暂无任务」', panelText.includes('暂无任务'));
       await shot('notify-bell-task-tab.png');
+      // B1：admin 有「全局队列看板」入口，打开抽屉有数据
+      const hasBoard = await evalJs(`!!document.querySelector('.queue-board-entry')`);
+      check('B1 admin 有全局看板入口', hasBoard);
+      if (hasBoard) {
+        await evalJs(`document.querySelector('.queue-board-entry button').click(); 'ok'`);
+        await sleep(1800);
+        const drawerText = await evalJs(`document.querySelector('.el-drawer').textContent`);
+        check('B1 看板含状态卡片', drawerText.includes('排队中') && drawerText.includes('执行中'));
+        check('B1 看板含类型分布区/空态', drawerText.includes('按类型') || drawerText.includes('当前无活跃任务'));
+        await shot('queue-board.png');
+      }
     }
 
     // ---- A3：学生视角 ----
@@ -125,6 +136,8 @@ async function main() {
     check('A3 学生无「任务」页签', stuTabs.length === 1 && stuTabs[0].startsWith('通知'), JSON.stringify(stuTabs));
     const stuNoBall = await evalJs(`!document.querySelector('.ai-task-bell')`);
     check('A3 学生无悬浮球', stuNoBall);
+    check('B2 学生无看板入口', await evalJs(`!document.querySelector('.queue-board-entry')`));
+    check('B2 学生无看板入口', await evalJs(`!document.querySelector('.queue-board-entry')`));
     await shot('notify-bell-student.png');
   } finally {
     ws.close(); chrome.kill();
