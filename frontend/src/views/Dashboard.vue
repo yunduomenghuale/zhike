@@ -259,7 +259,9 @@ const studentFeatures = computed(() => [
 const adminFeatures = [
   { label: '管理概览', desc: '查看平台运行数据', path: '/admin/overview', icon: DataAnalysis, color: '#2563eb', bg: '#eff6ff' },
   { label: '用户管理', desc: '维护教师与学生账号', path: '/admin/users', icon: UserFilled, color: '#8b5cf6', bg: '#f5f3ff' },
-  { label: '教学监管', desc: '监管课程与班级状态', path: '/admin/teaching', icon: Reading, color: '#10b981', bg: '#ecfdf5' },
+  { label: '班级管理', desc: '建班改班与成员管理', path: '/admin/classes', icon: School, color: '#10b981', bg: '#ecfdf5' },
+  { label: '教学监管', desc: '监管课程与班级状态', path: '/admin/teaching', icon: Reading, color: '#14b8a6', bg: '#ecfeff' },
+  { label: '操作审计', desc: '查看管理操作记录', path: '/admin/audit', icon: Document, color: '#f59e0b', bg: '#fff7ed' },
   { label: '大模型配置', desc: '配置模型并测试连接', path: '/admin/ai-settings', icon: Setting, color: '#0ea5e9', bg: '#f0f9ff' },
   { label: '个人中心', desc: '维护管理员账号资料', path: '/profile', icon: HomeFilled, color: '#f59e0b', bg: '#fff7ed' },
 ]

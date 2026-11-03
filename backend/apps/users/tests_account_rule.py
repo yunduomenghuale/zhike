@@ -1,4 +1,4 @@
-"""账号格式规则：学生学号 6~8 位、教师/管理员 3~10 位，均只允许字母和数字。
+"""账号格式规则：学生学号 6~10 位、教师/管理员 3~10 位，均只允许字母和数字。
 
 规则在 apps/users/validators.py 统一定义，本文件覆盖四个入口
 （管理端建号 / 自助改资料 / 学生导入 / 教师导入）、存量账号兼容边界，
@@ -33,9 +33,10 @@ class AccountFormatUnitTests(TestCase):
             self.assertEqual(account_problem(value, "student"), "", value)
 
     def test_student_rejects_out_of_range(self):
-        self.assertIn("6～8", account_problem("20240", "student"))
-        self.assertIn("6～8", account_problem("hys", "student"))
-        self.assertIn("6～8", account_problem("202401011", "student"))
+        self.assertIn("6～10", account_problem("20240", "student"))
+        self.assertIn("6～10", account_problem("hys", "student"))
+        self.assertIn("6～10", account_problem("20240101123", "student"))
+        self.assertFalse(account_problem("202401011", "student"))  # 9 位现合法（6~10，合法返回空串）
 
     def test_teacher_and_admin_accept_three_to_ten(self):
         for role in ("teacher", "admin"):
@@ -53,7 +54,7 @@ class AccountFormatUnitTests(TestCase):
 
     def test_short_chinese_name_fails_on_length_first(self):
         # 3 个汉字的学生账号先撞长度下限；换 6 个汉字才轮到字符集规则
-        self.assertIn("6～8", account_problem("孟燕姿", "student"))
+        self.assertIn("6～10", account_problem("孟燕姿", "student"))
         self.assertIn("只能由字母和数字", account_problem("孟燕姿孟燕姿", "student"))
 
     def test_label_follows_role(self):
@@ -85,7 +86,7 @@ class AdminCreateAccountTests(TestCase):
             self.assertEqual(resp.status_code, 201, (value, resp.data))
 
     def test_create_student_rejects_short_long_and_symbols(self):
-        for value, keyword in (("hys", "6～8"), ("202401011", "6～8"), ("2024_01", "只能由字母和数字")):
+        for value, keyword in (("hys", "6～10"), ("20240101123", "6～10"), ("2024_01", "只能由字母和数字")):
             resp = self.create(value, "student")
             self.assertEqual(resp.status_code, 400, value)
             self.assertIn(keyword, str(resp.data))
@@ -149,7 +150,7 @@ class SelfProfileAccountTests(TestCase):
             username="20240101", password="pw123456!", role=User.Role.STUDENT
         )
         self.client.force_authenticate(user=user)
-        for value in ("2024_01", "202401011", "2024"):
+        for value in ("2024_01", "20240101123", "2024"):
             resp = self.client.patch("/api/auth/me/", {"username": value}, format="json")
             self.assertEqual(resp.status_code, 400, value)
         user.refresh_from_db()
@@ -177,7 +178,7 @@ class ImportAccountRuleTests(TestCase):
         )
         rows = self.annotate(content, KIND_STUDENT)["rows"]
         self.assertEqual(rows[0]["row_status"], "error")
-        self.assertIn("学号长度应为 6～8 位", rows[0]["message"])
+        self.assertIn("学号长度应为 6～10 位", rows[0]["message"])
         self.assertEqual(rows[1]["row_status"], "error")
         self.assertIn("只能由字母和数字", rows[1]["message"])
         self.assertEqual(rows[2]["row_status"], "ok")

@@ -80,7 +80,7 @@ class RegisterSerializer(serializers.ModelSerializer):
         return value
 
     def validate_username(self, value):
-        # 账号规则按角色区分：学生学号 6~8 位、教师/管理员 3~10 位（apps/users/validators.py）
+        # 账号规则按角色区分：学生学号 6~10 位、教师/管理员 3~10 位（apps/users/validators.py）
         role = (self.initial_data or {}).get("role") or STUDENT
         value = check_account(value, role)
         if User.objects.filter(username__iexact=value).exists():

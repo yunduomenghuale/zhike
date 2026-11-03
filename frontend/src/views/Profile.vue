@@ -83,7 +83,7 @@
           >
             <div class="form-grid">
               <el-form-item label="用户名" prop="username">
-                <el-input v-model="profileForm.username" maxlength="150" placeholder="学生 6~8 位、教师 3~10 位">
+                <el-input v-model="profileForm.username" maxlength="150" placeholder="学生 6~10 位、教师 3~10 位">
                   <template #prefix><el-icon><User /></el-icon></template>
                 </el-input>
               </el-form-item>
@@ -202,7 +202,7 @@ const validateConfirmPassword = (_rule, value, callback) => {
   else callback()
 }
 
-// 账号规则与后端 apps/users/validators.py 一致：学生学号 6~8 位、教师/管理员 3~10 位。
+// 账号规则与后端 apps/users/validators.py 一致：学生学号 6~10 位、教师/管理员 3~10 位。
 // 存量账号原样保存时放行，否则连改姓名/头像都会被自己的账号挡住。
 const originalUsername = ref('')
 const validateUsername = (_rule, value, callback) => {
