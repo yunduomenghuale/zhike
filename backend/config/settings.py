@@ -97,6 +97,12 @@ CACHES = {
         "BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
         "LOCATION": BASE_DIR / "login_fail_cache",
     },
+    # 单用户在飞 AI 调用计数（问答在飞限制，11-03）：文件缓存跨 gunicorn worker
+    # 一致；TTL 兜底防进程崩溃导致的计数泄漏
+    "inflight": {
+        "BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
+        "LOCATION": BASE_DIR / "inflight_cache",
+    },
     # 督管概览重聚合的短 TTL 缓存（trends/alerts）：文件缓存跨 gunicorn worker 一致，
     # 避免每 worker 各算一遍；容器重建即失效，无持久化需求
     "oversight": {

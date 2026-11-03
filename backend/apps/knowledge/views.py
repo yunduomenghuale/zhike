@@ -1,3 +1,4 @@
+from functools import wraps
 import json
 from pathlib import Path
 
@@ -377,6 +378,51 @@ class MaterialViewSet(BaseModelViewSet):
         return FileResponse(fh, as_attachment=True, filename=material.file_name)
 
 
+
+# ---- 单用户问答在飞限制（11-03）：防多标签刷请求打满上游模型 ----
+# 跨 worker 文件缓存计数；SSE 释放在生成器 finally（客户端断开/异常都保证归还），
+# TTL 300s 兜底防进程崩溃泄漏。上限 2：允许追问衔接，堵住并发轰炸。
+_QA_MAX_INFLIGHT = 2
+
+
+def _qa_inflight_acquire(user):
+    from django.core.cache import caches
+
+    cache = caches["inflight"]
+    key = f"qa_inflight:{user.id}"
+    cur = cache.get(key, 0)
+    if cur >= _QA_MAX_INFLIGHT:
+        return None
+    cache.set(key, cur + 1, 300)
+    return key
+
+
+def _qa_inflight_release(key):
+    if not key:
+        return
+    from django.core.cache import caches
+
+    cache = caches["inflight"]
+    cache.set(key, max(0, cache.get(key, 1) - 1), 300)
+
+
+def _with_qa_inflight(view_method):
+    """同步 ask：视图返回即回答完成，方法级 try/finally 释放。"""
+
+    @wraps(view_method)
+    def wrapper(self, request, *args, **kwargs):
+        key = _qa_inflight_acquire(request.user)
+        if key is None:
+            return api_response(
+                message="你已有一个问题正在回答中，请完成后再提问", code="qa_inflight", status=429
+            )
+        try:
+            return view_method(self, request, *args, **kwargs)
+        finally:
+            _qa_inflight_release(key)
+
+    return wrapper
+
 class QARecordViewSet(BaseModelViewSet):
     serializer_class = QARecordSerializer
     permission_classes = [IsAuthenticated]
@@ -413,6 +459,7 @@ class QARecordViewSet(BaseModelViewSet):
         return api_response({"supports_vision": chat_supports_vision()})
 
     @action(detail=False, methods=["post"], url_path="ask")
+    @_with_qa_inflight
     def ask(self, request):
         """学生向课程知识库自由提问（需求 S-K-01/02/04）。
 
@@ -489,6 +536,12 @@ class QARecordViewSet(BaseModelViewSet):
             raise PermissionDenied(blocked)
         # AI 日配额（P5-B6）：超限 429
         check_ai_quota(request.user)
+        # 单用户在飞限制（同 ask）：SSE 释放在生成器 finally
+        inflight_key = _qa_inflight_acquire(request.user)
+        if inflight_key is None:
+            return api_response(
+                message="你已有一个问题正在回答中，请完成后再提问", code="qa_inflight", status=429
+            )
         course, classroom, catalog, classroom_ids = _resolve_qa_scope(request)
         question = (request.data.get("question") or "").strip()
         if not question:
@@ -503,6 +556,13 @@ class QARecordViewSet(BaseModelViewSet):
         history = build_conversation_context(qa_session)
 
         def event_stream():
+            # 包装：finally 释放在飞计数——流正常结束/客户端断开/异常都归还
+            try:
+                yield from _event_stream_inner()
+            finally:
+                _qa_inflight_release(inflight_key)
+
+        def _event_stream_inner():
             full, cited = [], []
             snapshot: dict = {}
             rewritten = ""
