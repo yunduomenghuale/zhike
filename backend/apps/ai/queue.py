@@ -47,6 +47,7 @@ def enqueue(
     priority: int | None = None,
     dedupe_key: str | None = None,
     on_duplicate: str = "return",
+    bypass_user_cap: bool = False,
     **biz_fields,
 ) -> tuple[AITask, bool]:
     """建 PENDING 任务，返回 (task, created)。
@@ -81,7 +82,7 @@ def enqueue(
     pending = AITask.objects.filter(status=AITask.Status.PENDING)
     if pending.count() >= settings.AI_QUEUE_MAX:
         raise QueueFullError("系统任务队列已满，请稍后")
-    if user is not None:
+    if user is not None and not bypass_user_cap:
         mine = pending.filter(triggered_by=user).count()
         if mine >= settings.AI_USER_PENDING_CAP:
             raise UserPendingCapError(f"你已有 {settings.AI_USER_PENDING_CAP} 个任务在排队，请等待完成")
@@ -227,12 +228,22 @@ def is_cancel_requested(task_id: int) -> bool:
 
 
 def mark_success(task_id: int) -> None:
-    """任务正常结束：仅置状态与完成时间（条件更新；流水线可能已自行置过 SUCCESS）。
+    """任务正常结束：置状态/完成时间，并把进度原子写满 + 清掉历史 error。
 
-    不写 progress/result——那归业务流水线（评审 C5）。
+    进度必须和 status 同一条 update——否则前端轮询可能夹在「progress 写满」与
+    「status 翻 success」之间拿到"已完成但进度不满"的定格（11-03 实测）。result
+    仍归业务流水线（评审 C5）。
     """
+    progress = AITask.objects.filter(id=task_id).values_list("progress", flat=True).first() or {}
+    total = progress.get("total")
+    if total:
+        progress = {**progress, "done": total, "message": f"第 {total}/{total} 页"}
     AITask.objects.filter(id=task_id, status=AITask.Status.RUNNING).update(
-        status=AITask.Status.SUCCESS, finished_at=timezone.now(), heartbeat_at=None
+        status=AITask.Status.SUCCESS,
+        finished_at=timezone.now(),
+        heartbeat_at=None,
+        error="",
+        progress=progress,
     )
 
 

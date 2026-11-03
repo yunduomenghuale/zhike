@@ -154,15 +154,26 @@ def run_script_gen(task: AITask) -> None:
     video.published_at = timezone.now()
     video.save(update_fields=["gen_status", "is_published", "published_at", "updated_at"])
     _write_progress(task.id, done=total, total=total, fallback_pages=fallback_pages)
-    # 向量入库拆独立任务（priority=200 后台衍生）：不阻塞主任务、内存峰值可控
+    # 向量入库拆独立任务（priority=200 后台衍生）：不阻塞主任务、内存峰值可控。
+    # 衍生任务是主任务的延续，不占用户排队上限（bypass_user_cap）——否则用户连点导致
+    # pending 打满时，这里抛 UserPendingCapError 会把已完成的讲稿任务标失败（11-03 实测）。
+    # 且衍生入队失败（队列满等）不得连坐主任务：try 兜底记日志，主任务照常 success。
     task.refresh_from_db(fields=["trace_id"])
-    queue.enqueue(
-        task_type=AITask.TaskType.EMBED_INGEST,
-        user=task.triggered_by,
-        course=task.course or catalog.course,
-        catalog=catalog,
-        ppt=ppt,
-        payload={"video_id": video.id, "from_task": task.id},
-        priority=200,
-        dedupe_key=f"embed_ingest:video:{video.id}",
-    )
+    try:
+        queue.enqueue(
+            task_type=AITask.TaskType.EMBED_INGEST,
+            user=task.triggered_by,
+            course=task.course or catalog.course,
+            catalog=catalog,
+            ppt=ppt,
+            payload={"video_id": video.id, "from_task": task.id},
+            priority=200,
+            dedupe_key=f"embed_ingest:video:{video.id}",
+            bypass_user_cap=True,
+        )
+    except Exception:  # noqa: BLE001 - 衍生任务失败不影响主任务终态
+        import logging
+
+        logging.getLogger(__name__).exception(
+            "[script] 衍生 embed_ingest 入队失败 task=%s video=%s", task.id, video.id
+        )

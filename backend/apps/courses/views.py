@@ -458,6 +458,9 @@ class CatalogViewSet(BaseModelViewSet):
                 payload=payload,
                 dedupe_key=f"script:{catalog.id}",
             )
+        except ai_queue.QueueError as exc:
+            # 用户排队上限/队列满 → 429 业务提示（不能裸 500：11-03 实测前端只报"上传失败 500"）
+            return api_response(message=str(exc), code="ai_task_cap", status=429)
         except Exception as exc:
             from django.db import IntegrityError
 
@@ -467,6 +470,7 @@ class CatalogViewSet(BaseModelViewSet):
             existing = AITask.objects.filter(
                 task_type=AITask.TaskType.SCRIPT_GEN,
                 catalog=catalog,
+                course=catalog.course,
                 status__in=[AITask.Status.PENDING, AITask.Status.RUNNING],
             ).first()
             if existing is None:
@@ -561,6 +565,8 @@ class CatalogViewSet(BaseModelViewSet):
                 # 分母按当前 PPT 页数算，避免提前判 done（§6.2）
                 progress={"stage": "queued", "done": 0, "total": ppt_pages, "message": "排队中…"},
             )
+        except ai_queue.QueueError as exc:
+            return api_response(message=str(exc), code="ai_task_cap", status=429)
         except Exception as exc:
             from django.db import IntegrityError
 
@@ -703,6 +709,12 @@ class PPTResourceViewSet(BaseModelViewSet):
                 priority=50,  # 教师正在上传页等着，最高优先级
                 dedupe_key=f"ppt_parse:{ppt.id}",
             )
+        except ai_queue.QueueError as exc:
+            # 排队上限 → 429 业务提示；课件行已建（parsing），但没人执行——标记失败避免假「解析中」
+            ppt.parse_status = PPTResource.ParseStatus.FAILED
+            ppt.parse_progress = {**(ppt.parse_progress or {}), "stage": "failed", "error": str(exc)}
+            ppt.save(update_fields=["parse_status", "parse_progress", "updated_at"])
+            return api_response(message=str(exc), code="ai_task_cap", status=429)
         except Exception as exc:
             from django.db import IntegrityError
 

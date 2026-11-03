@@ -20,7 +20,7 @@
       <div v-if="item.status === 'pending' && item.queuePosition" class="task-item-queue">
         排队第 {{ item.queuePosition }} 位
       </div>
-      <div v-if="item.error" class="task-item-error" :title="item.error">{{ item.error }}</div>
+      <div v-if="item.error && (item.status === 'failed' || item.status === 'cancelled')" class="task-item-error" :title="item.error">{{ item.error }}</div>
       <div class="task-item-actions">
         <el-button
           v-if="item.status === 'pending' || item.status === 'running'"
@@ -87,6 +87,8 @@ function statusType(status) {
   return 'warning'
 }
 function progressPercent(item) {
+  // 已完成恒 100：兜底后端「progress 写满」与「状态翻转」非原子时的定格竞态
+  if (item.status === 'success') return 100
   if (!item.total) return 0
   return Math.min(100, Math.round((item.done / item.total) * 100))
 }

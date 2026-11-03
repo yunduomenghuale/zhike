@@ -646,11 +646,11 @@
         <div class="ppt-file-info">
           <div class="ppt-file-name">{{ currentPpt.file_name }}</div>
           <div class="ppt-file-meta">
-            {{ currentPpt.pages ? `已解析 ${currentPpt.pages} 页` : '未解析到可用页面文本' }}
+            {{ pptStatusMeta.text }}
           </div>
         </div>
-        <el-tag size="small" :type="currentPpt.pages ? 'success' : 'warning'" effect="light" round>
-          {{ currentPpt.pages ? '可用于 AI' : '需检查' }}
+        <el-tag size="small" :type="pptStatusMeta.tagType" effect="light" round>
+          {{ pptStatusMeta.tag }}
         </el-tag>
       </div>
       <div v-else class="ppt-empty-state">
@@ -964,6 +964,20 @@ const emptyDescription = computed(() => (
 const pptMap = reactive({}) // catalogId -> {file_name, pages}
 const videoMap = reactive({}) // catalogId -> TeachingVideo
 const currentPpt = computed(() => (currentNode.value ? pptMap[String(currentNode.value.id)] : null))
+// 上传弹窗文件状态：parsing 中显示「解析中」——只看 pages 会把乐观插入的解析中
+// 课件误标「未解析到可用页面文本/需检查」（11-03 实测）
+const pptStatusMeta = computed(() => {
+  const p = currentPpt.value
+  if (!p) return { text: '', tag: '', tagType: 'info' }
+  if (p.parse_status === 'parsing' || p.parse_status === 'pending') {
+    return { text: '正在解析页面文本…', tag: '解析中', tagType: 'primary' }
+  }
+  if (p.parse_status === 'failed') {
+    return { text: p.parse_progress?.error || '未解析到可用页面文本', tag: '需检查', tagType: 'warning' }
+  }
+  if (p.pages) return { text: `已解析 ${p.pages} 页`, tag: '可用于 AI', tagType: 'success' }
+  return { text: '未解析到可用页面文本', tag: '需检查', tagType: 'warning' }
+})
 const fileAccept = '.ppt,.pptx,.pdf'
 
 async function loadCourseName() {
