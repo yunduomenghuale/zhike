@@ -1,0 +1,11 @@
+{
+  "updateFrequency": "weekly",
+  "dataSourceUrl": "http://www.baidu.com",
+  "enabled": true,
+  "retryMaxCount": 3,
+  "lastUpdateTime": "2026-08-19T08:35:24.430Z",
+  "version": "v2.3.0",
+  "lastUpdate": "2026-08-19",
+  "totalCategories": 19,
+  "totalItems": 174
+}

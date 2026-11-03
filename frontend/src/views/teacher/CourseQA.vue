@@ -140,7 +140,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
-  Promotion, MagicStick, Loading, Search, Clock, Picture, Close, Plus,
+  ChatDotRound, Promotion, MagicStick, Loading, Search, Clock, Picture, Close, Plus,
 } from '@element-plus/icons-vue'
 import { renderQaAnswer } from '@/utils/markdown'
 import CitedSources from '@/components/qa/CitedSources.vue'

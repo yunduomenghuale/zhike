@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>第5章 传输层（6+2学时） - 计算机网络思维导图</title>
+<style>
+* { margin: 0; padding: 0; }
+html { font-family: ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'; }
+#mindmap { display: block; width: 100vw; height: calc(100vh - 60px); margin-top: 60px; }
+.markmap-dark { background: #0b1120; color: #e2e8f0; }
+.nav-bar { position: fixed; top: 0; left: 0; right: 0; height: 60px; background: #0f172a; border-bottom: 2px solid #334155; display: flex; align-items: center; padding: 0 16px; z-index: 9999; gap: 6px; overflow-x: auto; overflow-y: hidden; white-space: nowrap; }
+.nav-bar::-webkit-scrollbar { height: 4px; }
+.nav-bar::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+.nav-bar .title { color: #e2e8f0; font-size: 14px; font-weight: bold; margin-right: 8px; white-space: nowrap; }
+.nav-bar a { color: #38bdf8; text-decoration: none; font-size: 12px; padding: 4px 8px; border-radius: 5px; transition: all 0.2s; white-space: nowrap; flex-shrink: 0; }
+.nav-bar a:hover { background: rgba(56,189,248,0.15); }
+.nav-bar a.active { background: #4a90e2; color: #fff; }
+.nav-bar .sep { color: #334155; margin: 0 2px; }
+</style>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/markmap-toolbar@0.18.12/dist/style.css">
+</head>
+<body>
+<div class="nav-bar">
+<span class="title">📚 计算机网络思维导图</span>
+<a href="index.html">📋 总览</a>
+<span class="sep">|</span>
+<a href="chapter1.html">第1章 概述</a>
+<a href="chapter2.html">第2章 物理层</a>
+<a href="chapter3.html">第3章 链路层</a>
+<a href="chapter4.html">第4章 网络层</a>
+<a href="chapter5.html" class="active">第5章 传输层</a>
+<a href="chapter6.html">第6章 应用层</a>
+<a href="chapter7.html">第7章 安全</a>
+<a href="chapter8.html">数据封装</a>
+</div>
+<svg id="mindmap"></svg>
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script><script src="https://cdn.jsdelivr.net/npm/markmap-view@0.18.12/dist/browser/index.js"></script><script src="https://cdn.jsdelivr.net/npm/markmap-toolbar@0.18.12/dist/index.js"></script><script>(()=>{setTimeout(()=>{const{markmap:S,mm:Q}=window,$=new S.Toolbar;$.attach(Q);const I=$.render();I.setAttribute("style","position:absolute;bottom:20px;right:20px"),document.body.append(I)})})()</script><script>((l,U,M,R)=>{const N=l();window.mm=N.Markmap.create("svg#mindmap",(U||N.deriveOptions)(R),M),window.matchMedia("(prefers-color-scheme: dark)").matches&&document.documentElement.classList.add("markmap-dark"),document.documentElement.classList.add("markmap-dark")})(()=>window.markmap,null,{"content":"第5章 传输层（6+2学时）","children":[{"content":"&#x4f20;&#x8f93;&#x5c42;&#x7684;&#x4f5c;&#x7528;","children":[{"content":"&#x7f51;&#x7edc;&#x5c42; vs &#x4f20;&#x8f93;&#x5c42;","children":[{"content":"&#x4e3b;&#x673a;&#x2192;&#x4e3b;&#x673a; vs &#x8fdb;&#x7a0b;&#x2192;&#x8fdb;&#x7a0b;","children":[],"payload":{"tag":"h5","lines":"117,118"}}],"payload":{"tag":"h4","lines":"116,117"}},{"content":"&#x7aef;&#x53e3;&#x53f7;&#xff08;&#x5fc5;&#x8bb0;&#xff09;","children":[{"content":"&#x719f;&#x77e5;&#x7aef;&#x53e3;","children":[{"content":"HTTP:80","children":[],"payload":{"tag":"h6","lines":"120,121"}},{"content":"HTTPS:443","children":[],"payload":{"tag":"h6","lines":"121,122"}},{"content":"DNS:53","children":[],"payload":{"tag":"h6","lines":"122,123"}},{"content":"FTP:21","children":[],"payload":{"tag":"h6","lines":"123,124"}},{"content":"SSH:22","children":[],"payload":{"tag":"h6","lines":"124,125"}}],"payload":{"tag":"h5","lines":"119,120"}}],"payload":{"tag":"h4","lines":"118,119"}}],"payload":{"tag":"h3","lines":"115,116"}},{"content":"UDP&#x534f;&#x8bae;","children":[{"content":"UDP&#x7279;&#x70b9;","children":[{"content":"&#x65e0;&#x8fde;&#x63a5;/&#x4e0d;&#x53ef;&#x9760;/&#x65e0;&#x62e5;&#x585e;&#x63a7;&#x5236;","children":[],"payload":{"tag":"h5","lines":"127,128"}}],"payload":{"tag":"h4","lines":"126,127"}},{"content":"UDP&#x9002;&#x7528;&#x573a;&#x666f;","children":[{"content":"&#x89c6;&#x9891;/&#x8bed;&#x97f3;/DNS","children":[],"payload":{"tag":"h5","lines":"129,130"}}],"payload":{"tag":"h4","lines":"128,129"}}],"payload":{"tag":"h3","lines":"125,126"}},{"content":"TCP&#x534f;&#x8bae;&#xff08;&#x6838;&#x5fc3;&#x8981;&#x70b9;&#xff09;","children":[{"content":"TCP&#x7279;&#x70b9;","children":[{"content":"&#x9762;&#x5411;&#x8fde;&#x63a5;/&#x53ef;&#x9760;/&#x5168;&#x53cc;&#x5de5;","children":[],"payload":{"tag":"h5","lines":"132,133"}}],"payload":{"tag":"h4","lines":"131,132"}},{"content":"&#x8fde;&#x63a5;&#x7ba1;&#x7406;&#xff08;&#x1f534;&#x5fc5;&#x8003;&#xff09;","children":[{"content":"&#x4e09;&#x6b21;&#x63e1;&#x624b;&#xff08;&#x5efa;&#x7acb;&#xff09;","children":[{"content":"SYN&#x2192;SYN+ACK&#x2192;ACK","children":[],"payload":{"tag":"h6","lines":"135,136"}},{"content":"&#x4e3a;&#x4ec0;&#x4e48;&#x4e24;&#x6b21;&#x4e0d;&#x884c;","children":[],"payload":{"tag":"h6","lines":"136,137"}}],"payload":{"tag":"h5","lines":"134,135"}},{"content":"&#x56db;&#x6b21;&#x6325;&#x624b;&#xff08;&#x91ca;&#x653e;&#xff09;","children":[{"content":"FIN&#x2192;ACK&#x2192;FIN&#x2192;ACK","children":[],"payload":{"tag":"h6","lines":"138,139"}},{"content":"&#x4e3a;&#x4ec0;&#x4e48;&#x56db;&#x6b21;","children":[],"payload":{"tag":"h6","lines":"139,140"}}],"payload":{"tag":"h5","lines":"137,138"}},{"content":"&#x4e3b;&#x8981;&#x72b6;&#x6001;&#x53d8;&#x8fc1;","children":[{"content":"LISTEN/ESTABLISHED/TIME-WAIT","children":[],"payload":{"tag":"h6","lines":"141,142"}}],"payload":{"tag":"h5","lines":"140,141"}}],"payload":{"tag":"h4","lines":"133,134"}},{"content":"&#x53ef;&#x9760;&#x4f20;&#x8f93;&#xff08;&#x1f7e1;&#x8bb2;&#x601d;&#x60f3;&#xff09;","children":[{"content":"&#x786e;&#x8ba4;&#x91cd;&#x4f20;&#xff08;ACK&#xff09;","children":[],"payload":{"tag":"h5","lines":"143,144"}},{"content":"&#x8d85;&#x65f6;&#x91cd;&#x4f20;&#xff08;&#x5b9a;&#x65f6;&#x5668;&#xff09;","children":[],"payload":{"tag":"h5","lines":"144,145"}},{"content":"&#x6ed1;&#x52a8;&#x7a97;&#x53e3;","children":[],"payload":{"tag":"h5","lines":"145,146"}}],"payload":{"tag":"h4","lines":"142,143"}},{"content":"&#x6d41;&#x91cf;&#x63a7;&#x5236;&#xff08;&#x1f7e2;&#x5b8f;&#x89c2;&#x6982;&#x5ff5;&#xff09;","children":[{"content":"&#x7aef;&#x5230;&#x7aef;/&#x63a5;&#x6536;&#x65b9;&#x63a7;&#x5236;","children":[],"payload":{"tag":"h5","lines":"147,148"}}],"payload":{"tag":"h4","lines":"146,147"}},{"content":"&#x62e5;&#x585e;&#x63a7;&#x5236;&#xff08;&#x1f7e2;&#x5b8f;&#x89c2;&#x6982;&#x5ff5;&#xff09;","children":[{"content":"&#x7f51;&#x7edc;&#x6574;&#x4f53;&#x63a7;&#x5236;","children":[],"payload":{"tag":"h5","lines":"149,150"}},{"content":"&#x6d41;&#x91cf;&#x63a7;&#x5236; vs &#x62e5;&#x585e;&#x63a7;&#x5236;","children":[],"payload":{"tag":"h5","lines":"150,151"}}],"payload":{"tag":"h4","lines":"148,149"}}],"payload":{"tag":"h3","lines":"130,131"}},{"content":"&#x672c;&#x7ae0;&#x8981;&#x70b9;&#x901f;&#x67e5;","children":[{"content":"&#x1f534;&#x5fc5;&#x987b;&#x638c;&#x63e1;","children":[{"content":"&#x719f;&#x77e5;&#x7aef;&#x53e3;/TCP&#x4e09;&#x6b21;&#x63e1;&#x624b;&#x56db;&#x6b21;&#x6325;&#x624b;","children":[],"payload":{"tag":"h5","lines":"153,154"}}],"payload":{"tag":"h4","lines":"152,153"}},{"content":"&#x1f7e1;&#x91cd;&#x70b9;&#x7406;&#x89e3;","children":[{"content":"TCP vs UDP&#x533a;&#x522b;","children":[],"payload":{"tag":"h5","lines":"155,156"}},{"content":"&#x4f20;&#x8f93;&#x5c42; vs &#x7f51;&#x7edc;&#x5c42;&#x533a;&#x522b;","children":[],"payload":{"tag":"h5","lines":"156,157"}}],"payload":{"tag":"h4","lines":"154,155"}},{"content":"&#x1f7e2;&#x4e86;&#x89e3;&#x5373;&#x53ef;","children":[{"content":"&#x6d41;&#x63a7;/&#x62e5;&#x63a7;&#x5b8f;&#x89c2;&#x6982;&#x5ff5;/UDP&#x9996;&#x90e8;","children":[],"payload":{"tag":"h5","lines":"158,159"}}],"payload":{"tag":"h4","lines":"157,158"}}],"payload":{"tag":"h3","lines":"151,152"}}],"payload":{"tag":"h2","lines":"114,115"}})
+</script>
+</body>
+</html>

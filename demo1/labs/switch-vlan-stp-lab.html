@@ -1,0 +1,1885 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>实验一：交换机与VLAN综合实验 - 计算机网络辅助教学平台</title>
+    <script src="../auth-check.js"></script>
+    <script src="../utils.js"></script>
+    <script src="../study-tracker.js"></script>
+    <script src="../lab-scoring-enhance.js"></script>
+    <script src="../lab-report-generator.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', Arial, sans-serif; background: #0a0e27; color: #e0e0e0; min-height: 100vh; }
+        .main-layout { display: grid; grid-template-columns: 280px 1fr 300px; grid-template-rows: auto 1fr; height: calc(100vh - 50px); }
+        .top-bar { grid-column: 1/-1; background: linear-gradient(135deg, #1a1f3a 0%, #2d1b4e 100%); padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #4a90e2; }
+        .top-bar h1 { font-size: 18px; color: #38bdf8; }
+        .top-bar .exp-info { font-size: 13px; color: #94a3b8; }
+        .step-panel { background: #111633; border-right: 1px solid #1e2a5a; overflow-y: auto; padding: 10px; }
+        .step-panel h3 { color: #38bdf8; font-size: 14px; padding: 8px; margin-bottom: 5px; border-bottom: 1px solid #1e2a5a; }
+        .float-hint-panel { position: absolute; top: 10px; right: 10px; width: 340px; max-height: 200px; background: rgba(17,22,51,0.6); border: 1px solid rgba(245,158,11,0.4); border-radius: 10px; z-index: 9998; box-shadow: 0 4px 16px rgba(0,0,0,0.3); display: flex; flex-direction: column; overflow: hidden; }
+        .float-hint-panel.hidden { display: none; }
+        .float-hint-header { padding: 8px 12px; background: rgba(245,158,11,0.1); display: flex; justify-content: space-between; align-items: center; cursor: move; user-select: none; border-bottom: 1px solid rgba(245,158,11,0.3); }
+        .float-hint-header span { color: #fbbf24; font-size: 13px; font-weight: bold; }
+        .float-hint-close { background: none; border: none; color: #94a3b8; font-size: 16px; cursor: pointer; padding: 0 4px; line-height: 1; }
+        .float-hint-close:hover { color: #ef4444; }
+        .float-hint-body { padding: 10px 12px; font-size: 12px; color: #fbbf24; line-height: 1.7; overflow-y: auto; max-height: 150px; white-space: pre-line; }
+        .step-item { padding: 10px 12px; margin: 4px 0; border-radius: 8px; cursor: pointer; transition: all 0.3s; font-size: 13px; border-left: 3px solid transparent; line-height: 1.5; }
+        .step-item:hover { background: rgba(56,189,248,0.1); }
+        .step-item.active { background: rgba(56,189,248,0.15); border-left-color: #38bdf8; color: #fff; }
+        .step-item.completed { border-left-color: #22c55e; }
+        .step-item.completed .step-icon { color: #22c55e; }
+        .step-item.failed { border-left-color: #ef4444; }
+        .step-icon { margin-right: 6px; font-size: 14px; }
+        .sim-area { background: #0d1230; position: relative; overflow: hidden; display: flex; flex-direction: column; }
+        .sim-canvas-wrap { height: 320px; min-height: 260px; position: relative; flex-shrink: 0; }
+        #simCanvas { width: 100%; height: 100%; display: block; }
+        .console-area { flex: 1; background: #0b1025; border-top: 1px solid #1e2a5a; display: flex; flex-direction: column; min-height: 220px; }
+        .console-header { padding: 6px 12px; background: #0f1535; font-size: 12px; color: #38bdf8; display: flex; justify-content: space-between; align-items: center; }
+        .console-output { flex: 1; overflow-y: auto; padding: 8px 12px; font-family: 'Consolas', 'Courier New', monospace; font-size: 13px; line-height: 1.6; color: #a3e635; background: #0a0f22; }
+        .console-input-wrap { display: flex; border-top: 1px solid #1e2a5a; background: #0c1128; }
+        .console-prompt { padding: 8px; color: #38bdf8; font-family: 'Consolas', monospace; font-size: 13px; white-space: nowrap; }
+        .console-input { flex: 1; background: transparent; border: none; color: #a3e635; font-family: 'Consolas', monospace; font-size: 13px; padding: 8px 4px; outline: none; }
+        .info-panel { background: #111633; border-left: 1px solid #1e2a5a; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+        .panel-card { background: #0d1230; border: 1px solid #1e2a5a; border-radius: 8px; overflow: hidden; }
+        .panel-card-header { padding: 8px 12px; background: #151b3d; font-size: 13px; font-weight: bold; color: #38bdf8; display: flex; justify-content: space-between; align-items: center; }
+        .panel-card-body { padding: 10px 12px; font-size: 12px; max-height: 200px; overflow-y: auto; }
+        .mac-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        .mac-table th { background: #1a2150; color: #94a3b8; padding: 6px 8px; text-align: left; font-weight: normal; border-bottom: 1px solid #1e2a5a; }
+        .mac-table td { padding: 6px 8px; border-bottom: 1px solid #0d1230; color: #a3e635; }
+        .mac-table tr.new-entry td { animation: macHighlight 1.5s ease; }
+        @keyframes macHighlight { 0% { background: rgba(56,189,248,0.3); } 100% { background: transparent; } }
+        .frame-info { font-size: 12px; line-height: 1.8; }
+        .frame-info .label { color: #94a3b8; }
+        .frame-info .value { color: #fbbf24; font-family: 'Consolas', monospace; }
+        .eval-result { padding: 8px 12px; border-radius: 6px; font-size: 13px; margin-top: 6px; }
+        .eval-pass { background: rgba(34,197,94,0.15); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); }
+        .eval-fail { background: rgba(239,68,68,0.15); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
+        .btn { padding: 6px 14px; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; font-family: inherit; transition: all 0.3s; }
+        .btn-primary { background: #4a90e2; color: white; }
+        .btn-primary:hover { background: #357abd; }
+        .btn-success { background: #22c55e; color: white; }
+        .btn-success:hover { background: #16a34a; }
+        .btn-warning { background: #f59e0b; color: #1a1a1a; }
+        .btn-warning:hover { background: #d97706; }
+        .btn-sm { padding: 4px 10px; font-size: 11px; }
+        .score-bar { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+        .score-bar-track { flex: 1; height: 8px; background: #1a2150; border-radius: 4px; overflow: hidden; }
+        .score-bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s; background: linear-gradient(90deg, #4a90e2, #22c55e); }
+        .score-text { font-size: 14px; font-weight: bold; color: #38bdf8; min-width: 40px; text-align: right; }
+        .principle-box { background: rgba(56,189,248,0.08); border: 1px solid rgba(56,189,248,0.2); border-radius: 6px; padding: 8px 10px; font-size: 12px; color: #7dd3fc; line-height: 1.6; }
+        .device-label { font-size: 12px; color: #e0e0e0; }
+        .port-label { font-size: 11px; color: #94a3b8; font-family: 'Consolas', monospace; }
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 10000; align-items: center; justify-content: center; }
+        .modal-overlay.show { display: flex; }
+        .modal-box { background: #151b3d; border: 2px solid #4a90e2; border-radius: 12px; padding: 30px; max-width: 600px; width: 90%; text-align: center; }
+        .modal-box h2 { color: #38bdf8; margin-bottom: 15px; }
+        .modal-box p { color: #94a3b8; margin-bottom: 20px; line-height: 1.8; }
+        .modal-box .final-score { font-size: 48px; color: #22c55e; font-weight: bold; margin: 15px 0; }
+        .sw-tab { padding: 3px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; border: 1px solid #1e2a5a; background: #0d1230; color: #94a3b8; transition: all 0.3s; }
+        .sw-tab.active { background: #4a90e2; color: #fff; border-color: #4a90e2; }
+        .sw-tab:hover { background: #1a2150; }
+        .sw-tab.active:hover { background: #357abd; }
+        .stp-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        .stp-table th { background: #1a2150; color: #94a3b8; padding: 6px 8px; text-align: left; font-weight: normal; border-bottom: 1px solid #1e2a5a; }
+        .stp-table td { padding: 6px 8px; border-bottom: 1px solid #0d1230; color: #a3e635; }
+        .port-role-root { color: #22c55e; font-weight: bold; }
+        .port-role-designated { color: #38bdf8; font-weight: bold; }
+        .port-role-alternate { color: #ef4444; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="top-bar">
+        <h1>实验一：交换机与VLAN综合实验</h1>
+        <div class="exp-info">计算机网络实验教| 虚拟仿真实验 | 配套教材：基于华为eNSP</div>
+    </div>
+
+    <div class="main-layout">
+    <div class="step-panel">
+        <h3>实验步骤</h3>
+        <div id="stepList"></div>
+        <div style="padding:10px; margin-top:10px;">
+            <div style="font-size:12px; color:#94a3b8; margin-bottom:6px;">实验进度</div>
+            <div class="score-bar">
+                <div class="score-bar-track"><div class="score-bar-fill" id="progressFill" style="width:0%"></div></div>
+                <span class="score-text" id="progressText">0%</span>
+            </div>
+        </div>
+        <div style="padding:10px;">
+            <div style="font-size:12px; color:#94a3b8; margin-bottom:6px;">实验评分</div>
+            <div class="score-bar">
+                <div class="score-bar-track"><div class="score-bar-fill" id="scoreFill" style="width:0%"></div></div>
+                <span class="score-text" id="scoreText">0</span>
+            </div>
+        </div>
+        <div style="padding:10px; display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn btn-primary btn-sm" onclick="resetExperiment()">重置实验</button>
+            <button class="btn btn-warning btn-sm" onclick="showDemo()">演示模式</button>
+            <button class="btn btn-success btn-sm" onclick="submitExperiment()">提交报告</button>
+        </div>
+    </div>
+
+    <div class="sim-area">
+        <div class="sim-canvas-wrap">
+            <canvas id="simCanvas"></canvas>
+        </div>
+        <div class="float-hint-panel" id="floatHintPanel">
+            <div class="float-hint-header" id="floatHintHeader">
+                <span>💡 实验提示</span>
+                <button class="float-hint-close" onclick="toggleHintPanel()">×</button>
+            </div>
+            <div class="float-hint-body" id="hintBox">请按照左侧步骤依次完成实验。点击当前步骤可查看详细提示。</div>
+        </div>
+        <div class="console-area">
+            <div class="console-header">
+                <span id="consoleTitle">设备控制台</span>
+                <div style="display:flex;gap:4px;align-items:center;">
+                    <span style="font-size:11px;color:#94a3b8;">切换设备：</span>
+                    <button class="sw-tab active" data-device="S1" onclick="switchDevice('S1')">S1</button>
+                    <button class="sw-tab" data-device="S2" onclick="switchDevice('S2')">S2</button>
+                    <button class="sw-tab" data-device="S3" onclick="switchDevice('S3')">S3</button>
+                    <button class="sw-tab" data-device="PC1" onclick="switchDevice('PC1')">PC1</button>
+                    <button class="sw-tab" data-device="PC2" onclick="switchDevice('PC2')">PC2</button>
+                    <button class="sw-tab" data-device="PC3" onclick="switchDevice('PC3')">PC3</button>
+                    <button class="sw-tab" data-device="PC4" onclick="switchDevice('PC4')">PC4</button>
+                    <button class="btn btn-sm" style="background:#1a2150;color:#94a3b8;margin-left:6px;" onclick="clearConsole()">清屏</button>
+                </div>
+            </div>
+            <div class="console-output" id="consoleOutput"></div>
+            <div class="console-input-wrap">
+                <span class="console-prompt" id="consolePrompt">&lt;S1&gt;</span>
+                <input type="text" class="console-input" id="consoleInput" placeholder="输入命令后按回车..." onkeydown="handleCommand(event)">
+            </div>
+        </div>
+    </div>
+
+    <div class="info-panel">
+        <div class="panel-card">
+            <div class="panel-card-header">
+                <span>MAC地址表</span>
+                <span id="macTableDevice" style="font-size:11px;color:#94a3b8;">S1</span>
+            </div>
+            <div class="panel-card-body" id="macTableBody">
+                <table class="mac-table">
+                    <thead><tr><th>MAC地址</th><th>VLAN</th><th>端口</th><th>类型</th></tr></thead>
+                    <tbody id="macTableTbody"><tr><td colspan="4" style="color:#94a3b8;text-align:center;">(空表)</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="panel-card">
+            <div class="panel-card-header">
+                <span>VLAN信息</span>
+                <span id="vlanTableDevice" style="font-size:11px;color:#94a3b8;">S1</span>
+            </div>
+            <div class="panel-card-body" id="vlanInfoBody">
+                <table class="mac-table">
+                    <thead><tr><th>VLAN ID</th><th>名称</th><th>端口</th></tr></thead>
+                    <tbody id="vlanTableTbody"><tr><td colspan="3" style="color:#94a3b8;text-align:center;">VLAN 1 (default)</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="panel-card">
+            <div class="panel-card-header">
+                <span>STP状态</span>
+                <span id="stpTableDevice" style="font-size:11px;color:#94a3b8;">S1</span>
+            </div>
+            <div class="panel-card-body" id="stpInfoBody">
+                <table class="stp-table">
+                    <thead><tr><th>端口</th><th>角色</th><th>状态</th></tr></thead>
+                    <tbody id="stpTableTbody"><tr><td colspan="3" style="color:#94a3b8;text-align:center;">STP未启用</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="panel-card">
+            <div class="panel-card-header"><span>当前帧信息</span></div>
+            <div class="panel-card-body" id="frameInfoBody">
+                <div class="frame-info" id="frameInfo">
+                    <span class="label">等待帧传输..</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel-card">
+            <div class="panel-card-header"><span>步骤评判</span></div>
+            <div class="panel-card-body" id="evalBody">
+                <div style="color:#94a3b8;font-size:12px;">完成步骤后自动评估</div>
+            </div>
+        </div>
+    </div>
+    </div>
+
+    <div class="modal-overlay" id="resultModal">
+        <div class="modal-box">
+            <h2>实验报告</h2>
+            <p id="resultSummary"></p>
+            <div class="final-score" id="finalScore">0</div>
+            <p style="font-size:14px;">总分（满00分）</p>
+            <div id="resultDetails" style="text-align:left;margin:15px 0;font-size:13px;color:#94a3b8;line-height:2;"></div>
+            <button class="btn btn-primary" onclick="document.getElementById('resultModal').classList.remove('show')">关闭</button>
+            <button class="btn btn-success" onclick="LabReportGenerator.showConclusionDialog()" style="margin-left:10px;">生成实验报告</button>
+        </div>
+    </div>
+
+    <script>
+    var RAND_SUBNET = Math.floor(Math.random() * 9) + 1;
+    var PC1_IP = '192.168.' + RAND_SUBNET + '.1';
+    var PC2_IP = '192.168.' + RAND_SUBNET + '.2';
+    var PC3_IP = '192.168.' + RAND_SUBNET + '.3';
+    var PC4_IP = '192.168.' + RAND_SUBNET + '.4';
+    var PC_GW = '192.168.' + RAND_SUBNET + '.254';
+
+    var DEVICES = {
+        S1: {
+            type: 'switch', name: 'S1',
+            macTable: {},
+            vlans: { '1': { name: 'default', ports: ['G0/0/1','G0/0/2','G0/0/23','G0/0/24'] } },
+            portMode: { 'G0/0/1':'access','G0/0/2':'access','G0/0/23':'trunk','G0/0/24':'trunk' },
+            portVlan: { 'G0/0/1':1,'G0/0/2':1,'G0/0/23':'trunk','G0/0/24':'trunk' },
+            stpPriority: 32768, stpRole: {}, stpState: {},
+            x: 0, y: 0
+        },
+        S2: {
+            type: 'switch', name: 'S2',
+            macTable: {},
+            vlans: { '1': { name: 'default', ports: ['G0/0/1','G0/0/2','G0/0/23','G0/0/24'] } },
+            portMode: { 'G0/0/1':'access','G0/0/2':'access','G0/0/23':'trunk','G0/0/24':'trunk' },
+            portVlan: { 'G0/0/1':1,'G0/0/2':1,'G0/0/23':'trunk','G0/0/24':'trunk' },
+            stpPriority: 32768, stpRole: {}, stpState: {},
+            x: 0, y: 0
+        },
+        S3: {
+            type: 'switch', name: 'S3',
+            macTable: {},
+            vlans: { '1': { name: 'default', ports: ['G0/0/23','G0/0/24'] } },
+            portMode: { 'G0/0/23':'trunk','G0/0/24':'trunk' },
+            portVlan: { 'G0/0/23':'trunk','G0/0/24':'trunk' },
+            stpPriority: 32768, stpRole: {}, stpState: {},
+            x: 0, y: 0
+        },
+        PC1: { type:'pc', name:'PC1', ip:PC1_IP, mask:'255.255.255.0', mac:'5489-9800-0001', gateway:PC_GW, switch:'S1', port:'G0/0/1', arpTable:{}, x:0, y:0 },
+        PC2: { type:'pc', name:'PC2', ip:PC2_IP, mask:'255.255.255.0', mac:'5489-9800-0002', gateway:PC_GW, switch:'S1', port:'G0/0/2', arpTable:{}, x:0, y:0 },
+        PC3: { type:'pc', name:'PC3', ip:PC3_IP, mask:'255.255.255.0', mac:'5489-9800-0003', gateway:PC_GW, switch:'S2', port:'G0/0/1', arpTable:{}, x:0, y:0 },
+        PC4: { type:'pc', name:'PC4', ip:PC4_IP, mask:'255.255.255.0', mac:'5489-9800-0004', gateway:PC_GW, switch:'S2', port:'G0/0/2', arpTable:{}, x:0, y:0 }
+    };
+
+    var LINKS = [
+        { from:'S1', fromPort:'G0/0/1', to:'PC1', toPort:'' },
+        { from:'S1', fromPort:'G0/0/2', to:'PC2', toPort:'' },
+        { from:'S2', fromPort:'G0/0/1', to:'PC3', toPort:'' },
+        { from:'S2', fromPort:'G0/0/2', to:'PC4', toPort:'' },
+        { from:'S1', fromPort:'G0/0/23', to:'S2', toPort:'G0/0/23' },
+        { from:'S1', fromPort:'G0/0/24', to:'S3', toPort:'G0/0/23' },
+        { from:'S2', fromPort:'G0/0/24', to:'S3', toPort:'G0/0/24' }
+    ];
+
+    var STEPS = [
+        { id:1, title:'查看交换机S1初始MAC地址表', hint:'第1步：切换到S1，输入display mac-address', score:5, evalFn:'evalStep1' },
+        { id:2, title:'PC1 ping PC2观察MAC学习', hint:'第2步：切换到PC1，输入ping ' + PC2_IP, score:5, evalFn:'evalStep2' },
+        { id:3, title:'查看S1的MAC地址表', hint:'第3步：切换到S1，输入display mac-address', score:5, evalFn:'evalStep3' },
+        { id:4, title:'PC1 ping PC3观察泛洪', hint:'第4步：切换到PC1，输入ping ' + PC3_IP, score:5, evalFn:'evalStep4' },
+        { id:5, title:'在S1上创建VLAN 10和VLAN 20', hint:'第5步：切换到S1，依次输入以下命令：\n1. system-view\n2. vlan 10\n3. name Sales\n4. quit\n5. vlan 20\n6. name Tech\n7. quit', score:5, evalFn:'evalStep5' },
+        { id:6, title:'将S1的G0/0/1划入VLAN 10', hint:'第6步：在S1上，依次输入以下命令：\n1. system-view\n2. interface G0/0/1\n3. port link-type access\n4. port default vlan 10\n5. quit', score:5, evalFn:'evalStep6' },
+        { id:7, title:'将S1的G0/0/2划入VLAN 20', hint:'第7步：在S1上，依次输入以下命令：\n1. system-view\n2. interface G0/0/2\n3. port link-type access\n4. port default vlan 20\n5. quit', score:5, evalFn:'evalStep7' },
+        { id:8, title:'验证VLAN隔离（PC1 ping PC2失败）', hint:'第8步：切换到PC1，输入ping ' + PC2_IP, score:5, evalFn:'evalStep8' },
+        { id:9, title:'在S2上创建VLAN 10和VLAN 20', hint:'第9步：切换到S2，依次输入以下命令：\n1. system-view\n2. vlan 10\n3. name Sales\n4. quit\n5. vlan 20\n6. name Tech\n7. quit', score:5, evalFn:'evalStep9' },
+        { id:10, title:'将S2的G0/0/1划入VLAN 10，G0/0/2划入VLAN 20', hint:'第10步：在S2上，依次输入以下命令：\n1. system-view\n2. interface G0/0/1\n3. port link-type access\n4. port default vlan 10\n5. quit\n6. interface G0/0/2\n7. port link-type access\n8. port default vlan 20\n9. quit', score:5, evalFn:'evalStep10' },
+        { id:11, title:'配置S1和S2的Trunk链路', hint:'第11步：先切换到S1，依次输入以下命令：\n1. system-view\n2. interface G0/0/23\n3. port link-type trunk\n4. port trunk allow-pass vlan 10 20\n5. quit\n再切换到S2，依次输入以下命令：\n1. system-view\n2. interface G0/0/23\n3. port link-type trunk\n4. port trunk allow-pass vlan 10 20\n5. quit', score:5, evalFn:'evalStep11' },
+        { id:12, title:'验证跨交换机VLAN通信（PC1 ping PC3成功）', hint:'第12步：切换到PC1，输入ping ' + PC3_IP, score:5, evalFn:'evalStep12' },
+        { id:13, title:'查看S1的STP状态', hint:'第13步：切换到S1，输入display stp brief', score:5, evalFn:'evalStep13' },
+        { id:14, title:'查看S2和S3的STP状态', hint:'第14步：切换到S2，输入display stp brief\n再切换到S3，输入display stp brief', score:5, evalFn:'evalStep14' },
+        { id:15, title:'修改S1的STP优先级为0使其成为根桥', hint:'第15步：切换到S1，依次输入以下命令：\n1. system-view\n2. stp priority 0\n3. display stp brief', score:5, evalFn:'evalStep15' },
+        { id:16, title:'观察STP重新收敛', hint:'第16步：观察STP重新收敛后各交换机端口角色的变化', score:5, evalFn:'evalStep16' },
+        { id:17, title:'验证冗余链路（断开S1-S2链路后STP切换）', hint:'第17步：切换到S1，依次输入以下命令：\n1. system-view\n2. shutdown G0/0/23\n然后切换到S2，输入display stp brief 观察阻塞端口变化', score:5, evalFn:'evalStep17' },
+        { id:18, title:'恢复链路并验证STP', hint:'第18步：切换到S1，依次输入以下命令：\n1. system-view\n2. undo shutdown G0/0/23', score:5, evalFn:'evalStep18' },
+        { id:19, title:'查看VLAN和STP综合信息', hint:'第19步：切换到S1，依次输入以下命令：\n1. display vlan\n2. display stp brief', score:5, evalFn:'evalStep19' },
+        { id:20, title:'完成实验总结', hint:'第20步：总结交换机MAC学习、VLAN隔离与通信、STP防环路三大功能，点击提交报告', score:5, evalFn:'evalStep20' }
+    ];
+
+    var currentStep = 1;
+    var stepResults = {};
+    var totalScore = 0;
+    var animating = false;
+    var animFrame = null;
+    var framePackets = [];
+    var demoMode = false;
+    var demoUsed = false;
+    var demoTimer = null;
+
+    var currentDevice = 'S1';
+    var viewMode = 'user';
+    var currentInterface = '';
+    var currentVlan = 0;
+    var consoleHistory = {};
+    var portShutdown = {};
+
+    var step1Done = false;
+    var step2Done = false;
+    var step3Done = false;
+    var step4Done = false;
+    var step5Done = false;
+    var step6Done = false;
+    var step7Done = false;
+    var step8Done = false;
+    var step9Done = false;
+    var step10Done = false;
+    var step11Done = false;
+    var step12Done = false;
+    var step13Done = false;
+    var step14Done = false;
+    var step15Done = false;
+    var step16Done = false;
+    var step17Done = false;
+    var step18Done = false;
+    var step19Done = false;
+
+    var stpInitialized = false;
+    var rootBridge = '';
+
+    var canvas, ctx;
+
+    function init() {
+        LabScoringEnhance.init(30);
+        canvas = document.getElementById('simCanvas');
+        ctx = canvas.getContext('2d');
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+        renderStepList();
+        drawTopology();
+        initSTP();
+        switchDevice('S1');
+        updateInfoPanels();
+    }
+
+    function resizeCanvas() {
+        var wrap = canvas.parentElement;
+        canvas.width = wrap.clientWidth;
+        canvas.height = wrap.clientHeight;
+        drawTopology();
+    }
+
+    function drawTopology() {
+        if (!ctx) return;
+        var w = canvas.width, h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+
+        DEVICES.S1.x = w * 0.25; DEVICES.S1.y = h * 0.25;
+        DEVICES.S2.x = w * 0.75; DEVICES.S2.y = h * 0.25;
+        DEVICES.S3.x = w * 0.5;  DEVICES.S3.y = h * 0.55;
+        DEVICES.PC1.x = w * 0.08; DEVICES.PC1.y = h * 0.82;
+        DEVICES.PC2.x = w * 0.32; DEVICES.PC2.y = h * 0.82;
+        DEVICES.PC3.x = w * 0.68; DEVICES.PC3.y = h * 0.82;
+        DEVICES.PC4.x = w * 0.92; DEVICES.PC4.y = h * 0.82;
+
+        for (var i = 0; i < LINKS.length; i++) {
+            var lk = LINKS[i];
+            var fd = DEVICES[lk.from], td = DEVICES[lk.to];
+            var isBlocked = isStpBlocked(lk.from, lk.fromPort);
+            drawLink(fd.x, fd.y, td.x, td.y, lk.fromPort, isBlocked);
+        }
+
+        drawSwitch(DEVICES.S1.x, DEVICES.S1.y, 'S1');
+        drawSwitch(DEVICES.S2.x, DEVICES.S2.y, 'S2');
+        drawSwitch(DEVICES.S3.x, DEVICES.S3.y, 'S3');
+        drawPC(DEVICES.PC1.x, DEVICES.PC1.y, 'PC1', DEVICES.PC1);
+        drawPC(DEVICES.PC2.x, DEVICES.PC2.y, 'PC2', DEVICES.PC2);
+        drawPC(DEVICES.PC3.x, DEVICES.PC3.y, 'PC3', DEVICES.PC3);
+        drawPC(DEVICES.PC4.x, DEVICES.PC4.y, 'PC4', DEVICES.PC4);
+
+        drawFramePackets();
+    }
+
+    function drawTextWithShadow(text, x, y, color, font) {
+        ctx.font = font;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 3;
+        ctx.lineJoin = 'round';
+        ctx.strokeText(text, x, y);
+        ctx.fillStyle = color;
+        ctx.fillText(text, x, y);
+    }
+
+    function drawSwitch(x, y, name) {
+        var sw = 110, sh = 55;
+        ctx.fillStyle = '#1a3a6a';
+        ctx.strokeStyle = '#4a90e2';
+        ctx.lineWidth = 2;
+        roundRect(ctx, x - sw/2, y - sh/2, sw, sh, 8);
+        ctx.fill(); ctx.stroke();
+
+        var isRoot = (rootBridge === name);
+        drawTextWithShadow(name, x, y - 10, '#ffffff', 'bold 14px Microsoft YaHei');
+        var subLabel = isRoot ? '根桥' : '交换机';
+        drawTextWithShadow(subLabel, x, y + 10, isRoot ? '#22c55e' : '#ffe066', '11px Microsoft YaHei');
+
+        var dev = DEVICES[name];
+        var ports = Object.keys(dev.portMode);
+        var portStartX = x - (ports.length - 1) * 12;
+        for (var i = 0; i < ports.length; i++) {
+            var px = portStartX + i * 24;
+            var py = y + sh/2 + 2;
+            var isBlocked = isStpBlocked(name, ports[i]);
+            var isDown = portShutdown[name] && portShutdown[name][ports[i]];
+            ctx.fillStyle = isDown ? '#666' : (isBlocked ? '#ef4444' : '#22c55e');
+            ctx.beginPath();
+            ctx.arc(px, py, 3, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    function drawPC(x, y, name, pc) {
+        var pw = 65, ph = 45;
+        ctx.fillStyle = '#1e3355';
+        ctx.strokeStyle = '#5b8dc9';
+        ctx.lineWidth = 1.5;
+        roundRect(ctx, x - pw/2, y - ph/2, pw, ph, 6);
+        ctx.fill(); ctx.stroke();
+
+        drawTextWithShadow(name, x, y - 12, '#ffffff', 'bold 12px Microsoft YaHei');
+        drawTextWithShadow(pc.ip, x, y + 2, '#ffe066', '9px Consolas');
+        drawTextWithShadow(pc.mac, x, y + 14, '#ffe066', '9px Consolas');
+    }
+
+    function drawLink(x1, y1, x2, y2, port, isBlocked) {
+        ctx.beginPath();
+        ctx.strokeStyle = isBlocked ? '#ef4444' : '#4a6a9a';
+        ctx.lineWidth = isBlocked ? 1.5 : 2;
+        ctx.setLineDash(isBlocked ? [6, 4] : []);
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        var mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+        drawTextWithShadow(port, mx, my - 8, '#ffe066', 'bold 9px Consolas');
+        if (isBlocked) {
+            drawTextWithShadow('阻塞', mx, my + 8, '#ef4444', 'bold 9px Microsoft YaHei');
+        }
+    }
+
+    function roundRect(c, x, y, w, h, r) {
+        c.beginPath();
+        c.moveTo(x + r, y);
+        c.lineTo(x + w - r, y);
+        c.quadraticCurveTo(x + w, y, x + w, y + r);
+        c.lineTo(x + w, y + h - r);
+        c.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        c.lineTo(x + r, y + h);
+        c.quadraticCurveTo(x, y + h, x, y + h - r);
+        c.lineTo(x, y + r);
+        c.quadraticCurveTo(x, y, x + r, y);
+        c.closePath();
+    }
+
+    function drawFramePackets() {
+        for (var i = 0; i < framePackets.length; i++) {
+            var p = framePackets[i];
+            ctx.save();
+            ctx.globalAlpha = p.alpha || 1;
+            ctx.fillStyle = p.color || '#fbbf24';
+            ctx.strokeStyle = p.borderColor || '#f59e0b';
+            ctx.lineWidth = 2;
+            var lbl = p.label || 'FRAME';
+            ctx.font = 'bold 13px Consolas';
+            var tw = ctx.measureText(lbl).width;
+            var pw = tw + 20, ph = 28;
+            ctx.shadowColor = 'rgba(0,0,0,0.5)';
+            ctx.shadowBlur = 8;
+            ctx.shadowOffsetX = 2;
+            ctx.shadowOffsetY = 2;
+            roundRect(ctx, p.x - pw/2, p.y - ph/2, pw, ph, 6);
+            ctx.fill(); ctx.stroke();
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+            drawTextWithShadow(lbl, p.x, p.y, '#ffffff', 'bold 13px Consolas');
+            ctx.restore();
+        }
+    }
+
+    function isStpBlocked(deviceName, port) {
+        var dev = DEVICES[deviceName];
+        if (!dev || dev.type !== 'switch') return false;
+        return dev.stpState[port] === 'Discarding';
+    }
+
+    function initSTP() {
+        var switches = ['S1', 'S2', 'S3'];
+        var minPri = 99999;
+        var root = 'S1';
+        for (var i = 0; i < switches.length; i++) {
+            var s = DEVICES[switches[i]];
+            if (s.stpPriority < minPri) {
+                minPri = s.stpPriority;
+                root = switches[i];
+            }
+        }
+        rootBridge = root;
+        computeStpRoles();
+    }
+
+    function computeStpRoles() {
+        var switches = ['S1', 'S2', 'S3'];
+        for (var i = 0; i < switches.length; i++) {
+            var s = DEVICES[switches[i]];
+            s.stpRole = {};
+            s.stpState = {};
+        }
+
+        var root = DEVICES[rootBridge];
+        root.stpRole = {};
+        root.stpState = {};
+        var rootPorts = Object.keys(root.portMode);
+        for (var j = 0; j < rootPorts.length; j++) {
+            var rp = rootPorts[j];
+            if (isPortUp(rootBridge, rp)) {
+                root.stpRole[rp] = 'Designated';
+                root.stpState[rp] = 'Forwarding';
+            }
+        }
+
+        var nonRoot = [];
+        for (var k = 0; k < switches.length; k++) {
+            if (switches[k] !== rootBridge) nonRoot.push(switches[k]);
+        }
+
+        for (var m = 0; m < nonRoot.length; m++) {
+            var sw = DEVICES[nonRoot[m]];
+            sw.stpRole = {};
+            sw.stpState = {};
+            var ports = Object.keys(sw.portMode);
+            var rootPort = findRootPort(nonRoot[m]);
+            for (var n = 0; n < ports.length; n++) {
+                var pt = ports[n];
+                if (!isPortUp(nonRoot[m], pt)) {
+                    sw.stpRole[pt] = 'Disabled';
+                    sw.stpState[pt] = 'Disabled';
+                } else if (pt === rootPort) {
+                    sw.stpRole[pt] = 'Root';
+                    sw.stpState[pt] = 'Forwarding';
+                } else {
+                    var neighbor = getNeighbor(nonRoot[m], pt);
+                    if (neighbor === rootBridge) {
+                        sw.stpRole[pt] = 'Designated';
+                        sw.stpState[pt] = 'Forwarding';
+                    } else {
+                    var neighborDev = DEVICES[neighbor];
+                    var neighborPort = getReversePort(nonRoot[m], pt);
+                    var neighborRootPort = (neighborDev && neighborDev.type === 'switch') ? findRootPort(neighbor) : null;
+                    if (neighborRootPort === neighborPort) {
+                        sw.stpRole[pt] = 'Designated';
+                        sw.stpState[pt] = 'Forwarding';
+                    } else if (neighborDev.stpPriority < sw.stpPriority ||
+                        (neighborDev.stpPriority === sw.stpPriority && neighbor < nonRoot[m])) {
+                        sw.stpRole[pt] = 'Alternate';
+                        sw.stpState[pt] = 'Discarding';
+                    } else {
+                        sw.stpRole[pt] = 'Designated';
+                        sw.stpState[pt] = 'Forwarding';
+                    }
+                    }
+                }
+            }
+        }
+    }
+
+    function findRootPort(swName) {
+        var sw = DEVICES[swName];
+        if (!sw || !sw.portMode) return null;
+        var ports = Object.keys(sw.portMode);
+        for (var i = 0; i < ports.length; i++) {
+            var neighbor = getNeighbor(swName, ports[i]);
+            if (neighbor === rootBridge && isPortUp(swName, ports[i])) {
+                return ports[i];
+            }
+        }
+        for (var j = 0; j < ports.length; j++) {
+            var nb = getNeighbor(swName, ports[j]);
+            if (nb && DEVICES[nb].type === 'switch' && isPortUp(swName, ports[j])) {
+                return ports[j];
+            }
+        }
+        return ports[0];
+    }
+
+    function getNeighbor(deviceName, port) {
+        for (var i = 0; i < LINKS.length; i++) {
+            var lk = LINKS[i];
+            if (lk.from === deviceName && lk.fromPort === port) return lk.to;
+            if (lk.to === deviceName && lk.toPort === port) return lk.from;
+        }
+        return null;
+    }
+
+    function getReversePort(deviceName, port) {
+        for (var i = 0; i < LINKS.length; i++) {
+            var lk = LINKS[i];
+            if (lk.from === deviceName && lk.fromPort === port) return lk.toPort;
+            if (lk.to === deviceName && lk.toPort === port) return lk.fromPort;
+        }
+        return '';
+    }
+
+    function isPortUp(deviceName, port) {
+        if (portShutdown[deviceName] && portShutdown[deviceName][port]) return false;
+        var neighbor = getNeighbor(deviceName, port);
+        if (neighbor && DEVICES[neighbor] && DEVICES[neighbor].type === 'switch') {
+            var neighborPort = getReversePort(deviceName, port);
+            if (neighborPort && portShutdown[neighbor] && portShutdown[neighbor][neighborPort]) return false;
+        }
+        return true;
+    }
+
+    var deviceViewState = {};
+
+    function switchDevice(devName) {
+        if (currentDevice && currentDevice !== devName) {
+            deviceViewState[currentDevice] = { viewMode: viewMode, currentInterface: currentInterface, currentVlan: currentVlan };
+        }
+        currentDevice = devName;
+        if (deviceViewState[devName]) {
+            viewMode = deviceViewState[devName].viewMode;
+            currentInterface = deviceViewState[devName].currentInterface;
+            currentVlan = deviceViewState[devName].currentVlan;
+        } else {
+            viewMode = 'user';
+            currentInterface = '';
+            currentVlan = 0;
+        }
+
+        var tabs = document.querySelectorAll('.sw-tab');
+        for (var i = 0; i < tabs.length; i++) {
+            tabs[i].classList.toggle('active', tabs[i].getAttribute('data-device') === devName);
+        }
+
+        updatePrompt();
+        updateInfoPanels();
+
+        if (!consoleHistory[devName]) {
+            consoleHistory[devName] = [];
+        }
+        var output = document.getElementById('consoleOutput');
+        output.innerHTML = '';
+        for (var j = 0; j < consoleHistory[devName].length; j++) {
+            var line = document.createElement('div');
+            line.textContent = consoleHistory[devName][j];
+            output.appendChild(line);
+        }
+        output.scrollTop = output.scrollHeight;
+    }
+
+    function updatePrompt() {
+        var prompt = document.getElementById('consolePrompt');
+        var dev = DEVICES[currentDevice];
+        if (dev.type === 'pc') {
+            prompt.textContent = currentDevice + '>';
+        } else {
+            if (viewMode === 'user') {
+                prompt.textContent = '<' + currentDevice + '>';
+            } else if (viewMode === 'system') {
+                if (currentInterface) {
+                    prompt.textContent = '[' + currentDevice + '-' + currentInterface + ']';
+                } else if (currentVlan) {
+                    prompt.textContent = '[' + currentDevice + '-vlan' + currentVlan + ']';
+                } else {
+                    prompt.textContent = '[' + currentDevice + ']';
+                }
+            }
+        }
+    }
+
+    function consolePrint(text) {
+        var output = document.getElementById('consoleOutput');
+        var line = document.createElement('div');
+        line.textContent = text;
+        output.appendChild(line);
+        output.scrollTop = output.scrollHeight;
+        if (!consoleHistory[currentDevice]) consoleHistory[currentDevice] = [];
+        consoleHistory[currentDevice].push(text);
+    }
+
+    function clearConsole() {
+        document.getElementById('consoleOutput').innerHTML = '';
+        consoleHistory[currentDevice] = [];
+    }
+
+    function handleCommand(event) {
+        if (event.key !== 'Enter') return;
+        var input = document.getElementById('consoleInput');
+        var cmd = input.value.trim();
+        input.value = '';
+        if (!cmd) return;
+
+        var dev = DEVICES[currentDevice];
+        var promptText = document.getElementById('consolePrompt').textContent;
+        consolePrint(promptText + cmd);
+
+        if (dev.type === 'pc') {
+            handlePCCommand(cmd);
+        } else {
+            handleSwitchCommand(cmd);
+        }
+        autoEvaluate();
+    }
+
+    function handlePCCommand(cmd) {
+        var pc = DEVICES[currentDevice];
+        var parts = cmd.split(/\s+/);
+        var base = parts[0].toLowerCase();
+
+        if (base === 'ping') {
+            if (parts.length < 2) { consolePrint('用法: ping <IP地址>'); return; }
+            var targetIp = parts[1];
+            handlePing(currentDevice, targetIp);
+        } else if (base === 'arp' && parts[1] === '-a') {
+            handleArpA(currentDevice);
+        } else if (base === 'ipconfig') {
+            consolePrint('以太网适配器信号');
+            consolePrint('  IP 地址 . . . . . . . . . : ' + pc.ip);
+            consolePrint('  子网掩码 . . . . . . . . : ' + pc.mask);
+            consolePrint('  默认网关 . . . . . . . . : ' + pc.gateway);
+            consolePrint('  MAC 地址 . . . . . . . . : ' + pc.mac);
+        } else if (base === '?' || base === 'help') {
+            consolePrint('可用命令:');
+            consolePrint('  ping <IP>     - 发送ping请求');
+            consolePrint('  arp -a        - 查看ARP');
+            consolePrint('  ipconfig      - 查看IP配置');
+        } else {
+            consolePrint('错误: 无法识别的命"' + cmd + '"');
+            LabScoringEnhance.recordError(currentStep, cmd);
+            consolePrint('输入 ? 查看可用命令');
+        }
+    }
+
+    function handlePing(pcName, targetIp) {
+        var pc = DEVICES[pcName];
+        var targetPc = null;
+        var pcNames = ['PC1','PC2','PC3','PC4'];
+        for (var i = 0; i < pcNames.length; i++) {
+            if (DEVICES[pcNames[i]].ip === targetIp) {
+                targetPc = DEVICES[pcNames[i]];
+                break;
+            }
+        }
+        if (!targetPc) {
+            consolePrint('Ping ' + targetIp + ': 目标主机不可达');
+            return;
+        }
+
+        var srcSw = DEVICES[pc.switch];
+        var dstSw = DEVICES[targetPc.switch];
+        var srcVlan = srcSw.portVlan[pc.port];
+        var dstVlan = dstSw.portVlan[targetPc.port];
+
+        if (pc.switch === targetPc.switch) {
+            if (srcVlan !== dstVlan) {
+                consolePrint('Ping ' + targetIp + ': 来自不同VLAN，通信失败（VLAN隔离）');
+                updateFrameInfo(pc.mac, targetPc.mac, pc.ip, targetPc.ip, '（VLAN隔离）');
+                if (pcName === 'PC1' && targetPc.name === 'PC2' && srcVlan !== dstVlan) {
+                    step8Done = true;
+                }
+                return;
+            }
+        } else {
+            if (srcVlan !== dstVlan) {
+                consolePrint('Ping ' + targetIp + ': 来自不同VLAN，通信失败（VLAN隔离）');
+                updateFrameInfo(pc.mac, targetPc.mac, pc.ip, targetPc.ip, '（VLAN隔离）');
+                return;
+            }
+            var trunkOk = checkTrunkOk(pc.switch, targetPc.switch, srcVlan);
+            if (!trunkOk) {
+                consolePrint('Ping ' + targetIp + ': Trunk链路未配置或未允许VLAN ' + srcVlan + '，通信失败');
+                updateFrameInfo(pc.mac, targetPc.mac, pc.ip, targetPc.ip, 'Trunk不支持');
+                return;
+            }
+        }
+
+        var path = findPath(pcName, targetPc.name);
+        if (!path) {
+            consolePrint('Ping ' + targetIp + ': 目标主机不可达');
+            return;
+        }
+
+        for (var j = 0; j < path.length; j++) {
+            if (path[j].type === 'switch') {
+                var sw = DEVICES[path[j].name];
+                if (!sw.macTable[pc.mac]) {
+                    sw.macTable[pc.mac] = { port: path[j].inPort, type: 'dynamic', vlan: srcVlan };
+                }
+            }
+        }
+        for (var k = path.length - 1; k >= 0; k--) {
+            if (path[k].type === 'switch') {
+                var sw2 = DEVICES[path[k].name];
+                if (!sw2.macTable[targetPc.mac]) {
+                    sw2.macTable[targetPc.mac] = { port: path[k].outPort, type: 'dynamic', vlan: dstVlan };
+                }
+            }
+        }
+
+        pc.arpTable[targetIp] = targetPc.mac;
+        targetPc.arpTable[pc.ip] = pc.mac;
+
+        animatePing(path, pc, targetPc, function() {
+            consolePrint('Ping ' + targetIp + ': 应答时间=1ms TTL=128');
+            consolePrint('Ping ' + targetIp + ': 应答时间=1ms TTL=128');
+            consolePrint('Ping ' + targetIp + ': 应答时间=1ms TTL=128');
+            consolePrint('--- ' + targetIp + ' Ping统计 ---');
+            consolePrint('  数据率 已发送3, 已接收3, 丢失=0');
+
+            if (pcName === 'PC1' && targetPc.name === 'PC2') step2Done = true;
+            if (pcName === 'PC1' && targetPc.name === 'PC3') step4Done = true;
+            if (pcName === 'PC1' && targetPc.name === 'PC3') step12Done = true;
+
+            updateInfoPanels();
+            autoEvaluate();
+        });
+    }
+
+    function checkTrunkOk(sw1, sw2, vlan) {
+        var link = null;
+        for (var i = 0; i < LINKS.length; i++) {
+            if ((LINKS[i].from === sw1 && LINKS[i].to === sw2) ||
+                (LINKS[i].from === sw2 && LINKS[i].to === sw1)) {
+                if (DEVICES[LINKS[i].from].type === 'switch' && DEVICES[LINKS[i].to].type === 'switch') {
+                    link = LINKS[i];
+                    break;
+                }
+            }
+        }
+        if (!link) return false;
+
+        var d1 = DEVICES[link.from], d2 = DEVICES[link.to];
+        var p1 = link.fromPort, p2 = link.toPort;
+
+        if (d1.portMode[p1] !== 'trunk' || d2.portMode[p2] !== 'trunk') return false;
+
+        var allowed1 = d1.portVlan[p1];
+        var allowed2 = d2.portVlan[p2];
+        if (allowed1 === 'trunk') allowed1 = [1];
+        else if (typeof allowed1 === 'string') allowed1 = allowed1.split(/\s+/).map(Number);
+        else if (Array.isArray(allowed1)) { }
+        else allowed1 = [allowed1];
+
+        if (allowed2 === 'trunk') allowed2 = [1];
+        else if (typeof allowed2 === 'string') allowed2 = allowed2.split(/\s+/).map(Number);
+        else if (Array.isArray(allowed2)) { }
+        else allowed2 = [allowed2];
+
+        return allowed1.indexOf(vlan) >= 0 && allowed2.indexOf(vlan) >= 0;
+    }
+
+    function findPath(srcPc, dstPc) {
+        var src = DEVICES[srcPc];
+        var dst = DEVICES[dstPc];
+        var srcSw = src.switch;
+        var dstSw = dst.switch;
+
+        if (srcSw === dstSw) {
+            return [
+                { type:'pc', name:srcPc },
+                { type:'switch', name:srcSw, inPort:src.port, outPort:dst.port },
+                { type:'pc', name:dstPc }
+            ];
+        }
+
+        var interLink = null;
+        for (var i = 0; i < LINKS.length; i++) {
+            var lk = LINKS[i];
+            if (lk.from === srcSw && lk.to === dstSw) { interLink = { fromPort: lk.fromPort, toPort: lk.toPort }; break; }
+            if (lk.to === srcSw && lk.from === dstSw) { interLink = { fromPort: lk.toPort, toPort: lk.fromPort }; break; }
+        }
+
+        if (interLink) {
+            var isBlocked1 = isStpBlocked(srcSw, interLink.fromPort);
+            var isBlocked2 = isStpBlocked(dstSw, interLink.toPort);
+            if (!isBlocked1 && !isBlocked2 && isPortUp(srcSw, interLink.fromPort) && isPortUp(dstSw, interLink.toPort)) {
+                return [
+                    { type:'pc', name:srcPc },
+                    { type:'switch', name:srcSw, inPort:src.port, outPort:interLink.fromPort },
+                    { type:'switch', name:dstSw, inPort:interLink.toPort, outPort:dst.port },
+                    { type:'pc', name:dstPc }
+                ];
+            }
+        }
+
+        var viaS3 = findViaSwitch(srcSw, dstSw, 'S3', src, dst);
+        if (viaS3) return viaS3;
+
+        return null;
+    }
+
+    function findViaSwitch(srcSw, dstSw, via, src, dst) {
+        var link1 = null, link2 = null;
+        for (var i = 0; i < LINKS.length; i++) {
+            var lk = LINKS[i];
+            if ((lk.from === srcSw && lk.to === via) || (lk.to === srcSw && lk.from === via)) {
+                var fp1 = lk.from === srcSw ? lk.fromPort : lk.toPort;
+                var tp1 = lk.from === srcSw ? lk.toPort : lk.fromPort;
+                if (!isStpBlocked(srcSw, fp1) && !isStpBlocked(via, tp1) && isPortUp(srcSw, fp1) && isPortUp(via, tp1)) {
+                    link1 = { fromPort: fp1, toPort: tp1 };
+                }
+            }
+            if ((lk.from === via && lk.to === dstSw) || (lk.to === via && lk.from === dstSw)) {
+                var fp2 = lk.from === via ? lk.fromPort : lk.toPort;
+                var tp2 = lk.from === via ? lk.toPort : lk.fromPort;
+                if (!isStpBlocked(via, fp2) && !isStpBlocked(dstSw, tp2) && isPortUp(via, fp2) && isPortUp(dstSw, tp2)) {
+                    link2 = { fromPort: fp2, toPort: tp2 };
+                }
+            }
+        }
+        if (link1 && link2) {
+            return [
+                { type:'pc', name:src.name },
+                { type:'switch', name:srcSw, inPort:src.port, outPort:link1.fromPort },
+                { type:'switch', name:via, inPort:link1.toPort, outPort:link2.fromPort },
+                { type:'switch', name:dstSw, inPort:link2.toPort, outPort:dst.port },
+                { type:'pc', name:dst.name }
+            ];
+        }
+        return null;
+    }
+
+    function handleArpA(pcName) {
+        var pc = DEVICES[pcName];
+        var keys = Object.keys(pc.arpTable);
+        if (keys.length === 0) {
+            consolePrint('ARP表为');
+            return;
+        }
+        consolePrint('接口: ' + pc.ip + ' --- 0x3');
+        consolePrint('  Internet 地址         物理地址           类型');
+        for (var ip in pc.arpTable) {
+            consolePrint('  ' + padRight(ip, 22) + pc.arpTable[ip] + '     动');
+        }
+    }
+
+    function padRight(str, len) {
+        while (str.length < len) str += ' ';
+        return str;
+    }
+
+    function handleSwitchCommand(cmd) {
+        var parts = cmd.split(/\s+/);
+        var base = parts[0].toLowerCase();
+
+        if (viewMode === 'user') {
+            if (base === 'display' || base === 'show') {
+                handleDisplayCommand(parts);
+            } else if (base === 'system-view') {
+                viewMode = 'system';
+                currentInterface = '';
+                currentVlan = 0;
+                consolePrint('Enter system view, return user view with Ctrl+Z.');
+                updatePrompt();
+            } else if (base === '?' || base === 'help') {
+                consolePrint('可用命令:');
+                consolePrint('  display mac-address       - 查看MAC地址');
+                consolePrint('  display vlan              - 查看VLAN信息');
+                consolePrint('  display stp brief         - 查看STP状态');
+                consolePrint('  system-view               - 进入系统视图');
+            } else {
+                consolePrint('错误: 无法识别的命"' + cmd + '"');
+            LabScoringEnhance.recordError(currentStep, cmd);
+            }
+        } else if (viewMode === 'system') {
+            if (currentInterface) {
+                handleInterfaceCommand(parts, base);
+            } else if (currentVlan) {
+                handleVlanViewCommand(parts, base);
+            } else {
+                handleSystemViewCommand(parts, base, cmd);
+            }
+        }
+    }
+
+    function handleDisplayCommand(parts) {
+        var sub = parts.length > 1 ? parts[1].toLowerCase() : '';
+        var sub2 = parts.length > 2 ? parts[2].toLowerCase() : '';
+
+        if (sub === 'mac-address' || sub === 'mac') {
+            displayMacAddress();
+        } else if (sub === 'vlan') {
+            displayVlan();
+        } else if (sub === 'stp' && sub2 === 'brief') {
+            displayStpBrief();
+        } else {
+            consolePrint('错误: 无法识别的显示命');
+            LabScoringEnhance.recordError(currentStep, "");
+        }
+    }
+
+    function displayMacAddress() {
+        var sw = DEVICES[currentDevice];
+        if (currentDevice === 'S1') step1Done = true;
+        if (currentDevice === 'S1' && Object.keys(sw.macTable).length > 0) step3Done = true;
+
+        var keys = Object.keys(sw.macTable);
+        if (keys.length === 0) {
+            consolePrint('MAC address table is empty.');
+        } else {
+            consolePrint('MAC address table of slot 0:');
+            consolePrint('-----------------------------------------------');
+            consolePrint('MAC Address    VLAN  Type      Interface');
+            consolePrint('-----------------------------------------------');
+            for (var mac in sw.macTable) {
+                var e = sw.macTable[mac];
+                consolePrint(mac + '  ' + padRight(String(e.vlan || 1), 5) + e.type + '    ' + e.port);
+            }
+            consolePrint('-----------------------------------------------');
+            consolePrint('Total items: ' + keys.length);
+        }
+        updateInfoPanels();
+    }
+
+    function displayVlan() {
+        var sw = DEVICES[currentDevice];
+        consolePrint('VLAN ID  Name        Ports');
+        consolePrint('-----------------------------------------------');
+        for (var vid in sw.vlans) {
+            var v = sw.vlans[vid];
+            consolePrint(padRight(vid, 9) + padRight(v.name, 12) + v.ports.join('  '));
+        }
+        if (sw.vlans[10] && sw.vlans[20]) step19Done = true;
+        updateInfoPanels();
+    }
+
+    function displayStpBrief() {
+        var sw = DEVICES[currentDevice];
+        if (currentDevice === 'S1') step13Done = true;
+        if (currentDevice === 'S2' || currentDevice === 'S3') step14Done = true;
+        if (step15Done) step16Done = true;
+        if (step17Done || step18Done) step16Done = true;
+
+        consolePrint('STP模式: MSTP');
+        consolePrint('根桥优先 ' + DEVICES[rootBridge].stpPriority);
+        consolePrint('根桥MAC: ' + rootBridge + '-MAC');
+        consolePrint('本桥优先 ' + sw.stpPriority);
+        consolePrint('');
+        consolePrint('端口          角色          状态');
+        consolePrint('-----------------------------------------------');
+        var ports = Object.keys(sw.portMode);
+        for (var i = 0; i < ports.length; i++) {
+            var pt = ports[i];
+            var role = sw.stpRole[pt] || 'Designated';
+            var state = sw.stpState[pt] || 'Forwarding';
+            if (!isPortUp(currentDevice, pt)) {
+                role = 'Disabled';
+                state = 'Disabled';
+            }
+            consolePrint(padRight(pt, 14) + padRight(role, 14) + state);
+        }
+        updateInfoPanels();
+    }
+
+    function handleSystemViewCommand(parts, base, cmd) {
+        if (base === 'vlan') {
+            if (parts.length < 2) { consolePrint('用法: vlan <VLAN-ID>'); return; }
+            var vid = parseInt(parts[1]);
+            if (isNaN(vid) || vid < 1 || vid > 4094) { consolePrint('错误: 无效的VLAN ID'); return; }
+            if (!DEVICES[currentDevice].vlans[vid]) {
+                DEVICES[currentDevice].vlans[vid] = { name: 'VLAN ' + vid, ports: [] };
+            }
+            currentVlan = vid;
+            consolePrint('Enter VLAN ' + vid + ' view');
+            updatePrompt();
+
+            if (currentDevice === 'S1' && DEVICES.S1.vlans[10] && DEVICES.S1.vlans[20] && DEVICES.S1.vlans[10].name === 'Sales' && DEVICES.S1.vlans[20].name === 'Tech') step5Done = true;
+            if (currentDevice === 'S2' && DEVICES.S2.vlans[10] && DEVICES.S2.vlans[20] && DEVICES.S2.vlans[10].name === 'Sales' && DEVICES.S2.vlans[20].name === 'Tech') step9Done = true;
+        } else if (base === 'interface') {
+            if (parts.length < 2) { consolePrint('用法: interface <接口'); return; }
+            var iface = parts[1];
+            if (iface.match(/^G0\/0\/\d+$/) || iface.match(/^GigabitEthernet0\/0\/\d+$/)) {
+                iface = iface.replace(/^GigabitEthernet/, 'G');
+                var sw = DEVICES[currentDevice];
+                if (!sw.portMode[iface]) {
+                    consolePrint('错误: 接口 ' + iface + ' 不存在');
+                    return;
+                }
+                currentInterface = iface;
+                consolePrint('Enter interface ' + iface + ' view');
+                updatePrompt();
+            } else {
+                consolePrint('错误: 无效的接口名');
+            }
+        } else if (base === 'stp' && parts[1] === 'priority') {
+            var pri = parseInt(parts[2]);
+            if (isNaN(pri) || pri % 4096 !== 0 || pri < 0 || pri > 61440) {
+                consolePrint('错误: STP优先级必须为4096的倍数据-61440');
+                return;
+            }
+            DEVICES[currentDevice].stpPriority = pri;
+            consolePrint('STP优先级已设置' + pri);
+            initSTP();
+            drawTopology();
+            if (currentDevice === 'S1' && pri === 0) step15Done = true;
+        } else if (base === 'shutdown') {
+            var pt = parts[1];
+            if (pt && pt.match(/^G0\/0\/\d+$/)) {
+                if (!portShutdown[currentDevice]) portShutdown[currentDevice] = {};
+                portShutdown[currentDevice][pt] = true;
+                consolePrint('接口 ' + pt + ' 已关');
+                computeStpRoles();
+                drawTopology();
+                if (currentDevice === 'S1' && pt === 'G0/0/23') step17Done = true;
+            } else {
+                consolePrint('用法: shutdown <接口');
+            }
+        } else if (base === 'undo' && parts[1] === 'shutdown') {
+            var pt2 = parts[2];
+            if (pt2 && pt2.match(/^G0\/0\/\d+$/)) {
+                if (!portShutdown[currentDevice]) portShutdown[currentDevice] = {};
+                portShutdown[currentDevice][pt2] = false;
+                consolePrint('接口 ' + pt2 + ' 已开');
+                computeStpRoles();
+                drawTopology();
+                if (currentDevice === 'S1' && pt2 === 'G0/0/23') step18Done = true;
+            } else {
+                consolePrint('用法: undo shutdown <接口');
+            }
+        } else if (base === 'display' || base === 'show') {
+            handleDisplayCommand(parts);
+        } else if (base === 'quit' || base === 'return') {
+            viewMode = 'user';
+            currentInterface = '';
+            currentVlan = 0;
+            consolePrint('Return to user view.');
+            updatePrompt();
+        } else if (base === '?' || base === 'help') {
+            consolePrint('可用命令:');
+            consolePrint('  vlan <ID>                  - 创建VLAN');
+            consolePrint('  interface G0/0/X           - 进入接口视图');
+            consolePrint('  stp priority <0-61440>     - 设置STP优先');
+            consolePrint('  shutdown G0/0/X            - 关闭接口');
+            consolePrint('  undo shutdown G0/0/X       - 开启接收');
+            consolePrint('  display mac-address        - 查看MAC地址');
+            consolePrint('  display vlan               - 查看VLAN信息');
+            consolePrint('  display stp brief          - 查看STP状态');
+            consolePrint('  quit                       - 返回用户视图');
+        } else {
+            consolePrint('错误: 无法识别的命"' + cmd + '"');
+            LabScoringEnhance.recordError(currentStep, cmd);
+        }
+    }
+
+    function handleInterfaceCommand(parts, base) {
+        var sw = DEVICES[currentDevice];
+        var pt = currentInterface;
+
+        if (base === 'port') {
+            if (parts[1] === 'link-type') {
+                var mode = parts[2] ? parts[2].toLowerCase() : '';
+                if (mode === 'access' || mode === 'trunk') {
+                    sw.portMode[pt] = mode;
+                    consolePrint('接口 ' + pt + ' 链路类型已设置为 ' + mode);
+                    if (mode === 'access') {
+                        sw.portVlan[pt] = sw.portVlan[pt] || 1;
+                    }
+                } else {
+                    consolePrint('用法: port link-type access|trunk');
+                }
+            } else if (parts[1] === 'default' && parts[2] === 'vlan') {
+                var vid = parseInt(parts[3]);
+                if (isNaN(vid) || !sw.vlans[vid]) {
+                    consolePrint('错误: VLAN ' + parts[3] + ' 不存在');
+                    return;
+                }
+                sw.portVlan[pt] = vid;
+                sw.portMode[pt] = 'access';
+                if (sw.vlans[vid].ports.indexOf(pt) < 0) {
+                    sw.vlans[vid].ports.push(pt);
+                }
+                consolePrint('接口 ' + pt + ' 已划入VLAN ' + vid);
+
+                if (currentDevice === 'S1' && pt === 'G0/0/1' && vid === 10) step6Done = true;
+                if (currentDevice === 'S1' && pt === 'G0/0/2' && vid === 20) step7Done = true;
+
+            } else if (parts[1] === 'trunk' && parts[2] === 'allow-pass' && parts[3] === 'vlan') {
+                var allowedVlans = [];
+                for (var i = 4; i < parts.length; i++) {
+                    var v = parseInt(parts[i]);
+                    if (!isNaN(v)) allowedVlans.push(v);
+                }
+                sw.portVlan[pt] = allowedVlans;
+                sw.portMode[pt] = 'trunk';
+                consolePrint('接口 ' + pt + ' Trunk允许VLAN: ' + allowedVlans.join(' '));
+
+                checkTrunkConfig();
+            } else {
+                consolePrint('用法: port link-type access|trunk');
+                consolePrint('      port default vlan <ID>');
+                consolePrint('      port trunk allow-pass vlan <ID1> <ID2> ...');
+            }
+        } else if (base === 'shutdown') {
+            if (!portShutdown[currentDevice]) portShutdown[currentDevice] = {};
+            portShutdown[currentDevice][pt] = true;
+            consolePrint('接口 ' + pt + ' 已关');
+            computeStpRoles();
+            drawTopology();
+            if (currentDevice === 'S1' && pt === 'G0/0/23') step17Done = true;
+        } else if (base === 'undo' && parts[1] === 'shutdown') {
+            if (!portShutdown[currentDevice]) portShutdown[currentDevice] = {};
+            portShutdown[currentDevice][pt] = false;
+            consolePrint('接口 ' + pt + ' 已开');
+            computeStpRoles();
+            drawTopology();
+            if (currentDevice === 'S1' && pt === 'G0/0/23') step18Done = true;
+        } else if (base === 'quit') {
+            currentInterface = '';
+            consolePrint('Return to system view.');
+            updatePrompt();
+        } else if (base === 'display' || base === 'show') {
+            handleDisplayCommand(parts);
+        } else if (base === '?' || base === 'help') {
+            consolePrint('可用命令:');
+            consolePrint('  port link-type access|trunk');
+            consolePrint('  port default vlan <ID>');
+            consolePrint('  port trunk allow-pass vlan <ID1> <ID2> ...');
+            consolePrint('  shutdown / undo shutdown');
+            consolePrint('  quit');
+        } else {
+            consolePrint('错误: 无法识别的命');
+            LabScoringEnhance.recordError(currentStep, "");
+        }
+    }
+
+    function handleVlanViewCommand(parts, base) {
+        if (base === 'name') {
+            var vname = parts.slice(1).join(' ');
+            if (currentVlan && DEVICES[currentDevice].vlans[currentVlan]) {
+                DEVICES[currentDevice].vlans[currentVlan].name = vname;
+                consolePrint('VLAN ' + currentVlan + ' 名称已设置为 ' + vname);
+            }
+            if (currentDevice === 'S1' && DEVICES.S1.vlans[10] && DEVICES.S1.vlans[20] && DEVICES.S1.vlans[10].name === 'Sales' && DEVICES.S1.vlans[20].name === 'Tech') step5Done = true;
+            if (currentDevice === 'S2' && DEVICES.S2.vlans[10] && DEVICES.S2.vlans[20] && DEVICES.S2.vlans[10].name === 'Sales' && DEVICES.S2.vlans[20].name === 'Tech') step9Done = true;
+        } else if (base === 'quit') {
+            currentVlan = 0;
+            consolePrint('Return to system view.');
+            updatePrompt();
+        } else if (base === 'display' || base === 'show') {
+            handleDisplayCommand(parts);
+        } else {
+            consolePrint('用法: name <VLAN名称> | quit');
+        }
+    }
+
+    function checkTrunkConfig() {
+        var s1Trunk = DEVICES.S1.portMode['G0/0/23'] === 'trunk';
+        var s2Trunk = DEVICES.S2.portMode['G0/0/23'] === 'trunk';
+        var s1Allowed = DEVICES.S1.portVlan['G0/0/23'];
+        var s2Allowed = DEVICES.S2.portVlan['G0/0/23'];
+
+        var s1Ok = false, s2Ok = false;
+        if (typeof s1Allowed === 'object' && s1Allowed.indexOf) {
+            s1Ok = s1Allowed.indexOf(10) >= 0 && s1Allowed.indexOf(20) >= 0;
+        }
+        if (typeof s2Allowed === 'object' && s2Allowed.indexOf) {
+            s2Ok = s2Allowed.indexOf(10) >= 0 && s2Allowed.indexOf(20) >= 0;
+        }
+
+        if (s1Trunk && s2Trunk && s1Ok && s2Ok) {
+            step11Done = true;
+        }
+    }
+
+    function animatePing(path, srcPc, dstPc, callback) {
+        if (animating) return;
+        animating = true;
+
+        if (demoMode) {
+            animating = false;
+            if (callback) callback();
+            return;
+        }
+
+        var waypoints = [];
+        for (var i = 0; i < path.length; i++) {
+            var node = path[i];
+            var dev = DEVICES[node.name];
+            if (dev) waypoints.push({ x: dev.x, y: dev.y });
+        }
+
+        updateFrameInfo(srcPc.mac, dstPc.mac, srcPc.ip, dstPc.ip, 'ICMP Echo Request');
+
+        var packet = { x: waypoints[0].x, y: waypoints[0].y, color: '#fbbf24', borderColor: '#f59e0b', label: 'ICMP', alpha: 1 };
+        framePackets = [packet];
+
+        var totalSegments = waypoints.length - 1;
+        var currentSegment = 0;
+        var step = 0;
+        var stepsPerSegment = 30;
+
+        function animate() {
+            step++;
+            var t = easeInOut(step / stepsPerSegment);
+            var from = waypoints[currentSegment];
+            var to = waypoints[currentSegment + 1];
+            packet.x = from.x + (to.x - from.x) * t;
+            packet.y = from.y + (to.y - from.y) * t;
+            drawTopology();
+
+            if (step >= stepsPerSegment) {
+                currentSegment++;
+                step = 0;
+                if (currentSegment >= totalSegments) {
+                    setTimeout(function() {
+                        packet.color = '#4ade80';
+                        packet.borderColor = '#22c55e';
+                        packet.label = 'REPLY';
+                        updateFrameInfo(dstPc.mac, srcPc.mac, dstPc.ip, srcPc.ip, 'ICMP Echo Reply');
+
+                        var replySegment = totalSegments - 1;
+                        var replyStep = 0;
+                        function animateReply() {
+                            replyStep++;
+                            var rt = easeInOut(replyStep / stepsPerSegment);
+                            var rFrom = waypoints[replySegment + 1];
+                            var rTo = waypoints[replySegment];
+                            packet.x = rFrom.x + (rTo.x - rFrom.x) * rt;
+                            packet.y = rFrom.y + (rTo.y - rFrom.y) * rt;
+                            drawTopology();
+                            if (replyStep >= stepsPerSegment) {
+                                replySegment--;
+                                replyStep = 0;
+                                if (replySegment < 0) {
+                                    setTimeout(function() {
+                                        framePackets = [];
+                                        drawTopology();
+                                        animating = false;
+                                        if (callback) callback();
+                                    }, 300);
+                                    return;
+                                }
+                                setTimeout(function() { animFrame = requestAnimationFrame(animateReply); }, 1000);
+                            } else {
+                                animFrame = requestAnimationFrame(animateReply);
+                            }
+                        }
+                        animFrame = requestAnimationFrame(animateReply);
+                    }, 300);
+                    return;
+                }
+                setTimeout(function() { animFrame = requestAnimationFrame(animate); }, 1000);
+            }
+            animFrame = requestAnimationFrame(animate);
+        }
+        animFrame = requestAnimationFrame(animate);
+    }
+
+    function easeInOut(t) { return t < 0.5 ? 2*t*t : -1+(4-2*t)*t; }
+
+    function updateFrameInfo(srcMac, dstMac, srcIp, dstIp, action) {
+        document.getElementById('frameInfo').innerHTML =
+            '<div class="frame-info">' +
+            '<div><span class="label">源MAC：</span><span class="value">' + srcMac + '</span></div>' +
+            '<div><span class="label">目的MAC：</span><span class="value">' + dstMac + '</span></div>' +
+            '<div><span class="label">源IP：</span><span class="value">' + srcIp + '</span></div>' +
+            '<div><span class="label">目的IP：</span><span class="value">' + dstIp + '</span></div>' +
+            '<div><span class="label">动作：</span><span class="value">' + action + '</span></div>' +
+            '</div>';
+    }
+
+    function updateInfoPanels() {
+        var sw = DEVICES[currentDevice];
+        document.getElementById('macTableDevice').textContent = currentDevice;
+        document.getElementById('vlanTableDevice').textContent = currentDevice;
+        document.getElementById('stpTableDevice').textContent = currentDevice;
+
+        var macTbody = document.getElementById('macTableTbody');
+        if (sw.type === 'pc' || !sw.macTable) {
+            macTbody.innerHTML = '<tr><td colspan="4" style="color:#94a3b8;text-align:center;">非交换机设备</td></tr>';
+        } else {
+            var macKeys = Object.keys(sw.macTable);
+            if (macKeys.length === 0) {
+                macTbody.innerHTML = '<tr><td colspan="4" style="color:#94a3b8;text-align:center;">(空表)</td></tr>';
+            } else {
+                var html = '';
+                for (var mac in sw.macTable) {
+                    var e = sw.macTable[mac];
+                    html += '<tr class="new-entry"><td style="font-family:Consolas,monospace;">' + mac + '</td><td>' + (e.vlan || 1) + '</td><td>' + e.port + '</td><td>' + e.type + '</td></tr>';
+                }
+                macTbody.innerHTML = html;
+            }
+        }
+
+        var vlanTbody = document.getElementById('vlanTableTbody');
+        if (sw.type === 'pc' || !sw.vlans) {
+            vlanTbody.innerHTML = '<tr><td colspan="3" style="color:#94a3b8;text-align:center;">非交换机设备</td></tr>';
+        } else {
+            var vlanHtml = '';
+            for (var vid in sw.vlans) {
+                var v = sw.vlans[vid];
+                vlanHtml += '<tr><td>' + vid + '</td><td>' + v.name + '</td><td style="font-size:11px;">' + v.ports.join(' ') + '</td></tr>';
+            }
+            vlanTbody.innerHTML = vlanHtml;
+        }
+
+        var stpTbody = document.getElementById('stpTableTbody');
+        if (sw.type !== 'switch') {
+            stpTbody.innerHTML = '<tr><td colspan="3" style="color:#94a3b8;text-align:center;">非交换机设备</td></tr>';
+        } else {
+            var stpHtml = '';
+            var ports = Object.keys(sw.portMode);
+            for (var i = 0; i < ports.length; i++) {
+                var pt = ports[i];
+                var role = sw.stpRole[pt] || 'Designated';
+                var state = sw.stpState[pt] || 'Forwarding';
+                if (!isPortUp(currentDevice, pt)) {
+                    role = 'Disabled';
+                    state = 'Disabled';
+                }
+                var roleClass = role === 'Root' ? 'port-role-root' : (role === 'Alternate' ? 'port-role-alternate' : 'port-role-designated');
+                stpHtml += '<tr><td>' + pt + '</td><td class="' + roleClass + '">' + role + '</td><td>' + state + '</td></tr>';
+            }
+            stpTbody.innerHTML = stpHtml;
+        }
+    }
+
+    function renderStepList() {
+        var html = '';
+        for (var i = 0; i < STEPS.length; i++) {
+            var s = STEPS[i];
+            var cls = '';
+            if (s.id === currentStep) cls = 'active';
+            if (stepResults[s.id] === 'pass') cls += ' completed';
+            if (stepResults[s.id] === 'fail') cls += ' failed';
+            var icon = stepResults[s.id] === 'pass' ? '✅' : stepResults[s.id] === 'fail' ? '❌' : (s.id === currentStep ? '▶️' : '⏳');
+            html += '<div class="step-item ' + cls + '" onclick="selectStep(' + s.id + ')">';
+            html += '<span class="step-icon">' + icon + '</span>';
+            html += '步骤' + s.id + '. ' + s.title;
+            html += '</div>';
+        }
+        document.getElementById('stepList').innerHTML = html;
+    }
+
+    function selectStep(id) {
+        currentStep = id;
+        var step = STEPS[id - 1];
+        document.getElementById('hintBox').textContent = step.hint;
+        renderStepList();
+    }
+
+    function autoEvaluate() {
+        var changed = false;
+        for (var i = 0; i < STEPS.length; i++) {
+            var s = STEPS[i];
+            if (stepResults[s.id]) continue;
+            var result = window[s.evalFn]();
+            if (result === 'pass' || result === 'fail') {
+                stepResults[s.id] = result;
+                showEvalResult(s.id, result);
+                changed = true;
+            }
+        }
+        if (changed) {
+            var nextStep = 0;
+            for (var j = 0; j < STEPS.length; j++) {
+                if (!stepResults[STEPS[j].id]) { nextStep = STEPS[j].id; break; }
+            }
+            if (nextStep) { currentStep = nextStep; document.getElementById('hintBox').textContent = STEPS[nextStep - 1].hint; }
+        }
+        updateProgress();
+        renderStepList();
+    }
+
+    function evalStep1() { return step1Done ? 'pass' : ''; }
+    function evalStep2() { return step2Done ? 'pass' : ''; }
+    function evalStep3() { return step3Done ? 'pass' : ''; }
+    function evalStep4() { return step4Done ? 'pass' : ''; }
+    function evalStep5() { return step5Done ? 'pass' : ''; }
+    function evalStep6() {
+        if (DEVICES.S1.portVlan['G0/0/1'] === 10) step6Done = true;
+        return step6Done ? 'pass' : '';
+    }
+    function evalStep7() {
+        if (DEVICES.S1.portVlan['G0/0/2'] === 20) step7Done = true;
+        return step7Done ? 'pass' : '';
+    }
+    function evalStep8() { return step8Done ? 'pass' : ''; }
+    function evalStep9() { return step9Done ? 'pass' : ''; }
+    function evalStep10() {
+        if (DEVICES.S2.portVlan['G0/0/1'] === 10 && DEVICES.S2.portVlan['G0/0/2'] === 20) step10Done = true;
+        return step10Done ? 'pass' : '';
+    }
+    function evalStep11() { return step11Done ? 'pass' : ''; }
+    function evalStep12() { return step12Done ? 'pass' : ''; }
+    function evalStep13() { return step13Done ? 'pass' : ''; }
+    function evalStep14() { return step14Done ? 'pass' : ''; }
+    function evalStep15() { return step15Done ? 'pass' : ''; }
+    function evalStep16() { return step16Done ? 'pass' : ''; }
+    function evalStep17() { return step17Done ? 'pass' : ''; }
+    function evalStep18() { return step18Done ? 'pass' : ''; }
+    function evalStep19() { return step19Done ? 'pass' : ''; }
+    function evalStep20() {
+        var passed = 0;
+        for (var id in stepResults) { if (stepResults[id] === 'pass') passed++; }
+        return passed >= STEPS.length - 1 ? 'pass' : '';
+    }
+
+    function showEvalResult(stepId, result) {
+        var body = document.getElementById('evalBody');
+        var html = '';
+        for (var id in stepResults) {
+            var s = STEPS[id - 1];
+            var cls = stepResults[id] === 'pass' ? 'eval-pass' : 'eval-fail';
+            var txt = stepResults[id] === 'pass' ? '通过 (+' + s.score + '分)' : '未通过';
+            html += '<div class="eval-result ' + cls + '">步骤' + id + '. ' + txt + '</div>';
+        }
+        body.innerHTML = html;
+    }
+
+    function updateProgress() {
+        var completed = 0;
+        totalScore = 0;
+        for (var id in stepResults) {
+            if (stepResults[id] === 'pass') {
+                completed++;
+                totalScore += STEPS[id - 1].score;
+            }
+        }
+        var pct = Math.round(completed / STEPS.length * 100);
+        document.getElementById('progressFill').style.width = pct + '%';
+        document.getElementById('progressText').textContent = pct + '%';
+        document.getElementById('scoreFill').style.width = Math.round(totalScore * 0.8) + '%';
+        document.getElementById('scoreText').textContent = Math.round(totalScore * 0.8) + '/80';
+
+        var nextStep = null;
+        for (var i = 0; i < STEPS.length; i++) {
+            if (!stepResults[STEPS[i].id]) { nextStep = STEPS[i].id; break; }
+        }
+        if (nextStep) {
+            currentStep = nextStep;
+            document.getElementById('hintBox').textContent = STEPS[nextStep - 1].hint;
+        }
+    }
+
+    function resetExperiment() {
+        LabScoringEnhance.init(30);
+        RAND_SUBNET = Math.floor(Math.random() * 9) + 1;
+        PC1_IP = '192.168.' + RAND_SUBNET + '.1';
+        PC2_IP = '192.168.' + RAND_SUBNET + '.2';
+        PC3_IP = '192.168.' + RAND_SUBNET + '.3';
+        PC4_IP = '192.168.' + RAND_SUBNET + '.4';
+        PC_GW = '192.168.' + RAND_SUBNET + '.254';
+        DEVICES.PC1.ip = PC1_IP; DEVICES.PC1.gateway = PC_GW; DEVICES.PC1.arpTable = {};
+        DEVICES.PC2.ip = PC2_IP; DEVICES.PC2.gateway = PC_GW; DEVICES.PC2.arpTable = {};
+        DEVICES.PC3.ip = PC3_IP; DEVICES.PC3.gateway = PC_GW; DEVICES.PC3.arpTable = {};
+        DEVICES.PC4.ip = PC4_IP; DEVICES.PC4.gateway = PC_GW; DEVICES.PC4.arpTable = {};
+        DEVICES.S1.macTable = {};
+        DEVICES.S1.vlans = { '1': { name: 'default', ports: ['G0/0/1','G0/0/2','G0/0/23','G0/0/24'] } };
+        DEVICES.S1.portMode = { 'G0/0/1':'access','G0/0/2':'access','G0/0/23':'trunk','G0/0/24':'trunk' };
+        DEVICES.S1.portVlan = { 'G0/0/1':1,'G0/0/2':1,'G0/0/23':'trunk','G0/0/24':'trunk' };
+        DEVICES.S1.stpPriority = 32768;
+        DEVICES.S2.macTable = {};
+        DEVICES.S2.vlans = { '1': { name: 'default', ports: ['G0/0/1','G0/0/2','G0/0/23','G0/0/24'] } };
+        DEVICES.S2.portMode = { 'G0/0/1':'access','G0/0/2':'access','G0/0/23':'trunk','G0/0/24':'trunk' };
+        DEVICES.S2.portVlan = { 'G0/0/1':1,'G0/0/2':1,'G0/0/23':'trunk','G0/0/24':'trunk' };
+        DEVICES.S2.stpPriority = 32768;
+        DEVICES.S3.macTable = {};
+        DEVICES.S3.vlans = { '1': { name: 'default', ports: ['G0/0/23','G0/0/24'] } };
+        DEVICES.S3.portMode = { 'G0/0/23':'trunk','G0/0/24':'trunk' };
+        DEVICES.S3.portVlan = { 'G0/0/23':'trunk','G0/0/24':'trunk' };
+        DEVICES.S3.stpPriority = 32768;
+
+
+        stepResults = {};
+        demoMode = false;
+        demoUsed = false;
+        totalScore = 0;
+        currentStep = 1;
+        viewMode = 'user';
+        currentInterface = '';
+        currentVlan = 0;
+        consoleHistory = {};
+        portShutdown = {};
+        deviceViewState = {};
+
+        step1Done = false; step2Done = false; step3Done = false; step4Done = false;
+        step5Done = false; step6Done = false; step7Done = false; step8Done = false;
+        step9Done = false; step10Done = false; step11Done = false; step12Done = false;
+        step13Done = false; step14Done = false; step15Done = false; step16Done = false;
+        step17Done = false; step18Done = false; step19Done = false;
+
+        framePackets = [];
+        animating = false;
+        initSTP();
+        switchDevice('S1');
+        renderStepList();
+        updateProgress();
+        updateInfoPanels();
+        document.getElementById('evalBody').innerHTML = '<div style="color:#94a3b8;font-size:12px;">完成步骤后自动评估</div>';
+        document.getElementById('frameInfo').innerHTML = '<span class="label">等待帧传输..</span>';
+        document.getElementById('hintBox').textContent = STEPS[0].hint;
+        clearConsole();
+        consolePrint('实验已重传');
+        drawTopology();
+    }
+
+    function showDemo() {
+        if (demoMode) { stopDemo(); return; }
+        resetExperiment();
+        demoMode = true;
+        demoUsed = true;
+        consolePrint('[演示模式] 演示开始，自动执行所有步骤..');
+
+        var actions = [
+            function() { switchDevice('S1'); setInput('display mac-address'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('PC1'); setInput('ping ' + PC2_IP); handleCommand({key:'Enter'}); },
+            function() { switchDevice('S1'); setInput('display mac-address'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('PC1'); setInput('ping ' + PC3_IP); handleCommand({key:'Enter'}); },
+            function() { switchDevice('S1'); setInput('system-view'); handleCommand({key:'Enter'}); },
+            function() { setInput('vlan 10'); handleCommand({key:'Enter'}); },
+            function() { setInput('name Sales'); handleCommand({key:'Enter'}); },
+            function() { setInput('quit'); handleCommand({key:'Enter'}); },
+            function() { setInput('vlan 20'); handleCommand({key:'Enter'}); },
+            function() { setInput('name Tech'); handleCommand({key:'Enter'}); },
+            function() { setInput('quit'); handleCommand({key:'Enter'}); },
+            function() { setInput('interface G0/0/1'); handleCommand({key:'Enter'}); },
+            function() { setInput('port link-type access'); handleCommand({key:'Enter'}); },
+            function() { setInput('port default vlan 10'); handleCommand({key:'Enter'}); },
+            function() { setInput('quit'); handleCommand({key:'Enter'}); },
+            function() { setInput('interface G0/0/2'); handleCommand({key:'Enter'}); },
+            function() { setInput('port link-type access'); handleCommand({key:'Enter'}); },
+            function() { setInput('port default vlan 20'); handleCommand({key:'Enter'}); },
+            function() { setInput('quit'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('PC1'); setInput('ping ' + PC2_IP); handleCommand({key:'Enter'}); },
+            function() { switchDevice('S2'); setInput('system-view'); handleCommand({key:'Enter'}); },
+            function() { setInput('vlan 10'); handleCommand({key:'Enter'}); },
+            function() { setInput('name Sales'); handleCommand({key:'Enter'}); },
+            function() { setInput('quit'); handleCommand({key:'Enter'}); },
+            function() { setInput('vlan 20'); handleCommand({key:'Enter'}); },
+            function() { setInput('name Tech'); handleCommand({key:'Enter'}); },
+            function() { setInput('quit'); handleCommand({key:'Enter'}); },
+            function() { setInput('interface G0/0/1'); handleCommand({key:'Enter'}); },
+            function() { setInput('port link-type access'); handleCommand({key:'Enter'}); },
+            function() { setInput('port default vlan 10'); handleCommand({key:'Enter'}); },
+            function() { setInput('quit'); handleCommand({key:'Enter'}); },
+            function() { setInput('interface G0/0/2'); handleCommand({key:'Enter'}); },
+            function() { setInput('port link-type access'); handleCommand({key:'Enter'}); },
+            function() { setInput('port default vlan 20'); handleCommand({key:'Enter'}); },
+            function() { setInput('quit'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('S1'); setInput('system-view'); handleCommand({key:'Enter'}); },
+            function() { setInput('interface G0/0/23'); handleCommand({key:'Enter'}); },
+            function() { setInput('port link-type trunk'); handleCommand({key:'Enter'}); },
+            function() { setInput('port trunk allow-pass vlan 10 20'); handleCommand({key:'Enter'}); },
+            function() { setInput('quit'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('S2'); setInput('system-view'); handleCommand({key:'Enter'}); },
+            function() { setInput('interface G0/0/23'); handleCommand({key:'Enter'}); },
+            function() { setInput('port link-type trunk'); handleCommand({key:'Enter'}); },
+            function() { setInput('port trunk allow-pass vlan 10 20'); handleCommand({key:'Enter'}); },
+            function() { setInput('quit'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('PC1'); setInput('ping ' + PC3_IP); handleCommand({key:'Enter'}); },
+            function() { switchDevice('S1'); setInput('display stp brief'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('S2'); setInput('display stp brief'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('S3'); setInput('display stp brief'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('S1'); setInput('system-view'); handleCommand({key:'Enter'}); },
+            function() { setInput('stp priority 0'); handleCommand({key:'Enter'}); },
+            function() { setInput('display stp brief'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('S1'); setInput('system-view'); handleCommand({key:'Enter'}); setInput('shutdown G0/0/23'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('S3'); setInput('display stp brief'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('S1'); setInput('system-view'); handleCommand({key:'Enter'}); setInput('undo shutdown G0/0/23'); handleCommand({key:'Enter'}); },
+            function() { switchDevice('S1'); setInput('display vlan'); handleCommand({key:'Enter'}); },
+            function() { setInput('display stp brief'); handleCommand({key:'Enter'}); }
+        ];
+
+        var idx = 0;
+        function nextAction() {
+            if (idx >= actions.length || !demoMode) { consolePrint('[演示] 完成，共执行' + idx + '步'); demoMode = false; return; }
+
+
+            if (animating) { if (demoTimer) clearTimeout(demoTimer); demoTimer = setTimeout(nextAction, 300); return; }
+            try { actions[idx](); } catch(e) { consolePrint('[演示错误] 步骤' + (idx+1) + ': ' + e.message + ' stack:' + (e.stack||'').substring(0,300)); }
+            idx++;
+            demoTimer = setTimeout(nextAction, 800);
+        }
+        nextAction();
+    }
+
+    function setInput(cmd) {
+        document.getElementById('consoleInput').value = cmd;
+    }
+
+    function stopDemo() {
+        demoMode = false;
+        if (demoTimer) clearTimeout(demoTimer);
+        consolePrint('[演示模式] 已停');
+    }
+
+    async function submitExperiment() {
+        if (labScheduleState === 'not_started') { alert('实验未开放，不能提交报告'); return; }
+        if (labScheduleState === 'ended') { alert('实验已结束，不能再提交报告'); return; }
+        if (demoMode || demoUsed) {
+            consolePrint('[提示] 演示模式下无法提交实验报告，请手动完成实验后提交换');
+            return;
+        }
+        autoEvaluate();
+        var passed = 0;
+        var stepScore = 0;
+        var details = '';
+        for (var i = 0; i < STEPS.length; i++) {
+            var s = STEPS[i];
+            if (stepResults[s.id] === 'pass') {
+                passed++;
+                stepScore += s.score;
+                details += '步骤' + s.id + '. ' + s.title + ' ' + s.score + '<br>';
+            } else {
+                details += '步骤' + s.id + '. ' + s.title + ' 0<br>';
+            }
+        }
+
+        var scoreResult = LabScoringEnhance.getFinalScore(stepScore, 100);
+        details += '<br>--- 综合评价 ---<br>';
+        details += LabScoringEnhance.formatDetails(scoreResult);
+
+        document.getElementById('resultSummary').textContent = '共完成' + passed + '/' + STEPS.length + ' 个实验步骤';
+        document.getElementById('finalScore').textContent = scoreResult.totalScore;
+        document.getElementById('finalScore').style.color = scoreResult.totalScore >= 60 ? '#22c55e' : '#ef4444';
+        document.getElementById('resultDetails').innerHTML = details;
+
+        var currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
+        if (currentUser.username && currentUser.type === 'student') {
+            try {
+                var labTitle = document.querySelector('.top-bar h1').textContent.trim();
+                var reportEntry = {
+                    labTitle: labTitle,
+                    score: scoreResult.totalScore,
+                    maxScore: 100,
+                    submitTime: new Date().toISOString(),
+                    mode: 'manual',
+                    details: details,
+                    baseScore: scoreResult.baseScore,
+                    accuracyScore: scoreResult.accuracyScore,
+                    efficiencyScore: scoreResult.efficiencyScore,
+                    errorCount: scoreResult.errorCount,
+                    elapsedMinutes: scoreResult.elapsedMinutes
+                };
+                var token = localStorage.getItem('authToken') || '';
+                var res = await fetch(API_BASE + '/api/lab-reports', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                    body: JSON.stringify({ studentId: currentUser.username, report: reportEntry })
+                });
+                var result = await res.json();
+                if (result.error) console.error('提交报告失败:', result.error);
+            } catch (e) { console.error('提交报告失败:', e); }
+        }
+        document.getElementById('resultModal').classList.add('show');
+
+        stepResults[20] = passed >= STEPS.length - 1 ? 'pass' : 'fail';
+        showEvalResult(20, stepResults[20]);
+        updateProgress();
+        renderStepList();
+    }
+
+    window.addEventListener('load', init);
+
+    </script>
+
+
+    <script>
+    (async function() {
+    var THIS_LAB_ID = 'switch-vlan-stp-lab';
+    var user = JSON.parse(localStorage.getItem('currentUser') || '{}');
+    var schedules = {};
+    try {
+        var res = await fetch(API_BASE + '/api/lab-schedules', {headers:{'Authorization':'Bearer '+(localStorage.getItem('authToken')||'')}});
+        var data = await res.json();
+        schedules = data.schedules || {};
+    } catch(e) {}
+    var s = schedules[THIS_LAB_ID] || {};
+    var now = new Date().getTime();
+    window.labScheduleState = 'not_started';
+    if (s.alwaysOpen) window.labScheduleState = 'open';
+    else if (s.startTime && now < new Date(s.startTime).getTime()) window.labScheduleState = 'not_started';
+    else if (s.endTime && now > new Date(s.endTime).getTime()) window.labScheduleState = 'ended';
+    else if (s.startTime || s.endTime) window.labScheduleState = 'open';
+
+    if (user.type === 'student' && labScheduleState === 'not_started') {
+        var startStr = s.startTime ? new Date(s.startTime).toLocaleString('zh-CN') : '';
+        var endStr = s.endTime ? new Date(s.endTime).toLocaleString('zh-CN') : '';
+        var overlay = document.createElement('div');
+        overlay.id = 'labScheduleOverlay';
+        overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:99999;display:flex;align-items:center;justify-content:center;';
+        overlay.innerHTML = '<div style="background:white;border-radius:20px;padding:40px 50px;text-align:center;max-width:500px;box-shadow:0 20px 60px rgba(0,0,0,0.3);">' +
+            '<div style="font-size:60px;margin-bottom:20px;">⏰</div>' +
+            '<h2 style="color:#e74c3c;margin-bottom:15px;">实验未开放</h2>' +
+            '<p style="color:#666;font-size:16px;line-height:1.8;">该实验尚未到开放时间，暂时无法操作</p>' +
+            (startStr ? '<p style="color:#333;font-size:15px;margin-top:10px;">开放时间：' + startStr + ' — ' + endStr + '</p>' : '') +
+            '<button onclick="window.location.href=\'../index.html\'" style="margin-top:25px;padding:12px 40px;background:linear-gradient(135deg,#4a90e2,#357abd);color:white;border:none;border-radius:10px;font-size:16px;cursor:pointer;transition:all 0.3s;">返回首页</button>' +
+            '</div>';
+        document.body.appendChild(overlay);
+        var cmdInput = document.getElementById('commandInput');
+        if (cmdInput) cmdInput.disabled = true;
+        var demoBtn = document.querySelector('.btn-demo');
+        if (demoBtn) demoBtn.disabled = true;
+        var submitBtn = document.querySelector('.btn-submit');
+        if (submitBtn) submitBtn.disabled = true;
+    } else if (user.type === 'student' && labScheduleState === 'ended') {
+        var submitBtn2 = document.querySelector('.btn-submit');
+        if (submitBtn2) {
+            submitBtn2.disabled = true;
+            submitBtn2.title = '实验已结束，不能再提交报告';
+            submitBtn2.style.opacity = '0.5';
+            submitBtn2.style.cursor = 'not-allowed';
+        }
+        var banner = document.createElement('div');
+        banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:linear-gradient(135deg,#f39c12,#e67e22);color:white;text-align:center;padding:12px;font-size:15px;z-index:9998;box-shadow:0 -2px 10px rgba(0,0,0,0.2);';
+        banner.innerHTML = '⚠️ 实验已结束，您可以查看实验内容，但不能再提交实验报告';
+        document.body.appendChild(banner);
+        document.body.style.paddingBottom = '50px';
+    }
+
+    function toggleHintPanel() {
+        var panel = document.getElementById('floatHintPanel');
+        if (panel.classList.contains('hidden')) {
+            panel.classList.remove('hidden');
+        } else {
+            panel.classList.add('hidden');
+        }
+    }
+
+    (function() {
+        var header = document.getElementById('floatHintHeader');
+        var panel = document.getElementById('floatHintPanel');
+        if (!header || !panel) return;
+        var dragging = false, offsetX = 0, offsetY = 0;
+        header.addEventListener('mousedown', function(e) {
+            dragging = true;
+            var rect = panel.getBoundingClientRect();
+            var parentRect = panel.parentElement.getBoundingClientRect();
+            offsetX = e.clientX - rect.left;
+            offsetY = e.clientY - rect.top;
+            panel.style.left = (rect.left - parentRect.left) + 'px';
+            panel.style.top = (rect.top - parentRect.top) + 'px';
+            panel.style.right = 'auto';
+            panel.style.bottom = 'auto';
+            e.preventDefault();
+        });
+        document.addEventListener('mousemove', function(e) {
+            if (!dragging) return;
+            var parentRect = panel.parentElement.getBoundingClientRect();
+            panel.style.left = (e.clientX - parentRect.left - offsetX) + 'px';
+            panel.style.top = (e.clientY - parentRect.top - offsetY) + 'px';
+        });
+        document.addEventListener('mouseup', function() { dragging = false; });
+    })();
+    })();
+    </script>
+    <script src="../chat-knowledge.js"></script>
+    <script src="../kb-loader.js"></script>
+    <script src="../chat-agent.js"></script>
+    <script>
+    document.addEventListener('paste', function(e) {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+            e.preventDefault();
+        }
+    }, true);
+    </script>
+</body>
+</html>

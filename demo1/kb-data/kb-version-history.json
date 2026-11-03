@@ -1,0 +1,201 @@
+[
+  {
+    "version": "v2.3.0",
+    "date": "2026-08-19",
+    "description": "新增408考研真题分类，包含2016-2025年近十年全国研究生入学考试408科目计算机网络真题及详细解析",
+    "changes": {
+      "addedCategories": 1,
+      "addedItems": 10,
+      "totalCategories": 19,
+      "totalItems": 174
+    }
+  },
+  {
+    "versionId": "v1",
+    "updateTime": "2026-07-18T05:21:02.209Z",
+    "addedCount": 1,
+    "updatedCount": 0,
+    "failedCount": 0,
+    "summary": "Approved pending item: test",
+    "status": "success"
+  },
+  {
+    "versionId": "v2",
+    "updateTime": "2026-07-19T00:36:25.568Z",
+    "addedCount": 1,
+    "updatedCount": 0,
+    "failedCount": 0,
+    "summary": "Approved pending item: 玥玥在哪个小学上学？",
+    "status": "success"
+  },
+  {
+    "versionId": "v3",
+    "updateTime": "2026-07-19T00:36:28.182Z",
+    "addedCount": 1,
+    "updatedCount": 0,
+    "failedCount": 0,
+    "summary": "Approved pending item: 玥玥的生肖是啥？",
+    "status": "success"
+  },
+  {
+    "versionId": "v4",
+    "updateTime": "2026-07-19T00:36:32.190Z",
+    "addedCount": 1,
+    "updatedCount": 0,
+    "failedCount": 0,
+    "summary": "Approved pending item: 玥玥在哪个小学上学？",
+    "status": "success"
+  },
+  {
+    "versionId": "v5",
+    "updateTime": "2026-07-19T00:36:36.480Z",
+    "addedCount": 1,
+    "updatedCount": 0,
+    "failedCount": 0,
+    "summary": "Approved pending item: 玥玥的生肖是啥？",
+    "status": "success"
+  },
+  {
+    "versionId": "v6",
+    "updateTime": "2026-07-19T00:36:39.909Z",
+    "addedCount": 1,
+    "updatedCount": 0,
+    "failedCount": 0,
+    "summary": "Approved pending item: 什么是TCP协议？",
+    "status": "success"
+  },
+  {
+    "versionId": "v7",
+    "updateTime": "2026-07-19T00:36:42.616Z",
+    "addedCount": 1,
+    "updatedCount": 0,
+    "failedCount": 0,
+    "summary": "Approved pending item: 什么是UDP协议？",
+    "status": "success"
+  },
+  {
+    "versionId": "v8",
+    "updateTime": "2026-07-19T00:36:44.562Z",
+    "addedCount": 1,
+    "updatedCount": 0,
+    "failedCount": 0,
+    "summary": "Approved pending item: 什么是IP地址？",
+    "status": "success"
+  },
+  {
+    "versionId": "v9",
+    "updateTime": "2026-07-19T00:40:17.636Z",
+    "addedCount": 0,
+    "updatedCount": 0,
+    "failedCount": 0,
+    "summary": "Rollback to v7",
+    "status": "success"
+  },
+  {
+    "versionId": "v10",
+    "updateTime": "2026-07-19T00:40:27.521Z",
+    "addedCount": 0,
+    "updatedCount": 0,
+    "failedCount": 0,
+    "summary": "Rollback to v9",
+    "status": "success"
+  },
+  {
+    "versionId": "v11",
+    "updateTime": "2026-07-19T00:40:38.188Z",
+    "addedCount": 0,
+    "updatedCount": 0,
+    "failedCount": 0,
+    "summary": "Rollback to v10",
+    "status": "success"
+  },
+  {
+    "versionId": "v12",
+    "updateTime": "2026-07-19T00:40:43.340Z",
+    "addedCount": 0,
+    "updatedCount": 0,
+    "failedCount": 0,
+    "summary": "Rollback to v11",
+    "status": "success"
+  },
+  {
+    "versionId": "v13",
+    "updateTime": "2026-07-19T00:41:04.592Z",
+    "addedCount": 0,
+    "updatedCount": 0,
+    "failedCount": 0,
+    "summary": "Rollback to v8",
+    "status": "success"
+  },
+  {
+    "versionId": "v14",
+    "updateTime": "2026-07-19T01:12:23.651Z",
+    "addedCount": 1,
+    "updatedCount": 0,
+    "failedCount": 0,
+    "summary": "Approved pending item: 计算机网络课程总学时多少？",
+    "status": "success"
+  },
+  {
+    "versionId": "v15",
+    "updateTime": "2026-07-19T01:14:13.563Z",
+    "addedCount": 1,
+    "updatedCount": 0,
+    "failedCount": 0,
+    "summary": "Approved pending item: 计算机网络是408考研课吗？",
+    "status": "success"
+  },
+  {
+    "versionId": "v16",
+    "updateTime": "2026-07-20T06:52:58.168Z",
+    "addedCount": 1,
+    "updatedCount": 0,
+    "failedCount": 0,
+    "summary": "Approved pending item: 华为ICT大赛分成几个阶段？",
+    "status": "success"
+  },
+  {
+    "versionId": "v17",
+    "updateTime": "2026-07-20T06:53:00.201Z",
+    "addedCount": 1,
+    "updatedCount": 0,
+    "failedCount": 0,
+    "summary": "Approved pending item: 华为ICT大赛举办时间？",
+    "status": "success"
+  },
+  {
+    "versionId": "v18",
+    "updateTime": "2026-07-20T08:04:25.796Z",
+    "addedCount": 1,
+    "updatedCount": 0,
+    "failedCount": 0,
+    "summary": "Approved pending item: 华为ICT大赛分成几个阶段？",
+    "status": "success"
+  },
+  {
+    "versionId": "v19",
+    "updateTime": "2026-07-20T08:04:28.787Z",
+    "addedCount": 1,
+    "updatedCount": 0,
+    "failedCount": 0,
+    "summary": "Approved pending item: 华为ICT大赛举办时间？",
+    "status": "success"
+  },
+  {
+    "versionId": "v20",
+    "updateTime": "2026-07-20T08:04:44.986Z",
+    "addedCount": 1,
+    "updatedCount": 0,
+    "failedCount": 0,
+    "summary": "Approved pending item: 计算机网络是408考研课吗？",
+    "status": "success"
+  },
+  {
+    "version": "v1787128524424",
+    "time": "2026-08-19T08:35:24.424Z",
+    "action": "全面扩充知识库",
+    "details": "从14个分类103条扩充到18个分类164条，新增无线网络、网络编程、SDN新技术、云计算网络4个分类",
+    "itemCount": 164,
+    "categoryCount": 18
+  }
+]

@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数字信号编码 - 计算机网络辅助教学平台</title>
+    <script src="../auth-check.js"></script>
+    <script src="../utils.js"></script>
+    <script src="../study-tracker.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+            background: #0b1120;
+            min-height: 100vh;
+            padding: 20px;
+         color: #e2e8f0; }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: #0f172a;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 30px;
+        }
+
+        h1 {
+            text-align: center;
+            color: #e2e8f0;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #cbd5e1;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .input-section {
+            background: #0f172a;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 30px;
+        }
+
+        .input-group {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .input-group label {
+            font-weight: bold;
+            color: #e2e8f0;
+            font-size: 16px;
+            min-width: 120px;
+        }
+
+        .input-group input {
+            flex: 1;
+            padding: 12px 20px;
+            font-size: 18px;
+            border: 2px solid #4a90e2;
+            border-radius: 10px;
+            font-family: 'Courier New', monospace;
+            letter-spacing: 3px;
+        }
+
+        .input-group input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 10px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+        }
+
+        button {
+            padding: 12px 30px;
+            font-size: 16px;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: bold;
+        }
+
+        .btn-draw {
+            background: #0ea5e9;
+            color: white;
+        }
+
+        .btn-draw:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-example {
+            background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
+            color: white;
+        }
+
+        .btn-example:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(46, 204, 113, 0.4);
+        }
+
+        .btn-clear {
+            background: linear-gradient(135deg, #95a5a6 0%, #7f8c8d 100%);
+            color: white;
+        }
+
+        .btn-clear:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(127, 140, 141, 0.4);
+        }
+
+        .hint {
+            color: #cbd5e1;
+            font-size: 13px;
+            margin-top: 10px;
+            text-align: center;
+        }
+
+        .encoding-section {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 25px;
+        }
+
+        .encoding-card {
+            background: #0f172a;
+            border-radius: 15px;
+            padding: 20px;
+            border: 2px solid #334155;
+            transition: all 0.3s ease;
+        }
+
+        .encoding-card:hover {
+            border-color: #4a90e2;
+            box-shadow: 0 5px 20px rgba(74, 144, 226, 0.2);
+        }
+
+        .encoding-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .encoding-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #e2e8f0;
+        }
+
+        .encoding-badge {
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .badge-nrz { background: #e74c3c; color: white; }
+        .badge-nrzi { background: #3498db; color: white; }
+        .badge-manchester { background: #2ecc71; color: white; }
+        .badge-diff-manchester { background: #9b59b6; color: white; }
+
+        .canvas-container {
+            background: #0f172a;
+            border-radius: 10px;
+            padding: 15px;
+            border: 1px solid #334155;
+        }
+
+        canvas {
+            width: 100%;
+            height: 150px;
+            display: block;
+        }
+
+        .encoding-description {
+            margin-top: 15px;
+            padding: 15px;
+            background: #0f172a;
+            border-radius: 8px;
+            border-left: 4px solid #4a90e2;
+        }
+
+        .encoding-description h3 {
+            color: #4a90e2;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        .encoding-description p {
+            color: #cbd5e1;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .info-panel {
+            background: #0f172a;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 30px;
+        }
+
+        .info-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #e2e8f0;
+            margin-bottom: 15px;
+        }
+
+        .info-content {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+        }
+
+        .info-item {
+            background: #0f172a;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #4a90e2;
+        }
+
+        .info-item h3 {
+            color: #4a90e2;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .info-item p {
+            color: #cbd5e1;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .binary-display {
+            text-align: center;
+            padding: 15px;
+            background: #0f172a;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            border: 2px solid #4a90e2;
+        }
+
+        .binary-display span {
+            font-family: 'Courier New', monospace;
+            font-size: 24px;
+            font-weight: bold;
+            color: #4a90e2;
+            letter-spacing: 8px;
+        }
+
+        .error-message {
+            color: #e74c3c;
+            font-size: 14px;
+            text-align: center;
+            margin-top: 10px;
+            display: none;
+        }
+
+        .error-message.show {
+            display: block;
+        }
+    </style>
+
+</head>
+<body>
+    <div class="container">
+        <h1>计算机网络 - 数字信号的常用编码方式</h1>
+        <p class="subtitle">基于《计算机网络教程（第7版）》图2-2 | 四种常见数字信号编码方式</p>
+
+        <div class="input-section">
+            <div class="input-group">
+                <label>二进制码</label>
+                <input type="text" id="binaryInput" placeholder="请输入5-8位二进制" maxlength="8" value="10110010">
+            </div>
+            <div class="btn-group">
+                <button class="btn-draw" onclick="drawEncodings()">📊 绘制编码</button>
+                <button class="btn-example" onclick="loadExample()">💡 示例数据</button>
+                <button class="btn-clear" onclick="clearAll()">🗑清空</button>
+            </div>
+            <p class="hint">提示：请输入5-8位二进制码（只能包含0和1），例如01100101</p>
+            <p class="error-message" id="errorMessage"></p>
+        </div>
+
+        <div class="binary-display" id="binaryDisplay" style="display: none;">
+            <span id="binaryText"></span>
+        </div>
+
+        <div class="encoding-section">
+            <!-- 不归零编码NRZ -->
+            <div class="encoding-card">
+                <div class="encoding-header">
+                    <div class="encoding-title">1. 不归零编码(NRZ - Non-Return to Zero)</div>
+                    <div class="encoding-badge badge-nrz">NRZ</div>
+                </div>
+                <div class="canvas-container">
+                    <canvas id="nrzCanvas"></canvas>
+                </div>
+                <div class="encoding-description">
+                    <h3>编码规则</h3>
+                    <p><strong>正电平</strong>表示二进制1，<strong>负电平</strong>表示二进制0。在整个码元期间，电平保持不变。简单直观，但无法提取同步信号。</p>
+                </div>
+            </div>
+
+            <!-- 归零编码 RZ -->
+            <div class="encoding-card">
+                <div class="encoding-header">
+                    <div class="encoding-title">2. 归零编码 (RZ - Return to Zero) 【双极性】</div>
+                    <div class="encoding-badge badge-nrzi">RZ</div>
+                </div>
+                <div class="canvas-container">
+                    <canvas id="rzCanvas"></canvas>
+                </div>
+                <div class="encoding-description">
+                    <h3>编码规则（双极性归零码）</h3>
+                    <p>二进制1<strong>正电平在码元中间归零</strong>，二进制0<strong>负电平在码元中间归零</strong>。每个码元中间都会归零，便于提取同步信号。使用三电平（+V, 0, -V）。</p>
+                </div>
+            </div>
+
+            <!-- 曼彻斯特编码 -->
+            <div class="encoding-card">
+                <div class="encoding-header">
+                    <div class="encoding-title">3. 曼彻斯特编码 (Manchester)</div>
+                    <div class="encoding-badge badge-manchester">曼彻斯特</div>
+                </div>
+                <div class="canvas-container">
+                    <canvas id="manchesterCanvas"></canvas>
+                </div>
+                <div class="encoding-description">
+                    <h3>编码规则</h3>
+                    <p>二进制1<strong>高电平跳变到低电平</strong>（前高后低）；二进制0<strong>低电平跳变到高电平</strong>（前低后高）。每个码元中间都有跳变，便于提取同步信号。</p>
+                </div>
+            </div>
+
+            <!-- 差分曼彻斯特编码 -->
+            <div class="encoding-card">
+                <div class="encoding-header">
+                    <div class="encoding-title">4. 差分曼彻斯特编码 (Differential Manchester)</div>
+                    <div class="encoding-badge badge-diff-manchester">Diff-Man</div>
+                </div>
+                <div class="canvas-container">
+                    <canvas id="diffManchesterCanvas"></canvas>
+                </div>
+                <div class="encoding-description">
+                    <h3>编码规则</h3>
+                    <p>码元中间<strong>始终有跳变</strong>（用于同步）。二进制1<strong>码元开始无跳变</strong>，二进制0<strong>码元开始有跳变</strong>。具有更好的抗干扰能力。</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="info-panel">
+            <div class="info-title">📚 编码方式对比</div>
+            <div class="info-content">
+                <div class="info-item">
+                    <h3>🔹 不归零编码(NRZ)</h3>
+                    <p>优点：实现简单，带宽利用率高。缺点：无法提取同步信号，长时间连1或连0时接收方容易失同步。</p>
+                </div>
+                <div class="info-item">
+                    <h3>🔹 归零编码 (RZ) 【双极性】</h3>
+                    <p>优点：每个码元中间都归零，便于提取同步信号。缺点：带宽利用率低，需要三电平（+V, 0, -V）。</p>
+                </div>
+                <div class="info-item">
+                    <h3>🔹 曼彻斯特编码</h3>
+                    <p>优点：每个码元中间都有跳变，便于提取同步信号。缺点：带宽利用率低，需要双倍带宽。</p>
+                </div>
+                <div class="info-item">
+                    <h3>🔹 差分曼彻斯特编码</h3>
+                    <p>优点：具有更好的抗干扰能力，同步性能好。缺点：实现复杂，带宽利用率低。</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 验证二进制输入
+        function validateBinary(input) {
+            const regex = /^[01]{5,8}$/;
+            return regex.test(input);
+        }
+
+        // 显示错误信息
+        function showError(message) {
+            const errorElement = document.getElementById('errorMessage');
+            errorElement.textContent = message;
+            errorElement.classList.add('show');
+        }
+
+        // 隐藏错误信息
+        function hideError() {
+            const errorElement = document.getElementById('errorMessage');
+            errorElement.classList.remove('show');
+        }
+
+        // 绘制坐标
+        function drawAxis(ctx, width, height, binaryLength) {
+            const padding = 50;
+            const axisY = height / 2;
+            
+            // 清空画布
+            ctx.clearRect(0, 0, width, height);
+            
+            // 绘制背景网格
+            ctx.strokeStyle = '#1e293b';
+            ctx.lineWidth = 1;
+            
+            // 水平网格
+            for (let i = 0; i <= 4; i++) {
+                const y = (height / 4) * i;
+                ctx.beginPath();
+                ctx.moveTo(padding, y);
+                ctx.lineTo(width - 20, y);
+                ctx.stroke();
+            }
+            
+            // 绘制坐标
+            ctx.strokeStyle = '#e2e8f0';
+            ctx.lineWidth = 2;
+            
+            // Y
+            ctx.beginPath();
+            ctx.moveTo(padding, 10);
+            ctx.lineTo(padding, height - 10);
+            ctx.stroke();
+            
+            // X
+            ctx.beginPath();
+            ctx.moveTo(padding, axisY);
+            ctx.lineTo(width - 20, axisY);
+            ctx.stroke();
+            
+            // Y轴标
+            ctx.fillStyle = '#e2e8f0';
+            ctx.font = '12px Microsoft YaHei';
+            ctx.textAlign = 'right';
+            ctx.fillText('+V', padding - 5, 25);
+            ctx.fillText('0', padding - 5, axisY + 4);
+            ctx.fillText('-V', padding - 5, height - 15);
+            
+            // 箭头
+            ctx.beginPath();
+            ctx.moveTo(padding - 5, 15);
+            ctx.lineTo(padding, 10);
+            ctx.lineTo(padding + 5, 15);
+            ctx.stroke();
+            
+            // 绘制码元分隔虚线
+            if (binaryLength && binaryLength > 0) {
+                const bitWidth = (width - padding - 20) / binaryLength;
+                ctx.strokeStyle = '#999';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([5, 5]); // 虚线样式
+                
+                for (let i = 1; i < binaryLength; i++) {
+                    const x = padding + i * bitWidth;
+                    ctx.beginPath();
+                    ctx.moveTo(x, 10);
+                    ctx.lineTo(x, height - 10);
+                    ctx.stroke();
+                }
+                
+                ctx.setLineDash([]); // 恢复实线
+            }
+            
+            return { padding, axisY };
+        }
+
+        // 绘制跳变箭头（使用带箭头的线条）
+        function drawTransitionArrow(ctx, x, y, direction, color = '#ff6b6b') {
+            const arrowLength = 25;
+            const arrowHeadSize = 10;
+            
+            ctx.save();
+            ctx.strokeStyle = color;
+            ctx.fillStyle = color;
+            ctx.lineWidth = 3;
+            
+            ctx.beginPath();
+            if (direction === 'up') {
+                // 向上箭头
+                ctx.moveTo(x, y + arrowLength/2);
+                ctx.lineTo(x, y - arrowLength/2);
+                ctx.stroke();
+                
+                // 箭头
+                ctx.beginPath();
+                ctx.moveTo(x, y - arrowLength/2);
+                ctx.lineTo(x - arrowHeadSize, y - arrowLength/2 + arrowHeadSize);
+                ctx.lineTo(x + arrowHeadSize, y - arrowLength/2 + arrowHeadSize);
+                ctx.closePath();
+                ctx.fill();
+            } else if (direction === 'down') {
+                // 向下箭头
+                ctx.moveTo(x, y - arrowLength/2);
+                ctx.lineTo(x, y + arrowLength/2);
+                ctx.stroke();
+                
+                // 箭头
+                ctx.beginPath();
+                ctx.moveTo(x, y + arrowLength/2);
+                ctx.lineTo(x - arrowHeadSize, y + arrowLength/2 - arrowHeadSize);
+                ctx.lineTo(x + arrowHeadSize, y + arrowLength/2 - arrowHeadSize);
+                ctx.closePath();
+                ctx.fill();
+            }
+            ctx.restore();
+        }
+
+        // 绘制跳变虚线
+        function drawTransitionLine(ctx, x, y1, y2, color = '#ff6b6b') {
+            ctx.save();
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2;
+            ctx.setLineDash([4, 4]); // 虚线样式
+            
+            ctx.beginPath();
+            ctx.moveTo(x, y1);
+            ctx.lineTo(x, y2);
+            ctx.stroke();
+            
+            ctx.restore();
+        }
+
+        // 绘制NRZ编码
+        function drawNRZ(binary) {
+            const canvas = document.getElementById('nrzCanvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = canvas.offsetWidth * 2;
+            canvas.height = canvas.offsetHeight * 2;
+            ctx.scale(2, 2);
+            
+            const width = canvas.offsetWidth;
+            const height = canvas.offsetHeight;
+            const { padding, axisY } = drawAxis(ctx, width, height, binary.length);
+            
+            const bitWidth = (width - padding - 20) / binary.length;
+            const amplitude = (height / 2 - 30);
+            
+            // 先绘制水平线
+            ctx.strokeStyle = '#e74c3c';
+            ctx.lineWidth = 3;
+            
+            const transitions = []; // 记录跳变位置
+            let prevY = null;
+            
+            for (let i = 0; i < binary.length; i++) {
+                const x = padding + i * bitWidth;
+                const bit = binary[i];
+                const y = bit === '1' ? axisY - amplitude : axisY + amplitude;
+                
+                // 绘制水平线段
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+                ctx.lineTo(x + bitWidth, y);
+                ctx.stroke();
+                
+                if (i > 0) {
+                    const prevBit = binary[i - 1];
+                    if (prevBit !== bit) {
+                        // 记录跳变位置
+                        const direction = y < prevY ? 'up' : 'down';
+                        transitions.push({ x, y1: prevY, y2: y, direction });
+                    }
+                }
+                
+                prevY = y;
+                
+                // 绘制位标
+                ctx.fillStyle = '#cbd5e1';
+                ctx.font = '14px Courier New';
+                ctx.textAlign = 'center';
+                ctx.fillText(bit, x + bitWidth / 2, height - 5);
+            }
+            
+            // 绘制跳变虚线和箭
+            transitions.forEach(t => {
+                // 绘制虚线
+                ctx.save();
+                ctx.strokeStyle = '#e74c3c';
+                ctx.lineWidth = 3;
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath();
+                ctx.moveTo(t.x, t.y1);
+                ctx.lineTo(t.x, t.y2);
+                ctx.stroke();
+                ctx.restore();
+                
+                // 绘制箭头
+                drawTransitionArrow(ctx, t.x, axisY, t.direction, '#ff9500');
+            });
+        }
+
+        // 绘制RZ编码（归零制）
+        function drawRZ(binary) {
+            const canvas = document.getElementById('rzCanvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = canvas.offsetWidth * 2;
+            canvas.height = canvas.offsetHeight * 2;
+            ctx.scale(2, 2);
+            
+            const width = canvas.offsetWidth;
+            const height = canvas.offsetHeight;
+            const { padding, axisY } = drawAxis(ctx, width, height, binary.length);
+            
+            const bitWidth = (width - padding - 20) / binary.length;
+            const amplitude = (height / 2 - 30);
+            
+            ctx.strokeStyle = '#3498db';
+            ctx.lineWidth = 3;
+            
+            const transitions = []; // 记录跳变位置
+            
+            for (let i = 0; i < binary.length; i++) {
+                const x = padding + i * bitWidth;
+                const bit = binary[i];
+                
+                // 1: 正电平在中间归零, 0: 负电平在中间归零
+                const y1 = bit === '1' ? axisY - amplitude : axisY + amplitude;
+                const y2 = axisY; // 归零
+                
+                // 绘制前半段水平线（实线）
+                ctx.beginPath();
+                ctx.moveTo(x, y1);
+                ctx.lineTo(x + bitWidth / 2, y1);
+                ctx.stroke();
+                
+                // 绘制后半段水平线（虚线，0电平）
+                ctx.save();
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath();
+                ctx.moveTo(x + bitWidth / 2, y2);
+                ctx.lineTo(x + bitWidth, y2);
+                ctx.stroke();
+                ctx.restore();
+                
+                // 记录归零跳变位置
+                const direction = bit === '1' ? 'down' : 'up';
+                transitions.push({ x: x + bitWidth / 2, y1, y2, direction });
+                
+                // 绘制位标
+                ctx.fillStyle = '#cbd5e1';
+                ctx.font = '14px Courier New';
+                ctx.textAlign = 'center';
+                ctx.fillText(bit, x + bitWidth / 2, height - 5);
+            }
+            
+            // 绘制跳变虚线和箭
+            transitions.forEach(t => {
+                // 绘制虚线
+                ctx.save();
+                ctx.strokeStyle = '#3498db';
+                ctx.lineWidth = 3;
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath();
+                ctx.moveTo(t.x, t.y1);
+                ctx.lineTo(t.x, t.y2);
+                ctx.stroke();
+                ctx.restore();
+                
+                // 绘制箭头，根据方向调整位置（放在有虚线的地方）
+                const arrowOffset = 15; // 偏移
+                const arrowY = t.direction === 'up' ? axisY + arrowOffset : axisY - arrowOffset;
+                drawTransitionArrow(ctx, t.x, arrowY, t.direction, '#ff6b6b');
+            });
+        }
+
+        // 绘制曼彻斯特编码
+        function drawManchester(binary) {
+            const canvas = document.getElementById('manchesterCanvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = canvas.offsetWidth * 2;
+            canvas.height = canvas.offsetHeight * 2;
+            ctx.scale(2, 2);
+            
+            const width = canvas.offsetWidth;
+            const height = canvas.offsetHeight;
+            const { padding, axisY } = drawAxis(ctx, width, height, binary.length);
+            
+            const bitWidth = (width - padding - 20) / binary.length;
+            const amplitude = (height / 2 - 30);
+            
+            ctx.strokeStyle = '#2ecc71';
+            ctx.lineWidth = 3;
+            
+            const transitions = []; // 记录跳变位置
+            
+            for (let i = 0; i < binary.length; i++) {
+                const x = padding + i * bitWidth;
+                const bit = binary[i];
+                
+                // 1: > 0: >
+                const y1 = bit === '1' ? axisY - amplitude : axisY + amplitude;
+                const y2 = bit === '1' ? axisY + amplitude : axisY - amplitude;
+                
+                // 绘制前半段水平线
+                ctx.beginPath();
+                ctx.moveTo(x, y1);
+                ctx.lineTo(x + bitWidth / 2, y1);
+                ctx.stroke();
+                
+                // 绘制后半段水平线
+                ctx.beginPath();
+                ctx.moveTo(x + bitWidth / 2, y2);
+                ctx.lineTo(x + bitWidth, y2);
+                ctx.stroke();
+                
+                // 记录中间跳变位置
+                const direction = bit === '1' ? 'down' : 'up';
+                transitions.push({ x: x + bitWidth / 2, y1, y2, direction });
+                
+                // 绘制位标
+                ctx.fillStyle = '#cbd5e1';
+                ctx.font = '14px Courier New';
+                ctx.textAlign = 'center';
+                ctx.fillText(bit, x + bitWidth / 2, height - 5);
+            }
+            
+            // 绘制跳变虚线和箭
+            transitions.forEach(t => {
+                // 绘制虚线
+                ctx.save();
+                ctx.strokeStyle = '#2ecc71';
+                ctx.lineWidth = 3;
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath();
+                ctx.moveTo(t.x, t.y1);
+                ctx.lineTo(t.x, t.y2);
+                ctx.stroke();
+                ctx.restore();
+                
+                // 绘制箭头（放在有虚线的地方）
+                const arrowOffset = 15;
+                const arrowY = t.direction === 'up' ? axisY + arrowOffset : axisY - arrowOffset;
+                drawTransitionArrow(ctx, t.x, arrowY, t.direction, '#9b59b6');
+            });
+        }
+
+        // 绘制差分曼彻斯特编码
+        function drawDiffManchester(binary) {
+            const canvas = document.getElementById('diffManchesterCanvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = canvas.offsetWidth * 2;
+            canvas.height = canvas.offsetHeight * 2;
+            ctx.scale(2, 2);
+            
+            const width = canvas.offsetWidth;
+            const height = canvas.offsetHeight;
+            const { padding, axisY } = drawAxis(ctx, width, height, binary.length);
+            
+            const bitWidth = (width - padding - 20) / binary.length;
+            const amplitude = (height / 2 - 30);
+            
+            ctx.strokeStyle = '#9b59b6';
+            ctx.lineWidth = 3;
+            
+            let prevEndLevel = -1; // 前一个码元结束时的电平
+            const transitions = []; // 记录跳变位置
+            
+            for (let i = 0; i < binary.length; i++) {
+                const x = padding + i * bitWidth;
+                const bit = binary[i];
+                
+                // 0: 开始有跳变, 1: 开始无跳变
+                let startLevel;
+                if (bit === '0') {
+                    startLevel = -prevEndLevel; // 跳变
+                } else {
+                    startLevel = prevEndLevel; // 不跳
+                }
+                
+                const endLevel = -startLevel; // 中间跳变
+                
+                const y1 = startLevel === 1 ? axisY - amplitude : axisY + amplitude;
+                const y2 = endLevel === 1 ? axisY - amplitude : axisY + amplitude;
+                
+                // 绘制前半段水平线
+                ctx.beginPath();
+                ctx.moveTo(x, y1);
+                ctx.lineTo(x + bitWidth / 2, y1);
+                ctx.stroke();
+                
+                // 绘制后半段水平线
+                ctx.beginPath();
+                ctx.moveTo(x + bitWidth / 2, y2);
+                ctx.lineTo(x + bitWidth, y2);
+                ctx.stroke();
+                
+                // 记录中间跳变位置
+                const direction = endLevel === 1 ? 'up' : 'down';
+                transitions.push({ x: x + bitWidth / 2, y1, y2, direction });
+                
+                prevEndLevel = endLevel;
+                
+                // 绘制位标
+                ctx.fillStyle = '#cbd5e1';
+                ctx.font = '14px Courier New';
+                ctx.textAlign = 'center';
+                ctx.fillText(bit, x + bitWidth / 2, height - 5);
+            }
+            
+            // 绘制跳变虚线和箭
+            transitions.forEach(t => {
+                // 绘制虚线
+                ctx.save();
+                ctx.strokeStyle = '#9b59b6';
+                ctx.lineWidth = 3;
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath();
+                ctx.moveTo(t.x, t.y1);
+                ctx.lineTo(t.x, t.y2);
+                ctx.stroke();
+                ctx.restore();
+                
+                // 绘制箭头（放在有虚线的地方）
+                const arrowOffset = 15;
+                const arrowY = t.direction === 'up' ? axisY + arrowOffset : axisY - arrowOffset;
+                drawTransitionArrow(ctx, t.x, arrowY, t.direction, '#ff9500');
+            });
+        }
+
+        // 绘制所有编码
+        function drawEncodings() {
+            const input = document.getElementById('binaryInput').value.trim();
+            
+            if (!validateBinary(input)) {
+                showError('请输入5-8位二进制码（只能包含0和1）');
+                return;
+            }
+            
+            hideError();
+            
+            // 显示二进制码
+            document.getElementById('binaryDisplay').style.display = 'block';
+            document.getElementById('binaryText').textContent = input;
+            
+            // 绘制四种编码
+            drawNRZ(input);
+            drawRZ(input);
+            drawManchester(input);
+            drawDiffManchester(input);
+        }
+
+        // 加载示例数据
+        function loadExample() {
+            const examples = ['10110010', '11001010', '10101010', '11110000', '10110101'];
+            const randomExample = examples[Math.floor(Math.random() * examples.length)];
+            document.getElementById('binaryInput').value = randomExample;
+            drawEncodings();
+        }
+
+        // 清空
+        function clearAll() {
+            document.getElementById('binaryInput').value = '';
+            document.getElementById('binaryDisplay').style.display = 'none';
+            hideError();
+            
+            // 清空画布
+            const canvases = ['nrzCanvas', 'rzCanvas', 'manchesterCanvas', 'diffManchesterCanvas'];
+            canvases.forEach(id => {
+                const canvas = document.getElementById(id);
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            });
+        }
+
+        // 页面加载时绘制默认数据
+        window.onload = function() {
+            drawEncodings();
+        };
+
+        // 输入框回车事
+        document.getElementById('binaryInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                drawEncodings();
+            }
+        });
+    </script>
+
+
+    <script src="../chat-knowledge.js"></script>
+    <script src="../kb-loader.js"></script>
+    <script src="../chat-agent.js"></script>
+</body>
+</html>
