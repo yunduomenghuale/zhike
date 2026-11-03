@@ -343,7 +343,7 @@
                 <el-button class="node-action-btn" :icon="Microphone" :loading="!!genStore.scriptTasks[data.id]" @click.stop="openScript(data)">
                   {{ genStore.scriptTasks[data.id]
                     ? (genStore.scriptTasks[data.id].status === 'pending'
-                        ? `排队中（第 ${genStore.scriptTasks[data.id].queuePosition || '…'} 位）`
+                        ? `讲稿队列第 ${genStore.scriptTasks[data.id].queuePosition || '…'} 位`
                         : genStore.scriptTasks[data.id].total
                           ? `讲稿 ${genStore.scriptTasks[data.id].done}/${genStore.scriptTasks[data.id].total}`
                           : '讲稿生成中…')
@@ -356,7 +356,7 @@
                 <el-button class="node-action-btn" :icon="Headset" :loading="!!genStore.audioTasks[data.id]" @click.stop="genAudio(data)">
                   {{ genStore.audioTasks[data.id]
                     ? (genStore.audioTasks[data.id].status === 'pending'
-                        ? `排队中（第 ${genStore.audioTasks[data.id].queuePosition || '…'} 位）`
+                        ? `配音队列第 ${genStore.audioTasks[data.id].queuePosition || '…'} 位`
                         : genStore.audioTasks[data.id].total
                           ? `配音 ${genStore.audioTasks[data.id].done}/${genStore.audioTasks[data.id].total}`
                           : '配音生成中…')
@@ -843,7 +843,7 @@
           <el-icon class="is-loading"><Loading /></el-icon>
           <span v-if="genStore.scriptTasks[videoNode.id]">
             <template v-if="genStore.scriptTasks[videoNode.id].status === 'pending'">
-              讲稿排队中（第 {{ genStore.scriptTasks[videoNode.id].queuePosition || '…' }} 位），完成后自动开始
+              讲稿队列第 {{ genStore.scriptTasks[videoNode.id].queuePosition || '…' }} 位（讲稿与配音/解析是独立队列，互不等位），完成后自动开始
             </template>
             <template v-else>
               正在生成讲解稿 {{ genStore.scriptTasks[videoNode.id].done }}/{{ genStore.scriptTasks[videoNode.id].total || videoScripts.length || '…' }}

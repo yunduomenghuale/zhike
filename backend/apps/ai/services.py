@@ -544,11 +544,12 @@ def _dedupe_script_clauses(text: str) -> str:
     AICallLog.Scene.TTS,
     course_getter=lambda args, kwargs: getattr(args[0], "course_id", None),
 )
-def synthesize_audio_for_video(video, voice: str | None = None, limit: int | None = None) -> int:
+def synthesize_audio_for_video(video, voice: str | None = None, limit: int | None = None, on_page_done=None) -> int:
     """为教学视频的逐页讲解稿补齐配音，音频地址写回 scripts 每页。返回本批新增成功页数。
 
     limit：本批最多合成的页数（分段生成，避免多页同步合成超过网关超时）；None 表示不限制。
     voice：发音人；优先级 调用参数 > 管理端该能力配置 > settings.AI_TTS_VOICE > Cherry。
+    on_page_done：每成功合成一页后的回调（队列任务用来实时写 progress，11-03 修配音进度不动）。
     本地 TTS 的发音人是服务端说话人 ID，在管理端「语音合成」配置里填写。
 
     性能：本批页在线程池中并发合成（每页是独立的无状态 API 调用，实测单页约 6s）——
@@ -600,6 +601,8 @@ def synthesize_audio_for_video(video, voice: str | None = None, limit: int | Non
                 if future.result():
                     ok += 1
                     merge_pages(video.id, {item.get("page"): {"audio_url": item["audio_url"], "audio_error": None}})
+                    if on_page_done is not None:
+                        on_page_done()
 
     # 权威状态回读 DB（本地 scripts 快照不再整数组回写）
     video.refresh_from_db()

@@ -66,7 +66,13 @@ def run_audio_gen(task: AITask) -> None:
         if not todo:
             break
         errors_before = sum(1 for item in scripts if item.get("audio_error"))
-        ok = synthesize_audio_for_video(video, voice=voice)
+
+        def _on_page_done():
+            # 每合成一页实时写任务进度（从 DB 回读计数）——否则整章几分钟内进度冻结
+            video.refresh_from_db(fields=["scripts"])
+            _write_progress(task.id, scripts_list=video.scripts or [])
+
+        ok = synthesize_audio_for_video(video, voice=voice, on_page_done=_on_page_done)
         video.refresh_from_db(fields=["scripts"])
         _write_progress(task.id, scripts_list=video.scripts or [])
         if ok == 0:

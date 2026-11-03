@@ -72,8 +72,21 @@ const TYPE_LABEL = {
 function typeLabel(t) {
   return TYPE_LABEL[t] || t
 }
+const QUEUE_LABEL = {
+  script_gen: '讲稿',
+  audio_gen: '配音',
+  question_gen: '生题',
+  chapter_summary: '总结',
+  class_analytics: '学情',
+  course_reuse: '复用',
+  ppt_parse: '解析',
+  embed_ingest: '入库',
+}
 function statusLabel(item) {
-  if (item.status === 'pending') return item.queuePosition ? `排队第 ${item.queuePosition} 位` : '排队中'
+  // 排队位是分型队列内的名次（各类型槽位独立、互不等位）——标注类型避免误读为全局名次
+  if (item.status === 'pending') {
+    return item.queuePosition ? `${QUEUE_LABEL[item.taskType] || ''}队列第 ${item.queuePosition} 位` : '排队中'
+  }
   if (item.status === 'running') return '进行中'
   if (item.status === 'success') return '已完成'
   if (item.status === 'cancelled') return '已取消'
