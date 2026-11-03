@@ -60,6 +60,6 @@ python manage.py collectstatic --noinput
 # 24 并发容量富余；worker 进程数保持 2 与内存额度匹配。
 exec gunicorn config.wsgi:application \
   --bind 0.0.0.0:8000 \
-  --workers 2 \
+  --workers 4 \
   --threads 12 \
   --timeout 180
