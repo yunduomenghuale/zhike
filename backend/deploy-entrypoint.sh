@@ -54,8 +54,12 @@ fi
 python manage.py migrate --noinput
 python manage.py collectstatic --noinput
 
+# 线程数 2→12：2×2=4 并发在真实场景（学生 SSE 问答长连接 + 多章课件解析轮询 +
+# 任务中心轮询 + 上传/管理操作并存）会把 gunicorn 打满，其他请求排队表现为
+#「页面一直加载」（2026-11-03 124 灰度实测复现）。IO 密集场景 gthread 线程轻量，
+# 24 并发容量富余；worker 进程数保持 2 与内存额度匹配。
 exec gunicorn config.wsgi:application \
   --bind 0.0.0.0:8000 \
   --workers 2 \
-  --threads 2 \
+  --threads 12 \
   --timeout 180
