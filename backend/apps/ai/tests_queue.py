@@ -323,6 +323,43 @@ class QuotaReservationTests(TransactionTestCase):
             self.assertEqual(exc.get_codes(), "ai_quota")
 
 
+class QueueCapCategoryTests(TransactionTestCase):
+    """Q12：pending 上限分类——解析/入库（课程建设，本地资源）不与 AI 调用类共用名额。"""
+
+    def setUp(self):
+        self.teacher = _user("Q_cap")
+        from apps.courses.models import Course, Catalog
+
+        self.course = Course.objects.create(name="Q上限课", teacher=self.teacher, status="active")
+        self.catalog = Catalog.objects.create(course=self.course, title="Q章节", order=1)
+
+    def test_cap_separate_by_category(self):
+        from django.test import override_settings
+
+        from apps.ai.queue import UserPendingCapError, enqueue
+
+        with override_settings(AI_USER_PENDING_CAP=2, AI_USER_PENDING_CAP_LOCAL=4, AI_QUEUE_MAX=100):
+            # AI 类 2 个即满
+            enqueue(task_type=AITask.TaskType.SCRIPT_GEN, user=self.teacher, catalog=self.catalog, course=self.course)
+            enqueue(task_type=AITask.TaskType.AUDIO_GEN, user=self.teacher, catalog=self.catalog, course=self.course)
+            try:
+                enqueue(task_type=AITask.TaskType.SCRIPT_GEN, user=self.teacher, catalog=self.catalog, course=self.course)
+                self.fail("AI 类第 3 个应触发上限")
+            except UserPendingCapError as exc:
+                self.assertIn("2 个任务", str(exc))
+            # 解析类独立名额：4 个都能入队（不受 AI 类 2 个占满影响）
+            for i in range(4):
+                c2 = type(self.catalog).objects.create(course=self.course, title=f"Q章节{i+2}", order=i + 2)
+                enqueue(task_type=AITask.TaskType.PPT_PARSE, user=self.teacher, catalog=c2, course=self.course)
+            # 解析类第 5 个才触发 LOCAL 上限
+            c6 = type(self.catalog).objects.create(course=self.course, title="Q章节6", order=9)
+            try:
+                enqueue(task_type=AITask.TaskType.PPT_PARSE, user=self.teacher, catalog=c6, course=self.course)
+                self.fail("解析类第 5 个应触发 LOCAL 上限")
+            except UserPendingCapError as exc:
+                self.assertIn("4 个任务", str(exc))
+
+
 class QueueContextTests(TransactionTestCase):
     """Q10/Q11：C1 上下文重建与长驻身份隔离（run_task 直跑，_dispatch 打桩）。"""
 

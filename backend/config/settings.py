@@ -518,9 +518,14 @@ AI_WORKER_POLL_SECONDS = _ai_env_int("AI_WORKER_POLL_SECONDS", 2)
 AI_MAX_CONCURRENT_CHAT = _ai_env_int("AI_MAX_CONCURRENT_CHAT", 6)
 AI_MAX_CONCURRENT_TTS = _ai_env_int("AI_MAX_CONCURRENT_TTS", 4)
 # 用户并发/容量：同用户同时 running ≤ AI_USER_RUNNING_CAP（claim 时子查询判定）；
-# 同用户 pending 超过 AI_USER_PENDING_CAP 返回 429；全局 pending 上限 AI_QUEUE_MAX。
+# 同用户 pending 超过上限返回 429；全局 pending 上限 AI_QUEUE_MAX。
+# 上限分两类（11-03 按真实使用重设计）：课件解析/向量入库走 LOCAL 上限——
+# 建课期十几章批量上传是常态，且解析耗本地 soffice 资源（ppt 槽位已在节流执行）、
+# 不占远程 AI 调用，与讲稿/配音不该共用名额；AI 调用类走 AI_USER_PENDING_CAP，
+# 成本另有提交时配额预留把关（D4），此上限只是防洪水护栏。
 AI_USER_RUNNING_CAP = _ai_env_int("AI_USER_RUNNING_CAP", 1)
-AI_USER_PENDING_CAP = _ai_env_int("AI_USER_PENDING_CAP", 5)
+AI_USER_PENDING_CAP = _ai_env_int("AI_USER_PENDING_CAP", 10)
+AI_USER_PENDING_CAP_LOCAL = _ai_env_int("AI_USER_PENDING_CAP_LOCAL", 50)
 AI_QUEUE_MAX = _ai_env_int("AI_QUEUE_MAX", 50)
 # 心跳：任务线程每 AI_WORKER_HEARTBEAT_SECONDS 秒打一次；running 超过
 # AI_WORKER_STALE_SECONDS 未心跳视为卡死，回收为 pending（attempts 不增）。

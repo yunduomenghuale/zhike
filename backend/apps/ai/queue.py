@@ -83,9 +83,17 @@ def enqueue(
     if pending.count() >= settings.AI_QUEUE_MAX:
         raise QueueFullError("系统任务队列已满，请稍后")
     if user is not None and not bypass_user_cap:
-        mine = pending.filter(triggered_by=user).count()
-        if mine >= settings.AI_USER_PENDING_CAP:
-            raise UserPendingCapError(f"你已有 {settings.AI_USER_PENDING_CAP} 个任务在排队，请等待完成")
+        # 分类上限且分类计数：解析/入库属课程建设任务（本地资源、槽位节流），
+        # 与 AI 调用类互不占用名额——建课期批量上传十几章是常态（11-03 按真实使用重设计）
+        local_types = {AITask.TaskType.PPT_PARSE, AITask.TaskType.EMBED_INGEST}
+        if task_type in local_types:
+            cap = settings.AI_USER_PENDING_CAP_LOCAL
+            mine = pending.filter(triggered_by=user, task_type__in=local_types).count()
+        else:
+            cap = settings.AI_USER_PENDING_CAP
+            mine = pending.filter(triggered_by=user).exclude(task_type__in=local_types).count()
+        if mine >= cap:
+            raise UserPendingCapError(f"你已有 {cap} 个任务在排队，请等待完成")
 
     try:
         with transaction.atomic():
