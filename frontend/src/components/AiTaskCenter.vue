@@ -1,74 +1,59 @@
 <template>
-  <!-- AI 任务中心：顶栏铃铛 + 抽屉。队列化后服务端是唯一真相，刷新/关页/多标签页一致。 -->
-  <div class="ai-task-center">
-    <button class="ai-task-bell" title="AI 任务中心" @click="open">
-      <el-badge :value="genStore.activeCount" :hidden="!genStore.activeCount" :max="99">
-        <el-icon :size="18"><Bell /></el-icon>
-      </el-badge>
-    </button>
-
-    <el-drawer v-model="visible" title="AI 任务中心" size="420px">
-      <div class="task-center-body">
-        <el-empty v-if="!sorted.length" description="暂无任务" :image-size="80" />
-        <div v-for="item in sorted" :key="item.taskId" class="task-item">
-          <div class="task-item-head">
-            <span class="task-item-type">{{ typeLabel(item.taskType) }}</span>
-            <span class="task-item-title">{{ item.catalogTitle || `章节 #${item.catalogId}` }}</span>
-            <el-tag size="small" :type="statusType(item.status)" effect="light">
-              {{ statusLabel(item) }}
-            </el-tag>
-          </div>
-          <div class="task-item-progress">
-            <el-progress
-              :percentage="progressPercent(item)"
-              :status="item.status === 'failed' || item.status === 'cancelled' ? 'exception' : item.status === 'success' ? 'success' : undefined"
-              :stroke-width="8"
-            />
-          </div>
-          <div v-if="item.status === 'pending' && item.queuePosition" class="task-item-queue">
-            排队第 {{ item.queuePosition }} 位
-          </div>
-          <div v-if="item.error" class="task-item-error" :title="item.error">{{ item.error }}</div>
-          <div class="task-item-actions">
-            <el-button
-              v-if="item.status === 'pending' || item.status === 'running'"
-              size="small"
-              text
-              type="danger"
-              @click="genStore.cancelTask(item.taskId)"
-            >取消</el-button>
-            <el-button
-              v-if="item.status === 'failed' || item.status === 'cancelled'"
-              size="small"
-              text
-              type="primary"
-              @click="genStore.retryTask(item.taskId)"
-            >重试</el-button>
-            <el-button
-              v-if="item.status === 'success' || item.status === 'failed' || item.status === 'cancelled'"
-              size="small"
-              text
-              @click="genStore.dismissTask(item.taskId)"
-            >清除</el-button>
-          </div>
-        </div>
+  <!-- AI 任务面板：嵌入通知铃铛的「任务」页签（MainLayout）。队列化后服务端是唯一真相。 -->
+  <div class="task-center-body">
+    <el-empty v-if="!sorted.length" description="暂无任务" :image-size="70" />
+    <div v-for="item in sorted" :key="item.taskId" class="task-item">
+      <div class="task-item-head">
+        <span class="task-item-type">{{ typeLabel(item.taskType) }}</span>
+        <span class="task-item-title">{{ item.catalogTitle || `章节 #${item.catalogId}` }}</span>
+        <el-tag size="small" :type="statusType(item.status)" effect="light">
+          {{ statusLabel(item) }}
+        </el-tag>
       </div>
-    </el-drawer>
+      <div class="task-item-progress">
+        <el-progress
+          :percentage="progressPercent(item)"
+          :status="item.status === 'failed' || item.status === 'cancelled' ? 'exception' : item.status === 'success' ? 'success' : undefined"
+          :stroke-width="8"
+        />
+      </div>
+      <div v-if="item.status === 'pending' && item.queuePosition" class="task-item-queue">
+        排队第 {{ item.queuePosition }} 位
+      </div>
+      <div v-if="item.error" class="task-item-error" :title="item.error">{{ item.error }}</div>
+      <div class="task-item-actions">
+        <el-button
+          v-if="item.status === 'pending' || item.status === 'running'"
+          size="small"
+          text
+          type="danger"
+          @click="genStore.cancelTask(item.taskId)"
+        >取消</el-button>
+        <el-button
+          v-if="item.status === 'failed' || item.status === 'cancelled'"
+          size="small"
+          text
+          type="primary"
+          @click="genStore.retryTask(item.taskId)"
+        >重试</el-button>
+        <el-button
+          v-if="item.status === 'success' || item.status === 'failed' || item.status === 'cancelled'"
+          size="small"
+          text
+          @click="genStore.dismissTask(item.taskId)"
+        >清除</el-button>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
-import { Bell } from '@element-plus/icons-vue'
+import { computed, onMounted } from 'vue'
 import { useGenerationStore } from '@/store/generation'
 
 const genStore = useGenerationStore()
-const visible = ref(false)
 
-function open() {
-  visible.value = true
-  genStore.refreshActive() // 打开时补拉一次，避免 3s 服务端缓存的滞后
-}
+onMounted(() => genStore.refreshActive())
 
 const sorted = computed(() =>
   Object.values(genStore.tracked).sort((a, b) => b.taskId - a.taskId).slice(0, 20),
@@ -108,32 +93,12 @@ function progressPercent(item) {
 </script>
 
 <style scoped>
-.ai-task-center {
-  position: fixed;
-  top: 14px;
-  right: 16px;
-  z-index: 3000;
-}
-.ai-task-bell {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border: none;
-  border-radius: 50%;
-  background: var(--el-bg-color);
-  box-shadow: var(--el-box-shadow-light);
-  color: var(--el-text-color-regular);
-  cursor: pointer;
-}
-.ai-task-bell:hover {
-  color: var(--el-color-primary);
-}
 .task-center-body {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
+  max-height: 420px;
+  overflow-y: auto;
 }
 .task-item {
   border: 1px solid var(--el-border-color-lighter);

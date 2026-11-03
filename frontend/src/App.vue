@@ -1,14 +1,12 @@
 <template>
   <el-config-provider :locale="zhCn">
     <router-view />
-    <AiTaskCenter />
   </el-config-provider>
 </template>
 
 <script setup>
 import { onMounted } from 'vue'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
-import AiTaskCenter from '@/components/AiTaskCenter.vue'
 import { useGenerationStore } from '@/store/generation'
 
 onMounted(() => {

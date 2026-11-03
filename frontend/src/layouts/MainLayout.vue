@@ -19,20 +19,32 @@
       </div>
 
       <div class="header-right">
-        <el-popover placement="bottom-end" :width="360" trigger="click" popper-class="notify-popper">
+        <el-popover placement="bottom-end" :width="360" trigger="click" popper-class="notify-popper" @show="onNotifyPopoverShow">
           <template #reference>
-            <el-badge :is-dot="unreadCount > 0" class="head-badge">
-              <button class="icon-btn" title="通知">
+            <el-badge :value="bellBadgeCount" :hidden="!bellBadgeCount" :max="99" class="head-badge">
+              <button class="icon-btn" title="通知与任务">
                 <el-icon><Bell /></el-icon>
               </button>
             </el-badge>
           </template>
           <div class="notify-panel">
             <div class="notify-head">
-              <span class="notify-head-title">通知</span>
-              <button class="notify-read-all" :disabled="!unreadCount" @click="readAll">全部已读</button>
+              <div class="notify-tabs">
+                <button
+                  class="notify-tab"
+                  :class="{ on: notifyTab === 'notify' }"
+                  @click="notifyTab = 'notify'"
+                >通知<span v-if="unreadCount" class="notify-tab-badge">{{ unreadCount }}</span></button>
+                <button
+                  v-if="canSeeAiTasks"
+                  class="notify-tab"
+                  :class="{ on: notifyTab === 'task' }"
+                  @click="notifyTab = 'task'"
+                >任务<span v-if="genStore.activeCount" class="notify-tab-badge">{{ genStore.activeCount }}</span></button>
+              </div>
+              <button v-if="notifyTab === 'notify'" class="notify-read-all" :disabled="!unreadCount" @click="readAll">全部已读</button>
             </div>
-            <div class="notify-list">
+            <div v-show="notifyTab === 'notify'" class="notify-list">
               <button
                 v-for="n in notifications"
                 :key="n.id"
@@ -50,6 +62,7 @@
               </button>
               <div v-if="!notifications.length" class="notify-empty">暂无通知</div>
             </div>
+            <AiTaskCenter v-if="canSeeAiTasks && notifyTab === 'task'" />
           </div>
         </el-popover>
         <button class="icon-btn" title="全屏" @click="toggleFullscreen">
@@ -148,6 +161,8 @@ import { storeToRefs } from 'pinia'
 import { useUserStore } from '@/store/user'
 import { listNotifications, markAllNotificationsRead, markNotificationRead } from '@/api/notification'
 import FirstLoginPrompt from '@/components/FirstLoginPrompt.vue'
+import AiTaskCenter from '@/components/AiTaskCenter.vue'
+import { useGenerationStore } from '@/store/generation'
 import {
   HomeFilled, Reading, School, Collection, EditPen, Document,
   VideoPlay, ChatDotRound, ArrowDown, UserFilled, Search, SwitchButton, Sunny,
@@ -249,6 +264,17 @@ function toggleFullscreen() {
 const notifications = ref([])
 const unreadCount = computed(() => notifications.value.filter((n) => !n.is_read).length)
 let notifyTimer = null
+
+// ---- AI 任务（教师/管理员可见，并入通知铃铛的「任务」页签）----
+const genStore = useGenerationStore()
+const canSeeAiTasks = computed(() => ['teacher', 'admin'].includes(profile.value?.role))
+const notifyTab = ref('notify')
+// 铃铛角标 = 未读通知数 + 进行中 AI 任务数；两者都没有时角标隐藏（空态不打扰）
+const bellBadgeCount = computed(() => unreadCount.value + (canSeeAiTasks.value ? genStore.activeCount : 0))
+function onNotifyPopoverShow() {
+  if (!canSeeAiTasks.value) return
+  genStore.refreshActive() // 打开时补拉一次，避免服务端缓存滞后
+}
 
 async function loadNotifications() {
   try {
@@ -1289,6 +1315,42 @@ function onCommand(cmd) {
   color: var(--gray-900);
   font-size: 14px;
   font-weight: 750;
+}
+
+.notify-tabs {
+  display: flex;
+  gap: 4px;
+}
+.notify-tab {
+  border: 0;
+  background: transparent;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gray-500);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.notify-tab:hover {
+  color: var(--primary-600);
+}
+.notify-tab.on {
+  color: var(--primary-600);
+  background: var(--primary-50, #eef4ff);
+}
+.notify-tab-badge {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--el-color-danger);
+  color: #fff;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
 }
 
 .notify-read-all {
