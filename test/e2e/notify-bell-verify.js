@@ -120,10 +120,17 @@ async function main() {
       if (hasBoard) {
         await evalJs(`document.querySelector('.queue-board-entry button').click(); 'ok'`);
         await sleep(1800);
-        const drawerText = await evalJs(`document.querySelector('.el-drawer').textContent`);
-        check('B1 看板含状态卡片', drawerText.includes('排队中') && drawerText.includes('执行中'));
-        check('B1 看板含类型分布区/空态', drawerText.includes('按类型') || drawerText.includes('当前无活跃任务'));
+        const drawerText = await evalJs(`document.querySelector('.el-dialog').textContent`);
+        check('B1 看板含状态卡片', drawerText.includes('排队中') && drawerText.includes('执行中') && drawerText.includes('活跃任务'));
+        check('B1 看板含类型分布区/空态', drawerText.includes('活跃任务') || drawerText.includes('当前无'));
         await shot('queue-board.png');
+        // 数据明细：弹窗里应能看到 用户/课程章节/内容量 字段
+        const hasDetail = drawerText.includes('内容量') || drawerText.includes('近期失败') || drawerText.includes('当前无排队');
+        check('B1 看板含任务明细字段', hasDetail);
+        // 切到失败/完成页签截图
+        await evalJs(`[...document.querySelectorAll('.el-tabs__item')].find(t => t.textContent.includes('完成') || t.textContent.includes('失败'))?.click(); 'ok'`);
+        await sleep(800);
+        await shot('queue-board-tab2.png');
       }
     }
 

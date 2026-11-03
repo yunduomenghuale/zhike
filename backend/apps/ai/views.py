@@ -226,10 +226,11 @@ class AITaskRetryView(APIView):
 
 
 class AIQueueDashboardView(APIView):
-    """管理端「任务队列」看板（C9/方案 §10）：全量统计与近期失败列表。
+    """管理端「任务队列」看板（C9/方案 §10）：全量统计、活跃任务明细与近期失败列表。
 
     pending/running/failed 按类型分布、近 24h 平均排队时长（created→started）、
-    失败原因 Top5、当前 worker 心跳（另见 worker-health 的槽位明细）。
+    活跃任务明细（用户/课程/章节/内容量/排队位）、失败原因 Top5、
+    近期失败/完成记录、当前 worker 心跳（另见 worker-health 的槽位明细）。
     """
 
     permission_classes = [IsAuthenticated]
@@ -239,6 +240,8 @@ class AIQueueDashboardView(APIView):
 
         if not is_platform_admin(request.user):
             return api_response(message="仅平台管理员可查看", code=403, status=403)
+
+        from .queue import queue_position
 
         from django.db.models import Count
         from django.utils import timezone
@@ -270,10 +273,46 @@ class AIQueueDashboardView(APIView):
             for row in AITask.objects.filter(status=AITask.Status.FAILED, error__gt="")
             .values("error").annotate(n=Count("id")).order_by("-n")[:5]
         ]
+
+        def _task_row(t, with_position=False):
+            row = {
+                "id": t.id,
+                "task_type": t.task_type,
+                "status": t.status,
+                "priority": t.priority,
+                "attempts": t.attempts,
+                "user": (
+                    {"username": t.triggered_by.username, "real_name": t.triggered_by.real_name}
+                    if t.triggered_by_id
+                    else None
+                ),
+                "course": {"id": t.course_id, "name": t.course.name} if t.course_id else None,
+                "catalog": {"id": t.catalog_id, "title": t.catalog.title} if t.catalog_id else None,
+                "progress": t.progress or {},
+                "error": (t.error or "")[:200],
+                "created_at": t.created_at,
+                "started_at": t.started_at,
+                "finished_at": t.finished_at,
+            }
+            if with_position:
+                row["queue_position"] = queue_position(t)
+            return row
+
+        active_qs = AITask.objects.filter(
+            status__in=[AITask.Status.PENDING, AITask.Status.RUNNING]
+        ).select_related("triggered_by", "course", "catalog").order_by("priority", "id")[:50]
+        active_tasks = [_task_row(t, with_position=True) for t in active_qs]
         recent_failed = [
-            {"id": t.id, "task_type": t.task_type, "error": t.error[:200],
-             "created_at": t.created_at, "finished_at": t.finished_at}
-            for t in AITask.objects.filter(status=AITask.Status.FAILED).order_by("-id")[:10]
+            _task_row(t)
+            for t in AITask.objects.filter(status=AITask.Status.FAILED)
+            .select_related("triggered_by", "course", "catalog")
+            .order_by("-id")[:10]
+        ]
+        recent_success = [
+            _task_row(t)
+            for t in AITask.objects.filter(status=AITask.Status.SUCCESS)
+            .select_related("triggered_by", "course", "catalog")
+            .order_by("-id")[:10]
         ]
         last_hb = AITask.objects.filter(
             status=AITask.Status.RUNNING, heartbeat_at__isnull=False
@@ -284,7 +323,9 @@ class AIQueueDashboardView(APIView):
                 "active_by_type": by_type,
                 "avg_wait_seconds_24h": round(avg_wait, 1) if avg_wait is not None else None,
                 "top_errors": top_errors,
+                "active_tasks": active_tasks,
                 "recent_failed": recent_failed,
+                "recent_success": recent_success,
                 "worker_last_heartbeat": last_hb,
             }
         )
