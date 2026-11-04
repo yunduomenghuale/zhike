@@ -15,7 +15,8 @@ from django.conf import settings
 from .calllog import ai_scene, copy_call_context, run_in_context, scene_decorator
 from .models import AICallLog
 from .providers.factory import get_provider
-from .vectorstore import search_chunks
+from .vectorstore import search_chunks, vector_meta
+from .vector_sync import sync_owner
 
 # 页级合并唯一入口（评审 C2）。courses.models 不反向依赖 apps.ai，无循环。
 from apps.courses.page_store import merge_pages
@@ -723,6 +724,9 @@ def ingest_material(material, chunk_size: int = 500) -> int:
         for piece, emb in zip(pieces, embeddings)
     ]
     KnowledgeChunk.objects.bulk_create(objs)
+    # 双写：Qdrant 开启时按来源对象回查后 upsert（bulk_create 在 MySQL 不回填
+    # 主键，故回查；未开启时该调用是空操作，MySQL 的 embedding 列即存储本身）
+    sync_owner("material", material)
 
     material.parse_status = material.ParseStatus.DONE
     material.save(update_fields=["parse_status", "updated_at"])
@@ -809,6 +813,8 @@ def ingest_ppt_pages(ppt, on_progress=None) -> int:
     with transaction.atomic():
         ppt.chunks.all().delete()
         KnowledgeChunk.objects.bulk_create(objs)
+        # 双写：提交后同步 Qdrant（旧片段由 pre_delete 信号同步删除）
+        sync_owner("ppt", ppt)
     return len(objs)
 
 
@@ -881,6 +887,8 @@ def ingest_video_scripts(video) -> int:
     with transaction.atomic():
         video.chunks.all().delete()
         KnowledgeChunk.objects.bulk_create(objs)
+        # 双写：提交后同步 Qdrant（旧片段由 pre_delete 信号同步删除）
+        sync_owner("video", video)
     return len(objs)
 
 
@@ -1444,6 +1452,8 @@ def _gather_course_context(
             for item in cited
         ],
         "degraded_level": 0,
+        # 向量后端审计（Qdrant 接入后可追溯「这次回答是哪个后端召回的、是否降级」）
+        "vector": vector_meta(),
     }
     context = "\n\n".join(units)
     if outline:

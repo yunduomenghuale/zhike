@@ -621,6 +621,38 @@ AI_QA_DISABLE_SCRIPT_SOURCE = os.getenv("AI_QA_DISABLE_SCRIPT_SOURCE", "").lower
 AI_QA_FALLBACK_MIN_HITS = _ai_env_int("AI_QA_FALLBACK_MIN_HITS", 3)
 AI_QA_FALLBACK_MAX_UNITS = _ai_env_int("AI_QA_FALLBACK_MAX_UNITS", 2)
 
+# ---------------------------------------------------------------------------
+# RAG 向量后端（2026-11 Qdrant 接入）
+# ---------------------------------------------------------------------------
+# RAG_VECTOR_BACKEND 是唯一开关，调用方代码不变：
+#   json   = 现状实现：读 KnowledgeChunk.embedding（JSON 列）+ 内存暴力余弦。
+#            默认值，也是回滚路径——向量本来就存在 MySQL 里，改回 json 即恢复。
+#   qdrant = 同一批向量的外置索引（vector_backends/qdrant_backend.py），过滤语义
+#            与 json 等价（由 ChunkFilter 单一事实源保证）。
+# 切换前后**不需要重算向量**：存量向量由 manage.py backfill_qdrant 原样搬运。
+# 取值非法时按 json 处理（配置写错不该让问答挂掉）。
+RAG_VECTOR_BACKEND = (os.getenv("RAG_VECTOR_BACKEND", "json") or "json").strip().lower()
+# Qdrant 连接：留空视为未配置 → 回落 json；支持三种形态：
+#   http://qdrant:6333（compose 内网服务）/ http://ip:6333（外部实例）
+#   local:<目录>（qdrant-client 本地文件模式，开发与单测用，无需起容器）
+QDRANT_URL = (os.getenv("QDRANT_URL", "") or "").strip()
+# 云端 Qdrant / Qdrant Cloud 需要 API Key；自建实例通常留空
+QDRANT_API_KEY = (os.getenv("QDRANT_API_KEY", "") or "").strip()
+QDRANT_COLLECTION = (os.getenv("QDRANT_COLLECTION", "") or "").strip() or "zhike_chunks"
+# 单次检索/写入的客户端超时（秒）：问答链路对延迟敏感，超时即回落 json，
+# 不能让学生等 Qdrant 重试。回填/比对命令会自行放大（见各自的 --timeout）。
+QDRANT_TIMEOUT = _ai_env_int("QDRANT_TIMEOUT", 3)
+# 集合向量维度：必须与当前 embedding 模型一致（通义 text-embedding-v3 /
+# BGE-M3 均为 1024）。换模型 = 换向量空间，需重建集合（backfill_qdrant --reset），
+# 维度不符时后端会明确报错而不是静默写坏索引。
+RAG_QDRANT_VECTOR_SIZE = _ai_env_int("RAG_QDRANT_VECTOR_SIZE", 1024)
+# 熔断（apps/ai/vectorstore.py）：Qdrant 连续失败达阈值后，在窗口期内不再尝试，
+# 直接走 json 检索。为什么需要：Qdrant 挂掉后每个请求仍会先试一次连接，测试环境
+# 实测降级期 p95 从 2.2s 涨到 11.7s（连接失败 + DNS 解析超时）；熔断后降级代价
+# 只剩 json 本身的耗时。窗口过后自动放行一次探活，成功即复位。
+RAG_QDRANT_BREAKER_THRESHOLD = _ai_env_int("RAG_QDRANT_BREAKER_THRESHOLD", 3)
+RAG_QDRANT_BREAKER_SECONDS = _ai_env_int("RAG_QDRANT_BREAKER_SECONDS", 30)
+
 # 系统内置本地模型的权重目录：生产容器内 /app/data 是 bind mount（见 docker-compose），
 # 故默认落点随之持久化、重建容器不丢；本地开发即 backend/data/models。
 # 下载源为 ModelScope（国内可达）；首次使用惰性下载，也可 manage.py download_models

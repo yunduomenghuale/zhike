@@ -465,6 +465,11 @@ def _copy_chunks(source, new_course, catalog_map, material_map, ppt_map, video_m
         for row in rows
     ]
     KnowledgeChunk.objects.bulk_create(batch, batch_size=200)
+    # 双写：Qdrant 开启时按新课程回查后 upsert（bulk_create 不回填主键，故回查；
+    # 未开启时空操作）。向量随行复制，源课程与复用课程检索行为一致。
+    from apps.ai.vector_sync import sync_course
+
+    sync_course(new_course.pk)
     return len(batch)
 
 

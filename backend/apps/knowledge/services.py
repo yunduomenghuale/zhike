@@ -202,6 +202,10 @@ def _rebuild_one(material, provider, dimension: int) -> int:
     with transaction.atomic():
         material.chunks.all().delete()
         KnowledgeChunk.objects.bulk_create(objs)
+        # Qdrant 开启时同步（未开启为空操作）：重建同样只搬向量，不重算模型侧数据
+        from apps.ai.vector_sync import sync_owner
+
+        sync_owner("material", material)
 
     material.parse_status = material.ParseStatus.DONE
     material.save(update_fields=["parse_status", "updated_at"])
@@ -261,6 +265,9 @@ def _rebuild_ppt_one(ppt, provider, dimension: int) -> int:
     with transaction.atomic():
         ppt.chunks.all().delete()
         KnowledgeChunk.objects.bulk_create(objs)
+        from apps.ai.vector_sync import sync_owner
+
+        sync_owner("ppt", ppt)
     return len(objs)
 
 
@@ -323,4 +330,7 @@ def _rebuild_script_one(video, provider, dimension: int) -> int:
     with transaction.atomic():
         video.chunks.all().delete()
         KnowledgeChunk.objects.bulk_create(objs)
+        from apps.ai.vector_sync import sync_owner
+
+        sync_owner("video", video)
     return len(objs)

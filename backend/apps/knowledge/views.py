@@ -2,6 +2,7 @@ from functools import wraps
 import json
 from pathlib import Path
 
+from django.conf import settings
 from django.core.files.storage import default_storage
 from django.db.models import Count, Max, Q
 from django.http import FileResponse, StreamingHttpResponse
@@ -21,6 +22,7 @@ from apps.ai.services import (
     knowledge_qa_stream,
     maybe_update_session_summary,
 )
+from apps.ai.vectorstore import consume_vector_meta
 from apps.common.access import (
     classrooms_for_user,
     courses_for_user,
@@ -520,6 +522,15 @@ class QARecordViewSet(BaseModelViewSet):
         data["provider_fallback"] = bool(fallback)
         if fallback:
             data["fallback_reason"] = fallback
+        # 向量后端显性化：Qdrant 不可用时自动回落 MySQL 检索，这里告诉前端/运维
+        # 这次回答是哪个后端召回的（与 provider_fallback 同款思路，语义不同）
+        vector = consume_vector_meta()
+        data["vector_backend"] = vector.get("backend") or getattr(
+            settings, "RAG_VECTOR_BACKEND", "json"
+        )
+        data["vector_fallback"] = bool(vector.get("fallback"))
+        if vector.get("fallback"):
+            data["vector_fallback_reason"] = vector.get("reason", "")
         return api_response(data, message="回答完成")
 
     @action(detail=False, methods=["post"], url_path="ask-stream")
@@ -584,14 +595,19 @@ class QARecordViewSet(BaseModelViewSet):
                         # snapshot 仅落库审计，不下发前端；降级级别由 stream
                         # 内部经同一对象引用更新
                         snapshot = evt.get("snapshot") or {}
-                        yield _sse(
-                            {
-                                "type": "meta",
-                                "cited": cited,
-                                "rewritten_question": rewritten,
-                                "session_id": qa_session.id,
-                            }
-                        )
+                        vector = snapshot.get("vector") or {}
+                        meta_evt = {
+                            "type": "meta",
+                            "cited": cited,
+                            "rewritten_question": rewritten,
+                            "session_id": qa_session.id,
+                            # 向量后端标记（Qdrant 不可用时 vector_fallback=true）
+                            "vector_backend": vector.get("backend", ""),
+                            "vector_fallback": bool(vector.get("fallback")),
+                        }
+                        if vector.get("fallback"):
+                            meta_evt["vector_fallback_reason"] = vector.get("reason", "")
+                        yield _sse(meta_evt)
                     elif evt["type"] == "history_dropped":
                         # 上下文超限分级降级（丢弃部分早期历史重试），level 1/2/4
                         yield _sse({"type": "history_dropped", "level": evt.get("level", 4)})

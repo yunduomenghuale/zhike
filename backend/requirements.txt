@@ -22,6 +22,8 @@ reportlab==5.0.1
 # PDF 页面渲染为图片（Chrome PDFium 引擎，纯 pip 依赖，跨平台一致，替代 pdftoppm）
 pypdfium2==4.30.1
 pywin32==312; platform_system == "Windows"
+# 向量库（RAG_VECTOR_BACKEND=qdrant 时使用；纯 Python wheel，自带本地文件模式无需服务端）
+qdrant-client==1.15.1
 # RAG 质量评估（manage.py eval_rag）
 ragas==0.4.3
 langchain-openai==1.4.1

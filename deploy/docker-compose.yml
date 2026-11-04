@@ -35,6 +35,35 @@ services:
     networks:
       - zhike_v2_net
 
+  qdrant:
+    # 向量库（RAG_VECTOR_BACKEND=qdrant 时的外置索引，见 docs/Qdrant向量库接入方案.md）。
+    # 关键约定：
+    # - 数据落在 ../data/qdrant（与 backend 的 ../data 挂载互不覆盖）；
+    # - backend/worker **不 depends_on 本服务**：Qdrant 起不来时检索会自动回落
+    #   MySQL（json 后端），把启动顺序做成硬依赖反而在故障时卡死整站；
+    # - 宿主端口只绑 127.0.0.1：容器间走 zhike_v2_net 的 qdrant:6333，宿主端口
+    #   仅供运维排查；不占用前端 8088，也不与现有服务冲突；
+    # - 不接 bnet-test：向量库只给本系统用，不需要碰外部数据库网络。
+    image: qdrant/qdrant:v1.12.4
+    container_name: zhike_v2_qdrant
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6333:6333"
+    volumes:
+      - ../data/qdrant:/qdrant/storage
+    environment:
+      - QDRANT__TELEMETRY_DISABLED=true
+      - QDRANT__LOG_LEVEL=WARN
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+    # 1024 维向量常驻内存；片段数十万量级时再调大
+    mem_limit: 1g
+    networks:
+      - zhike_v2_net
+
   backend:
     build:
       context: ../backend
