@@ -319,9 +319,46 @@ meta {'backend': 'json', 'fallback': True, 'reason': 'Qdrant 集合中该课程�
 
 问答耗时以 LLM 为主（6~26s），检索只占其中 20ms~2s。
 
+### 10.3 生产上线记录（2026-11-04，145:8088 / compose 项目 `deploy`）
+
+按第 5 节流程执行，实测踩到三处，记为下次的检查项：
+
+1. **端口**：测试栈与生产栈同机，两边都绑 `127.0.0.1:6333` 会冲突。生产占标准 6333，
+   测试栈改 `127.0.0.1:6433`（容器间仍走各自网络的服务名，不受影响）。
+2. **镜像构建**：`docker builder prune -f` 腾出 8GB 后，apt/pip 层缓存全丢，构建退化为
+   全量（apt + pip 含 torch 209MB，约 15 分钟）。若只是想缩小镜像可用
+   `--build-arg PRELOAD_MODELS=false`，但**生产 `/data/zhike-v2/data/models` 已有 5.5GB 模型**，
+   预载层其实是冗余的；真正省时间的做法是保留 builder 缓存，别在构建前 prune。
+3. **历史假向量**：回填发现 **275 个片段是 64 维 Mock 向量**（全部来自课程 5 的资料 10），
+   维度不符被跳过、命令非 0 退出。处理：`rebuild_vectors --material 10`（真实模型重算，
+   275 → 251 片段，一次 embedding 成本可忽略）后重跑回填，`跳过 0`。
+
+上线结果：
+
+```
+镜像 zhike-v2-backend:latest（含 qdrant-client 1.15.1）· 回滚标签 pre-qdrant-20261104
+回填：读取 4890 · 写入 4890 · 跳过 0 · 耗时 33.7s · 集合点数 4890
+比对：课程 10 全量 8/8 = 100%；课程 5 学生视角 6/6 = 100%（严格口径同为 100%）
+切换后：_gather_course_context → {'backend': 'qdrant', 'fallback': False}，8 条引用
+完整问答（含 LLM）：答案正常、degraded=0、日志无 [rag] 降级行
+```
+
+回滚件：`docker-compose.yml.bak-qdrant-*`、`.env.production.bak-qdrant-*`、
+`backups/backend-pre-qdrant-*.tar.gz`、镜像 `zhike-v2-backend:pre-qdrant-20261104`。
+
 ## 11. 回滚
 
 **一句话：`deploy/.env.production` 改回 `RAG_VECTOR_BACKEND=json`，重启 backend 与 worker。**
 
 向量本来就在 MySQL 的 `embedding` 列里，Qdrant 只是副本，回滚不涉及任何数据迁移；
 容器可以继续留着（不占用检索路径），也可以 `docker compose stop qdrant` 彻底停掉。
+
+镜像级回滚（连代码一起退，例如 Qdrant 相关代码本身出问题）：
+
+```bash
+cd /data/zhike-v2/deploy
+sudo docker tag zhike-v2-backend:pre-qdrant-20261104 zhike-v2-backend:latest
+sudo docker compose -p deploy -f docker-compose.yml up -d backend worker
+```
+
+代码级回滚（服务器非 git 仓）：`sudo tar xzf backups/backend-pre-qdrant-*.tar.gz -C /data/zhike-v2/`。
