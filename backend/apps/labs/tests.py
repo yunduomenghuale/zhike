@@ -1,7 +1,7 @@
 """labs 一期冒烟测试：模板库 → 建实验 → 排课发布 → start/bridge → 提交评分 → 复核/重置 → 统计。"""
 from decimal import Decimal
 
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
 
@@ -502,3 +502,307 @@ class LabCustomModelTest(TestCase):
         }, format="json")
         self.assertEqual(res.status_code, 201, res.data)
         self.assertIsNone(res.data["data"]["template"])
+
+
+class LabCustomPageTest(TestCase):
+    """Stage 2：页面上传/替换/删除/预览 + L2 沙箱门控（父页面/frame 双响应）+ S8 静态扫描。"""
+
+    HTML = """<!DOCTYPE html><html lang="zh-CN"><head>
+    <meta charset="utf-8"><base href="https://evil.example/"><title>上传测试</title>
+    <style>body{{font-family:sans-serif}}</style></head>
+    <body><h1 id="t">教师实验页面</h1><script>var a=1;<\/script></body></html>""".encode("utf-8")
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.teacher = User.objects.create_user("t301", password="pass1234", role="teacher", real_name="孙老师")
+        cls.student = User.objects.create_user("20260001", password="pass1234", role="student", real_name="周同学")
+        cls.admin = User.objects.create_user("adm1", password="pass1234", role="admin", real_name="管理员")
+        cls.course = Course.objects.create(name="计算机网络", teacher=cls.teacher)
+        cls.classroom = ClassRoom.objects.create(name="网络2601", teacher=cls.teacher)
+        ClassCourse.objects.create(classroom=cls.classroom, course=cls.course)
+        ClassStudent.objects.create(classroom=cls.classroom, student=cls.student)
+
+    def setUp(self):
+        self.tc = APIClient()
+        self.tc.force_authenticate(self.teacher)
+        self.sc = APIClient()
+        self.sc.force_authenticate(self.student)
+
+    def _make_custom_lab(self):
+        res = self.tc.post("/api/labs/", {
+            "page_source": "custom", "course": self.course.id,
+            "title": "沙箱测试实验", "total_score": "100", "pass_score": "60",
+        }, format="json")
+        self.assertEqual(res.status_code, 201, res.data)
+        return res.data["data"]["id"]
+
+    def _upload(self, lab_id, content=None, name="page.html", confirm=None):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        data = {"file": SimpleUploadedFile(name, content if content is not None else self.HTML, content_type="text/html")}
+        if confirm is not None:
+            data["confirm"] = confirm
+        return self.tc.post(f"/api/labs/{lab_id}/page/", data, format="multipart")
+
+    def _publish_with_page(self, lab_id):
+        res = self.tc.post("/api/lab-schedules/", {"lab": lab_id, "classroom": self.classroom.id}, format="json")
+        self.assertIn(res.status_code, (200, 201), res.data)
+        res = self.tc.post(f"/api/labs/{lab_id}/publish/", format="json")
+        self.assertIn(res.status_code, (200, 201), res.data)
+
+    def test_upload_replace_delete_page(self):
+        """上传 → 发布 → 替换（旧文件清盘）→ 删除（无模板拒绝 / 有模板回退）。"""
+        from apps.labs.models import LabPage
+
+        lab_id = self._make_custom_lab()
+
+        # 非 .html / 空文件被拒
+        res = self._upload(lab_id, b"hi", name="page.txt")
+        self.assertEqual(res.status_code, 400, res.data)
+        res = self._upload(lab_id, b"", name="empty.html")
+        self.assertEqual(res.status_code, 400, res.data)
+
+        # 正常上传
+        res = self._upload(lab_id)
+        self.assertIn(res.status_code, (200, 201), res.data)
+        page = LabPage.objects.get(lab_id=lab_id)
+        first_path = page.file.path
+        self.assertEqual(page.original_name, "page.html")
+        self.assertEqual(page.sha256, __import__("hashlib").sha256(self.HTML).hexdigest())
+        self.assertEqual(page.uploaded_by, self.teacher)
+        # 序列化器带页面元信息
+        res = self.tc.get(f"/api/labs/{lab_id}/")
+        self.assertTrue(res.data["data"]["has_custom_page"])
+        self.assertEqual(res.data["data"]["custom_page_name"], "page.html")
+
+        # 替换：旧磁盘文件被清
+        res = self._upload(lab_id, self.HTML + b"<!-- v2 -->")
+        self.assertIn(res.status_code, (200, 201), res.data)
+        page.refresh_from_db()
+        self.assertNotEqual(page.file.path, first_path)
+        self.assertFalse(__import__("os").path.exists(first_path))
+
+        # 发布前置校验通过
+        self._publish_with_page(lab_id)
+
+        # 无模板不可删除页面
+        res = self.tc.delete(f"/api/labs/{lab_id}/page/")
+        self.assertEqual(res.status_code, 400, res.data)
+
+        # 有模板：删除页面 → 回退 template 模式
+        lab = Lab.objects.get(id=lab_id)
+        lab.template = LabTemplate.objects.create(code="arp-ip-lab", title="ARP实验")
+        lab.save(update_fields=["template"])
+        res = self.tc.delete(f"/api/labs/{lab_id}/page/")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data["data"]["page_source"], "template")
+        self.assertFalse(LabPage.objects.filter(lab_id=lab_id).exists())
+        lab.refresh_from_db()
+        self.assertFalse(__import__("os").path.exists(page.file.path))
+
+        # 删除实验：磁盘无残留（C7/perform_destroy）
+        res = self.tc.post("/api/labs/", {
+            "page_source": "custom", "course": self.course.id, "title": "待删除实验", "total_score": "100",
+        }, format="json")
+        lab2 = res.data["data"]["id"]
+        res = self._upload(lab2)
+        self.assertIn(res.status_code, (200, 201), res.data)
+        p2 = LabPage.objects.get(lab_id=lab2)
+        p2_path = p2.file.path
+        res = self.tc.delete(f"/api/labs/{lab2}/")
+        self.assertIn(res.status_code, (200, 204), res.data)
+        self.assertFalse(__import__("os").path.exists(p2_path))
+
+    def test_sandbox_parent_and_frame(self):
+        """L2 门控：父页面持票据 + sandbox iframe（无 allow-same-origin）；frame 无票据。"""
+        import re
+
+        lab_id = self._make_custom_lab()
+        self._upload(lab_id)
+        self._publish_with_page(lab_id)
+
+        # 学生 start → 父页面 URL（含票据）
+        res = self.sc.post("/api/lab-submissions/start/", {"lab": lab_id}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        data = res.data["data"]
+        token = data["attempt_token"]
+        page_url = data["page_url"]
+
+        # 父页面：200 + 平台父页面特征
+        res = self.sc.get(page_url)
+        self.assertEqual(res.status_code, 200, res.content[:200])
+        html = res.content.decode()
+        m = re.search(r'<iframe[^>]*sandbox="([^"]*)"[^>]*src="([^"]*)"', html)
+        self.assertIsNotNone(m, "父页面必须含 sandbox iframe")
+        sandbox_attr, frame_src = m.group(1), m.group(2)
+        # C40：绝不允许 allow-same-origin
+        self.assertNotIn("allow-same-origin", sandbox_attr)
+        self.assertIn("allow-scripts", sandbox_attr)
+        # C45：iframe src 绝对路径、不含票据
+        self.assertTrue(frame_src.startswith("/api/lab-gate/frame/"), frame_src)
+        self.assertNotIn(token, frame_src)
+        self.assertNotIn("token=", frame_src)
+        # C45：父页面自带 <base> 与 parent 桥接脚本
+        self.assertIn('<base href="/api/lab-gate/asset/', html)
+        self.assertIn("lab-bridge-parent.js", html)
+        # 票据只以 JSON 字面量进父页面引导变量
+        self.assertIn(f'window.__LAB_BOOT_TOKEN__ = "{token}";', html)
+        # S6：父页面严格 CSP
+        csp = res.get("Content-Security-Policy", "")
+        self.assertIn("form-action 'none'", csp)
+        self.assertIn("base-uri 'self'", csp)
+        self.assertIn("object-src 'none'", csp)
+        self.assertEqual(res.get("Referrer-Policy"), "no-referrer")
+
+        # frame：教师 HTML + shim，无任何票据/引导变量
+        res = self.sc.get(frame_src)
+        self.assertEqual(res.status_code, 200, res.content[:200])
+        frame_html = res.content.decode()
+        self.assertIn("教师实验页面", frame_html)
+        self.assertIn("lab-bridge-shim.js", frame_html)
+        self.assertIn('<base href="/api/lab-gate/asset/', frame_html)
+        self.assertNotIn(token, frame_html)                      # 票据不进 iframe
+        self.assertNotIn("__LAB_BOOT_TOKEN__", frame_html)       # 引导变量不进 iframe
+        self.assertNotIn("https://evil.example/", frame_html)    # 教师自带 <base> 被剥离
+        # frame CSP：sandbox 指令（无 allow-same-origin）+ 严格 CSP
+        fcsp = res.get("Content-Security-Policy", "")
+        self.assertIn("sandbox allow-scripts allow-forms allow-modals", fcsp)
+        self.assertNotIn("allow-same-origin", fcsp)
+        self.assertIn("form-action 'none'", fcsp)
+        self.assertIn("base-uri 'self'", fcsp)
+        self.assertEqual(res.get("X-Frame-Options"), "SAMEORIGIN", "C44：frame 响应须 SAMEORIGIN")
+
+        # 无票据访问父页面 → 403 友好页
+        bare = page_url.split("&token=")[0]
+        res = self.sc.get(bare)
+        self.assertEqual(res.status_code, 403)
+
+    def test_static_scan_and_preview(self):
+        """S8 静态扫描（命中→二次确认→管理员告警）+ 教师预览（草稿可预览、不取票据）。"""
+        lab_id = self._make_custom_lab()
+
+        # 命中扫描：首次拒绝并给出命中项
+        dirty = b"""<html><head><script src="https://cdn.example/x.js"></script>
+        <script>eval("1");localStorage.getItem("k");new WebSocket("wss://x");
+        navigator.sendBeacon("https://x",{});document.cookie;window.opener;</script>
+        </head><body>s</body></html>"""
+        res = self._upload(lab_id, dirty, name="dirty.html")
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertTrue(res.data["data"]["require_confirm"])
+        self.assertIn("eval 动态执行", res.data["data"]["hits"])
+        self.assertIn("外链资源引用", res.data["data"]["hits"])
+        self.assertGreaterEqual(len(res.data["data"]["hits"]), 6)
+        # 未确认不落库
+        from apps.labs.models import LabPage
+        self.assertFalse(LabPage.objects.filter(lab_id=lab_id).exists())
+        self.assertFalse(self.admin.notifications.exists())
+
+        # confirm=1 二次确认 → 落库 + 管理员告警
+        res = self._upload(lab_id, dirty, name="dirty.html", confirm="1")
+        self.assertIn(res.status_code, (200, 201), res.data)
+        self.assertTrue(self.admin.notifications.filter(title__contains="静态扫描命中").exists())
+
+        # 干净文件无告警上传成功
+        lab2 = self._make_custom_lab()
+        res = self._upload(lab2)
+        self.assertIn(res.status_code, (200, 201), res.data)
+        self.assertEqual(res.data["data"]["hits"], [])
+
+        # 预览：草稿（未发布）也可预览；父页面 preview=true 且不注入票据
+        res = self.tc.get(f"/api/labs/{lab2}/page/preview/")
+        self.assertEqual(res.status_code, 200, res.data)
+        url = res.data["data"]["url"]
+        self.assertIn("preview=1", url)
+        res = self.tc.get(url)
+        self.assertEqual(res.status_code, 200, res.content[:200])
+        html = res.content.decode()
+        self.assertIn("window.__LAB_PREVIEW__ = true;", html)
+        self.assertIn("window.__LAB_BOOT_TOKEN__ = null;", html)
+        import re
+        m = re.search(r'<iframe[^>]*src="([^"]*)"', html)
+        self.assertIn("preview=1", m.group(1))
+        # 预览页 <base> 必须换成正式签名，否则 lab-bridge-parent.js / shim.js 403
+        base = re.search(r'<base href="([^"]*)"', html).group(1)
+        res = self.tc.get(base + "lab-bridge-parent.js")
+        self.assertEqual(res.status_code, 200, b"lib must be readable in preview")
+        # 预览 frame 同样可达（草稿，走 verify_preview），且 shim 资产可读
+        res = self.tc.get(m.group(1))
+        self.assertEqual(res.status_code, 200, res.content[:200])
+        frame_base = re.search(r'<base href="([^"]*)"', res.content.decode()).group(1)
+        res = self.tc.get(frame_base + "lab-bridge-shim.js")
+        self.assertEqual(res.status_code, 200, b"shim must be readable in preview")
+        self.assertIn("教师实验页面", self.tc.get(m.group(1)).content.decode())
+
+        # 学生无权限上传/预览（IsTeacher 不含学生；admin 按 C46 也不放行教师 action）
+        res = self.sc.post(f"/api/labs/{lab2}/page/", {}, format="multipart")
+        self.assertIn(res.status_code, (401, 403), res.data)
+        res = self.sc.get(f"/api/labs/{lab2}/page/preview/")
+        self.assertIn(res.status_code, (401, 403), res.data)
+
+
+class LabStaticContractTest(SimpleTestCase):
+    """Stage 2：C40/C41/C42/C44/C45/C46 静态契约逐条对照（读真实静态文件与源码，非 mock）。"""
+
+    def _static(self, name):
+        from pathlib import Path
+
+        from django.conf import settings
+
+        text = (Path(settings.LABS_ROOT) / name).read_text(encoding="utf-8")
+        self.assertTrue(text.strip(), f"{name} 不应为空")
+        return text
+
+    def test_c40_c46_static_contract(self):
+        import re
+        from pathlib import Path
+
+        parent_html = self._static("lab-gate-parent.html")
+        parent_js = self._static("lab-bridge-parent.js")
+        shim_js = self._static("lab-bridge-shim.js")
+        views_src = Path(__file__).with_name("views.py").read_text(encoding="utf-8")
+
+        # C40：三个 L2 静态文件都不出现 allow-same-origin（含注释，避免后续静态扫描误命中）
+        for name, text in (("parent.html", parent_html), ("parent.js", parent_js), ("shim.js", shim_js)):
+            self.assertNotIn("allow-same-origin", text, f"C40: {name} 出现 allow-same-origin")
+
+        # C44：iframe sandbox 属性与 frame 响应 CSP sandbox 指令取交集且保持一致
+        m = re.search(r'<iframe[^>]*sandbox="([^"]*)"', parent_html)
+        self.assertIsNotNone(m, "C44：父页面必须显式声明 sandbox 属性")
+        sandbox_attr = " ".join(m.group(1).split())
+        self.assertEqual(sandbox_attr, "allow-scripts allow-forms allow-modals")
+        csp_sandbox = re.search(r'"sandbox ([^;"]+); "', views_src)
+        self.assertIsNotNone(csp_sandbox, "C44：frame 响应必须下发 sandbox 指令")
+        self.assertEqual(" ".join(csp_sandbox.group(1).split()), sandbox_attr)
+
+        # C41：opaque origin 下 event.origin 恒为 "null"，必须校验 event.source
+        self.assertIn("e.source !== frame.contentWindow", parent_js, "C41：必须校验 event.source")
+
+        # C42：shim 内不得出现票据头或同源 API fetch 字面量，分数只走 postMessage
+        self.assertNotIn("X-Lab-Token", shim_js, "C42：shim 不得出现票据头字面量")
+        self.assertNotIn("fetch('/api", shim_js, "C42：shim 不得出现同源 API fetch")
+        self.assertNotIn('fetch("/api', shim_js, "C42：shim 不得出现同源 API fetch")
+        self.assertIn("window.parent.postMessage", shim_js, "C42：shim 必须只经 postMessage 通信")
+
+        # C45：四占位符齐全（注释形态，避免替换误伤 window.__LAB_*__ 变量名）
+        for ph in (
+            "/*__FRAME_URL__*/", "/*__LAB_BOOT_TOKEN__*/",
+            "/*__LAB_CONTEXT__*/", "/*__LAB_PREVIEW__*/",
+        ):
+            self.assertIn(ph, parent_html, f"C45：父页面缺少占位符 {ph}")
+        self.assertIn('<script src="lab-bridge-parent.js">', parent_html)
+        self.assertIn('src="/*__FRAME_URL__*/"', parent_html)
+        for field in ("labId", "submissionId", "totalScore", "gradeEndpoint"):
+            self.assertIn(field, parent_js, f"C45：context 缺字段 {field}")
+        for leaked in ("random_seed", "expected", "res.data.status"):
+            self.assertNotIn(leaked, parent_js, f"C45：不得透传 {leaked}")
+
+        # C46：新增 action 显式 [IsTeacher]，不得放宽为 IsTeacherOrAdmin
+        self.assertIsNotNone(
+            re.search(r'@action\([^)]*url_path="page"[^)]*permission_classes=\[IsTeacher\]\)', views_src),
+            "C46：page action 必须显式 [IsTeacher]",
+        )
+        self.assertIsNotNone(
+            re.search(r'@action\([^)]*url_path="page/preview"[^)]*permission_classes=\[IsTeacher\]\)', views_src),
+            "C46：preview action 必须显式 [IsTeacher]",
+        )
+        self.assertNotIn("IsTeacherOrAdmin", views_src, "C46：不得使用 IsTeacherOrAdmin 放宽权限")

@@ -1,0 +1,118 @@
+采集时间: Thu Nov  5 18:37:56     2026
+采集通道: http://127.0.0.1:5273  (前端 serve-local.js 代理 5273 -> 后端 8005, 真实 HTTP)
+纪律: curl 全部带 --noproxy '*'；URL 自 D:/tmp/stage2-{gate,preview}-url.txt（2h 签名未过期）
+
+=== A. 父页面（正式模式，持 attempt_token） ===
+URL: http://127.0.0.1:5273/api/lab-gate/page/bef1c830-60cd-4e09-8aa8-a082763e9cb8/?sig=90e273b6b4c6bd95cea97df3441aa836c53f53a6eb556bedd3f0fae1d6d6d037&exp=1793881439&token=BP4agT-F0wL0JNsWjgDf0tsmNULwmpm-16cDK3SMfLc
+HTTP/1.1 200 OK
+date: Thu, 05 Nov 2026 10:37:56 GMT
+server: WSGIServer/0.2 CPython/3.12.2
+content-type: text/html; charset=utf-8
+cache-control: no-store
+x-content-type-options: nosniff
+x-frame-options: SAMEORIGIN
+content-security-policy: default-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' blob:; frame-ancestors 'self'; form-action 'none'; base-uri 'self'; object-src 'none'
+referrer-policy: no-referrer
+content-length: 2224
+cross-origin-opener-policy: same-origin
+vary: origin
+Connection: keep-alive
+Keep-Alive: timeout=5
+
+
+-- 关键响应头复取 --
+HTTP/1.1 200 OK
+cache-control: no-store
+x-content-type-options: nosniff
+x-frame-options: SAMEORIGIN
+content-security-policy: default-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' blob:; frame-ancestors 'self'; form-action 'none'; base-uri 'self'; object-src 'none'
+referrer-policy: no-referrer
+
+=== B. 父页面（预览模式，无票据） ===
+URL: http://127.0.0.1:5273/api/lab-gate/page/bef1c830-60cd-4e09-8aa8-a082763e9cb8/?sig=1f71540d0a7bbd6f4f87e9238cc1ce52e5f2b1f77744b7a04ad7232fe790689a&exp=1793881439&preview=1
+HTTP/1.1 200 OK
+date: Thu, 05 Nov 2026 10:37:57 GMT
+server: WSGIServer/0.2 CPython/3.12.2
+content-type: text/html; charset=utf-8
+cache-control: no-store
+x-content-type-options: nosniff
+x-frame-options: SAMEORIGIN
+content-security-policy: default-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' blob:; frame-ancestors 'self'; form-action 'none'; base-uri 'self'; object-src 'none'
+referrer-policy: no-referrer
+content-length: 2346
+cross-origin-opener-policy: same-origin
+vary: origin
+Connection: keep-alive
+Keep-Alive: timeout=5
+
+
+-- 关键响应头复取 --
+HTTP/1.1 200 OK
+cache-control: no-store
+x-content-type-options: nosniff
+x-frame-options: SAMEORIGIN
+content-security-policy: default-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' blob:; frame-ancestors 'self'; form-action 'none'; base-uri 'self'; object-src 'none'
+referrer-policy: no-referrer
+
+=== 从父页面 HTML 提取的 iframe src ===
+正式 frame: /api/lab-gate/frame/bef1c830-60cd-4e09-8aa8-a082763e9cb8/90e273b6b4c6bd95cea97df3441aa836c53f53a6eb556bedd3f0fae1d6d6d037/1793881439/
+预览 frame: /api/lab-gate/frame/bef1c830-60cd-4e09-8aa8-a082763e9cb8/1f71540d0a7bbd6f4f87e9238cc1ce52e5f2b1f77744b7a04ad7232fe790689a/1793881439/?preview=1
+
+=== C. frame（正式模式） ===
+URL: http://127.0.0.1:5273/api/lab-gate/frame/bef1c830-60cd-4e09-8aa8-a082763e9cb8/90e273b6b4c6bd95cea97df3441aa836c53f53a6eb556bedd3f0fae1d6d6d037/1793881439/
+HTTP/1.1 200 OK
+date: Thu, 05 Nov 2026 10:37:57 GMT
+server: WSGIServer/0.2 CPython/3.12.2
+content-type: text/html; charset=utf-8
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: sandbox allow-scripts allow-forms allow-modals; default-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' blob:; frame-ancestors 'self'; form-action 'none'; base-uri 'self'; object-src 'none'
+x-frame-options: SAMEORIGIN
+referrer-policy: no-referrer
+content-length: 2293
+cross-origin-opener-policy: same-origin
+vary: origin
+Connection: keep-alive
+Keep-Alive: timeout=5
+
+
+-- 关键响应头复取 --
+HTTP/1.1 200 OK
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: sandbox allow-scripts allow-forms allow-modals; default-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' blob:; frame-ancestors 'self'; form-action 'none'; base-uri 'self'; object-src 'none'
+x-frame-options: SAMEORIGIN
+referrer-policy: no-referrer
+
+=== D. frame（预览模式） ===
+URL: http://127.0.0.1:5273/api/lab-gate/frame/bef1c830-60cd-4e09-8aa8-a082763e9cb8/1f71540d0a7bbd6f4f87e9238cc1ce52e5f2b1f77744b7a04ad7232fe790689a/1793881439/?preview=1
+HTTP/1.1 200 OK
+date: Thu, 05 Nov 2026 10:37:57 GMT
+server: WSGIServer/0.2 CPython/3.12.2
+content-type: text/html; charset=utf-8
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: sandbox allow-scripts allow-forms allow-modals; default-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' blob:; frame-ancestors 'self'; form-action 'none'; base-uri 'self'; object-src 'none'
+x-frame-options: SAMEORIGIN
+referrer-policy: no-referrer
+content-length: 2292
+cross-origin-opener-policy: same-origin
+vary: origin
+Connection: keep-alive
+Keep-Alive: timeout=5
+
+
+-- 关键响应头复取 --
+HTTP/1.1 200 OK
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: sandbox allow-scripts allow-forms allow-modals; default-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' blob:; frame-ancestors 'self'; form-action 'none'; base-uri 'self'; object-src 'none'
+x-frame-options: SAMEORIGIN
+referrer-policy: no-referrer
+
+=== 资产路由 200 校验 ===
+lab-bridge-parent.js -> HTTP 200
+lab-bridge-shim.js -> HTTP 200
+lab-bridge.js -> HTTP 200
+
+=== 采集结束 ===

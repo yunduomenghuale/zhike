@@ -1182,7 +1182,10 @@ def course_resource_page(request, token):
         "img-src 'self' data: blob:; "
         "font-src 'self' data:; "
         "connect-src 'self' blob:; "
-        "frame-ancestors 'self'"
+        "frame-ancestors 'self'; "
+        "form-action 'none'; "
+        "base-uri 'self'; "
+        "object-src 'none'"
     )
     # 查看器以同源 iframe 嵌入本页（clickjacking 中间件不覆盖已设置的响应头）
     response["X-Frame-Options"] = "SAMEORIGIN"

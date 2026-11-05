@@ -236,7 +236,7 @@ async function enter(row) {
     const data = await startLab(row.id)
     // page_url 为服务端签发的门控完整链接（已含签名与 attempt 票据；下线后旧链接失效）
     if (data.page_url) {
-      window.open(data.page_url, '_blank')
+      window.open(data.page_url, '_blank', 'noopener,noreferrer')
     } else {
       ElMessage.warning('实验页面暂未部署，请联系管理员')
     }

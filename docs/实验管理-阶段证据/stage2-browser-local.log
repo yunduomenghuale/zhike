@@ -1,0 +1,25 @@
+PASS | P1 父页面渲染（含 sandbox iframe）
+PASS | P2 iframe sandbox 属性 = allow-scripts allow-forms allow-modals（C40 无 allow-same-origin） | allow-scripts allow-forms allow-modals
+PASS | P3 iframe src 绝对路径且不含票据（C45） | /api/lab-gate/frame/bef1c830-60cd-4e09-8aa8-a082763e9cb8/90e273b6b4c6bd95cea97df3441aa836c53f53a6eb556bedd3f0fae1d6d6d037/1793881439/
+PASS | P4 lab-bridge-parent.js 200 | ["lab-bridge-parent.js:200"]
+PASS | P5 父页面自带 <base> 签名资产路由 | /api/lab-gate/asset/bef1c830-60cd-4e09-8aa8-a082763e9cb8/90e273b6b4c6bd95cea97df3441aa836c53f53a6eb556bedd3f0fae1d6d6d037/1793881439/
+PASS | C0 定位到 iframe 独立执行上下文（opaque origin） | {"sessionId":"88C6FE5AF4510A5FCF3D1DF6DDD07CE6"}
+PASS | I1 iframe 内读 localStorage 抛 SecurityError | SecurityError
+PASS | I2 iframe 内写 sessionStorage 抛 SecurityError | SecurityError
+PASS | I3 iframe 内 document.cookie 不可读（抛错或为空） | SecurityError
+PASS | I4 iframe 内访问 window.parent.document 抛 SecurityError | SecurityError
+PASS | I5 iframe 内 window.opener 为空/受限 | VAL:null
+PASS | I6 iframe 内 fetch /api 被 CORS 拒绝 | REJECTED:TypeError
+PASS | S1 iframe 内 LabBridge 存在（shim 注入） | {"ok":true,"preview":false,"ctx":{"labId":14,"submissionId":7,"totalScore":100,"gradeEndpoint":"/api/lab-gate/grade/"},"log":"preview=false\ncontext={\"labId\":14,\"submissionId\":7,\"totalScore\":100
+PASS | S2 正式模式 preview=false
+PASS | S3 validate() 经 postMessage 拿到 context（四字段，无票据） | {"labId":14,"submissionId":7,"totalScore":100,"gradeEndpoint":"/api/lab-gate/grade/"}
+PASS | S4 reportGrade 经 postMessage 有响应（父页面代发已触发） | reportGrade => {"code":500,"message":"成绩上报失败，请重试","data":null}
+shot -> test/screenshots/stage2-local-parent.png
+PASS | V1 预览父页面 preview=true 且无票据 | {"preview":true,"context":{"labId":14,"submissionId":null,"totalScore":100,"gradeEndpoint":"/api/lab-gate/grade/"}}
+PASS | V2 预览 iframe 带 preview=1 且无票据 | /api/lab-gate/frame/bef1c830-60cd-4e09-8aa8-a082763e9cb8/1f71540d0a7bbd6f4f87e9238cc1ce52e5f2b1f77744b7a04ad7232fe790689a/1793881439/?preview=1
+PASS | V3 iframe 内 LabBridge.preview=true 且跳过提交 | {"preview":true,"hasBridge":true,"log":"preview=true\n预览模式：不提交成绩\n"}
+shot -> test/screenshots/stage2-local-preview.png
+
+===== 汇总 =====
+总计 19 项，通过 19 项，失败 0 项
+ALL_PASS

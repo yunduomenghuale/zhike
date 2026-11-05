@@ -1,0 +1,11 @@
+D:\Claude_Code\智课系统V2\backend\apps\labs\tests.py:510: SyntaxWarning: invalid escape sequence '\/'
+  HTML = """<!DOCTYPE html><html lang="zh-CN"><head>
+Using existing test database for alias 'default'...
+Found 17 test(s).
+System check identified no issues (9 silenced).
+.................
+----------------------------------------------------------------------
+Ran 17 tests in 4.119s
+
+OK
+Preserving test database for alias 'default'...

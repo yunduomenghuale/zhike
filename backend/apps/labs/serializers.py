@@ -7,6 +7,7 @@ from .models import (
     Lab,
     LabAttemptToken,
     LabGuide,
+    LabPage,
     LabReport,
     LabSchedule,
     LabSubmission,
@@ -74,12 +75,16 @@ class LabSerializer(serializers.ModelSerializer):
     title = serializers.CharField(required=False, allow_blank=True, max_length=128)
     description = serializers.CharField(required=False, allow_blank=True)
     random_config = serializers.JSONField(required=False)
+    has_custom_page = serializers.SerializerMethodField()
+    custom_page_name = serializers.SerializerMethodField()
+    custom_page_size = serializers.SerializerMethodField()
 
     class Meta:
         model = Lab
         fields = [
             "id", "template", "template_code", "template_title", "page_url",
             "page_source", "report_note", "last_debug",
+            "has_custom_page", "custom_page_name", "custom_page_size",
             "course", "course_name", "catalog", "title", "description",
             "standard_minutes", "standard_minutes_display",
             "total_score", "pass_score", "random_config",
@@ -96,6 +101,17 @@ class LabSerializer(serializers.ModelSerializer):
 
     def get_page_url(self, obj) -> str | None:
         return obj.template.page_url if obj.template_id else None
+
+    def get_has_custom_page(self, obj) -> bool:
+        return _custom_page(obj) is not None
+
+    def get_custom_page_name(self, obj) -> str | None:
+        page = _custom_page(obj)
+        return page.original_name if page else None
+
+    def get_custom_page_size(self, obj) -> int | None:
+        page = _custom_page(obj)
+        return page.size if page else None
 
     def validate_course(self, value: Course):
         user = self.context["request"].user
@@ -157,6 +173,48 @@ class LabSubmissionSerializer(serializers.ModelSerializer):
         if user and (getattr(user, "is_teacher", False) or is_platform_admin(user)):
             return obj.grade_raw
         return None
+
+
+def _custom_page(obj):
+    """OneToOne 反查：不存在时返回 None（getattr 默认值兜不住 DoesNotExist）。"""
+    try:
+        return obj.custom_page
+    except LabPage.DoesNotExist:
+        return None
+
+
+class LabPageSerializer(serializers.ModelSerializer):
+    """自定义实验页面（只读元信息：不暴露文件 URL，源码走门控链路）。"""
+
+    class Meta:
+        model = LabPage
+        fields = ["id", "kind", "original_name", "size", "sha256", "uploaded_by", "created_at", "updated_at"]
+        read_only_fields = fields
+
+
+# S8 上传静态扫描规则：只挡「AI 生成的无心污染 / 网上复制的无心后门」，挡不住定向混淆。
+# 命中即要求教师源码二次确认 + 通知管理员；L2 沙箱保证即便放行也读不到平台数据。
+_LAB_PAGE_SCAN_RULES = [
+    ("localStorage 访问", r"localStorage"),
+    ("sessionStorage 访问", r"sessionStorage"),
+    ("document.cookie 访问", r"document\.cookie"),
+    ("window.opener 访问", r"window\.opener|\bopener\b"),
+    ("eval 动态执行", r"\beval\s*\("),
+    ("外链资源引用", r"src\s*=\s*[\"']https?://"),
+    ("sendBeacon 外发", r"sendBeacon"),
+    ("WebSocket 连接", r"WebSocket"),
+]
+
+
+def scan_lab_page_html(html: str) -> list:
+    """静态扫描教师上传的 HTML 源码，返回命中规则名列表（去重、保持规则序）。"""
+    import re
+
+    hits = []
+    for name, pattern in _LAB_PAGE_SCAN_RULES:
+        if re.search(pattern, html or ""):
+            hits.append(name)
+    return hits
 
 
 class LabAttemptTokenSerializer(serializers.ModelSerializer):

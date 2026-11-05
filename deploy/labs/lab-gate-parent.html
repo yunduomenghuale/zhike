@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>虚拟仿真实验</title>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; background: #f5f7fa; }
+    #lab-frame {
+      display: block; width: 100%; height: 100vh; border: 0; background: #fff;
+    }
+    #lab-loading {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      color: #909399; font: 14px/1.6 system-ui, sans-serif; pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <!--
+    平台父页面（v3.2 / L2）：持有本次作答票据的唯一页面。
+    教师 HTML 在 sandbox iframe（opaque origin）内运行，读不到票据与平台数据。
+    占位符 /*__FRAME_URL__*/ 与 /*__LAB_BOOT_TOKEN__*/ / /*__LAB_CONTEXT__*/ / /*__LAB_PREVIEW__*/
+    由 apps.labs.gate.render_parent() 服务端替换；<base> 由同一函数注入签名资产路由。
+    iframe 的 sandbox 只允许脚本/表单/弹窗三项，禁止任何会解除隔离的指令（C40）。
+  -->
+  <div id="lab-loading">实验加载中…</div>
+  <iframe id="lab-frame"
+          sandbox="allow-scripts allow-forms allow-modals"
+          src="/*__FRAME_URL__*/"></iframe>
+  <script>
+    (function () {
+      var loading = document.getElementById('lab-loading');
+      var frame = document.getElementById('lab-frame');
+      frame.addEventListener('load', function () {
+        if (loading && loading.parentNode) loading.parentNode.removeChild(loading);
+      });
+    })();
+  </script>
+  <script>window.__LAB_BOOT_TOKEN__ = /*__LAB_BOOT_TOKEN__*/;</script>
+  <script>window.__LAB_CONTEXT__ = /*__LAB_CONTEXT__*/;</script>
+  <script>window.__LAB_PREVIEW__ = /*__LAB_PREVIEW__*/;</script>
+  <script src="lab-bridge-parent.js"></script>
+</body>
+</html>

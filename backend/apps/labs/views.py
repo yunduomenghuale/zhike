@@ -1,4 +1,6 @@
 from decimal import Decimal
+import hashlib
+import os
 
 from django.db import transaction
 from django.http import HttpResponse
@@ -21,16 +23,19 @@ from . import bridge, gate, guide_preset, scoring, seedgen
 from .models import (
     Lab,
     LabGuide,
+    LabPage,
     LabSchedule,
     LabSubmission,
     LabTemplate,
 )
 from .serializers import (
     LabGuideSerializer,
+    LabPageSerializer,
     LabScheduleSerializer,
     LabSerializer,
     LabSubmissionSerializer,
     LabTemplateSerializer,
+    scan_lab_page_html,
 )
 
 
@@ -120,6 +125,130 @@ class LabViewSet(BaseModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save()
+
+    def perform_destroy(self, instance):
+        """删除实验：CASCADE 只删行不删盘，显式清自定义页面文件与报告文件（C7）。"""
+        page = getattr(instance, "custom_page", None)
+        if page is not None:
+            page.file.delete(save=False)
+        for sub in instance.submissions.all():
+            report = getattr(sub, "report", None)
+            if report is not None:
+                if report.file_docx:
+                    report.file_docx.delete(save=False)
+                if report.file_pdf:
+                    report.file_pdf.delete(save=False)
+        instance.delete()
+
+    # ---- 教师：自定义实验页面（上传 / 删除 / 预览；IsTeacher 不含 admin，C46） ----
+    MAX_PAGE_SIZE = 50 * 1024 * 1024  # 50MB（本期只收单文件 HTML）
+
+    def _notify_admins_page_scan(self, lab, hits):
+        """S8 静态扫描命中：通知平台管理员（站内信）。"""
+        from apps.users.models import Notification, User
+
+        for admin in User.objects.filter(role=User.Role.ADMIN, is_active=True):
+            Notification.objects.create(
+                user=admin,
+                ntype=Notification.Type.SYSTEM,
+                title="自定义实验页面静态扫描命中",
+                content=(
+                    f"教师 {self.request.user.real_name or self.request.user.username} 上传的"
+                    f"实验「{lab.title}」页面命中：{'、'.join(hits)}。请复核该实验页面源码。"
+                ),
+            )
+
+    @action(detail=True, methods=["post", "delete"], url_path="page", permission_classes=[IsTeacher])
+    def page(self, request, pk=None):
+        """自定义实验页面：POST 上传/替换单 HTML；DELETE 删除并回退模板模式。"""
+        if request.method == "DELETE":
+            return self._delete_page(request)
+        return self._upload_page(request)
+
+    def _upload_page(self, request):
+        """上传/替换单 HTML 实验页面：≤50MB、.html、非空；sha256/上传者留痕；S8 静态扫描。
+
+        命中扫描规则时一律拒绝首次写入，前端展示命中项与源码后由教师显式 confirm=1
+        二次确认才落库，并通知平台管理员。
+        """
+        lab = self.get_object()  # 行级：仅本人课程（get_queryset 已过滤）
+        upload = request.FILES.get("file")
+        if upload is None:
+            raise ValidationError({"file": "请上传页面文件"})
+        ext = os.path.splitext(upload.name or "")[1].lower()
+        if ext not in (".html", ".htm"):
+            raise ValidationError({"file": "仅支持单 .html 文件"})
+        if upload.size > self.MAX_PAGE_SIZE:
+            raise ValidationError({"file": "页面文件不能超过 50MB"})
+        if upload.size == 0:
+            raise ValidationError({"file": "文件为空"})
+        content = b"".join(upload.chunks())
+        html = content.decode("utf-8", errors="replace")
+
+        hits = scan_lab_page_html(html)
+        if hits and not str(request.data.get("confirm", "")).lower() in ("1", "true", "yes"):
+            return api_response(
+                {"hits": hits, "require_confirm": True, "size": upload.size},
+                message="页面源码命中安全扫描规则，确认无误后请带 confirm=1 重新上传",
+                code=400, status=400,
+            )
+
+        digest = hashlib.sha256(content).hexdigest()
+        from django.core.files.base import ContentFile
+
+        with transaction.atomic():
+            old = getattr(lab, "custom_page", None)
+            old_file = old.file if old is not None else None
+            page, _ = LabPage.objects.update_or_create(
+                lab=lab,
+                defaults={
+                    "kind": LabPage.Kind.SINGLE_HTML,
+                    "original_name": (upload.name or "")[:255],
+                    "size": upload.size,
+                    "sha256": digest,
+                    "uploaded_by": request.user,
+                },
+            )
+            page.file.save(f"index{ext}", ContentFile(content), save=True)
+        if old_file:
+            old_file.delete(save=False)
+        lab.page_source = Lab.PageSource.CUSTOM
+        lab.save(update_fields=["page_source", "updated_at"])
+        if hits:
+            self._notify_admins_page_scan(lab, hits)
+        return api_response(
+            {
+                "page": LabPageSerializer(page).data,
+                "hits": hits,
+                "sha256": digest,
+                "page_source": lab.page_source,
+            },
+            message="页面已上传" + ("（扫描命中，已通知管理员）" if hits else ""),
+        )
+
+    def _delete_page(self, request):
+        """删除自定义页面：删文件 + 删行；无模板可回退时拒绝（避免实验成「无页面」）。"""
+        lab = self.get_object()
+        page = getattr(lab, "custom_page", None)
+        if page is None:
+            raise ValidationError("该实验尚未上传自定义页面")
+        if lab.template_id is None:
+            raise ValidationError("该实验未绑定平台模板，删除页面后将无法访问，请先上传新页面")
+        with transaction.atomic():
+            page.file.delete(save=False)
+            page.delete()
+        lab.page_source = Lab.PageSource.TEMPLATE
+        lab.save(update_fields=["page_source", "updated_at"])
+        return api_response({"page_source": lab.page_source}, message="自定义页面已删除，实验回退为平台预置模式")
+
+    @action(detail=True, methods=["get"], url_path="page/preview", permission_classes=[IsTeacher])
+    def preview_page(self, request, pk=None):
+        """教师预览：签发 2h 预览链接（verify_preview，草稿可预览，不取票据、不提交）。"""
+        lab = self.get_object()
+        if getattr(lab, "custom_page", None) is None:
+            raise ValidationError("请先上传实验页面再预览")
+        signed = gate.sign_preview(lab)
+        return api_response(signed, message="预览链接已生成")
 
     @action(detail=True, methods=["post"], url_path="publish", permission_classes=[IsTeacher])
     def publish(self, request, pk=None):
@@ -340,6 +469,7 @@ class LabSubmissionViewSet(BaseModelViewSet):
                 "lab": {"id": lab.id, "title": lab.title,
                         "code": lab.template.code if lab.template_id else f"custom-{lab.id}",
                         "page_source": lab.page_source,
+                        "total_score": float(lab.total_score),
                         "standard_minutes": lab.effective_standard_minutes,
                         "time_limit_seconds": lab.time_limit_seconds},
                 "random_seed": sub.random_seed,
@@ -559,22 +689,127 @@ class LabSubmissionViewSet(BaseModelViewSet):
 # 实验页门控（普通 Django 视图，不进 router——资产路径无尾斜杠，同课程资源门控模式）
 # ---------------------------------------------------------------------------
 
+# S6 严格 CSP：复用 apps/courses/views.py 门控串 + 补齐 form-action/base-uri/object-src。
+# 用于 page_source=custom 的父页面与 frame 两个响应。
+_GATE_CSP = (
+    "default-src 'self' data: blob:; "
+    "script-src 'self' 'unsafe-inline'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data: blob:; "
+    "font-src 'self' data:; "
+    "connect-src 'self' blob:; "
+    "frame-ancestors 'self'; "
+    "form-action 'none'; "
+    "base-uri 'self'; "
+    "object-src 'none'"
+)
+
+
+def _gate_block(status, title, message):
+    response = render_block_page(status, title, message)
+    response["Content-Security-Policy"] = _GATE_CSP
+    response["Referrer-Policy"] = "no-referrer"
+    return response
+
+
 def lab_gate_page(request, token):
-    """实验入口页：验签（含发布状态）→ 读静态 HTML → 注入 <base> 指向签名资产路由。"""
+    """实验入口页（三分流，v3.2/L2）：
+
+    - preview=1（verify_preview，跳过发布状态）→ custom 渲染平台父页面（预览模式）；
+    - template → 原逻辑：读预置静态页 + 注入 <base>（不验票据，C29）；
+    - custom → 校验本次作答票据（有效/未消费/发布中/排课窗口开）后返回平台父页面
+      （持票据 + sandbox iframe）；教师 HTML 由 lab_gate_frame 返回。
+    """
     lab = Lab.objects.select_related("template").filter(access_token=token).first()
-    if lab is None or not gate.verify_lab(lab, request.GET.get("sig", ""), request.GET.get("exp", "")):
-        return render_block_page(403, "实验链接无效或已失效", "实验已下线或链接已过期，请返回课程实验页重新进入。")
+    sig, exp = request.GET.get("sig", ""), request.GET.get("exp", "")
+    preview = request.GET.get("preview") == "1"
+    if preview:
+        if lab is None or not gate.verify_preview(lab, sig, exp):
+            return _gate_block(403, "预览链接无效或已失效", "预览链接已过期，请重新获取。")
+        if lab.page_source != Lab.PageSource.CUSTOM:
+            return _gate_block(400, "该实验不支持页面预览", "预置实验页面由平台统一部署，无需预览。")
+        html = gate.render_parent(lab, sig, exp, attempt_token=None, preview=True)
+        if html is None:
+            return _gate_block(404, "实验页面不存在", "教师尚未上传实验页面。")
+        response = HttpResponse(html, content_type="text/html; charset=utf-8")
+        response["Cache-Control"] = "no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        response["X-Frame-Options"] = "SAMEORIGIN"
+        response["Content-Security-Policy"] = _GATE_CSP
+        response["Referrer-Policy"] = "no-referrer"
+        return response
+
+    if lab is None or not gate.verify_lab(lab, sig, exp):
+        return _gate_block(403, "实验链接无效或已失效", "实验已下线或链接已过期，请返回课程实验页重新进入。")
+    if lab.page_source == Lab.PageSource.CUSTOM:
+        # 父页面是票据唯一落点：无效票据直接 403，不进父页面
+        try:
+            ticket = bridge.validate_token(request.GET.get("token", ""))
+        except ValueError as exc:
+            return _gate_block(403, "实验票据无效", str(exc))
+        if ticket.submission.lab_id != lab.id:
+            return _gate_block(403, "实验票据无效", "票据与实验不匹配。")
+        if lab.status != Lab.Status.PUBLISHED:
+            return _gate_block(403, "实验已下线", "实验已下线，请联系教师重新上线。")
+        schedule = ticket.submission.schedule
+        if schedule and not schedule.is_open():
+            return _gate_block(403, "实验不在开放时间", "当前不在实验开放时间内，请在开放时间重试。")
+        html = gate.render_parent(lab, sig, exp, attempt_token=ticket.token, preview=False)
+        if html is None:
+            return _gate_block(404, "实验页面不存在", "教师尚未上传实验页面。")
+        response = HttpResponse(html, content_type="text/html; charset=utf-8")
+        response["Cache-Control"] = "no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        response["X-Frame-Options"] = "SAMEORIGIN"
+        response["Content-Security-Policy"] = _GATE_CSP
+        response["Referrer-Policy"] = "no-referrer"
+        return response
+
+    # template：原逻辑（读预置 HTML + 注入 <base>；页面本体自带 lab-bridge.js）
     html = gate.read_page(lab)
     if html is None:
-        return render_block_page(404, "实验页面不存在", "平台尚未部署该实验页面，请联系管理员。")
+        return _gate_block(404, "实验页面不存在", "平台尚未部署该实验页面，请联系管理员。")
     response = HttpResponse(
-        resource_gate.inject_base(html, gate.asset_base(lab, request.GET.get("sig", ""), request.GET.get("exp", ""))),
+        gate.inject_bridge(html, "template", gate.asset_base(lab, sig, exp)),
         content_type="text/html; charset=utf-8",
     )
     response["Cache-Control"] = "no-store"
     response["X-Content-Type-Options"] = "nosniff"
     # 与课程资源入口页一致：允许同源 iframe 嵌入（clickjacking 中间件不覆盖已设置的响应头）
     response["X-Frame-Options"] = "SAMEORIGIN"
+    return response
+
+
+def lab_gate_frame(request, token, sig, exp):
+    """custom iframe 内容页：教师 HTML + <base> + 无票据 shim（C45/C25/C40）。
+
+    只验签名与（预览或发布）状态，绝不验票据——iframe URL 与内容里都没有票据。
+    预览模式（preview=1 + 预览签名）允许草稿预览。
+    """
+    lab = Lab.objects.filter(access_token=token).first()
+    preview = request.GET.get("preview") == "1"
+    verified = (
+        gate.verify_preview(lab, sig, exp)
+        if preview
+        else gate.verify_lab(lab, sig, exp)
+    ) if lab else False
+    if not verified:
+        return _gate_block(403, "实验链接无效或已失效", "实验已下线或链接已过期，请返回课程实验页重新进入。")
+    if lab.page_source != Lab.PageSource.CUSTOM:
+        return _gate_block(404, "实验页面不存在", "该实验没有自定义页面。")
+    html = gate.render_frame(lab, sig, exp, preview=preview)
+    if html is None:
+        return _gate_block(404, "实验页面不存在", "教师尚未上传实验页面。")
+    response = HttpResponse(html, content_type="text/html; charset=utf-8")
+    response["Cache-Control"] = "no-store"
+    response["X-Content-Type-Options"] = "nosniff"
+    # C40 双保险：CSP sandbox 与 iframe 属性取交集，绝不允许 allow-same-origin
+    response["Content-Security-Policy"] = (
+        "sandbox allow-scripts allow-forms allow-modals; " + _GATE_CSP
+    )
+    # C44：显式 SAMEORIGIN，避免中间件默认 DENY 依赖「CSP frame-ancestors 覆盖 XFO」的浏览器行为
+    response["X-Frame-Options"] = "SAMEORIGIN"
+    response["Referrer-Policy"] = "no-referrer"
     return response
 
 
