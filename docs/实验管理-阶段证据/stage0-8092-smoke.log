@@ -1,0 +1,14 @@
+PASS | A1 test_admin 登录成功并跳转 | path=/dashboard
+PASS | A2 教师实验管理页渲染（含实验内容）
+PASS | A3 教师页无控制台错误
+shot -> test/screenshots/stage0-8092-admin-labs.png
+PASS | B1 门控页加载完成 | readyState=complete
+PASS | B2 lab-bridge.js 已注入（window.LabBridge 存在）
+PASS | B3 页面含 lab-bridge script 标签
+PASS | B4 门控页无控制台错误
+shot -> test/screenshots/stage0-8092-student-gate.png
+gate body excerpt: "实验一：交换机与VLAN综合实验\n计算机网络实验教| 虚拟仿真实验 | 配套教材：基于华为eNSP\n实验步骤\n▶️步骤1. 查看交换机S1初始MAC地址表\n⏳步骤2. PC1 ping PC2观察MAC学习\n⏳步骤3. 查看S1的MAC地址表\n⏳步骤4. PC1 ping PC3观察泛洪\n⏳步骤5. 在S1上创建VLAN 10和VLAN 20\n⏳步骤6. 将S1的G0/0/1划入VLAN 10\n⏳"
+
+===== 汇总 =====
+总计 7 项，通过 7 项，失败 0 项
+ALL_PASS

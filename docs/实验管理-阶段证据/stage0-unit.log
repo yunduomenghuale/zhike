@@ -1,0 +1,38 @@
+Using existing test database for alias 'default' ('test_zk')...
+Found 10 test(s).
+Operations to perform:
+  Synchronize unmigrated apps: analytics, common, corsheaders, django_filters, drf_spectacular, messages, rest_framework, rest_framework_simplejwt, staticfiles
+  Apply all migrations: admin, ai, auth, classroom, contenttypes, courses, exams, homework, knowledge, labs, platform_admin, questions, sessions, token_blacklist, users
+Synchronizing apps without migrations:
+  Creating tables...
+    Running deferred SQL...
+Running migrations:
+  No migrations to apply.
+System check identified no issues (9 silenced).
+test_full_flow (apps.labs.tests.LabFlowTest.test_full_flow) ... ok
+test_other_teacher_cannot_access (apps.labs.tests.LabFlowTest.test_other_teacher_cannot_access) ... ok
+test_schedule_empty_time_means_open (apps.labs.tests.LabFlowTest.test_schedule_empty_time_means_open)
+排课时间留空（空字符串）按“立即开放/不限制”保存，不再 400； ... ok
+test_access_token_random_unique (apps.labs.tests.LabGateTest.test_access_token_random_unique)
+每条 Lab 持有不可猜测的随机 access_token（与课程资源同构）。 ... ok
+test_asset_path_traversal_blocked (apps.labs.tests.LabGateTest.test_asset_path_traversal_blocked)
+资产路由防目录穿越：.. 段与非 LABS_ROOT 路径拒绝。 ... ok
+test_bridge_validate_blocked_after_close (apps.labs.tests.LabGateTest.test_bridge_validate_blocked_after_close)
+票据有效期内实验被下线：bridge-validate 403（页内桥接同步拒绝）。 ... ok
+test_close_invalidates_signed_url (apps.labs.tests.LabGateTest.test_close_invalidates_signed_url)
+下线后旧签名立即失效；重新上线后（closed→published）可再次签发进入。 ... ok
+test_gate_invalid_signature_blocked (apps.labs.tests.LabGateTest.test_gate_invalid_signature_blocked)
+签名缺失/篡改/过期一律 403 友好页（不泄露实验存在性以外的信息）。 ... ok
+test_gate_page_and_asset_ok_when_published (apps.labs.tests.LabGateTest.test_gate_page_and_asset_ok_when_published)
+发布态：门控页 200（注入 <base> + SAMEORIGIN），资产可读。 ... ok
+test_report_generate_and_download (apps.labs.tests.LabReportTest.test_report_generate_and_download) ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 2.628s
+
+OK
+Preserving test database for alias 'default' ('test_zk')...
+
+real	0m4.573s
+user	0m0.015s
+sys	0m0.015s
