@@ -347,3 +347,158 @@ class LabReportTest(TestCase):
         oc.force_authenticate(other)
         res = oc.get(f"/api/lab-submissions/{sub_id}/download-report/?type=pdf")
         self.assertIn(res.status_code, (403, 404))
+
+
+class LabCustomModelTest(TestCase):
+    """Stage 1：template=None 的自定义实验——数据层/报告链不崩、报告双分支、grade_raw 角色裁剪。"""
+
+    HTML = """<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>自定义实验</title>
+    <style>body{font-family:sans-serif}</style></head><body><h1>实验操作区</h1>
+    <script>window.__custom_lab__ = true;</script></body></html>""".encode("utf-8")
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.teacher = User.objects.create_user("t201", password="pass1234", role="teacher", real_name="赵老师")
+        cls.student = User.objects.create_user("20250001", password="pass1234", role="student", real_name="钱同学")
+        cls.course = Course.objects.create(name="计算机网络", teacher=cls.teacher)
+        cls.classroom = ClassRoom.objects.create(name="网络2501", teacher=cls.teacher)
+        ClassCourse.objects.create(classroom=cls.classroom, course=cls.course)
+        ClassStudent.objects.create(classroom=cls.classroom, student=cls.student)
+
+    def setUp(self):
+        self.tc = APIClient()
+        self.tc.force_authenticate(self.teacher)
+        self.sc = APIClient()
+        self.sc.force_authenticate(self.student)
+
+    def _create_custom_lab(self):
+        res = self.tc.post("/api/labs/", {
+            "page_source": "custom", "course": self.course.id,
+            "title": "VLAN 综合自定义实验", "total_score": "100", "pass_score": "60",
+        }, format="json")
+        self.assertEqual(res.status_code, 201, res.data)
+        data = res.data["data"]
+        self.assertIsNone(data["template"])
+        self.assertIsNone(data["template_code"])
+        self.assertIsNone(data["template_title"])
+        self.assertIsNone(data["page_url"])
+        self.assertEqual(data["page_source"], "custom")
+        return data["id"]
+
+    def _upload_page(self, lab_id):
+        import hashlib
+
+        from django.core.files.base import ContentFile
+
+        from apps.labs.models import LabPage
+
+        page = LabPage(
+            lab_id=lab_id, original_name="vlan-lab.html", size=len(self.HTML),
+            sha256=hashlib.sha256(self.HTML).hexdigest(), uploaded_by=self.teacher,
+        )
+        page.file.save("vlan-lab.html", ContentFile(self.HTML), save=True)
+        return page
+
+    def test_custom_lab_full_chain_no_template(self):
+        """无模板 lab 走完 创建 → 发布 → start → bridge-validate → 生成报告，全链路不崩。"""
+        lab_id = self._create_custom_lab()
+
+        # 发布前置校验：custom 无页面必须 400
+        res = self.tc.post("/api/lab-schedules/", {"lab": lab_id, "classroom": self.classroom.id}, format="json")
+        self.assertIn(res.status_code, (200, 201), res.data)
+        res = self.tc.post(f"/api/labs/{lab_id}/publish/", format="json")
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertIn("上传", res.data.get("message", ""))
+
+        # 上传页面（模型层直建；上传 API 属 Stage 2）→ 发布成功
+        self._upload_page(lab_id)
+        res = self.tc.post(f"/api/labs/{lab_id}/publish/", format="json")
+        self.assertIn(res.status_code, (200, 201), res.data)
+
+        # start → 票据 + 门控 URL（gate 三分流是 Stage 2，这里只验票据/桥接层）
+        res = self.sc.post("/api/lab-submissions/start/", {"lab": lab_id}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        data = res.data["data"]
+        token = data["attempt_token"]
+        self.assertIn("page_url", data)
+
+        # bridge-validate：template=None 不崩，code 兜底 custom-{id}，expected 为空
+        res = self.sc.get(f"/api/lab-submissions/bridge-validate/?token={token}")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data["data"]["lab"]["code"], f"custom-{lab_id}")
+        self.assertEqual(res.data["data"]["lab"]["page_source"], "custom")
+        self.assertEqual(res.data["data"]["expected"], {})
+
+        # 模拟 Stage 3 端点将写入的成绩（external 分支数据形态）
+        from django.utils import timezone
+
+        from apps.labs.models import LabSubmission
+
+        sub = LabSubmission.objects.get(lab_id=lab_id, student=self.student)
+        sub.status = LabSubmission.Status.SUBMITTED
+        sub.submitted_at = timezone.now()
+        sub.elapsed_seconds = 742
+        sub.total_score = "86.5"
+        sub.score_breakdown = {"source": "external", "total": 86.5, "elapsed_seconds": 742}
+        sub.grading_source = "external"
+        sub.grade_raw = {"body": {"total_score": 86.5, "elapsed_seconds": 742}, "server": {"via": "parent"}}
+        sub.grade_raw_digest = "ab" * 32
+        sub.graded_at = timezone.now()
+        sub.save()
+
+        # grade_raw 角色裁剪：教师可见、学生 None（C8）
+        res = self.tc.get(f"/api/lab-submissions/{sub.id}/")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data["data"]["grade_raw"]["body"]["total_score"], 86.5)
+        self.assertEqual(res.data["data"]["grading_source"], "external")
+        res = self.sc.get(f"/api/lab-submissions/{sub.id}/")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertIsNone(res.data["data"]["grade_raw"])
+        self.assertEqual(res.data["data"]["score_breakdown"]["source"], "external")
+
+        # 报告：写结论 → 生成 → docx/pdf 真实打开检查
+        res = self.sc.post(f"/api/lab-submissions/{sub.id}/conclusion/", {"conclusion": "完成了 VLAN 划分与连通性验证。"}, format="json")
+        self.assertIn(res.status_code, (200, 201), res.data)
+        res = self.sc.post(f"/api/lab-submissions/{sub.id}/generate-report/")
+        self.assertIn(res.status_code, (200, 201), res.data)
+
+        sub.refresh_from_db()
+        self.assertTrue(sub.report.file_docx.name.endswith(".docx"))
+        self.assertIn(f"custom-{lab_id}", sub.report.file_name)
+
+        # DOCX：评分明细 = 总分 + 用时，不出现步骤分四项与步骤表
+        from docx import Document as DocxDocument
+
+        doc = DocxDocument(sub.report.file_docx.path)
+        text = "\n".join(p.text for p in doc.paragraphs)
+        self.assertIn("总分：86.5 / 100", text)
+        self.assertIn("用时：12 分钟", text)
+        self.assertNotIn("基础分", text)
+        self.assertIn("不适用", text)  # 步骤清单标注不适用
+        self.assertNotIn("步骤 1：", text)
+
+        # PDF：魔数正确且可解析出「总分」文本
+        import pypdf
+
+        self.assertTrue(sub.report.file_pdf.path.endswith(".pdf"))
+        reader = pypdf.PdfReader(sub.report.file_pdf.path)
+        pdf_text = "".join(page.extract_text() or "" for page in reader.pages)
+        self.assertIn("总分", pdf_text)
+        self.assertNotIn("基础分", pdf_text)
+
+    def test_template_mode_still_requires_template(self):
+        """template 模式不填模板仍被校验拒绝（存量行为不回退）。"""
+        res = self.tc.post("/api/labs/", {
+            "page_source": "template", "course": self.course.id, "title": "无模板预置",
+        }, format="json")
+        self.assertEqual(res.status_code, 400, res.data)
+
+    def test_custom_lab_clears_template_on_create(self):
+        """custom + 同时带 template：以 custom 为准，template 被清空。"""
+        template = LabTemplate.objects.create(code="arp-ip-lab", title="ARP实验")
+        res = self.tc.post("/api/labs/", {
+            "page_source": "custom", "template": template.id, "course": self.course.id,
+            "title": "带模板字段的自定义实验", "total_score": "100",
+        }, format="json")
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertIsNone(res.data["data"]["template"])

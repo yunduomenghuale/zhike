@@ -24,6 +24,11 @@ def _report_file_path(instance, filename):
     return f"lab_reports/{uuid4().hex}{Path(filename).suffix.lower()}"
 
 
+def _lab_page_path(instance, filename):
+    """教师自定义实验页：lab_pages/{lab_id}/{uuid}.html（防路径猜测/覆盖）。"""
+    return f"lab_pages/{instance.lab_id}/{uuid4().hex}{Path(filename).suffix.lower()}"
+
+
 class LabTemplate(BaseModel):
     """实验模板库（平台层）。一个模板对应一个静态实验页。"""
 
@@ -52,16 +57,30 @@ class LabTemplate(BaseModel):
 
 
 class Lab(BaseModel):
-    """实验（教师引用模板创建，挂课程）。"""
+    """实验（教师引用模板创建，挂课程）。
+
+    page_source 隐含判分方式：template → 现有服务端步骤重算；custom →
+    教师上传单 HTML，页面上报一个总分（grading_source=external）。
+    """
 
     class Status(models.TextChoices):
         DRAFT = "draft", "草稿"
         PUBLISHED = "published", "已发布"
         CLOSED = "closed", "已下线"
 
+    class PageSource(models.TextChoices):
+        TEMPLATE = "template", "平台预置"
+        CUSTOM = "custom", "教师自定义上传"
+
     template = models.ForeignKey(
-        LabTemplate, on_delete=models.PROTECT, related_name="labs", verbose_name="实验模板"
+        LabTemplate, null=True, blank=True, on_delete=models.PROTECT,
+        related_name="labs", verbose_name="实验模板",
     )
+    page_source = models.CharField(
+        "页面来源", max_length=16, choices=PageSource.choices, default=PageSource.TEMPLATE,
+    )
+    report_note = models.TextField("接入说明补充", blank=True)  # 教师补充给 AI 的 Markdown，可空
+    last_debug = models.JSONField("最近调试摘要", default=dict, blank=True)
     course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="labs", verbose_name="课程")
     catalog = models.ForeignKey(
         Catalog, null=True, blank=True, on_delete=models.SET_NULL, related_name="labs", verbose_name="章节"
@@ -92,11 +111,44 @@ class Lab(BaseModel):
 
     @property
     def effective_standard_minutes(self) -> int:
-        return self.standard_minutes or self.template.default_standard_minutes
+        return self.standard_minutes or (self.template.default_standard_minutes if self.template_id else 30)
 
     @property
     def effective_random_config(self) -> dict:
-        return self.random_config or self.template.random_config or {}
+        return self.random_config or (self.template.random_config if self.template_id else None) or {}
+
+
+class LabPage(BaseModel):
+    """教师自定义实验页面文件（OneToOne）：单文件 HTML，sha256/上传者留痕。
+
+    文件落 MEDIA_ROOT/lab_pages/；门控页由 Django 读出渲染，不用 /media/ 直链
+    （nginx 对 media 下 .html 强制 octet-stream，直链是下载而非执行）。
+    """
+
+    class Kind(models.TextChoices):
+        SINGLE_HTML = "single_html", "单文件 HTML"
+        BUNDLE = "bundle", "资源包（预留，本期不开放）"
+
+    lab = models.OneToOneField(
+        Lab, on_delete=models.CASCADE, related_name="custom_page", verbose_name="实验"
+    )
+    kind = models.CharField("类型", max_length=16, choices=Kind.choices, default=Kind.SINGLE_HTML)
+    file = models.FileField("页面文件", upload_to=_lab_page_path, max_length=255)
+    entry = models.CharField("入口文件", max_length=128, default="index.html")
+    original_name = models.CharField("原始文件名", max_length=255, blank=True)
+    size = models.BigIntegerField("文件大小(字节)", default=0)
+    sha256 = models.CharField("SHA-256", max_length=64, blank=True)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL,
+        related_name="uploaded_lab_pages", verbose_name="上传人",
+    )
+
+    class Meta:
+        verbose_name = "自定义实验页面"
+        verbose_name_plural = verbose_name
+
+    def __str__(self):
+        return f"{self.lab} 页面"
 
 
 class LabSchedule(BaseModel):
@@ -164,6 +216,11 @@ class LabSubmission(BaseModel):
     completion_score = models.DecimalField("完成度", max_digits=4, decimal_places=1, null=True, blank=True)
     total_score = models.DecimalField("总分", max_digits=6, decimal_places=1, null=True, blank=True)
     score_breakdown = models.JSONField("评分明细", default=dict, blank=True)
+    # 成绩来源：steps=服务端步骤重算（预置实验）；external=页面上报总分（自定义实验）
+    grading_source = models.CharField("成绩来源", max_length=16, default="steps")
+    grade_raw = models.JSONField("成绩原始报文", default=dict, blank=True)  # 请求体原文 + 服务端上下文（≤64KB）
+    grade_raw_digest = models.CharField("原始报文 SHA-256", max_length=64, blank=True)  # 供教师对账
+    graded_at = models.DateTimeField("成绩写入时间", null=True, blank=True)
     # 教师复核
     reviewed = models.BooleanField("教师已复核", default=False)
     reviewed_by = models.ForeignKey(

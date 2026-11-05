@@ -62,9 +62,10 @@ class LabScheduleSerializer(serializers.ModelSerializer):
 
 
 class LabSerializer(serializers.ModelSerializer):
-    template_code = serializers.CharField(source="template.code", read_only=True)
-    template_title = serializers.CharField(source="template.title", read_only=True)
-    page_url = serializers.CharField(source="template.page_url", read_only=True)
+    # template 可空（自定义实验）：三个派生字段必须 None 安全，不能 source 穿透
+    template_code = serializers.SerializerMethodField()
+    template_title = serializers.SerializerMethodField()
+    page_url = serializers.SerializerMethodField()
     course_name = serializers.CharField(source="course.name", read_only=True)
     standard_minutes_display = serializers.IntegerField(source="effective_standard_minutes", read_only=True)
     # 排课窗口（教师排课管理 / 学生判断是否在开放时间内）
@@ -78,13 +79,23 @@ class LabSerializer(serializers.ModelSerializer):
         model = Lab
         fields = [
             "id", "template", "template_code", "template_title", "page_url",
+            "page_source", "report_note", "last_debug",
             "course", "course_name", "catalog", "title", "description",
             "standard_minutes", "standard_minutes_display",
             "total_score", "pass_score", "random_config",
             "time_limit_seconds", "allow_resubmit", "status", "order",
             "schedules", "created_at", "updated_at",
         ]
-        read_only_fields = ["status"]
+        read_only_fields = ["status", "last_debug"]
+
+    def get_template_code(self, obj) -> str | None:
+        return obj.template.code if obj.template_id else None
+
+    def get_template_title(self, obj) -> str | None:
+        return obj.template.title if obj.template_id else None
+
+    def get_page_url(self, obj) -> str | None:
+        return obj.template.page_url if obj.template_id else None
 
     def validate_course(self, value: Course):
         user = self.context["request"].user
@@ -93,9 +104,19 @@ class LabSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, attrs):
-        """title/description/random_config 缺省继承模板（教师建实验=选模板+配置）。"""
+        """页面来源双分支：custom 忽略 template；template 强制要求模板。
+
+        title/description/random_config 缺省继承模板（教师建实验=选模板+配置）。
+        """
+        page_source = attrs.get("page_source") or (
+            self.instance.page_source if self.instance else Lab.PageSource.TEMPLATE
+        )
         template = attrs.get("template")
-        if template:
+        if page_source == Lab.PageSource.CUSTOM:
+            attrs["template"] = None  # 自定义实验不引用模板
+        elif template is None and not self.instance:
+            raise serializers.ValidationError({"template": "预置实验必须选择实验模板"})
+        if template and page_source != Lab.PageSource.CUSTOM:
             if not attrs.get("title"):
                 attrs["title"] = template.title
             if not attrs.get("description"):
@@ -113,6 +134,8 @@ class LabSubmissionSerializer(serializers.ModelSerializer):
     lab_title = serializers.CharField(source="lab.title", read_only=True)
     course_name = serializers.CharField(source="lab.course.name", read_only=True)
     lab_total_score = serializers.CharField(source="lab.total_score", read_only=True)
+    # C8：原始报文按角色裁剪——教师/管理员可见（对账改分依据），学生端一律 None
+    grade_raw = serializers.SerializerMethodField()
 
     class Meta:
         model = LabSubmission
@@ -123,8 +146,17 @@ class LabSubmissionSerializer(serializers.ModelSerializer):
             "error_count", "passed_steps", "total_steps",
             "base_score", "accuracy_score", "efficiency_score", "completion_score",
             "total_score", "score_breakdown",
+            "grading_source", "grade_raw", "grade_raw_digest", "graded_at",
             "reviewed", "abnormal", "started_at", "submitted_at",
         ]
+
+    def get_grade_raw(self, obj):
+        from apps.common.access import is_platform_admin
+
+        user = self.context.get("request").user if self.context.get("request") else None
+        if user and (getattr(user, "is_teacher", False) or is_platform_admin(user)):
+            return obj.grade_raw
+        return None
 
 
 class LabAttemptTokenSerializer(serializers.ModelSerializer):

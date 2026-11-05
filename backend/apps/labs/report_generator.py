@@ -61,10 +61,16 @@ def build_report_context(submission) -> dict:
     steps = submission.steps_result or {}
     if isinstance(steps, list):  # 兼容列表式步骤
         steps = {str(i + 1): v for i, v in enumerate(steps)}
-    step_lines = [
-        f"步骤 {sid}：{'通过' if state == 'pass' else '未通过'}"
-        for sid, state in sorted(steps.items(), key=lambda kv: (len(kv[0]), kv[0]))
-    ]
+    # 成绩来源双分支（C17/C18）：external（自定义实验）无步骤数据，
+    # 步骤清单标注「不适用」，评分明细只出总分 + 用时
+    score_mode = "external" if submission.grading_source == "external" else "steps"
+    if score_mode == "external":
+        step_lines = ["（不适用：自定义实验，平台不记录步骤明细）"]
+    else:
+        step_lines = [
+            f"步骤 {sid}：{'通过' if state == 'pass' else '未通过'}"
+            for sid, state in sorted(steps.items(), key=lambda kv: (len(kv[0]), kv[0]))
+        ]
     error_lines = [
         f"步骤 {e.get('step', '?')}：命令 {e.get('cmd', '')} {e.get('msg', '')}".strip()
         for e in (submission.error_log or [])
@@ -76,6 +82,7 @@ def build_report_context(submission) -> dict:
         "student_no": student.username,
         "class_name": classroom.name if classroom else "—",
         "experiment_date": submission.submitted_at or timezone.now(),
+        "score_mode": score_mode,
         "score": {
             "base": _fmt_score(submission.base_score),
             "accuracy": _fmt_score(submission.accuracy_score),
@@ -100,8 +107,9 @@ def generate_report(submission) -> LabReport:
     ctx["conclusion"] = report.conclusion or "（学生未填写实验结论）"
 
     base_name = (
-        f"实验报告_{ctx['student_no']}_{submission.lab.template.code}_"
-        f"{ctx['experiment_date']:%Y%m%d}"
+        f"实验报告_{ctx['student_no']}_"
+        f"{submission.lab.template.code if submission.lab.template_id else f'custom-{submission.lab.id}'}"
+        f"_{ctx['experiment_date']:%Y%m%d}"
     )
     docx_path = _render_docx(ctx)
     pdf_path = _render_pdf(ctx)
@@ -167,13 +175,19 @@ def _render_docx(ctx: dict) -> str:
 
     _section("三、评分明细")
     s = ctx["score"]
-    doc.add_paragraph(
-        f"基础分：{s['base']} / 80\n"
-        f"操作准确性：{s['accuracy']} / 5\n"
-        f"完成效率：{s['efficiency']} / 5\n"
-        f"完成度：{s['completion']} / 10\n"
-        f"总分：{s['total']} / {s['full']}"
-    )
+    if ctx["score_mode"] == "external":
+        doc.add_paragraph(
+            f"总分：{s['total']} / {s['full']}\n"
+            f"用时：{ctx['elapsed_minutes']} 分钟"
+        )
+    else:
+        doc.add_paragraph(
+            f"基础分：{s['base']} / 80\n"
+            f"操作准确性：{s['accuracy']} / 5\n"
+            f"完成效率：{s['efficiency']} / 5\n"
+            f"完成度：{s['completion']} / 10\n"
+            f"总分：{s['total']} / {s['full']}"
+        )
 
     _section("四、实验结论")
     doc.add_paragraph(ctx["conclusion"])
@@ -234,14 +248,26 @@ def _render_pdf(ctx: dict) -> str:
             bulletType="1",
         ))
     s = ctx["score"]
-    flow += [
-        Paragraph("三、评分明细", styles["h"]),
-        Paragraph(
-            f"基础分：{s['base']} / 80<br/>操作准确性：{s['accuracy']} / 5<br/>"
-            f"完成效率：{s['efficiency']} / 5<br/>完成度：{s['completion']} / 10<br/>"
-            f"<b>总分：{s['total']} / {s['full']}</b>",
-            styles["body"],
-        ),
+    if ctx["score_mode"] == "external":
+        score_flow = [
+            Paragraph("三、评分明细", styles["h"]),
+            Paragraph(
+                f"总分：{s['total']} / {s['full']}<br/>"
+                f"用时：{ctx['elapsed_minutes']} 分钟",
+                styles["body"],
+            ),
+        ]
+    else:
+        score_flow = [
+            Paragraph("三、评分明细", styles["h"]),
+            Paragraph(
+                f"基础分：{s['base']} / 80<br/>操作准确性：{s['accuracy']} / 5<br/>"
+                f"完成效率：{s['efficiency']} / 5<br/>完成度：{s['completion']} / 10<br/>"
+                f"<b>总分：{s['total']} / {s['full']}</b>",
+                styles["body"],
+            ),
+        ]
+    flow += score_flow + [
         Paragraph("四、实验结论", styles["h"]),
         Paragraph(_esc(ctx["conclusion"]).replace("\n", "<br/>"), styles["body"]),
         Spacer(1, 6 * mm),

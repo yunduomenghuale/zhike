@@ -128,6 +128,11 @@ class LabViewSet(BaseModelViewSet):
             return api_response(message="实验已是发布状态")
         if not lab.schedules.exists():
             raise ValidationError("请先给班级排课再发布实验")
+        # 页面来源前置校验：custom 必须先上传页面；template 必须绑定模板（设计 §5）
+        if lab.page_source == Lab.PageSource.CUSTOM and not hasattr(lab, "custom_page"):
+            raise ValidationError("自定义实验需先上传实验页面再发布")
+        if lab.page_source == Lab.PageSource.TEMPLATE and lab.template_id is None:
+            raise ValidationError("预置实验需选择实验模板")
         lab.status = Lab.Status.PUBLISHED
         lab.save(update_fields=["status", "updated_at"])
         self._notify_schedules(lab)
@@ -332,11 +337,15 @@ class LabSubmissionViewSet(BaseModelViewSet):
         return api_response(
             {
                 "submission_id": sub.id,
-                "lab": {"id": lab.id, "title": lab.title, "code": lab.template.code,
+                "lab": {"id": lab.id, "title": lab.title,
+                        "code": lab.template.code if lab.template_id else f"custom-{lab.id}",
+                        "page_source": lab.page_source,
                         "standard_minutes": lab.effective_standard_minutes,
                         "time_limit_seconds": lab.time_limit_seconds},
                 "random_seed": sub.random_seed,
-                "expected": seedgen.derive_expected(sub.random_seed, lab.template.code),
+                "expected": seedgen.derive_expected(
+                    sub.random_seed, lab.template.code
+                ) if lab.template_id else {},
                 "status": sub.status,
             }
         )

@@ -1,0 +1,11 @@
+Migrations for 'labs':
+  apps\labs\migrations\0006_lab_custom_page_grading.py
+    + Add field last_debug to lab
+    + Add field page_source to lab
+    + Add field report_note to lab
+    + Add field grade_raw to labsubmission
+    + Add field grade_raw_digest to labsubmission
+    + Add field graded_at to labsubmission
+    + Add field grading_source to labsubmission
+    ~ Alter field template on lab
+    + Create model LabPage

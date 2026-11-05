@@ -51,18 +51,26 @@ def asset_base(lab, sig: str, exp: str) -> str:
     return ASSET_URL.format(token=lab.access_token, sig=sig, exp=exp)
 
 
-def _lab_page_relpath(lab) -> str:
-    """模板静态页相对 LABS_ROOT 的路径：static_path（/labs/x.html）或缺省 {code}.html。"""
+def _lab_page_relpath(lab) -> str | None:
+    """模板静态页相对 LABS_ROOT 的路径：static_path（/labs/x.html）或缺省 {code}.html。
+
+    page_source=custom 的实验没有模板静态页（页面走 LabPage/L2 沙箱链路），返回 None。
+    """
+    if lab.template_id is None:
+        return None
     raw = (lab.template.static_path or "").strip() or f"/labs/{lab.template.code}.html"
     name = raw.rsplit("/labs/", 1)[-1] if "/labs/" in raw else raw.lstrip("/")
     return name
 
 
 def read_page(lab) -> str | None:
-    """读实验入口 HTML；文件不存在返回 None。"""
+    """读实验入口 HTML；无模板页或文件不存在返回 None。"""
+    relpath = _lab_page_relpath(lab)
+    if relpath is None:
+        return None
     root = Path(settings.LABS_ROOT).resolve()
     try:
-        candidate = (root / _lab_page_relpath(lab)).resolve()
+        candidate = (root / relpath).resolve()
         candidate.relative_to(root)
     except (OSError, ValueError):
         return None

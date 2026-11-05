@@ -1,0 +1,4 @@
+Operations to perform:
+  Apply all migrations: labs
+Running migrations:
+  Applying labs.0006_lab_custom_page_grading... OK
