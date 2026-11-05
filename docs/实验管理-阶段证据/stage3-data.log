@@ -1,0 +1,103 @@
+===== 一、入库记录（真实库 zk） =====
+{
+  "submission_id": 11,
+  "lab_id": 19,
+  "lab_title": "Stage3 成绩上报端到端实验-20261105193653",
+  "student": "20249999",
+  "status": "submitted",
+  "total_score": "100.0",
+  "grading_source": "external",
+  "elapsed_seconds": 7,
+  "started_at": "2026-11-05T11:36:53.555469+00:00",
+  "submitted_at": "2026-11-05T11:37:01.190490+00:00",
+  "graded_at": "2026-11-05T11:37:01.190490+00:00",
+  "abnormal": true,
+  "passed_steps": 0,
+  "total_steps": 0,
+  "score_breakdown": {
+    "total": 100.0,
+    "source": "external",
+    "elapsed_seconds": 7
+  },
+  "grade_raw": {
+    "server": {
+      "lab_id": 19,
+      "abnormal": true,
+      "raw_bytes": 42,
+      "started_at": "2026-11-05T11:36:53.555469+00:00",
+      "student_id": 12,
+      "submitted_at": "2026-11-05T11:37:01.190490+00:00",
+      "submission_id": 11,
+      "abnormal_reason": "满分且用时极短，建议复核",
+      "elapsed_seconds": 7,
+      "client_elapsed_seconds": 6
+    },
+    "request": {
+      "total_score": 100,
+      "elapsed_seconds": 6
+    }
+  },
+  "grade_raw_digest": "40a3b20af07b2ff109f7a073c514eb4d0ebbd4b7439a165108e0b7d3ef44871f",
+  "ticket_consumed": true
+}
+PASS | S1 落库用时 == submitted_at - started_at | 7 vs 7
+PASS | S1 客户端谎报用时只进 grade_raw | client=6
+PASS | C23 submitted_at 由服务端生成
+PASS | 成绩来源 external + 总分 100
+PASS | 步骤指标保持 0（C17 统计分支依据）
+PASS | score_breakdown 只有 total/source/elapsed | {'total': 100.0, 'source': 'external', 'elapsed_seconds': 7}
+PASS | grade_raw_digest 可复核
+PASS | S2 票据已消费且不可重放
+PASS | S5 满分极短用时 abnormal=True | 满分且用时极短，建议复核
+===== 二、C8 grade_raw 角色裁剪（真实 HTTP） =====
+PASS | 教师可见原文
+PASS | 学生端 grade_raw 为 None
+===== 三、C17 章节学情（真实数据调 build_chapter_profile） =====
+{"title": "Stage3 成绩上报端到端实验-20261105193653", "total_score": 100.0, "passed_steps": null, "total_steps": null, "elapsed_seconds": 7, "grading_source": "external", "step_metrics": "不适用（自定义实验，平台不记录步骤明细）"}
+PASS | 章节画像含该自定义实验
+PASS | 章节画像步骤指标为 None（不被 0 拉低）
+PASS | 章节画像标注「不适用」并保留总分/用时
+===== 四、C18 班级导出（真实 HTTP xlsx） =====
+PASS | 导出接口 200 | 200
+{"学号": "20249999", "姓名": "多班学生", "实验名称": "Stage3 成绩上报端到端实验-20261105193653", "满分": 100, "总分": 100, "折算分": 100, "基础分": "不适用", "操作准确性": "不适用", "完成效率": "不适用", "完成度": "不适用", "通过步骤": "不适用", "总步骤": "不适用", "用时(分钟)": 0.1, "第几次作答": 1, "教师复核": "否", "状态": "已提交"}
+PASS | Sheet4 含该实验行
+PASS | Sheet4 总分 100 + 用时非空
+PASS | Sheet4 基础分 = 不适用 | 不适用
+PASS | Sheet4 操作准确性 = 不适用 | 不适用
+PASS | Sheet4 完成效率 = 不适用 | 不适用
+PASS | Sheet4 完成度 = 不适用 | 不适用
+PASS | Sheet4 通过步骤 = 不适用 | 不适用
+PASS | Sheet4 总步骤 = 不适用 | 不适用
+xlsx -> D:\tmp\stage3-export.xlsx
+===== 五、报告双分支（真实生成并打开 docx/pdf） =====
+PASS | 报告生成接口 200 | {"code":0,"message":"实验报告已生成","data":{"id":2,"submission":11,"conclusion":"完成自定义实验，验证了总分上报与服务端用时计算。","file_docx":"/media/lab_reports/ad95013dab11436fab00a47152d7d92f.docx","file_docx_url":"/media/lab_
+PASS | LabReport 落库
+PASS | DOCX 评分明细 = 总分 + 用时，不含四项基准分 | 虚拟仿真实验报告
+计算机网络 · Stage3 成绩上报端到端实验-20261105193653
+姓名：多班学生    学号：20249999    班级：网络2026届-1班
+实验日期：2026年11月05日
+一、完成步骤
+（不适用：自定义实验，平台不记录步骤明细）
+三、评分明细
+总分：100.0 / 100.0
+用时：0 分钟
+四、实验结论
+完成自定义实验，验证了总分上报与服务端用时计算。
+PASS | DOCX 步骤清单标注「不适用」
+PASS | PDF 同样只有总分、无基准分 | 虚拟仿真实验报告
+ 计算机网络 · Stage3 成绩上报端到端实验-20261105193653
+姓名：多班学生 学号：20249999 班级：网络2026届-1班
+实验日期：2026年11月05日
+一、完成步骤
+
+（不适用：自定义实验，平台不记录步骤明细）
+三、评分明细
+总分：100.0 / 100.0
+用时：0 分钟
+四、实验结论
+完成自定义实验，验证了总分上报与服务端用时计算。
+
+
+===== 汇总 =====
+总计 28 项，通过 28 项，失败 0 项
+ALL_PASS

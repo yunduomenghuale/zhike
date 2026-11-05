@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>Stage3 成绩上报端到端</title>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 24px; background: #0f1f3d; color: #e8eefc; }
+    .task { padding: 10px; margin: 8px 0; border: 1px solid #3a5a9c; border-radius: 8px; }
+    button { padding: 8px 18px; font-size: 14px; margin-right: 8px; }
+    pre { background: #16264d; padding: 12px; color: #9fd18b; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>Stage3 自定义实验 · 成绩上报</h1>
+  <p>本页只调用平台提供的 LabBridge：validate() 取 context，reportGrade() 上报总分与页面用时。</p>
+  <div id="tasks"></div>
+  <button id="finish">完成并提交</button>
+  <button id="bad">越界分数提交（应失败）</button>
+  <pre id="log"></pre>
+
+  <script>
+  (function () {
+    var startedAt = Date.now();
+    function log(m) {
+      var el = document.getElementById('log');
+      el.textContent += m + '\n';
+      window.__stage3Log = el.textContent;
+    }
+    if (!window.LabBridge) { log('NO_LABBRIDGE'); return; }
+    log('preview=' + LabBridge.preview);
+    if (LabBridge.preview) { log('预览模式：不提交成绩'); return; }
+
+    LabBridge.validate().then(function (ctx) {
+      window.__stage3Context = ctx;
+      log('context=' + JSON.stringify(ctx));
+      var maxScore = (ctx && ctx.totalScore) || 100;
+      var tasks = [
+        { title: '任务一：配置 VLAN', score: 40 },
+        { title: '任务二：配置路由', score: 40 },
+        { title: '任务三：连通性验证', score: 20 }
+      ];
+      var box = document.getElementById('tasks');
+      tasks.forEach(function (t, i) {
+        var div = document.createElement('div');
+        div.className = 'task';
+        var label = document.createElement('label');
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.setAttribute('data-i', String(i));
+        label.appendChild(cb);
+        label.appendChild(document.createTextNode(' ' + t.title + '（' + t.score + ' 分）'));
+        div.appendChild(label);
+        box.appendChild(div);
+      });
+
+      function submit(payload) {
+        return LabBridge.reportGrade(payload).then(function (res) {
+          window.__stage3Last = res;
+          log('reportGrade => ' + JSON.stringify(res));
+          return res;
+        });
+      }
+      window.__stage3Submit = submit;
+      document.getElementById('finish').onclick = function () {
+        var total = 0;
+        tasks.forEach(function (t, i) {
+          if (box.querySelector('input[data-i="' + i + '"]').checked) total += t.score;
+        });
+        total = Math.min(Math.round(total * 10) / 10, maxScore);
+        return submit({
+          total_score: total,
+          elapsed_seconds: Math.round((Date.now() - startedAt) / 1000)
+        });
+      };
+      document.getElementById('bad').onclick = function () {
+        return submit({ total_score: maxScore + 1, elapsed_seconds: 1 });
+      };
+      window.__stage3Ready = true;
+    }).catch(function (e) { log('validate failed: ' + e); });
+  })();
+  </script>
+</body>
+</html>

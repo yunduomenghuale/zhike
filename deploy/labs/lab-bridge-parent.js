@@ -30,11 +30,19 @@
       ).then(function (r) { return r.json(); }).then(function (res) {
         if (!res || res.code !== 0) return null;
         var d = res.data || {};
-        window.__LAB_CONTEXT__ = {
+        // C45：bridge-validate 下发四字段 context，父页面只透这四字段给 iframe；
+        // 旧后端无 context 时按既有字段回退映射，绝不多透原响应里的其它业务字段。
+        var c = d.context || {
           labId: d.lab && d.lab.id,
           submissionId: d.submission_id,
           totalScore: d.lab && d.lab.total_score != null ? Number(d.lab.total_score) : null,
           gradeEndpoint: '/api/lab-gate/grade/'
+        };
+        window.__LAB_CONTEXT__ = {
+          labId: c.labId != null ? c.labId : null,
+          submissionId: c.submissionId != null ? c.submissionId : null,
+          totalScore: c.totalScore != null ? Number(c.totalScore) : null,
+          gradeEndpoint: c.gradeEndpoint || '/api/lab-gate/grade/'
         };
         return window.__LAB_CONTEXT__;
       }).catch(function () { return null; });

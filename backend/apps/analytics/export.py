@@ -436,17 +436,20 @@ def build_class_export_workbook(classroom, course, start=None, end=None, section
         for lab in lab_list:
             for sid, username, name in stu_meta:
                 sub = lab_subs.get((lab.id, sid))
+                # C18：自定义实验只由页面上报「总分 + 用时」，四项基准分与
+                # 步骤指标均无数据；写 0 会被误读成真实低分，统一标「不适用」。
+                external = bool(sub and sub.grading_source == "external")
                 ws4.append([
                     username, name, lab.title,
                     float(lab.total_score),
                     _f1(sub.total_score) if sub else None,
                     _pct(sub.total_score, lab.total_score) if sub else None,
-                    _f1(sub.base_score) if sub else None,
-                    _f1(sub.accuracy_score) if sub else None,
-                    _f1(sub.efficiency_score) if sub else None,
-                    _f1(sub.completion_score) if sub else None,
-                    sub.passed_steps if sub else None,
-                    sub.total_steps if sub else None,
+                    "不适用" if external else (_f1(sub.base_score) if sub else None),
+                    "不适用" if external else (_f1(sub.accuracy_score) if sub else None),
+                    "不适用" if external else (_f1(sub.efficiency_score) if sub else None),
+                    "不适用" if external else (_f1(sub.completion_score) if sub else None),
+                    "不适用" if external else (sub.passed_steps if sub else None),
+                    "不适用" if external else (sub.total_steps if sub else None),
                     _fmt_minutes(sub.elapsed_seconds) if sub else None,
                     sub.attempt if sub else None,
                     ("是" if sub.reviewed else "否") if sub else None,

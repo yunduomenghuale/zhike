@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 
 from . import views
 from .views import (
+    GradeReportView,
     LabGuideViewSet,
     LabScheduleViewSet,
     LabSubmissionViewSet,
@@ -19,6 +20,7 @@ router.register("lab-guide", LabGuideViewSet, basename="lab-guide")
 
 urlpatterns = [
     # 实验页门控（显式 path 须在 router.urls 前；资产路径无尾斜杠，不能用 router）
+    path("lab-gate/grade/", GradeReportView.as_view(), name="lab-gate-grade"),
     path("lab-gate/page/<uuid:token>/", views.lab_gate_page, name="lab-gate-page"),
     path("lab-gate/frame/<uuid:token>/<str:sig>/<int:exp>/", views.lab_gate_frame, name="lab-gate-frame"),
     path("lab-gate/asset/<uuid:token>/<str:sig>/<int:exp>/<path:rest>", views.lab_gate_asset, name="lab-gate-asset"),

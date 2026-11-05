@@ -1,0 +1,9 @@
+login OK: teacher=t101 student=20249999
+create lab OK: id=19
+upload page OK: 3144 bytes, scan hits=0
+grade-debug OK: 100/0/86.5 通过，101 未通过，均为 dry_run
+schedule + publish OK
+student start OK: sub_id=11 token=<attempt_token>...
+preview_url=/api/lab-gate/page/98532853-6371-460f-ad47-eb88528fe62f/?sig=4b5ac63509dc9c95f2dc7952cee3d8344798108103e502ee6ffe96b27a8147fa&exp=1793885813&preview=1
+page_url=/api/lab-gate/page/98532853-6371-460f-ad47-eb88528fe62f/?sig=ea5805faaa6380ff369f58b4b2a4229d0d846a063378033ed8b9bc897c15f6e4&exp=1793885813&token=<attempt_token>
+out=D:/tmp/stage3-setup.json

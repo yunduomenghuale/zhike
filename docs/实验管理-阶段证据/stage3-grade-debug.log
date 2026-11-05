@@ -1,0 +1,45 @@
+# grade-debug dry-run 逐条结果（来自 setup 真实 HTTP 响应，未入库）
+
+--- total_score=100 ---
+passed=True dry_run=True
+  [PASS] 票据模拟 (提示项，不参与判定)
+  [PASS] 页面来源 (提示项，不参与判定)
+  [FAIL] 发布状态 -> 当前 draft（草稿态也可 dry-run） (提示项，不参与判定)
+  [PASS] 页面文件 (提示项，不参与判定)
+  [PASS] 总分格式与范围
+  [PASS] 客户端用时
+  [PASS] 报文大小
+preview=有（含 grading_source=external / 服务端时间说明）
+
+--- total_score=0 ---
+passed=True dry_run=True
+  [PASS] 票据模拟 (提示项，不参与判定)
+  [PASS] 页面来源 (提示项，不参与判定)
+  [FAIL] 发布状态 -> 当前 draft（草稿态也可 dry-run） (提示项，不参与判定)
+  [PASS] 页面文件 (提示项，不参与判定)
+  [PASS] 总分格式与范围
+  [PASS] 客户端用时
+  [PASS] 报文大小
+preview=有（含 grading_source=external / 服务端时间说明）
+
+--- total_score=86.5 ---
+passed=True dry_run=True
+  [PASS] 票据模拟 (提示项，不参与判定)
+  [PASS] 页面来源 (提示项，不参与判定)
+  [FAIL] 发布状态 -> 当前 draft（草稿态也可 dry-run） (提示项，不参与判定)
+  [PASS] 页面文件 (提示项，不参与判定)
+  [PASS] 总分格式与范围
+  [PASS] 客户端用时
+  [PASS] 报文大小
+preview=有（含 grading_source=external / 服务端时间说明）
+
+--- total_score=101 ---
+passed=False dry_run=True
+  [PASS] 票据模拟 (提示项，不参与判定)
+  [PASS] 页面来源 (提示项，不参与判定)
+  [FAIL] 发布状态 -> 当前 draft（草稿态也可 dry-run） (提示项，不参与判定)
+  [PASS] 页面文件 (提示项，不参与判定)
+  [FAIL] 总分格式与范围 -> [ErrorDetail(string='成绩超出实验总分范围（0 ~ 100.0）', code='invalid')]
+  [FAIL] 客户端用时 -> [ErrorDetail(string='成绩超出实验总分范围（0 ~ 100.0）', code='invalid')]
+  [FAIL] 报文大小 -> [ErrorDetail(string='成绩超出实验总分范围（0 ~ 100.0）', code='invalid')]
+preview=None

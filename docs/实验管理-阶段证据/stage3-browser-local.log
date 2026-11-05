@@ -1,0 +1,61 @@
+PASS | A1 平台父页面渲染（含 sandbox iframe）
+PASS | A2 iframe sandbox 不含 allow-same-origin（C40） | allow-scripts allow-forms allow-modals
+PASS | A3 iframe src 绝对路径且不含票据（C45） | /api/lab-gate/frame/98532853-6371-460f-ad47-eb88528fe62f/ea5805faaa6380ff369f58b4b2a4229d0d846a063378033ed8b9bc897c15f6e4/1793885813/
+PASS | A4 父页面票据引导变量用完即删
+PASS | A5 父页面 fetch 探针注入
+PASS | A6 伪造 postMessage 被父页面丢弃（未发起成绩上报，C41） | posts=0
+PASS | A7 定位到 sandbox iframe 独立执行上下文 | {"sessionId":"E0905957309E9A2C6754D8128E5CB75A"}
+PASS | A8 iframe 内 localStorage 抛 SecurityError（L2 隔离） | SecurityError
+PASS | A9 iframe 内 shim 注入且 preview=false | {"hasBridge":true,"preview":false,"context":{"labId":19,"submissionId":11,"totalScore":100,"gradeEndpoint":"/api/lab-gate/grade/"},"ready":true,"bootToken":"undefined","htmlHasToken":false}
+PASS | A10 validate() 拿到的 context 只有四字段、不含票据（C45） | {"labId":19,"submissionId":11,"totalScore":100,"gradeEndpoint":"/api/lab-gate/grade/"}
+PASS | A11 iframe 内无引导票据变量、页面无票据头字面量（C42） | {"hasBridge":true,"preview":false,"context":{"labId":19,"submissionId":11,"totalScore":100,"gradeEndpoint":"/api/lab-gate/grade/"},"ready":true,"bootToken":"undefined","htmlHasToken":false}
+PASS | A12 越界分数返回中文错误且 code=400 | {"code":400,"message":"成绩超出实验总分范围（0 ~ 100.0）","data":["成绩超出实验总分范围（0 ~ 100.0）"]}
+PASS | A13 修正后 reportGrade 成功，总分 100 / status=submitted | {"code":0,"message":"成绩已提交","data":{"submission_id":11,"total_score":100,"status":"submitted","submitted_at":"2026-11-05T11:37:01.190490+00:00","graded_at":"2026-11-05T11:37:01.190490+00:00"}}
+PASS | A14 两次上报均由父页面代发且带 X-Lab-Token | [{"url":"/api/lab-gate/grade/","hasToken":true},{"url":"/api/lab-gate/grade/","hasToken":true}]
+PASS | A15 成功后一次性闸门拒绝重复上报（S4） | posts=2
+PASS | A16 iframe 日志含失败与成功两次响应 | preview=false
+context={"labId":19,"submissionId":11,"totalScore":100,"gradeEndpoint":"/api/lab-gate/grade/"}
+reportGrade => {"code":400,"message":"成绩超出实验总分范围（0 ~ 100.0）","data":["成绩超出实验总分范围（0 ~ 100.0）"]}
+reportGrade => {"code":0,"message":"成绩已提交","data":{"subm
+shot -> test/screenshots/stage3-local-after-report.png
+PASS | B1 预览页 fetch 探针注入
+PASS | B2 预览父页面 preview=true 且无票据 | {"preview":true}
+PASS | B3 定位预览 iframe 会话
+PASS | B4 预览 iframe 内跳过提交 | {"preview":true,"log":"preview=true\n预览模式：不提交成绩\n"}
+PASS | B5 预览模式零成绩上报 | posts=0
+shot -> test/screenshots/stage3-local-preview.png
+PASS | C1 学生真实账号 UI 登录成功 | path=/dashboard
+PASS | C2 学生实验列表出现该自定义实验 | 智课平台
+返回我的课程
+计算机网络
+网络2026届-1班
+章节目录
+AI 助教
+课程资料
+课程资源
+虚拟实验
+我的作业
+我的考试
+错题本
+实验
+实验一：交换机基础配置与VLAN/STP实验
+69.3 分
+使用华为命令完成交换机基础配置、VLAN 划分与生成树协议观察。
+计算机网络
+标准时长 30 分钟
+满分 100.0
+PASS | C3 学生端立刻显示总分 100 | {"found":true,"total":"100.0 / 100.0 分","tag":["100.0 分"]}
+PASS | C4 学生实验页无控制台错误 | 
+shot -> test/screenshots/stage3-local-student-score.png
+PASS | D1 教师真实账号 UI 登录成功 | path=/dashboard
+PASS | D2 打开该实验详情抽屉 | OK
+PASS | D2b 抽屉确实是本次已发布的实验 | {"title":"Stage3 成绩上报端到端实验-20261105193653","items":["状态 已发布","实验模板","满分 100.0 分（及格 60.0）","标准时长 30 分钟"]}
+PASS | D3 教师端提交均分 = 100 | {"nums":["8","1","0","7","100","—"],"labels":["应做人数","已提交","进行中","未开始","提交均分","平均步骤通过"],"avgSteps":"—","avgScore":"100","stepCells":1}
+PASS | D4 平均步骤通过率为「—」（external 不拉低统计，C17） | —
+PASS | D5 详情表步骤列标注「不适用」 | 1
+PASS | D6 教师实验页无控制台错误 | 
+shot -> test/screenshots/stage3-local-teacher-detail.png
+
+===== 汇总 =====
+总计 32 项，通过 32 项，失败 0 项
+ALL_PASS

@@ -278,6 +278,7 @@ GLOBAL_THROTTLE_RATES = {
     "user": "1200/min",    # 登录用户：视频 10s 心跳约 6/min，留足余量
     "login": "30/min",     # 登录端点按 IP 从严（另有失败锁定兜底）
     "ai_ask": "60/min",    # AI 问答从严（成本入口；用户级日配额是第二道闸）
+    "lab_grade": "10/min",  # 自定义实验成绩上报（叠加票据一次性 + S4 闸门）
 }
 
 REST_FRAMEWORK = {
@@ -300,6 +301,9 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_CLASSES": GLOBAL_THROTTLE_CLASSES,
     "DEFAULT_THROTTLE_RATES": {
         **GLOBAL_THROTTLE_RATES,
+        # 双写：lab_grade 既在 GLOBAL_THROTTLE_RATES（ScopedSettingThrottle 动态读取），
+        # 也显式列在 DEFAULT_THROTTLE_RATES，避免后续重构漏掉专项档位。
+        "lab_grade": "10/min",
         "admin_read": "120/min",
         "admin_write": "30/min",
         "admin_export": "10/min",

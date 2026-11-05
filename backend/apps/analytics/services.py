@@ -615,11 +615,17 @@ def build_chapter_profile(student, catalog, *, for_student: bool) -> dict:
         sub = LabSubmission.objects.filter(lab=lab, student=student).first()
         if not sub:
             continue
+        # C17：自定义实验（external）没有步骤数据，0/0 会把章节画像的
+        # 步骤通过率当成 0% 拉低；这里显式标为不适用，只保留总分与用时。
+        external = sub.grading_source == "external"
         labs_out.append({
             "title": lab.title,
             "total_score": float(sub.total_score) if sub.total_score is not None else None,
-            "passed_steps": sub.passed_steps,
-            "total_steps": sub.total_steps,
+            "passed_steps": None if external else sub.passed_steps,
+            "total_steps": None if external else sub.total_steps,
+            "elapsed_seconds": sub.elapsed_seconds,
+            "grading_source": sub.grading_source,
+            "step_metrics": "不适用（自定义实验，平台不记录步骤明细）" if external else None,
         })
 
     # ---- 章节问答 ----

@@ -1,5 +1,6 @@
 from decimal import Decimal
 import hashlib
+import json
 import os
 
 from django.db import transaction
@@ -7,19 +8,21 @@ from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import mixins, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.exceptions import AuthenticationFailed, PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.views import APIView
 
 from apps.common.access import is_platform_admin, student_submit_block_detail
 from apps.common.error_pages import render_block_page
 from apps.common.permissions import IsStudent, IsTeacher, IsTeacherOrReadOnly
 from apps.common.response import api_response
+from apps.common.throttles import LabGradeThrottle
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from .auth import LabTokenAuthentication
 from apps.common.viewsets import BaseModelViewSet
 from apps.courses import resource_gate
 
-from . import bridge, gate, guide_preset, scoring, seedgen
+from . import bridge, gate, guide_preset, scoring, seedgen, services
 from .models import (
     Lab,
     LabGuide,
@@ -250,6 +253,69 @@ class LabViewSet(BaseModelViewSet):
         signed = gate.sign_preview(lab)
         return api_response(signed, message="预览链接已生成")
 
+    @action(detail=True, methods=["post"], url_path="grade-debug", permission_classes=[IsTeacher])
+    def grade_debug(self, request, pk=None):
+        """在线调试（dry-run）：用同一套极简校验跑模拟报文，逐项返回结果，不入库、不产生提交。"""
+        lab = self.get_object()
+        checks = []
+
+        def check(name, ok, detail="", blocking=True):
+            checks.append({
+                "name": name, "ok": bool(ok), "detail": str(detail), "blocking": blocking,
+            })
+
+        # 只有「模拟报文本身」的校验参与通过判定；发布状态 / 页面文件是环境提示，
+        # 草稿态也必须能调试（Stage 4 的 UI 顺序是 创建 → 调试 → 发布）。
+        check("票据模拟", True, "正式提交由平台父页面自动附带一次性票据；dry-run 不校验真实票据", blocking=False)
+        check("页面来源", lab.page_source == Lab.PageSource.CUSTOM,
+              "custom 才走页面成绩上报" if lab.page_source == Lab.PageSource.CUSTOM else "当前为平台预置实验",
+              blocking=False)
+        check("发布状态", lab.status == Lab.Status.PUBLISHED,
+              "已发布" if lab.status == Lab.Status.PUBLISHED else f"当前 {lab.status}（草稿态也可 dry-run）",
+              blocking=False)
+        check("页面文件", getattr(lab, "custom_page", None) is not None,
+              "已上传" if getattr(lab, "custom_page", None) is not None else "尚未上传自定义页面",
+              blocking=False)
+
+        parsed = None
+        try:
+            parsed = services.parse_grade_payload(request.data, lab)
+            check("总分格式与范围", True, f"0 ~ {lab.total_score}，最多 1 位小数")
+            check("客户端用时", True, "非负数（只留痕，正式用时由服务端计算）")
+            check("报文大小", True, f"{parsed['raw_bytes']} B ≤ {services.MAX_GRADE_BYTES} B")
+        except ValidationError as exc:
+            detail = str(exc.detail)
+            check("总分格式与范围", False, detail)
+            check("客户端用时", False, detail)
+            check("报文大小", False, detail)
+
+        passed = all(c["ok"] for c in checks if c["blocking"])
+        preview = None
+        if passed:
+            # 「若正式提交会写入什么」：不落库，只描述服务端会补的字段
+            preview = {
+                "status": "submitted",
+                "grading_source": "external",
+                "total_score": float(parsed["total_score"]),
+                "submitted_at": "服务端 timezone.now() 生成（页面传值一律忽略）",
+                "elapsed_seconds": "服务端按 submitted_at - started_at 计算",
+                "client_elapsed_seconds_in_grade_raw": parsed["client_elapsed_seconds"],
+                "score_breakdown": {"total": float(parsed["total_score"]), "source": "external"},
+                "message": "成绩已提交",
+            }
+
+        lab.last_debug = {
+            "passed": passed,
+            "at": timezone.now().isoformat(),
+            "payload": {k: request.data.get(k) for k in ("total_score", "elapsed_seconds")},
+            "checks": checks,
+        }
+        lab.save(update_fields=["last_debug", "updated_at"])
+        return api_response(
+            {"passed": passed, "checks": checks, "preview": preview, "dry_run": True},
+            message="调试通过（未入库）" if passed else "调试未通过（未入库）",
+        )
+
     @action(detail=True, methods=["post"], url_path="publish", permission_classes=[IsTeacher])
     def publish(self, request, pk=None):
         lab = self.get_object()
@@ -456,13 +522,26 @@ class LabSubmissionViewSet(BaseModelViewSet):
             ticket = bridge.validate_token(raw_token)
         except ValueError as exc:
             return api_response(message=str(exc), code=403, status=403)
-        if ticket.student_id != request.user.id:
-            return api_response(message="无权访问该实验票据", code=403, status=403)
         sub = ticket.submission
         lab = sub.lab
+        # C32：LabTokenAuthentication 已把 request.user 设成 ticket.student，
+        # `ticket.student_id != request.user.id` 恒为假，等于没校验，故删除；
+        # 身份靠「持有票据 + 服务端从票据反查 submission/lab」，并校验归属一致防数据被改。
+        if ticket.student_id != sub.student_id:
+            return api_response(message="票据与作答不匹配", code=403, status=403)
         # 票据有效期内实验被下线也要拦截（门控签名已失效，票据层同步拒绝）
         if lab.status != Lab.Status.PUBLISHED:
             return api_response(message="实验已下线，请联系教师重新上线", code=403, status=403)
+        # S3：窗口关闭后持有有效票据也不能再取 context（预置实验同样生效，零回归风险见单测）
+        schedule = sub.schedule
+        if schedule and not schedule.is_open():
+            return api_response(message="实验已截止，无法继续作答", code=403, status=403)
+        context = {
+            "labId": lab.id,
+            "submissionId": sub.id,
+            "totalScore": float(lab.total_score),
+            "gradeEndpoint": "/api/lab-gate/grade/",
+        }
         return api_response(
             {
                 "submission_id": sub.id,
@@ -477,6 +556,7 @@ class LabSubmissionViewSet(BaseModelViewSet):
                     sub.random_seed, lab.template.code
                 ) if lab.template_id else {},
                 "status": sub.status,
+                "context": context,  # C45：父页面只映射这四字段给 iframe，绝不含票据
             }
         )
 
@@ -521,30 +601,32 @@ class LabSubmissionViewSet(BaseModelViewSet):
         total = len(steps)
         error_count = len(error_log)
 
-        now = timezone.now()
-        with transaction.atomic():
+        def apply_result(sub, now):
+            # 预置实验沿用客户端上报的用时（S1 只约束新增的 external 端点）
             sub.steps_result = steps
             sub.error_log = error_log
             sub.elapsed_seconds = elapsed
             sub.error_count = error_count
             sub.passed_steps = passed
             sub.total_steps = total
-            sub.status = LabSubmission.Status.SUBMITTED
-            sub.submitted_at = now
-            sub.save()
-
             lab = sub.lab
             step_scores = scoring.calc_step_scores(sub, lab.effective_standard_minutes, lab.total_score)
-            total = scoring.calc_total(step_scores, lab.total_score)
+            total_score = scoring.calc_total(step_scores, lab.total_score)
             sub.base_score = step_scores["base"]
             sub.accuracy_score = step_scores["accuracy"]
             sub.efficiency_score = step_scores["efficiency"]
             sub.completion_score = step_scores["completion"]
-            sub.total_score = total
-            sub.score_breakdown = scoring.build_breakdown(sub, step_scores, total)
-            sub.save()
+            sub.total_score = total_score
+            sub.score_breakdown = scoring.build_breakdown(sub, step_scores, total_score)
 
-        bridge.consume_token(ticket)
+        def validate(sub, locked_ticket, now):
+            # S2 锁后复验：窗口可能在锁等待期间关闭
+            schedule = sub.schedule
+            if schedule and not schedule.is_open():
+                raise ValidationError("实验已截止，无法提交")
+
+        # S2：状态、分数、消费票据收敛到 services.finalize_submission 同一事务
+        sub = services.finalize_submission(ticket, apply_result=apply_result, validate=validate)
         return api_response(
             LabSubmissionSerializer(sub, context={"request": request}).data,
             message=f"实验提交成功，得分 {sub.total_score}",
@@ -682,6 +764,97 @@ class LabSubmissionViewSet(BaseModelViewSet):
             filename=filename,
             content_type="application/pdf" if fmt == "pdf" else
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+
+class GradeReportView(APIView):
+    """`POST /api/lab-gate/grade/`：自定义实验页面成绩上报（v3.2 / L2）。
+
+    票据只由平台父页面 `lab-bridge-parent.js` 在 `X-Lab-Token` 头里附带；
+    `LabTokenAuthentication` 把 `request.user` 设成 `ticket.student`、
+    `request.auth` 设成票据本身。服务端**只从票据反查** submission / lab，
+    绝不接受请求体指定实验 id 或学生身份（C23 / C32 / S3）。
+    """
+
+    authentication_classes = [LabTokenAuthentication]
+    permission_classes = [IsStudent]
+
+    def get_throttles(self):
+        # 全局 user 限流之上叠加 lab_grade 独立档（按 user.pk 计数）
+        return super().get_throttles() + [LabGradeThrottle()]
+
+    def permission_denied(self, request, message=None, code=None):
+        # 无票据时给出可操作的中文提示，而不是 IsStudent 的泛化 403
+        if getattr(request, "auth", None) is None:
+            raise AuthenticationFailed("实验票据无效")
+        super().permission_denied(request, message=message, code=code)
+
+    def post(self, request):
+        ticket = request.auth
+        # 票据有效性（存在 / 未消费 / 未过期）已由 LabTokenAuthentication 校验；
+        # 锁后复验由 services.finalize_submission 再跑一遍，防并发重放。
+        parsed = {}
+
+        def validate(sub, locked_ticket, now):
+            lab = sub.lab
+            if lab.page_source != Lab.PageSource.CUSTOM:
+                raise ValidationError("该实验不支持页面成绩上报")
+            if lab.status != Lab.Status.PUBLISHED:
+                raise ValidationError("实验已下线，请联系教师重新上线")
+            schedule = sub.schedule
+            if schedule and not schedule.is_open():
+                raise ValidationError("实验已截止，无法提交")
+            blocked = student_submit_block_detail(request.user, "提交实验成绩")
+            if blocked:
+                raise PermissionDenied(blocked)
+            # 身份靠「持有票据 + 从票据反查」，再校验票据与作答归属一致防数据被改（C32）
+            if locked_ticket.student_id != sub.student_id:
+                raise ValidationError("票据与作答不匹配")
+            parsed.update(services.parse_grade_payload(request.data, lab))
+
+        def apply_result(sub, now):
+            score = parsed["total_score"]
+            elapsed = services.server_elapsed_seconds(sub, now)
+            abnormal = services.is_abnormal(score, sub.lab, elapsed)
+            raw = {
+                "request": {k: request.data.get(k) for k in ("total_score", "elapsed_seconds")},
+                "server": {
+                    "submission_id": sub.id,
+                    "lab_id": sub.lab_id,
+                    "student_id": sub.student_id,
+                    "submitted_at": now.isoformat(),
+                    "started_at": sub.started_at.isoformat() if sub.started_at else None,
+                    "elapsed_seconds": elapsed,
+                    "client_elapsed_seconds": parsed["client_elapsed_seconds"],
+                    "raw_bytes": parsed["raw_bytes"],
+                    "abnormal": abnormal,
+                    "abnormal_reason": "满分且用时极短，建议复核" if abnormal else "",
+                },
+            }
+            sub.elapsed_seconds = elapsed
+            sub.total_score = score
+            sub.score_breakdown = {
+                "total": float(score), "source": "external", "elapsed_seconds": elapsed,
+            }
+            sub.grading_source = "external"
+            sub.grade_raw = raw
+            sub.grade_raw_digest = hashlib.sha256(
+                json.dumps(raw, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+            ).hexdigest()
+            sub.graded_at = now
+            sub.abnormal = abnormal
+            # 步骤指标保持 0（C17：analytics 按 grading_source 排除）
+
+        sub = services.finalize_submission(ticket, apply_result=apply_result, validate=validate)
+        return api_response(
+            {
+                "submission_id": sub.id,
+                "total_score": float(sub.total_score),
+                "status": sub.status,
+                "submitted_at": sub.submitted_at.isoformat(),
+                "graded_at": sub.graded_at.isoformat(),
+            },
+            message="成绩已提交",
         )
 
 

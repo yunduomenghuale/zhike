@@ -1,0 +1,3 @@
+payload=86.5 | response.passed=True | response.dry_run=True | last_debug.passed=True | preview=True
+payload=101 | response.passed=False | response.dry_run=True | last_debug.passed=False | preview=False
+no real submission created by dry-run: True

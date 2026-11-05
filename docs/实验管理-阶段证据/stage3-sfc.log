@@ -1,0 +1,2 @@
+check_sfc_bindings.py: exit 0
+说明：该脚本成功时不打印任何内容，故原始 stdout 为空；本行仅记录退出码与结论（无缺失的 <script setup> 模板绑定声明），不是伪造的输出。

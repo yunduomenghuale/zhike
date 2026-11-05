@@ -193,7 +193,11 @@
                 </template>
               </el-table-column>
               <el-table-column label="步骤" width="66" align="center">
-                <template #default="{ row }">{{ row.state === 'not_started' ? '—' : `${row.passed_steps ?? 0}/${row.total_steps ?? '—'}` }}</template>
+                <template #default="{ row }">
+                  <span v-if="row.state === 'not_started'">—</span>
+                  <span v-else-if="row.grading_source === 'external'" class="sub-text">不适用</span>
+                  <span v-else>{{ `${row.passed_steps ?? 0}/${row.total_steps ?? '—'}` }}</span>
+                </template>
               </el-table-column>
               <el-table-column prop="error_count" label="错误" width="56" align="center">
                 <template #default="{ row }">{{ row.state === 'not_started' ? '—' : (row.error_count ?? 0) }}</template>
@@ -322,7 +326,8 @@ async function fetchLabStats(lab) {
   const doneIds = new Set(submitted.map((s) => s.student))
   const scores = submitted.map((s) => Number(s.total_score || 0)).filter((n) => Number.isFinite(n))
   const avgScore = scores.length ? Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10 : null
-  const stepPairs = submitted.filter((s) => s.total_steps > 0)
+  // C17：自定义实验（external）无步骤数据，0/0 会把平均步骤通过率算成 0%，必须排除
+  const stepPairs = submitted.filter((s) => s.grading_source !== 'external' && s.total_steps > 0)
   const avgSteps = stepPairs.length
     ? Math.round((stepPairs.reduce((a, s) => a + s.passed_steps / s.total_steps, 0) / stepPairs.length) * 100)
     : null
@@ -361,6 +366,7 @@ const detailRows = computed(() => {
     username: username || s.student_username,
     state: s.status === 'submitted' ? 'submitted' : 'ongoing',
     total_score: s.total_score,
+    grading_source: s.grading_source,
     passed_steps: s.passed_steps,
     total_steps: s.total_steps,
     error_count: s.error_count,

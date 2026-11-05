@@ -1,7 +1,7 @@
 """labs 一期冒烟测试：模板库 → 建实验 → 排课发布 → start/bridge → 提交评分 → 复核/重置 → 统计。"""
 from decimal import Decimal
 
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase, TestCase, TransactionTestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
 
@@ -793,7 +793,8 @@ class LabStaticContractTest(SimpleTestCase):
         self.assertIn('src="/*__FRAME_URL__*/"', parent_html)
         for field in ("labId", "submissionId", "totalScore", "gradeEndpoint"):
             self.assertIn(field, parent_js, f"C45：context 缺字段 {field}")
-        for leaked in ("random_seed", "expected", "res.data.status"):
+        # 断言「实际取用原响应字段」而非注释里的字面量，避免注释措辞误伤
+        for leaked in ("d.random_seed", "d.expected", "d.status", "res.data.status"):
             self.assertNotIn(leaked, parent_js, f"C45：不得透传 {leaked}")
 
         # C46：新增 action 显式 [IsTeacher]，不得放宽为 IsTeacherOrAdmin
@@ -806,3 +807,589 @@ class LabStaticContractTest(SimpleTestCase):
             "C46：preview action 必须显式 [IsTeacher]",
         )
         self.assertNotIn("IsTeacherOrAdmin", views_src, "C46：不得使用 IsTeacherOrAdmin 放宽权限")
+
+    def test_stage3_grade_contract(self):
+        """Stage 3 静态契约：S2 双行锁 / S4 闸门 / context 四字段 / 限流双写 / 路由顺序。"""
+        from pathlib import Path
+
+        parent_js = self._static("lab-bridge-parent.js")
+        shim_js = self._static("lab-bridge-shim.js")
+        views_src = Path(__file__).with_name("views.py").read_text(encoding="utf-8")
+        services_src = Path(__file__).with_name("services.py").read_text(encoding="utf-8")
+        urls_src = Path(__file__).with_name("urls.py").read_text(encoding="utf-8")
+        settings_src = Path(__file__).parents[2].joinpath("config", "settings.py").read_text(encoding="utf-8")
+        throttles_src = Path(__file__).parents[1].joinpath("common", "throttles.py").read_text(encoding="utf-8")
+
+        # C41 / S4：伪造 postMessage（source 不符）被丢弃；失败自动解除闸门
+        self.assertIn("e.source !== frame.contentWindow", parent_js)
+        self.assertIn("if (m.type !== 'lab:grade' || reported) return;", parent_js)
+        self.assertIn("if (!res || res.code !== 0) reported = false;", parent_js)
+        self.assertIn("reported = false;", parent_js)
+        # 票据只进父页面上报请求头，且引导变量用完即删
+        self.assertIn("delete window.__LAB_BOOT_TOKEN__", parent_js)
+        self.assertIn("'/api/lab-gate/grade/'", parent_js)
+        self.assertIn("'X-Lab-Token': token", parent_js)
+        # context / 响应一律不含票据：所有 postMessage 行都不得出现 token
+        post_lines = [ln for ln in parent_js.splitlines() if "postMessage(" in ln]
+        self.assertTrue(post_lines)
+        for ln in post_lines:
+            self.assertNotIn("token", ln.lower(), f"C45：postMessage 泄漏票据：{ln.strip()}")
+
+        # C42：shim 无票据、无同源 API 请求；LabBridge.context 只来自父页面应答
+        self.assertNotIn("X-Lab-Token", shim_js)
+        self.assertNotIn("fetch(", shim_js)
+        self.assertNotIn("bootToken", shim_js)
+        self.assertIn("m.context || null", shim_js)
+        self.assertIn("window.parent.postMessage", shim_js)
+
+        # C45：服务端 context 恰好四字段、不含票据字面量
+        start = views_src.index("context = {")
+        block = views_src[start:views_src.index("}", start)]
+        for field in ("labId", "submissionId", "totalScore", "gradeEndpoint"):
+            self.assertIn(f'"{field}"', block)
+        self.assertNotIn("token", block.lower())
+        self.assertIn("services.finalize_submission", views_src)
+        self.assertIn("grade-debug", views_src)
+
+        # S2：同一事务内双行锁 + 事务内消费票据
+        self.assertIn("with transaction.atomic():", services_src)
+        self.assertEqual(services_src.count(".select_for_update()"), 2)
+        self.assertIn("bridge.consume_token(locked_ticket)", services_src)
+
+        # C22/C43：显式 grade path 必须排在 router.urls 之前
+        self.assertLess(urls_src.index('path("lab-gate/grade/"'), urls_src.index("+ router.urls"))
+
+        # lab_grade 限流 scope：双写 + 自定义 get_cache_key 按 user.pk
+        self.assertGreaterEqual(settings_src.count('"lab_grade": "10/min"'), 2)
+        self.assertIn("class LabGradeThrottle", throttles_src)
+        self.assertIn('"ident": user.pk', throttles_src)
+
+
+# ---------------------------------------------------------------------------
+# Stage 3：成绩上报端点 / S1–S5 / dry-run / C17·C18 统计分支
+# ---------------------------------------------------------------------------
+
+
+class LabGradeReportTest(TestCase):
+    """`POST /api/lab-gate/grade/` 六分支 + S1/S3/S5 + dry-run + 失败重试。"""
+
+    HTML = """<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+    <title>成绩上报测试页</title></head><body><h1>自定义实验</h1>
+    <script>window.__custom_lab__ = true;</script></body></html>""".encode("utf-8")
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.teacher = User.objects.create_user("t401", password="pass1234", role="teacher", real_name="吴老师")
+        cls.student = User.objects.create_user("20270001", password="pass1234", role="student", real_name="郑同学")
+        cls.other_student = User.objects.create_user("20270002", password="pass1234", role="student", real_name="王同学")
+        cls.admin = User.objects.create_user("adm401", password="pass1234", role="admin", real_name="管理员")
+        cls.course = Course.objects.create(name="计算机网络", teacher=cls.teacher)
+        cls.catalog = Catalog.objects.create(course=cls.course, title="第4章 自定义实验", is_published=True)
+        cls.classroom = ClassRoom.objects.create(name="网络2701", teacher=cls.teacher)
+        ClassCourse.objects.create(classroom=cls.classroom, course=cls.course)
+        ClassStudent.objects.create(classroom=cls.classroom, student=cls.student)
+        ClassStudent.objects.create(classroom=cls.classroom, student=cls.other_student)
+        cls.template = LabTemplate.objects.create(
+            code="st3-arp", title="ARP实验", default_standard_minutes=30,
+            random_config={"ranges": {"s1": [1, 9], "s2": [1, 9]}},
+        )
+
+    def setUp(self):
+        self.tc = APIClient()
+        self.tc.force_authenticate(self.teacher)
+        self.sc = APIClient()
+        self.sc.force_authenticate(self.student)
+        self.adc = APIClient()
+        self.adc.force_authenticate(self.admin)
+        # 真实浏览器路径：父页面只带 X-Lab-Token 头，不带 JWT、不带 force_authenticate
+        self.gc = APIClient()
+
+    def _make_lab(self, title="成绩上报测试实验", page_source="custom"):
+        payload = {
+            "course": self.course.id, "catalog": self.catalog.id, "title": title,
+            "total_score": "100", "pass_score": "60", "page_source": page_source,
+        }
+        if page_source == "template":
+            payload["template"] = self.template.id
+        res = self.tc.post("/api/labs/", payload, format="json")
+        self.assertEqual(res.status_code, 201, res.data)
+        return res.data["data"]["id"]
+
+    def _upload(self, lab_id):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        return self.tc.post(f"/api/labs/{lab_id}/page/", {
+            "file": SimpleUploadedFile("grade.html", self.HTML, content_type="text/html"),
+        }, format="multipart")
+
+    def _publish(self, lab_id):
+        res = self.tc.post("/api/lab-schedules/", {"lab": lab_id, "classroom": self.classroom.id}, format="json")
+        self.assertIn(res.status_code, (200, 201), res.data)
+        res = self.tc.post(f"/api/labs/{lab_id}/publish/", format="json")
+        self.assertIn(res.status_code, (200, 201), res.data)
+
+    def _setup(self, title="成绩上报测试实验", page_source="custom"):
+        lab_id = self._make_lab(title, page_source)
+        if page_source == "custom":
+            res = self._upload(lab_id)
+            self.assertIn(res.status_code, (200, 201), res.data)
+        self._publish(lab_id)
+        return lab_id
+
+    def _start(self, lab_id):
+        res = self.sc.post("/api/lab-submissions/start/", {"lab": lab_id}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        data = res.data["data"]
+        return data["attempt_token"], data["submission"]["id"]
+
+    def _grade(self, token, payload, client=None):
+        return (client or self.gc).post(
+            "/api/lab-gate/grade/", payload, format="json", HTTP_X_LAB_TOKEN=token,
+        )
+
+    def _ticket(self, token):
+        from apps.labs.models import LabAttemptToken
+
+        return LabAttemptToken.objects.get(token=token)
+
+    def _sub(self, sub_id):
+        from apps.labs.models import LabSubmission
+
+        return LabSubmission.objects.get(pk=sub_id)
+
+    def test_invalid_expired_consumed_ticket(self):
+        """六分支 1：票据无效 / 过期 / 已消费 / 完全缺失，一律拒绝且不落库。"""
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        lab_id = self._setup()
+        token, sub_id = self._start(lab_id)
+
+        res = self._grade("not-a-real-token", {"total_score": "86.5", "elapsed_seconds": 10})
+        self.assertEqual(res.status_code, 401, res.data)
+        self.assertIn("票据无效", res.data["message"])
+
+        res = self.gc.post("/api/lab-gate/grade/", {"total_score": "86.5"}, format="json")
+        self.assertEqual(res.status_code, 401, res.data)
+        self.assertEqual(res.data["message"], "实验票据无效")
+
+        t = self._ticket(token)
+        t.expires_at = timezone.now() - timedelta(seconds=1)
+        t.save(update_fields=["expires_at", "updated_at"])
+        res = self._grade(token, {"total_score": "86.5", "elapsed_seconds": 10})
+        self.assertEqual(res.status_code, 401, res.data)
+        self.assertIn("过期", res.data["message"])
+
+        t.expires_at = timezone.now() + timedelta(hours=2)
+        t.save(update_fields=["expires_at", "updated_at"])
+        t.consumed = True
+        t.save(update_fields=["consumed", "updated_at"])
+        res = self._grade(token, {"total_score": "86.5", "elapsed_seconds": 10})
+        self.assertEqual(res.status_code, 401, res.data)
+        self.assertIn("已使用", res.data["message"])
+
+        sub = self._sub(sub_id)
+        self.assertEqual(sub.status, "in_progress")
+        self.assertIsNone(sub.submitted_at)
+        self.assertIsNone(sub.total_score, "LabSubmission.total_score 是 nullable，未提交时应为 None")
+        self.assertEqual(sub.grading_source, "steps")
+
+    def test_cross_lab_ticket_and_body_fields_ignored(self):
+        """六分支 2：跨实验票据（预置实验）被拒；票据归属被篡改被拒；请求体不能指定实验/学生。"""
+        lab_a = self._setup("自定义实验 A")
+        lab_b = self._setup("预置实验 B", page_source="template")
+        token_a, sub_a = self._start(lab_a)
+        token_b, _ = self._start(lab_b)
+
+        # 预置实验票据不能走 external 端点（custom 来源硬校验）
+        res = self._grade(token_b, {"total_score": "90", "elapsed_seconds": 100})
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertIn("不支持页面成绩上报", res.data["message"])
+
+        # 票据学生被改成别人 → C32 归属校验（不是自我抵消的 request.user 比较）
+        t = self._ticket(token_a)
+        t.student = self.other_student
+        t.save(update_fields=["student", "updated_at"])
+        res = self._grade(token_a, {"total_score": "86.5", "elapsed_seconds": 10})
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertIn("票据与作答不匹配", res.data["message"])
+
+        t.student = self.student
+        t.save(update_fields=["student", "updated_at"])
+        # 请求体伪造 lab / student / submitted_at：一律忽略，只从票据反查
+        res = self._grade(token_a, {
+            "total_score": "86.5", "elapsed_seconds": 3,
+            "lab": lab_b, "student": self.other_student.id,
+            "submitted_at": "2000-01-01T00:00:00Z",
+        })
+        self.assertEqual(res.status_code, 200, res.data)
+        sub = self._sub(sub_a)
+        self.assertEqual(sub.lab_id, lab_a)
+        self.assertEqual(sub.student_id, self.student.id)
+        self.assertNotEqual(sub.submitted_at.year, 2000)
+
+    def test_out_of_range_score_and_failed_retry(self):
+        """六分支 3：越界/格式错/超大报文返回中文错误；票据不作废，修正后重试成功。"""
+        lab_id = self._setup()
+        token, sub_id = self._start(lab_id)
+        cases = [
+            ({}, "缺少总成绩"),
+            ({"total_score": "abc"}, "总成绩格式不正确"),
+            ({"total_score": "-1", "elapsed_seconds": 10}, "成绩超出实验总分范围"),
+            ({"total_score": "100.1", "elapsed_seconds": 10}, "成绩超出实验总分范围"),
+            ({"total_score": "86.55", "elapsed_seconds": 10}, "最多保留 1 位小数"),
+            ({"total_score": "86.5", "elapsed_seconds": -1}, "用时不能为负"),
+            ({"total_score": "86.5", "elapsed_seconds": 10, "pad": "x" * 70000}, "上报内容过大"),
+        ]
+        for payload, expected in cases:
+            res = self._grade(token, payload)
+            self.assertEqual(res.status_code, 400, (payload.get("total_score"), res.data))
+            self.assertIn(expected, res.data["message"], res.data)
+            self.assertFalse(self._ticket(token).consumed, "失败不得作废票据")
+            self.assertEqual(self._sub(sub_id).status, "in_progress")
+
+        # 修正后重试成功（S4 父页面失败自动解除闸门的服务端前提）
+        res = self._grade(token, {"total_score": "86.5", "elapsed_seconds": 10})
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertTrue(self._ticket(token).consumed)
+        self.assertEqual(self._sub(sub_id).status, "submitted")
+
+    def test_success_uses_server_time_and_raw_digest(self):
+        """六分支 4 + S1：正常入库、票据消费、submitted_at 与用时均由服务端生成。"""
+        from datetime import timedelta
+        import hashlib
+        import json
+
+        from django.utils import timezone
+
+        lab_id = self._setup()
+        token, sub_id = self._start(lab_id)
+        LabSubmission.objects.filter(pk=sub_id).update(
+            started_at=timezone.now() - timedelta(seconds=742)
+        )
+
+        # 客户端谎报 3 秒 + 伪造 submitted_at
+        res = self._grade(token, {
+            "total_score": "86.5", "elapsed_seconds": 3,
+            "submitted_at": "2000-01-01T00:00:00Z",
+        })
+        self.assertEqual(res.status_code, 200, res.data)
+        data = res.data["data"]
+        self.assertEqual(
+            {"submission_id", "total_score", "status", "submitted_at", "graded_at"},
+            set(data.keys()),
+        )
+        self.assertEqual(data["status"], "submitted")
+        self.assertEqual(Decimal(str(data["total_score"])), Decimal("86.5"))
+
+        sub = self._sub(sub_id)
+        delta = int((sub.submitted_at - sub.started_at).total_seconds())
+        self.assertEqual(sub.elapsed_seconds, delta, "S1：用时必须是 submitted_at - started_at")
+        self.assertGreaterEqual(delta, 742)
+        self.assertNotEqual(sub.elapsed_seconds, 3, "S1：客户端用时不得采信")
+        self.assertLess(abs((sub.submitted_at - timezone.now()).total_seconds()), 60)
+        self.assertEqual(sub.grading_source, "external")
+        self.assertEqual(Decimal(str(sub.total_score)), Decimal("86.5"))
+        self.assertEqual(sub.score_breakdown["source"], "external")
+        self.assertEqual(sub.score_breakdown["total"], 86.5)
+        self.assertEqual(sub.score_breakdown["elapsed_seconds"], delta)
+        self.assertEqual(sub.graded_at, sub.submitted_at)
+        self.assertEqual(sub.passed_steps, 0)
+        self.assertEqual(sub.total_steps, 0)
+        # C8：grade_raw 原文 + 摘要，教师可见、学生不可见
+        self.assertEqual(sub.grade_raw["request"]["elapsed_seconds"], 3)
+        self.assertEqual(sub.grade_raw["server"]["client_elapsed_seconds"], 3)
+        self.assertEqual(sub.grade_raw["server"]["elapsed_seconds"], delta)
+        self.assertEqual(
+            sub.grade_raw_digest,
+            hashlib.sha256(json.dumps(
+                sub.grade_raw, sort_keys=True, ensure_ascii=False, default=str
+            ).encode("utf-8")).hexdigest(),
+        )
+        self.assertTrue(self._ticket(token).consumed)
+        self.assertEqual(
+            self.tc.get(f"/api/lab-submissions/{sub_id}/").data["data"]["grade_raw"]["request"]["elapsed_seconds"], 3
+        )
+        self.assertIsNone(
+            self.sc.get(f"/api/lab-submissions/{sub_id}/").data["data"]["grade_raw"]
+        )
+
+    def test_window_closed_and_unpublished_rejected(self):
+        """S3：窗口关闭 / 实验下线后，持有效票据仍被拒；票据与作答状态不变。"""
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        lab_id = self._setup()
+        token, sub_id = self._start(lab_id)
+        LabSchedule.objects.filter(lab_id=lab_id).update(
+            close_at=timezone.now() - timedelta(minutes=1)
+        )
+
+        res = self._grade(token, {"total_score": "86.5", "elapsed_seconds": 10})
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertIn("实验已截止", res.data["message"])
+        res = self.sc.get(f"/api/lab-submissions/bridge-validate/?token={token}")
+        self.assertEqual(res.status_code, 403, res.data)
+        self.assertIn("实验已截止", res.data["message"])
+
+        LabSchedule.objects.filter(lab_id=lab_id).update(close_at=None)
+        Lab.objects.filter(id=lab_id).update(status=Lab.Status.CLOSED)
+        res = self._grade(token, {"total_score": "86.5", "elapsed_seconds": 10})
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertIn("实验已下线", res.data["message"])
+
+        self.assertFalse(self._ticket(token).consumed)
+        self.assertEqual(self._sub(sub_id).status, "in_progress")
+
+    def test_perfect_instant_submit_marked_abnormal(self):
+        """S5：满分 + 极短用时置 abnormal=True，只标记不拒答；非满分不误标。"""
+        lab_a = self._setup("满分秒交实验")
+        token_a, sub_a = self._start(lab_a)
+        res = self._grade(token_a, {"total_score": "100", "elapsed_seconds": 1})
+        self.assertEqual(res.status_code, 200, res.data)
+        sub = self._sub(sub_a)
+        self.assertEqual(sub.status, "submitted", "S5 只标记，不拒答")
+        self.assertTrue(sub.abnormal)
+        self.assertIn("满分", sub.grade_raw["server"]["abnormal_reason"])
+
+        lab_b = self._setup("非满分秒交实验")
+        token_b, sub_b = self._start(lab_b)
+        res = self._grade(token_b, {"total_score": "99.5", "elapsed_seconds": 1})
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertFalse(self._sub(sub_b).abnormal)
+
+    def test_grade_debug_dry_run_three_payloads(self):
+        """在线调试：满分/零分/部分分三种模拟报文均通过，last_debug 正确、不产生真实提交。"""
+        # 草稿态（未发布）也必须能 dry-run：Stage 4 的 UI 顺序是 创建 → 调试 → 发布
+        draft_id = self._make_lab("草稿态调试实验")
+        res = self._upload(draft_id)
+        self.assertIn(res.status_code, (200, 201), res.data)
+        res = self.tc.post(f"/api/labs/{draft_id}/grade-debug/", {
+            "total_score": "86.5", "elapsed_seconds": 742,
+        }, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertTrue(res.data["data"]["passed"], "草稿态 dry-run 不应被发布状态拦下")
+        self.assertFalse(any(c["blocking"] for c in res.data["data"]["checks"]
+                             if c["name"] in ("发布状态", "页面文件")))
+
+        lab_id = self._setup()
+        for score in ("100", "0", "86.5"):
+            res = self.tc.post(f"/api/labs/{lab_id}/grade-debug/", {
+                "total_score": score, "elapsed_seconds": 742,
+            }, format="json")
+            self.assertEqual(res.status_code, 200, res.data)
+            payload = res.data["data"]
+            self.assertTrue(payload["passed"], res.data)
+            self.assertTrue(payload["dry_run"])
+            self.assertIsNotNone(payload["preview"])
+            self.assertEqual(payload["preview"]["grading_source"], "external")
+            self.assertIn("未入库", res.data["message"])
+            lab = Lab.objects.get(pk=lab_id)
+            self.assertTrue(lab.last_debug["passed"])
+            self.assertEqual(lab.last_debug["payload"]["total_score"], score)
+
+        # 模拟失败报文 → 徽标变红，仍不入库
+        res = self.tc.post(f"/api/labs/{lab_id}/grade-debug/", {
+            "total_score": "101", "elapsed_seconds": 1,
+        }, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertFalse(res.data["data"]["passed"])
+        self.assertTrue(any(not c["ok"] for c in res.data["data"]["checks"]))
+        self.assertIsNone(res.data["data"]["preview"])
+        self.assertFalse(Lab.objects.get(pk=lab_id).last_debug["passed"])
+
+        self.assertFalse(LabSubmission.objects.filter(
+            lab_id=lab_id, status=LabSubmission.Status.SUBMITTED
+        ).exists())
+        # C46：dry-run 只对教师开放，学生与平台管理员均不可调用
+        for client in (self.sc, self.adc, self.gc):
+            res = client.post(f"/api/labs/{lab_id}/grade-debug/", {
+                "total_score": "86.5", "elapsed_seconds": 1,
+            }, format="json")
+            self.assertIn(res.status_code, (401, 403), res.data)
+
+    def test_context_contract_has_four_fields_only(self):
+        """C45：bridge-validate 的 context 只有四字段，绝不含票据。"""
+        import json
+
+        lab_id = self._setup()
+        token, sub_id = self._start(lab_id)
+        res = self.sc.get(f"/api/lab-submissions/bridge-validate/?token={token}")
+        self.assertEqual(res.status_code, 200, res.data)
+        ctx = res.data["data"]["context"]
+        self.assertEqual(set(ctx), {"labId", "submissionId", "totalScore", "gradeEndpoint"})
+        self.assertEqual(ctx["labId"], lab_id)
+        self.assertEqual(ctx["submissionId"], sub_id)
+        self.assertEqual(ctx["gradeEndpoint"], "/api/lab-gate/grade/")
+        self.assertNotIn(token, json.dumps(ctx, ensure_ascii=False))
+
+
+class LabGradeConcurrencyTest(TransactionTestCase):
+    """S2 真实并发：两个线程同时用同一票据上报，只有一个成功、票据只消费一次。
+
+    `TransactionTestCase` 不包外层事务，两个线程用各自 DB 连接真实抢行锁；
+    普通 `TestCase` 的原子事务会让第二线程看不到数据，测不出并发。
+    """
+
+    HTML = b"<html><head><title>x</title></head><body>concurrency</body></html>"
+
+    def setUp(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        self.teacher = User.objects.create_user("t402", password="pass1234", role="teacher", real_name="并发老师")
+        self.student = User.objects.create_user("20270003", password="pass1234", role="student", real_name="并发学生")
+        self.course = Course.objects.create(name="并发课程", teacher=self.teacher)
+        self.classroom = ClassRoom.objects.create(name="并发班", teacher=self.teacher)
+        ClassCourse.objects.create(classroom=self.classroom, course=self.course)
+        ClassStudent.objects.create(classroom=self.classroom, student=self.student)
+        self.tc = APIClient()
+        self.tc.force_authenticate(self.teacher)
+        self.sc = APIClient()
+        self.sc.force_authenticate(self.student)
+
+        res = self.tc.post("/api/labs/", {
+            "page_source": "custom", "course": self.course.id, "title": "并发上报实验",
+            "total_score": "100", "pass_score": "60",
+        }, format="json")
+        self.assertEqual(res.status_code, 201, res.data)
+        self.lab_id = res.data["data"]["id"]
+        res = self.tc.post(f"/api/labs/{self.lab_id}/page/", {
+            "file": SimpleUploadedFile("c.html", self.HTML, content_type="text/html"),
+        }, format="multipart")
+        self.assertIn(res.status_code, (200, 201), res.data)
+        self.tc.post("/api/lab-schedules/", {"lab": self.lab_id, "classroom": self.classroom.id}, format="json")
+        self.tc.post(f"/api/labs/{self.lab_id}/publish/", format="json")
+        res = self.sc.post("/api/lab-submissions/start/", {"lab": self.lab_id}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.token = res.data["data"]["attempt_token"]
+        self.sub_id = res.data["data"]["submission"]["id"]
+
+    def tearDown(self):
+        # TransactionTestCase 会 flush 表，磁盘上的上传文件需显式清理
+        from apps.labs.models import LabPage
+
+        for page in LabPage.objects.all():
+            if page.file:
+                page.file.delete(save=False)
+        super().tearDown()
+
+    def test_two_concurrent_reports_only_one_wins(self):
+        import threading
+
+        from apps.labs.models import LabAttemptToken, LabSubmission
+        from django.db import connections
+
+        barrier = threading.Barrier(2)
+        results = {}
+
+        def worker(idx):
+            try:
+                barrier.wait(timeout=15)
+                client = APIClient()
+                res = client.post("/api/lab-gate/grade/", {
+                    "total_score": "86.5", "elapsed_seconds": 10,
+                }, format="json", HTTP_X_LAB_TOKEN=self.token)
+                results[idx] = (res.status_code, str(res.data))
+            except Exception as exc:  # 线程内异常必须回收，不能静默丢
+                results[idx] = ("EXC", repr(exc))
+            finally:
+                connections.close_all()
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in (0, 1)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+        self.assertFalse(any(t.is_alive() for t in threads), "并发线程必须在超时内结束")
+        self.assertEqual(len(results), 2, results)
+
+        codes = sorted(v[0] for v in results.values())
+        self.assertEqual(codes, [200, 400], f"S2：只能一个成功、一个被拒；实际 {results}")
+        ticket = LabAttemptToken.objects.get(token=self.token)
+        self.assertTrue(ticket.consumed, "S2：票据必须被消费")
+        self.assertEqual(
+            LabSubmission.objects.filter(pk=self.sub_id, status="submitted").count(), 1
+        )
+        sub = LabSubmission.objects.get(pk=self.sub_id)
+        self.assertEqual(Decimal(str(sub.total_score)), Decimal("86.5"))
+
+
+class LabExternalAnalyticsTest(TestCase):
+    """C17/C18：章节画像与班级导出对 external 只出「总分 + 用时」，步骤指标标不适用。"""
+
+    @classmethod
+    def setUpTestData(cls):
+        from django.utils import timezone
+
+        cls.teacher = User.objects.create_user("t403", password="pass1234", role="teacher", real_name="统计老师")
+        cls.student = User.objects.create_user("20270004", password="pass1234", role="student", real_name="统计学生")
+        cls.course = Course.objects.create(name="统计课程", teacher=cls.teacher)
+        cls.catalog = Catalog.objects.create(course=cls.course, title="第5章", is_published=True)
+        cls.classroom = ClassRoom.objects.create(name="统计班", teacher=cls.teacher)
+        ClassCourse.objects.create(classroom=cls.classroom, course=cls.course)
+        ClassStudent.objects.create(classroom=cls.classroom, student=cls.student)
+        template = LabTemplate.objects.create(code="st3-stat", title="ARP实验", default_standard_minutes=30)
+        cls.tpl_lab = Lab.objects.create(
+            template=template, course=cls.course, catalog=cls.catalog,
+            title="预置步骤实验", status=Lab.Status.PUBLISHED, total_score=100,
+        )
+        cls.custom_lab = Lab.objects.create(
+            page_source="custom", course=cls.course, catalog=cls.catalog,
+            title="自定义上报实验", status=Lab.Status.PUBLISHED, total_score=100,
+        )
+        LabSchedule.objects.create(lab=cls.tpl_lab, classroom=cls.classroom)
+        LabSchedule.objects.create(lab=cls.custom_lab, classroom=cls.classroom)
+        now = timezone.now()
+        LabSubmission.objects.create(
+            lab=cls.tpl_lab, student=cls.student, status=LabSubmission.Status.SUBMITTED,
+            total_score=88, passed_steps=4, total_steps=5, elapsed_seconds=1200,
+            submitted_at=now, grading_source="steps",
+        )
+        LabSubmission.objects.create(
+            lab=cls.custom_lab, student=cls.student, status=LabSubmission.Status.SUBMITTED,
+            total_score=86.5, grading_source="external", elapsed_seconds=742,
+            submitted_at=now, graded_at=now,
+            score_breakdown={"total": 86.5, "source": "external", "elapsed_seconds": 742},
+        )
+
+    def test_chapter_profile_excludes_external_step_metrics(self):
+        from apps.analytics.services import build_chapter_profile
+
+        profile = build_chapter_profile(self.student, self.catalog, for_student=True)
+        self.assertEqual(len(profile["labs"]), 2, profile["labs"])
+        ext = next(x for x in profile["labs"] if x["title"] == "自定义上报实验")
+        self.assertEqual(ext["total_score"], 86.5)
+        self.assertEqual(ext["elapsed_seconds"], 742)
+        self.assertIsNone(ext["passed_steps"], "C17：不得用 0/0 拉低步骤通过率")
+        self.assertIsNone(ext["total_steps"])
+        self.assertEqual(ext["grading_source"], "external")
+        self.assertIn("不适用", ext["step_metrics"])
+        tpl = next(x for x in profile["labs"] if x["title"] == "预置步骤实验")
+        self.assertEqual(tpl["passed_steps"], 4, "C17：预置实验指标零回归")
+        self.assertEqual(tpl["total_steps"], 5)
+        self.assertIsNone(tpl["step_metrics"])
+
+    def test_class_export_sheet4_marks_external_as_na(self):
+        from apps.analytics.export import build_class_export_workbook
+
+        wb = build_class_export_workbook(self.classroom, self.course, sections={"lab"})
+        ws = wb["实验明细"]
+        headers = [ws.cell(row=2, column=c).value for c in range(1, ws.max_column + 1)]
+        rows = {}
+        for r in range(3, ws.max_row + 1):
+            rows[ws.cell(row=r, column=3).value] = {
+                headers[c - 1]: ws.cell(row=r, column=c).value
+                for c in range(1, ws.max_column + 1)
+            }
+        ext = rows["自定义上报实验"]
+        self.assertEqual(ext["总分"], 86.5)
+        self.assertIsNotNone(ext["用时(分钟)"])
+        for col in ("基础分", "操作准确性", "完成效率", "完成度", "通过步骤", "总步骤"):
+            self.assertEqual(ext[col], "不适用", f"C18：{col} 应标注不适用")
+        tpl = rows["预置步骤实验"]
+        self.assertEqual(tpl["通过步骤"], 4, "C18：预置实验列零回归")
+        self.assertEqual(tpl["总步骤"], 5)
+        self.assertNotEqual(tpl["基础分"], "不适用")
+

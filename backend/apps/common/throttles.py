@@ -78,6 +78,22 @@ class AIAskThrottle(ScopedSettingThrottle):
         return self.cache_format % {"scope": self.scope, "ident": user.pk}
 
 
+class LabGradeThrottle(ScopedSettingThrottle):
+    """成绩上报端点独立档：叠加在全局 user 限流之上，按 user.pk 计数。
+
+    `GradeReportView` 走 `X-Lab-Token` 认证（request.user = ticket.student），
+    所以按用户主键计数有效；未登录（无票据）时返回 None，由权限层拦下。
+    """
+
+    scope = "lab_grade"
+
+    def get_cache_key(self, request, view):
+        user = request.user
+        if not user.is_authenticated:
+            return None
+        return self.cache_format % {"scope": self.scope, "ident": user.pk}
+
+
 # 供需要显式引用基类的模块导入（保持 BaseThrottle 名字可用）
 __all__ = [
     "BaseThrottle",
@@ -86,4 +102,5 @@ __all__ = [
     "GlobalUserThrottle",
     "LoginThrottle",
     "AIAskThrottle",
+    "LabGradeThrottle",
 ]
