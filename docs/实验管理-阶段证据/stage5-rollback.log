@@ -1,0 +1,267 @@
+========================================================================
+Stage 5 · 迁移回滚演练（独立库 zk_s5_rollback；主库 zk / zk_e2e 只读复核）
+========================================================================
+PASS | R0 演练库名不是受保护库 | zk_s5_rollback
+[reset] 演练库 zk_s5_rollback 已重建（空库）
+$ manage.py migrate  (exit=0)
+    Operations to perform:
+      Apply all migrations: admin, ai, auth, classroom, contenttypes, courses, exams, homework, knowledge, labs, platform_admin, questions, sessions, token_blacklist, users
+    Running migrations:
+      Applying contenttypes.0001_initial... OK
+      Applying contenttypes.0002_remove_content_type_name... OK
+      Applying auth.0001_initial... OK
+      Applying auth.0002_alter_permission_name_max_length... OK
+      Applying auth.0003_alter_user_email_max_length... OK
+      Applying auth.0004_alter_user_username_opts... OK
+      Applying auth.0005_alter_user_last_login_null... OK
+      Applying auth.0006_require_contenttypes_0002... OK
+      Applying auth.0007_alter_validators_add_error_messages... OK
+      Applying auth.0008_alter_user_username_max_length... OK
+      Applying auth.0009_alter_user_last_name_max_length... OK
+      Applying auth.0010_alter_group_name_max_length... OK
+      Applying auth.0011_update_proxy_permissions... OK
+      Applying auth.0012_alter_user_first_name_max_length... OK
+      Applying users.0001_initial... OK
+      Applying admin.0001_initial... OK
+      Applying admin.0002_logentry_remove_auto_add... OK
+      Applying admin.0003_logentry_add_action_flag_choices... OK
+      Applying courses.0001_initial... OK
+      Applying courses.0002_initial... OK
+      Applying courses.0003_videowatchprogress... OK
+      Applying courses.0004_videowatchprogress_total_seconds... OK
+      Applying courses.0005_videowatchprogress_page_count_and_more... OK
+      Applying courses.0006_alter_pptresource_file... OK
+      Applying courses.0007_courseresource... OK
+      Applying courses.0008_coursevideo... OK
+      Applying courses.0009_pptresource_parse_progress... OK
+      Applying courses.0010_courseresource_access_token... OK
+      Applying courses.0011_remove_coursevideo_catalog_remove_coursevideo_course_and_more... OK
+      Applying courses.0012_term_and_course_term_fk... OK
+      Applying courses.0013_alter_course_teacher... OK
+      Applying courses.0014_mysql_partial_unique... OK
+      Applying classroom.0001_initial... OK
+      Applying classroom.0002_initial... OK
+      Applying classroom.0003_initial... OK
+      Applying classroom.0004_classroom_courses... OK
+      Applying classroom.0005_classroom_org_fields... OK
+      Applying classroom.0006_classstudent_single_class... OK
+      Applying classroom.0007_disable_invite... OK
+      Applying classroom.0008_mysql_partial_unique... OK
+      Applying platform_admin.0001_initial... OK
+      Applying ai.0001_initial... OK
+      Applying ai.0002_remove_zhipu_provider... OK
+      Applying ai.0003_aicapabilityconfig_aitestrecord_and_more... OK
+      Applying ai.0004_alter_aicapabilityconfig_provider... OK
+      Applying ai.0005_aicapabilityconfig_timeout_aicapabilityconfig_voice... OK
+      Applying ai.0006_alter_aicapabilityconfig_capability_and_more... OK
+      Applying ai.0007_alter_aicapabilityconfig_provider... OK
+      Applying ai.0008_aicapabilitychangelog_aicalllog... OK
+      Applying ai.0009_aicapabilityconfig_supports_vision... OK
+      Applying ai.0010_backfill_changelog_to_audit... OK
+      Applying ai.0011_alter_aicalllog_scene... OK
+      Applying ai.0012_alter_aicalllog_scene... OK
+      Applying ai.0013_alter_aicalllog_scene_aitask... OK
+      Applying ai.0014_alter_aitask_task_type_and_more... OK
+      Applying ai.0015_alter_aitask_task_type... OK
+      Applying ai.0016_aiquotapolicy... OK
+      Applying ai.0017_mysql_partial_unique... OK
+      Applying ai.0018_aitask_attempts_aitask_cancel_requested_and_more... OK
+      Applying ai.0019_alter_aitask_status... OK
+      Applying ai.0020_aiquotareservation... OK
+      Applying courses.0015_pptresource_file_md5... OK
+      Applying exams.0001_initial... OK
+      Applying exams.0002_initial... OK
+      Applying exams.0003_examsubmission_score_released_and_more... OK
+      Applying exams.0004_alter_exam_options_alter_examlog_options_and_more... OK
+      Applying exams.0005_alter_exam_shuffle_options... OK
+      Applying exams.0006_examsubmission_question_layout_and_more... OK
+      Applying questions.0001_initial... OK
+      Applying questions.0002_initial... OK
+      Applying homework.0001_initial... OK
+      Applying homework.0002_initial... OK
+      Applying homework.0003_homework_course... OK
+      Applying homework.0004_homework_mode_homeworksubmission_objective_score_and_more... OK
+      Applying homework.0005_homework_start_time... OK
+      Applying homework.0006_alter_homework_options_and_more... OK
+      Applying homework.0007_alter_homework_attachment_and_more... OK
+      Applying homework.0008_homeworksubmission_attachments... OK
+      Applying homework.0009_homework_attachment_name... OK
+      Applying homework.0010_homework_attachments... OK
+      Applying knowledge.0001_initial... OK
+      Applying knowledge.0002_initial... OK
+      Applying knowledge.0003_qarecord_catalog... OK
+      Applying knowledge.0004_qarecord_session... OK
+      Applying knowledge.0005_alter_qarecord_options... OK
+      Applying knowledge.0006_alter_material_file... OK
+      Applying knowledge.0007_material_catalog... OK
+      Applying knowledge.0008_knowledgechunk_ppt_alter_knowledgechunk_material... OK
+      Applying knowledge.0009_knowledgechunk_catalog_knowledgechunk_source_and_more... OK
+      Applying knowledge.0010_qarecord_feedback_qarecord_turn_index_qasession_and_more... OK
+      Applying knowledge.0011_qarecord_skip_retrieval... OK
+      Applying knowledge.0012_mysql_partial_unique... OK
+      Applying questions.0003_strict_question_catalog... OK
+      Applying questions.0004_wrongnote... OK
+      Applying questions.0005_wrongmastery... OK
+      Applying questions.0006_wrongmastery_removed... OK
+      Applying labs.0001_initial... OK
+      Applying labs.0002_lab_guide... OK
+      Applying labs.0003_alter_lab_allow_resubmit... OK
+      Applying labs.0004_lab_access_token... OK
+      Applying labs.0005_remove_labquestion_lab_remove_labquestion_question_and_more... OK
+      Applying labs.0006_lab_custom_page_grading... OK
+      Applying platform_admin.0002_platformsetting_alter_adminactionlog_action... OK
+      Applying platform_admin.0003_alter_adminactionlog_action... OK
+      Applying platform_admin.0004_alter_adminactionlog_action... OK
+      Applying questions.0007_wrongnote_catalog... OK
+      Applying questions.0008_alter_question_source_questiondraftbatch... OK
+      Applying questions.0009_question_image... OK
+      Applying questions.0010_scenetag_question_scenes... OK
+      Applying sessions.0001_initial... OK
+      Applying token_blacklist.0001_initial... OK
+      Applying token_blacklist.0002_outstandingtoken_jti_hex... OK
+      Applying token_blacklist.0003_auto_20171017_2007... OK
+      Applying token_blacklist.0004_auto_20171017_2013... OK
+      Applying token_blacklist.0005_remove_outstandingtoken_jti... OK
+      Applying token_blacklist.0006_auto_20171017_2113... OK
+      Applying token_blacklist.0007_auto_20171017_2214... OK
+      Applying token_blacklist.0008_migrate_to_bigautofield... OK
+      Applying token_blacklist.0010_fix_migrate_to_bigautofield... OK
+      Applying token_blacklist.0011_linearizes_history... OK
+      Applying token_blacklist.0012_alter_outstandingtoken_user... OK
+      Applying users.0002_user_display_name... OK
+      Applying users.0003_alter_user_phone... OK
+      Applying users.0004_remove_user_display_name... OK
+      Applying users.0005_notification... OK
+      Applying users.0006_user_must_change_password... OK
+      Applying users.0007_alter_notification_ntype... OK
+      Applying users.0008_user_edu_fields... OK
+      Applying users.0009_user_tokens_invalid_before... OK
+PASS | R1 空库全量 migrate 成功 | 
+$ manage.py showmigrations labs  (exit=0)
+    labs
+     [X] 0001_initial
+     [X] 0002_lab_guide
+     [X] 0003_alter_lab_allow_resubmit
+     [X] 0004_lab_access_token
+     [X] 0005_remove_labquestion_lab_remove_labquestion_question_and_more
+     [X] 0006_lab_custom_page_grading
+$ manage.py showmigrations labs  (exit=0)
+    labs
+     [X] 0001_initial
+     [X] 0002_lab_guide
+     [X] 0003_alter_lab_allow_resubmit
+     [X] 0004_lab_access_token
+     [X] 0005_remove_labquestion_lab_remove_labquestion_question_and_more
+     [X] 0006_lab_custom_page_grading
+PASS | R2 0006 已应用，LabPage 表 + Lab/LabSubmission 新字段齐备 | applied=True {'table': True, 'lab_new': True, 'sub_new': True, 'lab_old': True}
+$ manage.py migrate labs 0005  (exit=0)
+    Operations to perform:
+      Target specific migration: 0005_remove_labquestion_lab_remove_labquestion_question_and_more, from labs
+    Running migrations:
+      Rendering model states... DONE
+      Unapplying labs.0006_lab_custom_page_grading... OK
+PASS | R3 真回退到 0005 成功 | 
+$ manage.py showmigrations labs  (exit=0)
+    labs
+     [X] 0001_initial
+     [X] 0002_lab_guide
+     [X] 0003_alter_lab_allow_resubmit
+     [X] 0004_lab_access_token
+     [X] 0005_remove_labquestion_lab_remove_labquestion_question_and_more
+     [ ] 0006_lab_custom_page_grading
+$ manage.py showmigrations labs  (exit=0)
+    labs
+     [X] 0001_initial
+     [X] 0002_lab_guide
+     [X] 0003_alter_lab_allow_resubmit
+     [X] 0004_lab_access_token
+     [X] 0005_remove_labquestion_lab_remove_labquestion_question_and_more
+     [ ] 0006_lab_custom_page_grading
+PASS | R4 回退后 0006 未应用、LabPage 表与新字段已移除 | applied=False {'table': False, 'lab_new': False, 'sub_new': False, 'lab_old': True}
+$ manage.py migrate labs  (exit=0)
+    Operations to perform:
+      Apply all migrations: labs
+    Running migrations:
+      Applying labs.0006_lab_custom_page_grading... OK
+PASS | R5 真前进回 0006 成功 | 
+$ manage.py showmigrations labs  (exit=0)
+    labs
+     [X] 0001_initial
+     [X] 0002_lab_guide
+     [X] 0003_alter_lab_allow_resubmit
+     [X] 0004_lab_access_token
+     [X] 0005_remove_labquestion_lab_remove_labquestion_question_and_more
+     [X] 0006_lab_custom_page_grading
+$ manage.py showmigrations labs  (exit=0)
+    labs
+     [X] 0001_initial
+     [X] 0002_lab_guide
+     [X] 0003_alter_lab_allow_resubmit
+     [X] 0004_lab_access_token
+     [X] 0005_remove_labquestion_lab_remove_labquestion_question_and_more
+     [X] 0006_lab_custom_page_grading
+PASS | R6 前进后结构完整恢复（可前进可回退） | applied=True {'table': True, 'lab_new': True, 'sub_new': True, 'lab_old': True}
+$ manage.py migrate labs 0005 --fake  (exit=0)
+    Operations to perform:
+      Target specific migration: 0005_remove_labquestion_lab_remove_labquestion_question_and_more, from labs
+    Running migrations:
+      Rendering model states... DONE
+      Unapplying labs.0006_lab_custom_page_grading... FAKED
+PASS | R7 --fake 回退记录成功（模拟旧代码部署、表残留） | 
+$ manage.py showmigrations labs  (exit=0)
+    labs
+     [X] 0001_initial
+     [X] 0002_lab_guide
+     [X] 0003_alter_lab_allow_resubmit
+     [X] 0004_lab_access_token
+     [X] 0005_remove_labquestion_lab_remove_labquestion_question_and_more
+     [ ] 0006_lab_custom_page_grading
+$ manage.py showmigrations labs  (exit=0)
+    labs
+     [X] 0001_initial
+     [X] 0002_lab_guide
+     [X] 0003_alter_lab_allow_resubmit
+     [X] 0004_lab_access_token
+     [X] 0005_remove_labquestion_lab_remove_labquestion_question_and_more
+     [ ] 0006_lab_custom_page_grading
+PASS | R8 记录为 0005 但 LabPage 表与新字段仍在（表可保留） | applied=False {'table': True, 'lab_new': True, 'sub_new': True, 'lab_old': True}
+PASS | R9 旧字段只读查询成功且残留 LabPage 表不干扰（旧代码兼容） | lab_row=None labpage_rows=0
+$ manage.py migrate labs 0006 --fake  (exit=0)
+    Operations to perform:
+      Target specific migration: 0006_lab_custom_page_grading, from labs
+    Running migrations:
+      Applying labs.0006_lab_custom_page_grading... FAKED
+$ manage.py showmigrations labs  (exit=0)
+    labs
+     [X] 0001_initial
+     [X] 0002_lab_guide
+     [X] 0003_alter_lab_allow_resubmit
+     [X] 0004_lab_access_token
+     [X] 0005_remove_labquestion_lab_remove_labquestion_question_and_more
+     [X] 0006_lab_custom_page_grading
+PASS | R10 --fake 对齐记录后 0006 重新标记已应用 | 
+$ manage.py makemigrations --check --dry-run  (exit=0)
+    No changes detected
+PASS | R11 模型与迁移一致（No changes detected） | No changes detected
+$ manage.py showmigrations labs  (exit=0)
+    labs
+     [X] 0001_initial
+     [X] 0002_lab_guide
+     [X] 0003_alter_lab_allow_resubmit
+     [X] 0004_lab_access_token
+     [X] 0005_remove_labquestion_lab_remove_labquestion_question_and_more
+     [X] 0006_lab_custom_page_grading
+PASS | R12 隔离性：主库 zk 的 0006 仍为 [X]（演练未波及） | applied=True
+$ manage.py showmigrations labs  (exit=0)
+    labs
+     [X] 0001_initial
+     [X] 0002_lab_guide
+     [X] 0003_alter_lab_allow_resubmit
+     [X] 0004_lab_access_token
+     [X] 0005_remove_labquestion_lab_remove_labquestion_question_and_more
+     [X] 0006_lab_custom_page_grading
+PASS | R12 隔离性：E2E 库 zk_e2e 的 0006 仍为 [X]（演练未波及） | applied=True
+========================================================================
+总计 14 项，通过 14 项，失败 0 项
+ALL_PASS
+========================================================================

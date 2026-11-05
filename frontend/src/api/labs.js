@@ -5,6 +5,7 @@ export const listLabTemplates = (params) => request.get('/lab-templates/', { par
 
 // ===== 教师：实验管理 =====
 export const listLabs = (params) => request.get('/labs/', { params })
+export const getLab = (id) => request.get(`/labs/${id}/`)
 export const createLab = (data) => request.post('/labs/', data)
 export const updateLab = (id, data) => request.patch(`/labs/${id}/`, data)
 export const deleteLab = (id) => request.delete(`/labs/${id}/`)

@@ -147,6 +147,19 @@ def seed():
         Homework.objects.filter(classroom=room).delete()
         Exam.objects.filter(classroom=room).delete()
         rooms.filter(pk=room.pk).delete()
+    # MySQL 模式下 cleanup() 只删 SQLite 副本文件，夹具仍留在 zk_e2e 独立库里。
+    # User 被 Course.teacher / AdminActionLog.actor 以 PROTECT 引用，重跑直接
+    # User.objects.delete() 会抛 ProtectedError。先按依赖顺序删引用行再删用户，
+    # 只修「可重复运行」，不改任何验收断言。
+    from apps.platform_admin.models import AdminActionLog
+
+    stale_users = User.objects.filter(username__startswith="p4v_")
+    AdminActionLog.objects.filter(actor__in=stale_users).delete()
+    for stale in Course.objects.filter(teacher__in=stale_users):
+        try:
+            stale.delete()
+        except Exception as exc:
+            print(f"[seed] 残留课程 {stale.pk} 删除被挡（后续删用户会暴露）：{exc}")
     User.objects.filter(username__startswith="p4v_").delete()
     # 课程清理（房间删完后子引用已级联；若被 PROTECT 挡住只留孤儿行，不影响判定）
     for stale in Course.objects.filter(name__startswith="P4课程"):

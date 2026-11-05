@@ -1,0 +1,4 @@
+Operations to perform:
+  Apply all migrations: admin, ai, auth, classroom, contenttypes, courses, exams, homework, knowledge, labs, platform_admin, questions, sessions, token_blacklist, users
+Running migrations:
+  Applying labs.0006_lab_custom_page_grading... OK

@@ -198,7 +198,7 @@ import LabCreateDrawer from '@/components/lab/LabCreateDrawer.vue'
 import LabPageUploader from '@/components/lab/LabPageUploader.vue'
 import LabGradingPanel from '@/components/lab/LabGradingPanel.vue'
 import {
-  listLabs, deleteLab, publishLab, closeLab, listLabSchedules,
+  listLabs, getLab, deleteLab, publishLab, closeLab, listLabSchedules,
   createLabSchedule, listLabSubmissions,
 } from '@/api/labs'
 
@@ -257,10 +257,16 @@ function labAvg(row) {
 async function load() {
   loading.value = true
   try {
-    const params = courseFilter.value ? { course: courseFilter.value } : undefined
-    const [l, c] = await Promise.all([listLabs(params), request.get('/courses/', { params })])
+    // 顶级实验管理页没有分页控件：一次取到后端上限（max_page_size=100），
+    // 并按 id 倒序展示，保证「刚创建的实验」永远在可见范围内；
+    // 否则按模型默认 course_id/order/id 升序时新实验会落到第一页之外。
+    const courseParams = courseFilter.value ? { course: courseFilter.value } : undefined
+    const labParams = { ...(courseParams || {}), page_size: 100 }
+    // 课程下拉同样一次取全（否则课程超过默认 20 条时，新建抽屉里选不到最新课程）。
+    const courseListParams = { page_size: 100 }
+    const [l, c] = await Promise.all([listLabs(labParams), request.get('/courses/', { params: courseListParams })])
     courses.value = c.results ?? c
-    labs.value = l.results ?? l
+    labs.value = (l.results ?? l).slice().sort((a, b) => b.id - a.id)
     labs.value
       .filter((lab) => (lab.schedules || []).length)
       .forEach((lab) => {
@@ -333,15 +339,24 @@ async function openDetail(row, tab = 'overview') {
 async function refreshCurrent() {
   await load()
   if (!currentLab.value) return
-  const fresh = labs.value.find((l) => l.id === currentLab.value.id)
-  if (fresh) currentLab.value = fresh
+  // 详情必须按 id 回查，不能用「列表里找得到吗」来决定是否刷新：
+  // 分页/筛选变化时当前实验可能不在列表结果里，继续用旧对象会显示
+  // 「尚未上传」「无排课」等陈旧数据。
+  try {
+    currentLab.value = await getLab(currentLab.value.id)
+  } catch { /* 拉取失败保留原详情，不阻塞操作 */ }
 }
 
 async function onCreated(lab) {
+  // 新建后把筛选定位到该课程，用户立刻看到刚创建的实验。
+  if (lab.course) courseFilter.value = lab.course
   await load()
-  const row = labs.value.find((l) => l.id === lab.id) || lab
+  let fresh = lab
+  try {
+    fresh = await getLab(lab.id)
+  } catch { /* 回查失败时退回创建响应，后续操作仍按 id 进行 */ }
   // 自定义实验创建成功即展示「成绩接口」Tab（设计 §6.2）
-  await openDetail(row, lab.page_source === 'custom' ? 'grading' : 'overview')
+  await openDetail(fresh, fresh.page_source === 'custom' ? 'grading' : 'overview')
 }
 
 const detailRows = computed(() => {

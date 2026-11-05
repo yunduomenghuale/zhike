@@ -177,6 +177,22 @@ def seed():
         room.course_links.all().delete()
         Exam.objects.filter(classroom=room).delete()
         rooms.filter(pk=room.pk).delete()
+    # MySQL 模式下 cleanup() 只删 SQLite 副本文件，夹具仍留在 zk_e2e 独立库里。
+    # User 被 Course.teacher / AdminActionLog.actor 以 PROTECT 引用，重跑直接
+    # User.objects.delete() 会抛 ProtectedError。先按依赖顺序删引用行再删用户，
+    # 只修「可重复运行」，不改任何验收断言。
+    from apps.platform_admin.models import AdminActionLog
+
+    stale_users = User.objects.filter(username__startswith="p5v_")
+    stale_courses = Course.objects.filter(teacher__in=stale_users)
+    # Question.catalog 是 PROTECT：删课程会 CASCADE 到 Catalog，被题目挡住。
+    Question.objects.filter(course__in=stale_courses).delete()
+    AdminActionLog.objects.filter(actor__in=stale_users).delete()
+    for stale in stale_courses:
+        try:
+            stale.delete()
+        except Exception as exc:
+            print(f"[seed] 残留课程 {stale.pk} 删除被挡（后续删用户会暴露）：{exc}")
     User.objects.filter(username__startswith="p5v_").delete()
     AIQuotaPolicy.objects.all().delete()
     AICallLog.objects.filter(provider="openai", model_name="p5-unreachable").delete()

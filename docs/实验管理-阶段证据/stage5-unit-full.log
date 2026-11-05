@@ -1,0 +1,1236 @@
+D:\Claude_Code\智课系统V2\backend\apps\labs\tests.py:510: SyntaxWarning: invalid escape sequence '\/'
+  HTML = """<!DOCTYPE html><html lang="zh-CN"><head>
+Using existing test database for alias 'default'...
+
+Found 863 test(s).
+System check identified no issues (9 silenced).
+..........................写入 AI 调用流水失败（chat/mock）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 301, in flush
+    AICallLog.objects.create(**self._build(success))
+  File "E:\Miniconda\Lib\unittest\mock.py", line 1134, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\Miniconda\Lib\unittest\mock.py", line 1138, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\Miniconda\Lib\unittest\mock.py", line 1193, in _execute_mock_call
+    raise effect
+Exception: db down
+...............................................[rag] Qdrant 检索不可用，已回落 MySQL 检索：connection refused (down)
+[rag] Qdrant 检索不可用，已回落 MySQL 检索：connection refused (down)
+.[rag] Qdrant 检索不可用，已回落 MySQL 检索：connection refused (down)
+[rag] Qdrant 检索不可用，已回落 MySQL 检索：connection refused (down)
+..............[rag] Qdrant 集合中该课程尚无向量（未回填），已回落 MySQL 检索 course=15410
+.[rag] Qdrant 检索不可用，已回落 MySQL 检索：timed out
+...........[qdrant-sync] sync chunk ids [22939] 失败（已忽略，MySQL 数据不受影响）：boom
+[qdrant-sync] delete 1 chunks 失败（已忽略，MySQL 数据不受影响）：boom
+.........................................................................D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\jwt\api_jwt.py:147: InsecureKeyLengthWarning: The HMAC key is 23 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+  return self._jws.encode(
+...............................................................................写入 AI 调用流水失败（tts/tongyi）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\backends\utils.py", line 105, in _execute
+    return self.cursor.execute(sql, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\backends\mysql\base.py", line 76, in execute
+    return self.cursor.execute(query, args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\MySQLdb\cursors.py", line 179, in execute
+    res = self._query(mogrified_query)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\MySQLdb\cursors.py", line 330, in _query
+    db.query(q)
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\MySQLdb\connections.py", line 280, in query
+    _mysql.connection.query(self, query)
+MySQLdb.OperationalError: (1205, 'Lock wait timeout exceeded; try restarting transaction')
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 301, in flush
+    AICallLog.objects.create(**self._build(success))
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 679, in create
+    obj.save(force_insert=True, using=self.db)
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 892, in save
+    self.save_base(
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 998, in save_base
+    updated = self._save_table(
+              ^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1161, in _save_table
+    results = self._do_insert(
+              ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1202, in _do_insert
+    return manager._insert(
+           ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 1847, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1836, in execute_sql
+    cursor.execute(sql, params)
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\backends\utils.py", line 79, in execute
+    return self._execute_with_wrappers(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\backends\utils.py", line 92, in _execute_with_wrappers
+    return executor(sql, params, many, context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\backends\utils.py", line 100, in _execute
+    with self.db.wrap_database_errors:
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\utils.py", line 91, in __exit__
+    raise dj_exc_value.with_traceback(traceback) from exc_value
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\backends\utils.py", line 105, in _execute
+    return self.cursor.execute(sql, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\backends\mysql\base.py", line 76, in execute
+    return self.cursor.execute(query, args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\MySQLdb\cursors.py", line 179, in execute
+    res = self._query(mogrified_query)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\MySQLdb\cursors.py", line 330, in _query
+    db.query(q)
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\MySQLdb\connections.py", line 280, in query
+    _mysql.connection.query(self, query)
+django.db.utils.OperationalError: (1205, 'Lock wait timeout exceeded; try restarting transaction')
+写入 AI 调用流水失败（tts/tongyi）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\backends\utils.py", line 105, in _execute
+    return self.cursor.execute(sql, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\backends\mysql\base.py", line 76, in execute
+    return self.cursor.execute(query, args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\MySQLdb\cursors.py", line 179, in execute
+    res = self._query(mogrified_query)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\MySQLdb\cursors.py", line 330, in _query
+    db.query(q)
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\MySQLdb\connections.py", line 280, in query
+    _mysql.connection.query(self, query)
+MySQLdb.OperationalError: (1205, 'Lock wait timeout exceeded; try restarting transaction')
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 301, in flush
+    AICallLog.objects.create(**self._build(success))
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 679, in create
+    obj.save(force_insert=True, using=self.db)
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 892, in save
+    self.save_base(
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 998, in save_base
+    updated = self._save_table(
+              ^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1161, in _save_table
+    results = self._do_insert(
+              ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1202, in _do_insert
+    return manager._insert(
+           ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 1847, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1836, in execute_sql
+    cursor.execute(sql, params)
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\backends\utils.py", line 79, in execute
+    return self._execute_with_wrappers(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\backends\utils.py", line 92, in _execute_with_wrappers
+    return executor(sql, params, many, context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\backends\utils.py", line 100, in _execute
+    with self.db.wrap_database_errors:
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\utils.py", line 91, in __exit__
+    raise dj_exc_value.with_traceback(traceback) from exc_value
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\backends\utils.py", line 105, in _execute
+    return self.cursor.execute(sql, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\backends\mysql\base.py", line 76, in execute
+    return self.cursor.execute(query, args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\MySQLdb\cursors.py", line 179, in execute
+    res = self._query(mogrified_query)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\MySQLdb\cursors.py", line 330, in _query
+    db.query(q)
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\MySQLdb\connections.py", line 280, in query
+    _mysql.connection.query(self, query)
+django.db.utils.OperationalError: (1205, 'Lock wait timeout exceeded; try restarting transaction')
+...........................................................................................................................................................................................................................................................................................................................................................................................................................AI 生题组失败（task_id=2893, qtype=judge）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\questions\question_gen_ai.py", line 341, in run_question_gen
+    items = _chat_group(provider, qtype, n, score, context, objective, catalog_title)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\questions\question_gen_ai.py", line 215, in _chat_group
+    raw = provider.chat(
+          ^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\questions\tests.py", line 1428, in chat
+    raise RuntimeError(f"模拟{label}生成失败")
+RuntimeError: 模拟判断题生成失败
+AI 任务执行失败（task_id=2893, type=question_gen）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\tasks.py", line 97, in run_task
+    _dispatch(task)
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\tasks.py", line 136, in _dispatch
+    run_question_gen(task)
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 163, in wrapper
+    result = fn(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\questions\question_gen_ai.py", line 361, in run_question_gen
+    raise ValueError(f"所有题型均生成失败（{reasons or '未知原因'}）"[:300])
+ValueError: 所有题型均生成失败（判断题：RuntimeError: 模拟判断题生成失败）
+.AI 生题组失败（task_id=2894, qtype=single）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\questions\question_gen_ai.py", line 341, in run_question_gen
+    items = _chat_group(provider, qtype, n, score, context, objective, catalog_title)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\questions\question_gen_ai.py", line 215, in _chat_group
+    raw = provider.chat(
+          ^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\questions\tests.py", line 1428, in chat
+    raise RuntimeError(f"模拟{label}生成失败")
+RuntimeError: 模拟单选题生成失败
+.....AI 生题组失败（task_id=2899, qtype=judge）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\questions\question_gen_ai.py", line 341, in run_question_gen
+    items = _chat_group(provider, qtype, n, score, context, objective, catalog_title)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\questions\question_gen_ai.py", line 215, in _chat_group
+    raw = provider.chat(
+          ^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\questions\tests.py", line 1428, in chat
+    raise RuntimeError(f"模拟{label}生成失败")
+RuntimeError: 模拟判断题生成失败
+............................................D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\jwt\api_jwt.py:368: InsecureKeyLengthWarning: The HMAC key is 23 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+  decoded = self.decode_complete(
+.....D:\Claude_Code\智课系统V2\backend\apps\platform_admin\oversight_views.py: Warning [AdminActionLogViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views.py: Warning [AdminAICallLogListView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\serializers.py: Warning [AdminAICallLogListView > AICallLogSerializer]: unable to resolve type hint for function "get_provider_display". Consider using a type hint or @extend_schema_field. Defaulting to string.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views.py: Error [AdminAICallLogExportView]: unable to guess serializer. This is graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views.py: Warning [AdminAICallLogExportView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views.py: Error [AdminAICallStatsView]: unable to guess serializer. This is graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views.py: Warning [AdminAICallStatsView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views.py: Warning [AdminAIConfigChangeLogListView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views.py: Error [AdminAIConfigurationView]: unable to guess serializer. This is graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views.py: Warning [AdminAIConfigurationView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views.py: Error [AdminAIConnectionTestView]: unable to guess serializer. This is graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views.py: Warning [AdminAIConnectionTestView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views_ai_quota.py: Error [AdminAIQuotaView]: unable to guess serializer. This is graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views_ai_quota.py: Warning [AdminAIQuotaView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\oversight_views.py: Warning [AdminClassViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\oversight_views.py: Warning [AdminCourseViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views_imports.py: Error [AdminImportCommitView]: unable to guess serializer. This is graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views_imports.py: Warning [AdminImportCommitView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views_imports.py: Error [AdminImportPreviewView]: unable to guess serializer. This is graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views_imports.py: Warning [AdminImportPreviewView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views_imports.py: Error [AdminImportTemplateView]: unable to guess serializer. This is graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views_imports.py: Warning [AdminImportTemplateView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views.py: Warning [AdminOverviewView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\oversight_views.py: Error [AdminAlertsView]: unable to guess serializer. This is graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\oversight_views.py: Warning [AdminAlertsView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\oversight_views.py: Error [AdminTrendsView]: unable to guess serializer. This is graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\oversight_views.py: Warning [AdminTrendsView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views.py: Error [AdminQAQualityStatsView]: unable to guess serializer. This is graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views.py: Warning [AdminQAQualityStatsView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views.py: Error [AdminRebuildVectorsView]: unable to guess serializer. This is graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views.py: Warning [AdminRebuildVectorsView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views.py: Error [AdminPlatformSettingsView]: unable to guess serializer. This is graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views.py: Warning [AdminPlatformSettingsView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\oversight_views.py: Error [AdminTeacherViewSet]: unable to guess serializer. This is graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\oversight_views.py: Warning [AdminTeacherViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views.py: Warning [AdminUserListCreateView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views.py: Warning [AdminUserDetailView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views.py: Warning [AdminPasswordResetView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views.py: Error [AdminUserImportConfirmView]: unable to guess serializer. This is graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views.py: Warning [AdminUserImportConfirmView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views.py: Error [AdminUserImportPreviewView]: unable to guess serializer. This is graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views.py: Warning [AdminUserImportPreviewView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views.py: Error [AdminUserImportTemplateView]: unable to guess serializer. This is graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+D:\Claude_Code\智课系统V2\backend\apps\platform_admin\views.py: Warning [AdminUserImportTemplateView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\ai\views.py: Warning [AITaskDetailView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\ai\views.py: Error [AITaskCancelView]: unable to guess serializer. This is graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+D:\Claude_Code\智课系统V2\backend\apps\ai\views.py: Warning [AITaskCancelView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\ai\views.py: Error [AITaskRetryView]: unable to guess serializer. This is graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+D:\Claude_Code\智课系统V2\backend\apps\ai\views.py: Warning [AITaskRetryView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\ai\views.py: Warning [AITaskActiveView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\ai\views.py: Error [AIQueueDashboardView]: unable to guess serializer. This is graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+D:\Claude_Code\智课系统V2\backend\apps\ai\views.py: Warning [AIQueueDashboardView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\ai\views.py: Error [AIWorkerHealthView]: unable to guess serializer. This is graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+D:\Claude_Code\智课系统V2\backend\apps\ai\views.py: Warning [AIWorkerHealthView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\ai\views.py: Warning [AIProviderInfoView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\ai\views.py: Warning [TTSPreviewView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\analytics\views.py: Warning [ChapterSummaryView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\analytics\views.py: Warning [ClassStatsView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\analytics\views.py: Warning [ClassAIReportView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\analytics\views.py: Warning [ClassAIReportHistoryView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\analytics\views.py: Warning [ClassChapterSummariesView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\analytics\views.py: Error [ClassExportView]: unable to guess serializer. This is graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+D:\Claude_Code\智课系统V2\backend\apps\analytics\views.py: Warning [ClassExportView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\analytics\views.py: Warning [ClassStudentDetailView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\analytics\views.py: Warning [MyWrongQuestionsView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\questions\views.py: Warning [AnswerRecordViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\users\views.py: Warning [AvatarUploadView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\users\views.py: Error [AuthConfigView]: unable to guess serializer. This is graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+D:\Claude_Code\智课系统V2\backend\apps\users\views.py: Warning [AuthConfigView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\users\views.py: Warning [LoginView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\users\views.py: Error [LogoutView]: unable to guess serializer. This is graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+D:\Claude_Code\智课系统V2\backend\apps\users\views.py: Warning [LogoutView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\users\views.py: Warning [MeView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\users\views.py: Warning [PasswordChangeView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\users\views.py: Warning [RegisterView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\courses\views.py: Warning [CatalogViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\classroom\views.py: Warning [ClassStudentViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\classroom\views.py: Warning [ClassRoomViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\courses\views.py: Warning [CourseResourceViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\courses\views.py: Warning [CourseViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\exams\views.py: Warning [ExamLogViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\exams\views.py: Warning [ExamSubmissionViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\exams\serializers.py: Warning [ExamSubmissionViewSet > ExamSubmissionSerializer]: unable to resolve type hint for function "get_objective_score". Consider using a type hint or @extend_schema_field. Defaulting to string.
+D:\Claude_Code\智课系统V2\backend\apps\exams\serializers.py: Warning [ExamSubmissionViewSet > ExamSubmissionSerializer]: unable to resolve type hint for function "get_total_score". Consider using a type hint or @extend_schema_field. Defaulting to string.
+D:\Claude_Code\智课系统V2\backend\apps\exams\serializers.py: Warning [ExamSubmissionViewSet > ExamSubmissionSerializer]: unable to resolve type hint for function "get_subjective_scores". Consider using a type hint or @extend_schema_field. Defaulting to string.
+D:\Claude_Code\智课系统V2\backend\apps\exams\serializers.py: Warning [ExamSubmissionViewSet > ExamSubmissionSerializer]: unable to resolve type hint for function "get_has_subjective". Consider using a type hint or @extend_schema_field. Defaulting to string.
+D:\Claude_Code\智课系统V2\backend\apps\exams\serializers.py: Warning [ExamSubmissionViewSet > ExamSubmissionSerializer]: unable to resolve type hint for function "get_subjective_count". Consider using a type hint or @extend_schema_field. Defaulting to string.
+D:\Claude_Code\智课系统V2\backend\apps\exams\serializers.py: Warning [ExamSubmissionViewSet > ExamSubmissionSerializer]: unable to resolve type hint for function "get_graded_subjective_count". Consider using a type hint or @extend_schema_field. Defaulting to string.
+D:\Claude_Code\智课系统V2\backend\apps\exams\serializers.py: Warning [ExamSubmissionViewSet > ExamSubmissionSerializer]: unable to resolve type hint for function "get_abnormal_count". Consider using a type hint or @extend_schema_field. Defaulting to string.
+D:\Claude_Code\智课系统V2\backend\apps\exams\views.py: Warning [ExamViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\exams\serializers.py: Warning [ExamViewSet > ExamSerializer]: unable to resolve type hint for function "get_has_paper". Consider using a type hint or @extend_schema_field. Defaulting to string.
+D:\Claude_Code\智课系统V2\backend\apps\exams\serializers.py: Warning [ExamViewSet > ExamSerializer]: unable to resolve type hint for function "get_question_count". Consider using a type hint or @extend_schema_field. Defaulting to string.
+D:\Claude_Code\智课系统V2\backend\apps\exams\serializers.py: Warning [ExamViewSet > ExamSerializer]: unable to resolve type hint for function "get_my_submission". Consider using a type hint or @extend_schema_field. Defaulting to string.
+D:\Claude_Code\智课系统V2\backend\apps\homework\views.py: Warning [HomeworkSubmissionViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\homework\serializers.py: Warning [HomeworkSubmissionViewSet > HomeworkSubmissionSerializer > HomeworkAnswerSerializer]: unable to resolve type hint for function "get_score". Consider using a type hint or @extend_schema_field. Defaulting to string.
+D:\Claude_Code\智课系统V2\backend\apps\homework\serializers.py: Warning [HomeworkSubmissionViewSet > HomeworkSubmissionSerializer > HomeworkAnswerSerializer]: unable to resolve type hint for function "get_comment". Consider using a type hint or @extend_schema_field. Defaulting to string.
+D:\Claude_Code\智课系统V2\backend\apps\homework\serializers.py: Warning [HomeworkSubmissionViewSet > HomeworkSubmissionSerializer]: unable to resolve type hint for function "get_objective_score". Consider using a type hint or @extend_schema_field. Defaulting to string.
+D:\Claude_Code\智课系统V2\backend\apps\homework\serializers.py: Warning [HomeworkSubmissionViewSet > HomeworkSubmissionSerializer]: unable to resolve type hint for function "get_score". Consider using a type hint or @extend_schema_field. Defaulting to string.
+D:\Claude_Code\智课系统V2\backend\apps\homework\serializers.py: Warning [HomeworkSubmissionViewSet > HomeworkSubmissionSerializer]: unable to resolve type hint for function "get_comment". Consider using a type hint or @extend_schema_field. Defaulting to string.
+D:\Claude_Code\智课系统V2\backend\apps\homework\views.py: Warning [HomeworkViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\labs\views.py: Error [GradeReportView]: unable to guess serializer. This is graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+D:\Claude_Code\智课系统V2\backend\apps\labs\views.py: Warning [GradeReportView]: could not resolve authenticator <class 'apps.labs.auth.LabTokenAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\labs\views.py: Warning [LabGuideViewSet]: could not derive type of path parameter "id" because it is untyped and obtaining queryset from the viewset failed. Consider adding a type to the path (e.g. <int:id>) or annotating the parameter type with @extend_schema. Defaulting to "string".
+D:\Claude_Code\智课系统V2\backend\apps\labs\views.py: Warning [LabGuideViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\labs\views.py: Warning [LabScheduleViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\labs\views.py: Warning [LabSubmissionViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\labs\serializers.py: Warning [LabSubmissionViewSet > LabSubmissionSerializer]: unable to resolve type hint for function "get_grade_raw". Consider using a type hint or @extend_schema_field. Defaulting to string.
+D:\Claude_Code\智课系统V2\backend\apps\labs\views.py: Warning [LabSubmissionViewSet]: could not resolve authenticator <class 'apps.labs.auth.LabTokenAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\labs\views.py: Warning [LabTemplateViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\labs\views.py: Warning [LabViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\knowledge\views.py: Warning [MaterialViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\users\views.py: Warning [NotificationViewSet]: Failed to obtain model through view's queryset due to raised exception. Prevent this either by setting "queryset = Model.objects.none()" on the view, checking for "getattr(self, "swagger_fake_view", False)" in get_queryset() or by simply using @extend_schema. (Exception: Field 'id' expected a number but got <django.contrib.auth.models.AnonymousUser object at 0x000001EE7DADDF70>.)
+D:\Claude_Code\智课系统V2\backend\apps\users\views.py: Warning [NotificationViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\users\views.py: Warning [NotificationViewSet]: could not derive type of path parameter "id" because it is untyped and obtaining queryset from the viewset failed. Consider adding a type to the path (e.g. <int:id>) or annotating the parameter type with @extend_schema. Defaulting to "string".
+D:\Claude_Code\智课系统V2\backend\apps\courses\views.py: Warning [PPTResourceViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\knowledge\views.py: Warning [TeacherQAIssueListView]: Failed to obtain model through view's queryset due to raised exception. Prevent this either by setting "queryset = Model.objects.none()" on the view, checking for "getattr(self, "swagger_fake_view", False)" in get_queryset() or by simply using @extend_schema. (Exception: Field 'id' expected a number but got <django.contrib.auth.models.AnonymousUser object at 0x000001EE7DADDF70>.)
+D:\Claude_Code\智课系统V2\backend\apps\knowledge\views.py: Warning [TeacherQAIssueListView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\knowledge\views.py: Error [TeacherQAQualityStatsView]: unable to guess serializer. This is graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+D:\Claude_Code\智课系统V2\backend\apps\knowledge\views.py: Warning [TeacherQAQualityStatsView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\knowledge\views.py: Warning [QARecordViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\knowledge\views.py: Warning [QASessionViewSet]: Failed to obtain model through view's queryset due to raised exception. Prevent this either by setting "queryset = Model.objects.none()" on the view, checking for "getattr(self, "swagger_fake_view", False)" in get_queryset() or by simply using @extend_schema. (Exception: Field 'id' expected a number but got <django.contrib.auth.models.AnonymousUser object at 0x000001EE7DADDF70>.)
+D:\Claude_Code\智课系统V2\backend\apps\knowledge\views.py: Warning [QASessionViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\knowledge\views.py: Warning [QASessionViewSet]: could not derive type of path parameter "id" because it is untyped and obtaining queryset from the viewset failed. Consider adding a type to the path (e.g. <int:id>) or annotating the parameter type with @extend_schema. Defaulting to "string".
+D:\Claude_Code\智课系统V2\backend\apps\questions\views.py: Warning [QuestionDraftBatchViewSet]: Failed to obtain model through view's queryset due to raised exception. Prevent this either by setting "queryset = Model.objects.none()" on the view, checking for "getattr(self, "swagger_fake_view", False)" in get_queryset() or by simply using @extend_schema. (Exception: Field 'id' expected a number but got <django.contrib.auth.models.AnonymousUser object at 0x000001EE7DADDF70>.)
+D:\Claude_Code\智课系统V2\backend\apps\questions\views.py: Warning [QuestionDraftBatchViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\questions\views.py: Warning [QuestionDraftBatchViewSet]: could not derive type of path parameter "id" because it is untyped and obtaining queryset from the viewset failed. Consider adding a type to the path (e.g. <int:id>) or annotating the parameter type with @extend_schema. Defaulting to "string".
+D:\Claude_Code\智课系统V2\backend\apps\questions\views.py: Error [QuestionImageUploadView]: unable to guess serializer. This is graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+D:\Claude_Code\智课系统V2\backend\apps\questions\views.py: Warning [QuestionImageUploadView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\questions\views.py: Warning [SceneTagViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\questions\views.py: Warning [QuestionViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\courses\views.py: Warning [TeachingVideoViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\courses\views.py: Warning [WatchProgressViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\questions\views.py: Error [WrongMasteryView]: unable to guess serializer. This is graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+D:\Claude_Code\智课系统V2\backend\apps\questions\views.py: Warning [WrongMasteryView]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\questions\views.py: Warning [WrongNoteViewSet]: Failed to obtain model through view's queryset due to raised exception. Prevent this either by setting "queryset = Model.objects.none()" on the view, checking for "getattr(self, "swagger_fake_view", False)" in get_queryset() or by simply using @extend_schema. (Exception: Field 'id' expected a number but got <django.contrib.auth.models.AnonymousUser object at 0x000001EE7DADDF70>.)
+D:\Claude_Code\智课系统V2\backend\apps\questions\views.py: Warning [WrongNoteViewSet]: could not resolve authenticator <class 'apps.users.authentication.RevocableJWTAuthentication'>. There was no OpenApiAuthenticationExtension registered for that class. Try creating one by subclassing it. Ignoring for now.
+D:\Claude_Code\智课系统V2\backend\apps\questions\views.py: Warning [WrongNoteViewSet]: could not derive type of path parameter "id" because it is untyped and obtaining queryset from the viewset failed. Consider adding a type to the path (e.g. <int:id>) or annotating the parameter type with @extend_schema. Defaulting to "string".
+Warning: enum naming encountered a non-optimally resolvable collision for fields named "status". The same name has been used for multiple choice sets in multiple components. The collision was resolved with "Status59cEnum". add an entry to ENUM_NAME_OVERRIDES to fix the naming.
+.写入 AI 调用流水失败（embed/openai-compat）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 301, in flush
+    AICallLog.objects.create(**self._build(success))
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 679, in create
+    obj.save(force_insert=True, using=self.db)
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 892, in save
+    self.save_base(
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 998, in save_base
+    updated = self._save_table(
+              ^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1161, in _save_table
+    results = self._do_insert(
+              ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1202, in _do_insert
+    return manager._insert(
+           ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 1847, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1834, in execute_sql
+    with self.connection.cursor() as cursor:
+         ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\test\testcases.py", line 198, in __call__
+    raise DatabaseOperationForbidden(self.message)
+django.test.testcases.DatabaseOperationForbidden: Database queries to 'default' are not allowed in SimpleTestCase subclasses. Either subclass TestCase or TransactionTestCase to ensure proper test isolation or add 'default' to apps.ai.tests.EmbedBatchTests.databases to silence this failure.
+..写入 AI 调用流水失败（embed/openai-compat）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 301, in flush
+    AICallLog.objects.create(**self._build(success))
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 679, in create
+    obj.save(force_insert=True, using=self.db)
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 892, in save
+    self.save_base(
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 998, in save_base
+    updated = self._save_table(
+              ^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1161, in _save_table
+    results = self._do_insert(
+              ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1202, in _do_insert
+    return manager._insert(
+           ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 1847, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1834, in execute_sql
+    with self.connection.cursor() as cursor:
+         ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\test\testcases.py", line 198, in __call__
+    raise DatabaseOperationForbidden(self.message)
+django.test.testcases.DatabaseOperationForbidden: Database queries to 'default' are not allowed in SimpleTestCase subclasses. Either subclass TestCase or TransactionTestCase to ensure proper test isolation or add 'default' to apps.ai.tests.EmbedBatchTests.databases to silence this failure.
+.写入 AI 调用流水失败（embed/openai-compat）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 315, in record_ai_call
+    yield rec
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\providers\openai_compat.py", line 264, in embed
+    batch_vectors, batch_usage, batch_mocked = self._embed_batch(
+                                               ^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\providers\openai_compat.py", line 301, in _embed_batch
+    resp = requests.post(
+           ^^^^^^^^^^^^^^
+  File "E:\Miniconda\Lib\unittest\mock.py", line 1134, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\Miniconda\Lib\unittest\mock.py", line 1138, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\Miniconda\Lib\unittest\mock.py", line 1199, in _execute_mock_call
+    result = effect(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\tests.py", line 1087, in fake_post
+    raise requests_exception()
+requests.exceptions.ConnectionError: boom
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 301, in flush
+    AICallLog.objects.create(**self._build(success))
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 679, in create
+    obj.save(force_insert=True, using=self.db)
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 892, in save
+    self.save_base(
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 998, in save_base
+    updated = self._save_table(
+              ^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1161, in _save_table
+    results = self._do_insert(
+              ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1202, in _do_insert
+    return manager._insert(
+           ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 1847, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1834, in execute_sql
+    with self.connection.cursor() as cursor:
+         ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\test\testcases.py", line 198, in __call__
+    raise DatabaseOperationForbidden(self.message)
+django.test.testcases.DatabaseOperationForbidden: Database queries to 'default' are not allowed in SimpleTestCase subclasses. Either subclass TestCase or TransactionTestCase to ensure proper test isolation or add 'default' to apps.ai.tests.EmbedBatchTests.databases to silence this failure.
+.写入 AI 调用流水失败（embed/openai-compat）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 301, in flush
+    AICallLog.objects.create(**self._build(success))
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 679, in create
+    obj.save(force_insert=True, using=self.db)
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 892, in save
+    self.save_base(
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 998, in save_base
+    updated = self._save_table(
+              ^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1161, in _save_table
+    results = self._do_insert(
+              ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1202, in _do_insert
+    return manager._insert(
+           ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 1847, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1834, in execute_sql
+    with self.connection.cursor() as cursor:
+         ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\test\testcases.py", line 198, in __call__
+    raise DatabaseOperationForbidden(self.message)
+django.test.testcases.DatabaseOperationForbidden: Database queries to 'default' are not allowed in SimpleTestCase subclasses. Either subclass TestCase or TransactionTestCase to ensure proper test isolation or add 'default' to apps.ai.tests.EmbedTimeoutTests.databases to silence this failure.
+.写入 AI 调用流水失败（embed/openai-compat）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 301, in flush
+    AICallLog.objects.create(**self._build(success))
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 679, in create
+    obj.save(force_insert=True, using=self.db)
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 892, in save
+    self.save_base(
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 998, in save_base
+    updated = self._save_table(
+              ^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1161, in _save_table
+    results = self._do_insert(
+              ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1202, in _do_insert
+    return manager._insert(
+           ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 1847, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1834, in execute_sql
+    with self.connection.cursor() as cursor:
+         ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\test\testcases.py", line 198, in __call__
+    raise DatabaseOperationForbidden(self.message)
+django.test.testcases.DatabaseOperationForbidden: Database queries to 'default' are not allowed in SimpleTestCase subclasses. Either subclass TestCase or TransactionTestCase to ensure proper test isolation or add 'default' to apps.ai.tests.EmbedTimeoutTests.databases to silence this failure.
+............写入 AI 调用流水失败（tts/openai-compat）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 315, in record_ai_call
+    yield rec
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\providers\openai_compat.py", line 420, in tts
+    url = self._tts_openai_compatible(text, voice, speed)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\providers\openai_compat.py", line 514, in _tts_openai_compatible
+    raise _Http4xxError(
+apps.ai.providers.openai_compat._Http4xxError: HTTP 404 model_not_found: model not found（端点 http://127.0.0.1:8000/v1/audio/speech）
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 301, in flush
+    AICallLog.objects.create(**self._build(success))
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 679, in create
+    obj.save(force_insert=True, using=self.db)
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 892, in save
+    self.save_base(
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 998, in save_base
+    updated = self._save_table(
+              ^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1161, in _save_table
+    results = self._do_insert(
+              ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1202, in _do_insert
+    return manager._insert(
+           ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 1847, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1834, in execute_sql
+    with self.connection.cursor() as cursor:
+         ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\test\testcases.py", line 198, in __call__
+    raise DatabaseOperationForbidden(self.message)
+django.test.testcases.DatabaseOperationForbidden: Database queries to 'default' are not allowed in SimpleTestCase subclasses. Either subclass TestCase or TransactionTestCase to ensure proper test isolation or add 'default' to apps.ai.tests.OpenAICompatibleTTSTests.databases to silence this failure.
+.写入 AI 调用流水失败（tts/openai-compat）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 315, in record_ai_call
+    yield rec
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\providers\openai_compat.py", line 420, in tts
+    url = self._tts_openai_compatible(text, voice, speed)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\providers\openai_compat.py", line 529, in _tts_openai_compatible
+    raise last_error or RuntimeError("TTS 请求失败")
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\providers\openai_compat.py", line 506, in _tts_openai_compatible
+    resp = requests.post(
+           ^^^^^^^^^^^^^^
+  File "E:\Miniconda\Lib\unittest\mock.py", line 1134, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\Miniconda\Lib\unittest\mock.py", line 1138, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\Miniconda\Lib\unittest\mock.py", line 1199, in _execute_mock_call
+    result = effect(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\tests.py", line 533, in fake_post
+    raise ConnectionError("local tts down")
+ConnectionError: local tts down
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 301, in flush
+    AICallLog.objects.create(**self._build(success))
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 679, in create
+    obj.save(force_insert=True, using=self.db)
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 892, in save
+    self.save_base(
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 998, in save_base
+    updated = self._save_table(
+              ^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1161, in _save_table
+    results = self._do_insert(
+              ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1202, in _do_insert
+    return manager._insert(
+           ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 1847, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1834, in execute_sql
+    with self.connection.cursor() as cursor:
+         ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\test\testcases.py", line 198, in __call__
+    raise DatabaseOperationForbidden(self.message)
+django.test.testcases.DatabaseOperationForbidden: Database queries to 'default' are not allowed in SimpleTestCase subclasses. Either subclass TestCase or TransactionTestCase to ensure proper test isolation or add 'default' to apps.ai.tests.OpenAICompatibleTTSTests.databases to silence this failure.
+.写入 AI 调用流水失败（tts/openai-compat）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 301, in flush
+    AICallLog.objects.create(**self._build(success))
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 679, in create
+    obj.save(force_insert=True, using=self.db)
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 892, in save
+    self.save_base(
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 998, in save_base
+    updated = self._save_table(
+              ^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1161, in _save_table
+    results = self._do_insert(
+              ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1202, in _do_insert
+    return manager._insert(
+           ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 1847, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1834, in execute_sql
+    with self.connection.cursor() as cursor:
+         ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\test\testcases.py", line 198, in __call__
+    raise DatabaseOperationForbidden(self.message)
+django.test.testcases.DatabaseOperationForbidden: Database queries to 'default' are not allowed in SimpleTestCase subclasses. Either subclass TestCase or TransactionTestCase to ensure proper test isolation or add 'default' to apps.ai.tests.OpenAICompatibleTTSTests.databases to silence this failure.
+.写入 AI 调用流水失败（tts/openai-compat）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 301, in flush
+    AICallLog.objects.create(**self._build(success))
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 679, in create
+    obj.save(force_insert=True, using=self.db)
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 892, in save
+    self.save_base(
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 998, in save_base
+    updated = self._save_table(
+              ^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1161, in _save_table
+    results = self._do_insert(
+              ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1202, in _do_insert
+    return manager._insert(
+           ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 1847, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1834, in execute_sql
+    with self.connection.cursor() as cursor:
+         ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\test\testcases.py", line 198, in __call__
+    raise DatabaseOperationForbidden(self.message)
+django.test.testcases.DatabaseOperationForbidden: Database queries to 'default' are not allowed in SimpleTestCase subclasses. Either subclass TestCase or TransactionTestCase to ensure proper test isolation or add 'default' to apps.ai.tests.OpenAICompatibleTTSTests.databases to silence this failure.
+.写入 AI 调用流水失败（tts/openai-compat）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 315, in record_ai_call
+    yield rec
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\providers\openai_compat.py", line 420, in tts
+    url = self._tts_openai_compatible(text, voice, speed)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\providers\openai_compat.py", line 529, in _tts_openai_compatible
+    raise last_error or RuntimeError("TTS 请求失败")
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\providers\openai_compat.py", line 520, in _tts_openai_compatible
+    raise RuntimeError("TTS 接口返回空音频")
+RuntimeError: TTS 接口返回空音频
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 301, in flush
+    AICallLog.objects.create(**self._build(success))
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 679, in create
+    obj.save(force_insert=True, using=self.db)
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 892, in save
+    self.save_base(
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 998, in save_base
+    updated = self._save_table(
+              ^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1161, in _save_table
+    results = self._do_insert(
+              ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1202, in _do_insert
+    return manager._insert(
+           ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 1847, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1834, in execute_sql
+    with self.connection.cursor() as cursor:
+         ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\test\testcases.py", line 198, in __call__
+    raise DatabaseOperationForbidden(self.message)
+django.test.testcases.DatabaseOperationForbidden: Database queries to 'default' are not allowed in SimpleTestCase subclasses. Either subclass TestCase or TransactionTestCase to ensure proper test isolation or add 'default' to apps.ai.tests.OpenAICompatibleTTSTests.databases to silence this failure.
+.写入 AI 调用流水失败（tts/openai-compat）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 301, in flush
+    AICallLog.objects.create(**self._build(success))
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 679, in create
+    obj.save(force_insert=True, using=self.db)
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 892, in save
+    self.save_base(
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 998, in save_base
+    updated = self._save_table(
+              ^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1161, in _save_table
+    results = self._do_insert(
+              ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1202, in _do_insert
+    return manager._insert(
+           ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 1847, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1834, in execute_sql
+    with self.connection.cursor() as cursor:
+         ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\test\testcases.py", line 198, in __call__
+    raise DatabaseOperationForbidden(self.message)
+django.test.testcases.DatabaseOperationForbidden: Database queries to 'default' are not allowed in SimpleTestCase subclasses. Either subclass TestCase or TransactionTestCase to ensure proper test isolation or add 'default' to apps.ai.tests.OpenAICompatibleTTSTests.databases to silence this failure.
+..写入 AI 调用流水失败（tts/openai-compat）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 301, in flush
+    AICallLog.objects.create(**self._build(success))
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 679, in create
+    obj.save(force_insert=True, using=self.db)
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 892, in save
+    self.save_base(
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 998, in save_base
+    updated = self._save_table(
+              ^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1161, in _save_table
+    results = self._do_insert(
+              ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1202, in _do_insert
+    return manager._insert(
+           ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 1847, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1834, in execute_sql
+    with self.connection.cursor() as cursor:
+         ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\test\testcases.py", line 198, in __call__
+    raise DatabaseOperationForbidden(self.message)
+django.test.testcases.DatabaseOperationForbidden: Database queries to 'default' are not allowed in SimpleTestCase subclasses. Either subclass TestCase or TransactionTestCase to ensure proper test isolation or add 'default' to apps.ai.tests.OpenAICompatibleTTSTests.databases to silence this failure.
+.写入 AI 调用流水失败（tts/openai-compat）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 301, in flush
+    AICallLog.objects.create(**self._build(success))
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 679, in create
+    obj.save(force_insert=True, using=self.db)
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 892, in save
+    self.save_base(
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 998, in save_base
+    updated = self._save_table(
+              ^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1161, in _save_table
+    results = self._do_insert(
+              ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1202, in _do_insert
+    return manager._insert(
+           ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 1847, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1834, in execute_sql
+    with self.connection.cursor() as cursor:
+         ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\test\testcases.py", line 198, in __call__
+    raise DatabaseOperationForbidden(self.message)
+django.test.testcases.DatabaseOperationForbidden: Database queries to 'default' are not allowed in SimpleTestCase subclasses. Either subclass TestCase or TransactionTestCase to ensure proper test isolation or add 'default' to apps.ai.tests.OpenAICompatibleTTSTests.databases to silence this failure.
+.写入 AI 调用流水失败（tts/openai-compat）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 301, in flush
+    AICallLog.objects.create(**self._build(success))
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 679, in create
+    obj.save(force_insert=True, using=self.db)
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 892, in save
+    self.save_base(
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 998, in save_base
+    updated = self._save_table(
+              ^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1161, in _save_table
+    results = self._do_insert(
+              ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1202, in _do_insert
+    return manager._insert(
+           ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 1847, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1834, in execute_sql
+    with self.connection.cursor() as cursor:
+         ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\test\testcases.py", line 198, in __call__
+    raise DatabaseOperationForbidden(self.message)
+django.test.testcases.DatabaseOperationForbidden: Database queries to 'default' are not allowed in SimpleTestCase subclasses. Either subclass TestCase or TransactionTestCase to ensure proper test isolation or add 'default' to apps.ai.tests.OpenAICompatibleTTSTests.databases to silence this failure.
+.....班级报告第 1 段生成失败（第 1 次）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\analytics_ai.py", line 400, in run_class_analytics
+    data = _chat_json(provider, _section_messages(idx, ctx, prev_digest, students_brief), timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\analytics_ai.py", line 79, in _chat_json
+    raw = provider.chat(messages, temperature=0.3, timeout=timeout, retries=2, enable_thinking=False)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\tests_ai_task.py", line 91, in chat
+    raise RuntimeError("stub boom")
+RuntimeError: stub boom
+班级报告第 1 段生成失败（第 2 次）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\analytics_ai.py", line 400, in run_class_analytics
+    data = _chat_json(provider, _section_messages(idx, ctx, prev_digest, students_brief), timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\analytics_ai.py", line 79, in _chat_json
+    raw = provider.chat(messages, temperature=0.3, timeout=timeout, retries=2, enable_thinking=False)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\tests_ai_task.py", line 91, in chat
+    raise RuntimeError("stub boom")
+RuntimeError: stub boom
+班级报告第 2 段生成失败（第 1 次）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\analytics_ai.py", line 400, in run_class_analytics
+    data = _chat_json(provider, _section_messages(idx, ctx, prev_digest, students_brief), timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\analytics_ai.py", line 79, in _chat_json
+    raw = provider.chat(messages, temperature=0.3, timeout=timeout, retries=2, enable_thinking=False)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\tests_ai_task.py", line 91, in chat
+    raise RuntimeError("stub boom")
+RuntimeError: stub boom
+班级报告第 2 段生成失败（第 2 次）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\analytics_ai.py", line 400, in run_class_analytics
+    data = _chat_json(provider, _section_messages(idx, ctx, prev_digest, students_brief), timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\analytics_ai.py", line 79, in _chat_json
+    raw = provider.chat(messages, temperature=0.3, timeout=timeout, retries=2, enable_thinking=False)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\tests_ai_task.py", line 91, in chat
+    raise RuntimeError("stub boom")
+RuntimeError: stub boom
+班级报告第 3 段生成失败（第 1 次）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\analytics_ai.py", line 400, in run_class_analytics
+    data = _chat_json(provider, _section_messages(idx, ctx, prev_digest, students_brief), timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\analytics_ai.py", line 79, in _chat_json
+    raw = provider.chat(messages, temperature=0.3, timeout=timeout, retries=2, enable_thinking=False)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\tests_ai_task.py", line 91, in chat
+    raise RuntimeError("stub boom")
+RuntimeError: stub boom
+班级报告第 3 段生成失败（第 2 次）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\analytics_ai.py", line 400, in run_class_analytics
+    data = _chat_json(provider, _section_messages(idx, ctx, prev_digest, students_brief), timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\analytics_ai.py", line 79, in _chat_json
+    raw = provider.chat(messages, temperature=0.3, timeout=timeout, retries=2, enable_thinking=False)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\tests_ai_task.py", line 91, in chat
+    raise RuntimeError("stub boom")
+RuntimeError: stub boom
+学生简评批次执行失败
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\analytics_ai.py", line 463, in run_class_analytics
+    merged = _run_batch(batches[0])
+             ^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\analytics_ai.py", line 448, in _run_batch
+    data = _chat_json(provider, _comments_messages(batch, ctx), timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\analytics_ai.py", line 79, in _chat_json
+    raw = provider.chat(messages, temperature=0.3, timeout=timeout, retries=2, enable_thinking=False)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\tests_ai_task.py", line 91, in chat
+    raise RuntimeError("stub boom")
+RuntimeError: stub boom
+..........章节总结生成失败（第 1 次）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\analytics_ai.py", line 693, in run_chapter_summary
+    data = _chat_json(provider, _chapter_summary_messages(profile), timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\analytics_ai.py", line 79, in _chat_json
+    raw = provider.chat(messages, temperature=0.3, timeout=timeout, retries=2, enable_thinking=False)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\tests_ai_task.py", line 91, in chat
+    raise RuntimeError("stub boom")
+RuntimeError: stub boom
+章节总结生成失败（第 2 次）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\analytics_ai.py", line 693, in run_chapter_summary
+    data = _chat_json(provider, _chapter_summary_messages(profile), timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\analytics_ai.py", line 79, in _chat_json
+    raw = provider.chat(messages, temperature=0.3, timeout=timeout, retries=2, enable_thinking=False)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\tests_ai_task.py", line 91, in chat
+    raise RuntimeError("stub boom")
+RuntimeError: stub boom
+.................写入 AI 调用流水失败（embed/local）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 301, in flush
+    AICallLog.objects.create(**self._build(success))
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 679, in create
+    obj.save(force_insert=True, using=self.db)
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 892, in save
+    self.save_base(
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 998, in save_base
+    updated = self._save_table(
+              ^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1161, in _save_table
+    results = self._do_insert(
+              ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1202, in _do_insert
+    return manager._insert(
+           ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 1847, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1834, in execute_sql
+    with self.connection.cursor() as cursor:
+         ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\test\testcases.py", line 198, in __call__
+    raise DatabaseOperationForbidden(self.message)
+django.test.testcases.DatabaseOperationForbidden: Database queries to 'default' are not allowed in SimpleTestCase subclasses. Either subclass TestCase or TransactionTestCase to ensure proper test isolation or add 'default' to apps.ai.tests_local_models.LocalProviderContractTests.databases to silence this failure.
+..写入 AI 调用流水失败（rerank/local）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 301, in flush
+    AICallLog.objects.create(**self._build(success))
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 679, in create
+    obj.save(force_insert=True, using=self.db)
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 892, in save
+    self.save_base(
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 998, in save_base
+    updated = self._save_table(
+              ^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1161, in _save_table
+    results = self._do_insert(
+              ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1202, in _do_insert
+    return manager._insert(
+           ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 1847, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1834, in execute_sql
+    with self.connection.cursor() as cursor:
+         ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\test\testcases.py", line 198, in __call__
+    raise DatabaseOperationForbidden(self.message)
+django.test.testcases.DatabaseOperationForbidden: Database queries to 'default' are not allowed in SimpleTestCase subclasses. Either subclass TestCase or TransactionTestCase to ensure proper test isolation or add 'default' to apps.ai.tests_local_models.LocalProviderContractTests.databases to silence this failure.
+.写入 AI 调用流水失败（rerank/local）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 301, in flush
+    AICallLog.objects.create(**self._build(success))
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 679, in create
+    obj.save(force_insert=True, using=self.db)
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 892, in save
+    self.save_base(
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 998, in save_base
+    updated = self._save_table(
+              ^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1161, in _save_table
+    results = self._do_insert(
+              ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1202, in _do_insert
+    return manager._insert(
+           ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 1847, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1834, in execute_sql
+    with self.connection.cursor() as cursor:
+         ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\test\testcases.py", line 198, in __call__
+    raise DatabaseOperationForbidden(self.message)
+django.test.testcases.DatabaseOperationForbidden: Database queries to 'default' are not allowed in SimpleTestCase subclasses. Either subclass TestCase or TransactionTestCase to ensure proper test isolation or add 'default' to apps.ai.tests_local_models.LocalProviderContractTests.databases to silence this failure.
+...............[queue] reaped 1 stale running task(s) (> 300s no heartbeat)
+......写入 AI 调用流水失败（rerank/openai-compat）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 315, in record_ai_call
+    yield rec
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\providers\openai_compat.py", line 369, in rerank
+    raise RuntimeError(_http_error_detail(resp))
+RuntimeError: HTTP 400 InvalidParameter: Model not exist.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 301, in flush
+    AICallLog.objects.create(**self._build(success))
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 679, in create
+    obj.save(force_insert=True, using=self.db)
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 892, in save
+    self.save_base(
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 998, in save_base
+    updated = self._save_table(
+              ^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1161, in _save_table
+    results = self._do_insert(
+              ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1202, in _do_insert
+    return manager._insert(
+           ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 1847, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1834, in execute_sql
+    with self.connection.cursor() as cursor:
+         ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\test\testcases.py", line 198, in __call__
+    raise DatabaseOperationForbidden(self.message)
+django.test.testcases.DatabaseOperationForbidden: Database queries to 'default' are not allowed in SimpleTestCase subclasses. Either subclass TestCase or TransactionTestCase to ensure proper test isolation or add 'default' to apps.ai.tests_rerank.RerankProviderTests.databases to silence this failure.
+..写入 AI 调用流水失败（rerank/openai-compat）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 315, in record_ai_call
+    yield rec
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\providers\openai_compat.py", line 383, in rerank
+    raise RuntimeError("重排序接口未返回结果")
+RuntimeError: 重排序接口未返回结果
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 301, in flush
+    AICallLog.objects.create(**self._build(success))
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 679, in create
+    obj.save(force_insert=True, using=self.db)
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 892, in save
+    self.save_base(
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 998, in save_base
+    updated = self._save_table(
+              ^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1161, in _save_table
+    results = self._do_insert(
+              ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1202, in _do_insert
+    return manager._insert(
+           ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 1847, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1834, in execute_sql
+    with self.connection.cursor() as cursor:
+         ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\test\testcases.py", line 198, in __call__
+    raise DatabaseOperationForbidden(self.message)
+django.test.testcases.DatabaseOperationForbidden: Database queries to 'default' are not allowed in SimpleTestCase subclasses. Either subclass TestCase or TransactionTestCase to ensure proper test isolation or add 'default' to apps.ai.tests_rerank.RerankProviderTests.databases to silence this failure.
+...写入 AI 调用流水失败（rerank/openai-compat）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 301, in flush
+    AICallLog.objects.create(**self._build(success))
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 679, in create
+    obj.save(force_insert=True, using=self.db)
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 892, in save
+    self.save_base(
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 998, in save_base
+    updated = self._save_table(
+              ^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1161, in _save_table
+    results = self._do_insert(
+              ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1202, in _do_insert
+    return manager._insert(
+           ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 1847, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1834, in execute_sql
+    with self.connection.cursor() as cursor:
+         ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\test\testcases.py", line 198, in __call__
+    raise DatabaseOperationForbidden(self.message)
+django.test.testcases.DatabaseOperationForbidden: Database queries to 'default' are not allowed in SimpleTestCase subclasses. Either subclass TestCase or TransactionTestCase to ensure proper test isolation or add 'default' to apps.ai.tests_rerank.RerankProviderTests.databases to silence this failure.
+..写入 AI 调用流水失败（rerank/openai-compat）
+Traceback (most recent call last):
+  File "D:\Claude_Code\智课系统V2\backend\apps\ai\calllog.py", line 301, in flush
+    AICallLog.objects.create(**self._build(success))
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 679, in create
+    obj.save(force_insert=True, using=self.db)
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 892, in save
+    self.save_base(
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 998, in save_base
+    updated = self._save_table(
+              ^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1161, in _save_table
+    results = self._do_insert(
+              ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\base.py", line 1202, in _do_insert
+    return manager._insert(
+           ^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\manager.py", line 87, in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\query.py", line 1847, in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\db\models\sql\compiler.py", line 1834, in execute_sql
+    with self.connection.cursor() as cursor:
+         ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Claude_Code\智课系统V2\backend\venv\Lib\site-packages\django\test\testcases.py", line 198, in __call__
+    raise DatabaseOperationForbidden(self.message)
+django.test.testcases.DatabaseOperationForbidden: Database queries to 'default' are not allowed in SimpleTestCase subclasses. Either subclass TestCase or TransactionTestCase to ensure proper test isolation or add 'default' to apps.ai.tests_rerank.RerankProviderTests.databases to silence this failure.
+...[render] slot=1/1 acquired, file=unknown
+.[render] slot=1/1 acquired, file=unknown
+[render] slot=1/1 acquired, file=unknown
+.[render] slot=1/1 acquired, file=unknown
+[render] slot=1/1 acquired, file=unknown
+..................................................
+----------------------------------------------------------------------
+Ran 863 tests in 310.254s
+
+OK
+Preserving test database for alias 'default'...
+
+FULL_TEST_EXIT=0

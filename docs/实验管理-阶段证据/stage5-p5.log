@@ -1,0 +1,60 @@
+[db] MySQL 独立库 zk_e2e（127.0.0.1:3306/zk_e2e）
+
+== P5-1 (A4) catalogs/generate-from-plan 权限 ==
+PASS  未登录 401  | 401
+PASS  学生 403  | 403
+PASS  教师 200（Mock provider 返回识别结果）  | 200 {'code': 0, 'message': '目录识别完成，请教师确认后保存', 'data': {'course': 57, 'catalog_tree':
+
+== P5-2 (A3) /api/docs/ 门控 ==
+PASS  开发默认 swagger 200  | 200
+PASS  开发默认（DEBUG=true）schema 200  | 200
+
+== P5-2b (A3) 显式关闭与生产姿态 ==
+PASS  显式 DJANGO_ENABLE_API_DOCS=false → 404  | 404
+PASS  schema 同样 404  | 404
+PASS  生产姿态（DEBUG=false）docs 404  | 404
+PASS  生产姿态 schema 404  | 404
+PASS  生产姿态登录正常 200  | 200
+
+== P5-3 (B5) 删除保护与停用联动 ==
+PASS  班级 DELETE 400 + 归档提示  | 400 班级不支持删除：请将班级归档（历史成绩与学籍保留）
+PASS  班级归档 PATCH 200  | 200
+PASS  student2 登录可用
+PASS  管理端停用学生 200  | 200
+PASS  停用联动 edu_status=withdrawn  | edu_status=withdrawn
+PASS  停用联动 token 作废线前移
+PASS  停用后旧 token 401  | 401
+
+== P5-4 (B6) AI 日配额 ==
+PASS  管理端设置全局默认 0（封禁）  | 200 {'code': 0, 'message': 'AI 日配额已更新', 'data': None}
+PASS  超限 ask 429 + 中文提示  | 429 今日 AI 调用次数已达上限（0 次），请明天再试或联系管理员调整配额
+PASS  调高全局默认并设用户覆盖  | 200
+PASS  GET 回读默认与覆盖  | {'default_daily_limit': 100, 'overrides': [{'user_id': 105, 'username': 'p5v_student', 'real_name': 'P5学生', 'role': 'stu
+PASS  配额内 ask 200（Mock 正常回答）  | 200 {'code': 0, 'message': '回答完成', 'data': {'id': 153, 'course': 57, 'classroom': No
+
+== P5-5 (B7) Mock 回退显性化 ==
+PASS  配置不可达 chat provider  | 200 {'code': 0, 'message': '大模型配置已保存并生效', 'data': {'items': [{'capability': 'chat', 
+PASS  回退后 ask 仍 200（保证可用性）  | 200
+PASS  响应体 provider_fallback=true  | provider_fallback=True
+PASS  携带 fallback_reason  | chat 调用失败已回退 Mock：HTTPConnectionPool(host='127.0.0.1', port=9): Max retries exce
+PASS  管理端 24h 回退告警计数 ≥1  | {'count_24h': 3, 'latest_scene': '知识库问答', 'latest_error': '', 'latest_at': '2026-11-05T12:47:19.685465Z'}
+
+== P5-6 (B8) 交卷行锁 ==
+PASS  并发交卷无 500/异常  | {0: 200, 1: 400}
+PASS  提交数恒为 1
+PASS  终态已交  | submitted
+PASS  成绩与提交答案一致（2 分）  | 2.0
+PASS  答案落库一致
+
+== P5-7 (A2) JWT 登出吊销 ==
+PASS  登出前 me 200
+PASS  登出 200 + refresh 已拉黑  | 200 {'code': 0, 'message': '已退出登录', 'data': {'refresh_revoked': True}}
+PASS  登出后旧 access 401  | 401
+PASS  登出后旧 refresh 换新 401  | 401
+PASS  登出后重新登录可用  | 200
+
+== P5-8 (C9) throttle 分级 ==
+PASS  ai_ask 61 次内触发 429  | first_429_at=61
+PASS  login 40 次内触发 429
+
+========== P5 准出结果：39/39 PASS，0 项失败 ==========

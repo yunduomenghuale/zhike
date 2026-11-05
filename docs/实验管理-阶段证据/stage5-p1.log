@@ -1,0 +1,116 @@
+Forbidden: /api/classes/
+Forbidden: /api/classes/
+Forbidden: /api/classes/
+Forbidden: /api/classes/1/
+Forbidden: /api/classes/1/
+Forbidden: /api/classes/1/
+Forbidden: /api/classes/27/
+Not Found: /api/classes/27/
+Forbidden: /api/classes/27/
+Forbidden: /api/classes/1/add-student/
+Forbidden: /api/classes/1/add-student/
+Forbidden: /api/classes/1/add-student/
+Forbidden: /api/class-students/86/
+Forbidden: /api/class-students/86/
+Forbidden: /api/class-students/86/
+Forbidden: /api/classes/1/
+Forbidden: /api/homeworks/
+Forbidden: /api/exams/
+Forbidden: /api/analytics/class/1/
+Forbidden: /api/analytics/class/1/
+Forbidden: /api/analytics/class/1/
+Forbidden: /api/analytics/class/1/students/12/
+Forbidden: /api/analytics/class/1/students/12/
+Forbidden: /api/classes/join/
+Forbidden: /api/classes/join/
+Forbidden: /api/classes/join/
+Gone: /api/classes/join/
+[0] 使用数据库 MySQL 独立库 zk_e2e（127.0.0.1:3306/zk_e2e）
+
+[1] 建班（管理员专属）
+  OK   建班 / admin                                   got=201 want=[201]
+  OK   建班 / teacher_a                               got=403 want=[403]
+  OK   建班 / teacher_b                               got=403 want=[403]
+  OK   建班 / student_user                            got=403 want=[403]
+
+[2] 改班 / 归档（管理员专属）
+  OK   改班 / admin                                   got=200 want=[200]
+  OK   改班 / teacher_a                               got=403 want=[403]
+  OK   改班 / teacher_b                               got=403 want=[403]
+  OK   改班 / student_user                            got=403 want=[403]
+  OK   归档 / admin                                   got=200 want=[200]
+  OK   归档 / teacher_a                               got=403 want=[403, 404]
+  OK   归档 / teacher_b                               got=404 want=[403, 404]
+  OK   归档 / student_user                            got=403 want=[403, 404]
+
+[3] 班级成员增删（管理员专属）
+  OK   加成员 / admin                                  got=200 want=[200, 201]
+  OK   加成员 / teacher_a                              got=403 want=[403]
+  OK   加成员 / teacher_b                              got=403 want=[403]
+  OK   加成员 / student_user                           got=403 want=[403]
+  OK   移成员 / admin                                  got=200 want=[200, 204]
+  OK   移成员 / teacher_a                              got=403 want=[403]
+  OK   移成员 / teacher_b                              got=403 want=[403]
+  OK   移成员 / student_user                           got=403 want=[403]
+
+[4] 给班级挂自己的课（管理员 + 两位任课教师）
+  OK   挂课 / admin                                   got=200 want=[200]
+  OK   挂课 / teacher_a                               got=200 want=[200]
+  OK   挂课 / teacher_b                               got=200 want=[200]
+  OK   挂课 / student_user                            got=403 want=[403]
+
+[5] 发作业 / 发考试
+  OK   发作业 / admin                                  got=201 want=[201]
+  OK   发考试 / admin                                  got=201 want=[201]
+  OK   发作业 / teacher_a                              got=201 want=[201]
+  OK   发考试 / teacher_a                              got=201 want=[201]
+  OK   发作业 / teacher_b                              got=201 want=[201]
+  OK   发考试 / teacher_b                              got=201 want=[201]
+  OK   发作业 / student_user                           got=403 want=[403]
+  OK   发考试 / student_user                           got=403 want=[403]
+
+[6] 班级统计（不带 course：落到自己的课）
+  OK   统计无参 / admin                                 got=200 want=[200]
+  OK   统计无参 / admin 落到自己的课                          got=5 want=5
+  OK   统计无参 / teacher_a                             got=200 want=[200]
+  OK   统计无参 / teacher_a 落到自己的课                      got=5 want=5
+  OK   统计无参 / teacher_b                             got=200 want=[200]
+  OK   统计无参 / teacher_b 落到自己的课                      got=52 want=52
+  OK   统计无参 / student_user                          got=403 want=[403]
+
+[7] 班级统计带「别人的课」id（X-02 验收点）
+  OK   统计?course=A的课 / admin                        got=200 want=[200]
+  OK   统计?course=A的课 / teacher_a                    got=200 want=[200]
+  OK   统计?course=A的课 / teacher_b                    got=403 want=[403]
+  OK   统计?course=A的课 / student_user                 got=403 want=[403]
+
+[8] 学生详情带「别人的课」id（X-02 验收点）
+  OK   学生详情?course=A的课 / admin                      got=200 want=[200]
+  OK   学生详情?course=A的课 / teacher_a                  got=200 want=[200]
+  OK   学生详情?course=A的课 / teacher_b                  got=403 want=[403]
+  OK   学生详情?course=A的课 / student_user               got=403 want=[403]
+
+[9] 邀请码加入（已下线，学生 410）
+  OK   邀请码 / admin                                  got=403 want=[403]
+  OK   邀请码 / teacher_a                              got=403 want=[403]
+  OK   邀请码 / teacher_b                              got=403 want=[403]
+  OK   邀请码 / student_user                           got=410 want=[410]
+
+[10] 学生课程列表过滤（X-03）
+  OK   学生可见本班教师A的课                                  got=True want=True
+  OK   学生可见本班教师B的课                                  got=True want=True
+  OK   学生看不到未挂进本班的课                                 got=False want=False
+
+[11] 回归：学习统计导出 + 督管看板（锚点换过之后必须仍然通）
+  OK   教师导出 Excel 状态码                               got=200 want=200
+  OK   导出内容是真 xlsx（PK 头）                            got=b'PK' want=b'PK'
+  OK   督管班级列表 / admin                               got=200 want=200
+  OK   督管班级列表非空                                     got=True want=True
+  OK   督管班级行带 student_count（占用口径）                   got=True want=True
+  OK   督管班级行带建班人字段                                  got=True want=True
+  OK   督管教师列表 / admin                               got=200 want=200
+  OK   督管教师列表非空                                     got=True want=True
+  OK   督管教师行带 class_count                           got=True want=True
+  OK   督管教师行带 student_count                         got=True want=True
+
+通过 64 项，失败 0 项

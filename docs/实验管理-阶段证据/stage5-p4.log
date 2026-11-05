@@ -1,0 +1,65 @@
+[db] MySQL 独立库 zk_e2e（127.0.0.1:3306/zk_e2e）
+
+== P4-1 毕业预览名单准确 ==
+PASS  预览只含占用+在读学生  | students=['p4v_a', 'p4v_b']
+PASS  转走生不在毕业名单且出现在排除清单  | transferred=['p4v_c']
+PASS  毕业年份已到（2020+4=2024）
+PASS  预览不写库（班级仍 active）
+
+== P4-2 整班毕业后状态一致 ==
+PASS  毕业接口 200  | {'code': 0, 'message': '已毕业 2 名学生', 'data': {'classroom_id': 33, 'graduated_count': 2, 'students': ['p4v_a', 'p4v_b'], '
+PASS  班级状态 graduated
+PASS  A/B 学籍 graduated
+PASS  A/B 班级关系仍 active（历史可查）
+PASS  审计日志含整班毕业 + 名单快照
+
+== P4-3 毕业生权限 ==
+PASS  毕业生可登录
+PASS  历史课程仍在列表  | ['P4课程']
+PASS  视频进度上报 200（X-31 不拦毕业生）  | {'code': 0, 'message': '进度已记录', 'data': {'id': 7, 'student': 110, 'student_name': '学生A', 'video': 12
+PASS  提交作业 403  | 403 已毕业，不能提交作业
+PASS  暂存附件 403  | 403
+PASS  开考 403  | 403 已毕业，不能开始考试
+PASS  AI 提问 403  | 403 已毕业，不能提问
+PASS  AI 流式提问 403  | 403
+PASS  开始实验 403  | 403
+
+== P4-3b 交卷不拦（已开考的答卷必须能交）==
+PASS  毕业生的在途答卷可经 start 恢复 200  | 200 {'code': 0, 'message': '考试已开始', 'data': {'submission': {'id': 43, 'exam': 43, 'exam_name': 'P4考试', '
+PASS  毕业生的在途答卷可交卷 200  | 200 {'code': 0, 'message': '交卷成功', 'data': {'id': 43, 'exam': 43, 'exam_name': 'P4考试', 'paper': 36, 'stu
+
+== P4-4 转班 ==
+PASS  转班生前先在旧班开考  | 200
+PASS  转班后旧课从列表消失  | ['P4课程-进阶']
+PASS  转班后旧作业待办消失
+PASS  旧班考试（有答卷）仍在「我的考试」  | ['P4考试']
+PASS  转班生不能提交旧班作业 403  | 403
+
+== P4-5 统计分母 ==
+PASS  毕业班统计分母为 0（A/B 均不计入）  | {'student_count': 0, 'avg_accuracy': None, 'avg_exam_score': None, 'avg_experiment_score': None, 'homework_rate': None, 'experiment_rate': None, 'warning_count': 0}
+PASS  毕业前：分母 3（C+D+E），完成率 33%  | {'student_count': 3, 'avg_accuracy': None, 'avg_exam_score': None, 'avg_experiment_score': None, 'homework_rate': 33, 'experiment_rate': None, 'warning_count': 3}
+PASS  个别学籍变更接口 200  | 200 学籍状态已更新为已毕业
+PASS  C 毕业后：分母 2（D+E），完成率 50%  | {'student_count': 2, 'avg_accuracy': None, 'avg_exam_score': None, 'avg_experiment_score': None, 'homework_rate': 50, 'experiment_rate': None, 'warning_count': 2}
+
+  毕业前后统计口径对比表（下一届班）:
+    指标                 毕业前     C 毕业后
+    分母人数                 3         2
+    作业完成率             33%       50%
+
+== P4-6 延期毕业 ==
+PASS  预览名单只剩 G（F 已转走）  | ['p4v_g']
+PASS  毕业只带走了 G  | {'code': 0, 'message': '已毕业 1 名学生', 'data': {'classroom_id': 35, 'graduated_count': 1, 'students': ['p4v_g'], 'forced': 
+PASS  延期生 F 学籍仍是在读
+PASS  延期生在新班可交作业 201  | 201 {'code': 0, 'message': '提交成功', 'data': {'id': 54, 'homework': 85, 'student': 115
+
+== 附加：撤销毕业 / 休学门控 / 教师无权 ==
+PASS  撤销毕业 200 且回滚 2 人  | {'code': 0, 'message': '已撤销 2 名学生的毕业状态', 'data': {'classroom_id': 33, 'reverted_count': 2, 'students': ['p4v_a', 'p4v_b'
+PASS  班级回到 active
+PASS  A/B 学籍回 enrolled
+PASS  休学变更 200
+PASS  休学生课程列表为空
+PASS  休学生提交作业 403（休学中）  | 403 休学中，不能提交作业
+PASS  教师看毕业预览 403  | 403
+PASS  教师改学籍 403  | 403
+
+===== P4 准出：41/41 通过，失败分组 0 个 =====

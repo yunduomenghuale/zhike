@@ -67,7 +67,10 @@ class Cdp {
   consoleErrors(mark = 0) {
     return this.events.slice(mark)
       .filter((e) => e.method === 'Log.entryAdded' && e.params.entry.level === 'error')
-      .map((e) => e.params.entry.text)
+      .map((e) => {
+        const en = e.params.entry || {};
+        return `${en.text || ''}${en.url ? ' @ ' + en.url : ''}${en.lineNumber != null ? ':' + en.lineNumber : ''}`;
+      })
       .filter((t) => !t.includes('Cross-Origin-Opener-Policy header has been ignored'));
   }
   async attachIframe(since) {
