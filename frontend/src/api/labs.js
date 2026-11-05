@@ -11,6 +11,20 @@ export const deleteLab = (id) => request.delete(`/labs/${id}/`)
 export const publishLab = (id) => request.post(`/labs/${id}/publish/`)
 export const closeLab = (id) => request.post(`/labs/${id}/close/`)
 
+// ===== 自定义实验：页面上传 / 预览 / 接入说明 / 在线调试（Stage 4）=====
+// 上传命中静态扫描时后端返回 HTTP 400 + require_confirm，需由组件自行读取
+// e.response.data 展示命中项并二次确认；故这里统一 silent，不让拦截器抢先弹提示。
+export const uploadLabPage = (id, file, confirm = false) => {
+  const form = new FormData()
+  form.append('file', file)
+  if (confirm) form.append('confirm', '1')
+  return request.post(`/labs/${id}/page/`, form, { silent: true })
+}
+export const deleteLabPage = (id) => request.delete(`/labs/${id}/page/`)
+export const previewLabPage = (id) => request.get(`/labs/${id}/page/preview/`)
+export const getIntegrationSpec = (id) => request.get(`/labs/${id}/integration-spec/`)
+export const gradeDebug = (id, data) => request.post(`/labs/${id}/grade-debug/`, data)
+
 // ===== 排课 =====
 export const listLabSchedules = (params) => request.get('/lab-schedules/', { params })
 export const createLabSchedule = (data) => request.post('/lab-schedules/', data)

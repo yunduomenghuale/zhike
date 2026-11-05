@@ -1,0 +1,100 @@
+PASS | A1 教师真实登录成功 | /dashboard
+PASS | A2 教师侧栏出现「实验管理」
+PASS | A3 顶级实验管理页渲染
+PASS | A4 课程筛选存在
+PASS | A5 新建实验按钮存在
+shot -> test/screenshots/stage4-local-library.png
+PASS | B1 新建抽屉打开
+PASS | B2 平台预置 / 自定义上传双 Tab | ["平台预置","自定义上传"]
+PASS | B3 切到自定义上传 Tab
+PASS | B3b 单 HTML 上传区可见
+PASS | B4 选择所属课程
+PASS | B5 填写实验名称
+PASS | B6 上传「从动态说明提取的」HTML | stage4-from-spec.html
+shot -> test/screenshots/stage4-local-create.png
+PASS | C1 创建成功并打开详情抽屉
+PASS | C2 自动切到「成绩接口」Tab | 自定义上传|成绩接口
+PASS | C3 成绩上报地址正确 | POST /api/lab-gate/grade/
+PASS | C4 动态 Markdown 含实验名/满分/schema/最小HTML/AI指令
+PASS | C5 动态说明无占位符残留
+PASS | C6 复制给 AI 可用
+PASS | C6b 复制结果反馈 | 接入说明已复制到剪贴板
+shot -> test/screenshots/stage4-local-grading.png
+PASS | D1 满分示例填充
+PASS | D2 发送调试请求
+PASS | D3 调试通过且标注 dry-run | 调试通过 （模拟报文，未产生真实提交）
+PASS | D4 提示项渲染为灰色「提示」而非红色失败（blocking=false） | {"total":7,"info":4,"bad":0,"ok":3}
+PASS | D5 展示「若正式提交会写入」预览 | {
+  "status": "submitted",
+  "grading_source": "external",
+  "total_score": 100,
+  "submitted_at": "服务端 timezone.now() 生
+PASS | D6 填写并保存补充说明
+PASS | D7 补充说明追加到接入说明末尾
+shot -> test/screenshots/stage4-local-debug.png
+PASS | D8 真实 API 能查到新建的自定义实验 | 32
+PASS | D9 dry-run 未产生任何真实提交 | count=0
+PASS | E1 切到「实验页面」Tab
+PASS | E1b 显示已上传页面文件名 | 单 HTML 自定义页面页面运行在平台父页面的沙箱 iframe 内；上传后可先「预览页面」检查。当前文件：stage4-from-spec.html（2.4 KB）
+PASS | E2 切到「排课」Tab
+PASS | E2b 选择班级
+PASS | E2c 保存排课
+PASS | E2d 排课记录可见
+PASS | E3 切到「概览」Tab
+PASS | E3b 切到「成绩」Tab
+PASS | E4 列表徽标「最近通过」+ 草稿态 | Stage4 自定义实验-20261105202510
+	
+Stage4 实验管理UI-20261105202510
+	
+自定义
+	
+草稿
+	
+最近通过
+	
+0/8
+	
+—
+	
+详情
+排课
+发布
+删除
+PASS | E5 发布实验
+PASS | E5b 列表状态变为「已发布」
+shot -> test/screenshots/stage4-local-published.png
+PASS | E6 越界报文 dry-run 判失败 | passed=false
+PASS | E6b 列表徽标「最近失败」
+PASS | E6c 满分报文 dry-run 判通过
+PASS | F1 学生开始实验拿到门控链接 | status=200 message=实验已开始
+PASS | F2 sandbox iframe 独立上下文可定位
+PASS | F3 说明里的最小 HTML 正常运行（3 个任务渲染）
+PASS | F4 页面经 LabBridge.reportGrade 真实上报成功 | {
+  "code": 0,
+  "message": "成绩已提交",
+  "data": {
+    "submission_id": 16,
+    "total_score": 100,
+    "status": "submitted",
+    "submitted_at": "2026-11-05T12:25:22.727764+00:00",
+    "graded_at": "2
+PASS | F5 学生真实登录成功 | /dashboard
+PASS | F6 学生端看到该自定义实验且标「自定义」 | 实验
+自定义
+Stage4 自定义实验-20261105202510
+100.0 分
+按步骤完成华为命令配置
+Stage4 实验管理UI-20261105202510
+标准时长 30 分钟
+满分 100.0 分
+网络2026届-1班 · 长期开放
+100.0 / 100.0 分
+用时 0 秒 · 提交于 2026-11-05 20:25 （自定义实验，平台不
+PASS | F7 external 只显示总分 + 用时、不渲染步骤表 | {"text":"实验\n自定义\nStage4 自定义实验-20261105202510\n100.0 分\n按步骤完成华为命令配置\nStage4 实验管理UI-20261105202510\n标准时长 30 分钟\n满分 100.0 分\n网络2026届-1班 · 长期开放\n100.0 / 100.0 分\n用时 0 秒 · 提交于 2026-11-05 20:25 （自定义实验，平台不记录步骤明细）","hasBreakdow
+PASS | F8 总分可见 | 100.0 / 100.0 分
+PASS | F9 自定义实验提交后不提供重做入口（C12 allow_resubmit=False） | []
+shot -> test/screenshots/stage4-local-student.png
+PASS | F10 全流程控制台无 error | 
+
+总计 52 项，通过 52 项，失败 0 项
+ALL_PASS

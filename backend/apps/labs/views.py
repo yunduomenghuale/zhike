@@ -23,6 +23,7 @@ from apps.common.viewsets import BaseModelViewSet
 from apps.courses import resource_gate
 
 from . import bridge, gate, guide_preset, scoring, seedgen, services
+from .integration_spec import GRADE_ENDPOINT, build_integration_spec
 from .models import (
     Lab,
     LabGuide,
@@ -252,6 +253,19 @@ class LabViewSet(BaseModelViewSet):
             raise ValidationError("请先上传实验页面再预览")
         signed = gate.sign_preview(lab)
         return api_response(signed, message="预览链接已生成")
+
+    @action(detail=True, methods=["get"], url_path="integration-spec", permission_classes=[IsTeacher])
+    def integration_spec(self, request, pk=None):
+        """动态接入说明（Stage 4 / §6.2）：按实验名 / 总分 / 上报地址渲染 Markdown。
+
+        纯渲染：不新增表、不写库、不产生提交；末尾追加教师填写的 `report_note`。
+        行级归属由 `get_queryset()` 保证；权限显式 `[IsTeacher]`（不含 admin，C46）。
+        """
+        lab = self.get_object()
+        data = build_integration_spec(
+            lab, absolute_grade_url=request.build_absolute_uri(GRADE_ENDPOINT)
+        )
+        return api_response(data, message="接入说明已生成")
 
     @action(detail=True, methods=["post"], url_path="grade-debug", permission_classes=[IsTeacher])
     def grade_debug(self, request, pk=None):

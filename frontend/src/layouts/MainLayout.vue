@@ -170,6 +170,7 @@ import {
   DataAnalysis,
   Setting,
   Tickets,
+  Pointer,
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
@@ -343,6 +344,7 @@ const menuGroups = computed(() => {
         items: [
           { index: '/teacher/courses', label: '课程管理', icon: Reading },
           { index: '/teacher/classes', label: '班级管理', icon: School },
+          { index: '/teacher/labs', label: '实验管理', icon: Pointer },
           { index: '/teacher/qa-quality', label: '问答质量', icon: ChatDotRound },
         ],
       },

@@ -1393,3 +1393,150 @@ class LabExternalAnalyticsTest(TestCase):
         self.assertEqual(tpl["总步骤"], 5)
         self.assertNotEqual(tpl["基础分"], "不适用")
 
+
+class LabIntegrationSpecTest(TestCase):
+    """Stage 4：`GET /api/labs/{id}/integration-spec/` 动态接入说明（纯渲染）。"""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.teacher = User.objects.create_user("t501", password="pass1234", role="teacher", real_name="许老师")
+        cls.other_teacher = User.objects.create_user("t502", password="pass1234", role="teacher", real_name="何老师")
+        cls.student = User.objects.create_user("20280001", password="pass1234", role="student", real_name="沈同学")
+        cls.admin = User.objects.create_user("adm501", password="pass1234", role="admin", real_name="管理员")
+        cls.course = Course.objects.create(name="计算机网络", teacher=cls.teacher)
+        cls.other_course = Course.objects.create(name="操作系统", teacher=cls.other_teacher)
+
+    def setUp(self):
+        self.tc = APIClient()
+        self.tc.force_authenticate(self.teacher)
+        self.otc = APIClient()
+        self.otc.force_authenticate(self.other_teacher)
+        self.sc = APIClient()
+        self.sc.force_authenticate(self.student)
+        self.adc = APIClient()
+        self.adc.force_authenticate(self.admin)
+        self.anon = APIClient()
+
+    def _make_lab(self, title="VLAN 配置实验", total_score="100", report_note=""):
+        res = self.tc.post("/api/labs/", {
+            "course": self.course.id, "title": title,
+            "total_score": total_score, "pass_score": "60",
+            "page_source": "custom", "report_note": report_note,
+        }, format="json")
+        self.assertEqual(res.status_code, 201, res.data)
+        return res.data["data"]["id"]
+
+    def _spec(self, lab_id, client=None):
+        return (client or self.tc).get(f"/api/labs/{lab_id}/integration-spec/")
+
+    def test_dynamic_markdown_contains_all_required_sections(self):
+        """§6.2：按实验名 / 总分 / 上报地址动态渲染，含 schema、错误码、最小 HTML、AI 指令。"""
+        lab_id = self._make_lab(title="VLAN 与 Trunk 配置实验", total_score="85.5",
+                                report_note="请重点考察 trunk 允许列表的配置顺序。")
+        res = self._spec(lab_id)
+        self.assertEqual(res.status_code, 200, res.data)
+        data = res.data["data"]
+        md = data["markdown"]
+        self.assertEqual(data["lab_title"], "VLAN 与 Trunk 配置实验")
+        self.assertEqual(data["total_score"], "85.5")
+        self.assertEqual(data["grade_endpoint"], "/api/lab-gate/grade/")
+        self.assertEqual(data["grade_debug_endpoint"], f"/api/labs/{lab_id}/grade-debug/")
+        self.assertNotIn("@@", md, "所有占位符必须被替换，不能把模板泄漏给教师/AI")
+        for text in (
+            "VLAN 与 Trunk 配置实验", "85.5", "/api/lab-gate/grade/",
+            f"/api/labs/{lab_id}/grade-debug/",
+            "## 4. 请求与响应 schema", '"total_score"', '"elapsed_seconds"',
+            '"submission_id"', "## 5. 最小可运行示例", "## 7. 可直接复制给 AI",
+            "LabBridge.validate()", "LabBridge.reportGrade(", "ctx.totalScore",
+            "本次实验已提交", "成绩超出实验总分范围", "实验票据已使用",
+            "提交过于频繁", "请重点考察 trunk 允许列表的配置顺序。",
+        ):
+            self.assertIn(text, md, f"接入说明缺少：{text}")
+        # 同源绝对地址由 request 预填，不是写死的内部 IP
+        self.assertIn("http://testserver/api/lab-gate/grade/", md)
+
+    def test_report_note_appended_at_end(self):
+        """report_note 追加在末尾；未填写时给出明确占位说明。"""
+        lab_id = self._make_lab(report_note="补充说明：满分需完成全部 5 个任务。")
+        md = self._spec(lab_id).data["data"]["markdown"]
+        self.assertTrue(md.rstrip().endswith("补充说明：满分需完成全部 5 个任务。"))
+        empty_id = self._make_lab(title="无补充说明实验")
+        md2 = self._spec(empty_id).data["data"]["markdown"]
+        self.assertIn("（教师未填写补充说明）", md2)
+
+    def test_permissions_teacher_only_and_row_level(self):
+        """C46：显式 [IsTeacher]（不含 admin），行级归属由 get_queryset 保证。"""
+        lab_id = self._make_lab()
+        self.assertEqual(self._spec(lab_id, self.tc).status_code, 200)
+        self.assertEqual(self._spec(lab_id, self.sc).status_code, 403, "学生不可读接入说明")
+        self.assertEqual(self._spec(lab_id, self.adc).status_code, 403, "IsTeacher 不含 admin（C46）")
+        self.assertEqual(self._spec(lab_id, self.otc).status_code, 404, "跨课程教师不可读他人实验")
+        self.assertIn(self._spec(lab_id, self.anon).status_code, (401, 403))
+
+    def test_pure_render_no_side_effects_and_draft_ok(self):
+        """纯渲染：不写库、不产生提交、草稿态可用（Stage 4 UI 顺序 创建→说明→调试→发布）。"""
+        from apps.labs.models import LabPage, LabSubmission
+
+        lab_id = self._make_lab()
+        lab = Lab.objects.get(pk=lab_id)
+        self.assertEqual(lab.status, "draft")
+        before = (lab.last_debug, lab.status, LabSubmission.objects.count(), LabPage.objects.count())
+        first = self._spec(lab_id)
+        second = self._spec(lab_id)
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.data["data"]["markdown"], second.data["data"]["markdown"])
+        lab.refresh_from_db()
+        self.assertEqual(
+            (lab.last_debug, lab.status, LabSubmission.objects.count(), LabPage.objects.count()),
+            before, "接入说明必须是纯渲染，不得写库或产生提交",
+        )
+
+    def test_markdown_is_dynamic_per_lab(self):
+        """两个实验的说明各自预填自己的名称与总分，不串参数。"""
+        a = self._make_lab(title="实验甲", total_score="60")
+        b = self._make_lab(title="实验乙", total_score="120")
+        ma = self._spec(a).data["data"]["markdown"]
+        mb = self._spec(b).data["data"]["markdown"]
+        self.assertNotEqual(ma, mb)
+        self.assertIn("实验甲", ma)
+        self.assertNotIn("实验乙", ma)
+        self.assertIn("0 ~ 60", ma)
+        self.assertNotIn("0 ~ 120", ma)
+        self.assertIn("实验乙", mb)
+        self.assertIn("0 ~ 120", mb)
+
+    def test_min_html_is_uploadable_and_scan_clean(self):
+        """验收「复制出来的说明可直接使用」：最小 HTML 单文件、静态扫描零命中、四个 API 齐全。"""
+        import re
+
+        from apps.labs.serializers import scan_lab_page_html
+
+        lab_id = self._make_lab()
+        md = self._spec(lab_id).data["data"]["markdown"]
+        blocks = re.findall(r"```html\n(.*?)\n```", md, flags=re.S)
+        self.assertEqual(len(blocks), 1, "说明里必须恰有一个最小 HTML 代码块")
+        html = blocks[0]
+        self.assertIn("<!DOCTYPE html>", html)
+        self.assertIn("</html>", html)
+        self.assertIn("LabBridge.preview", html)
+        self.assertIn("await LabBridge.validate()", html)
+        self.assertIn("ctx.totalScore", html)
+        self.assertIn("await LabBridge.reportGrade(", html)
+        # 上传约束：不自带桥接 script src、不自己发请求、不碰票据
+        for forbidden in ("<script src", "lab-bridge.js", "X-Lab-Token", "fetch(", "<base"):
+            self.assertNotIn(forbidden, html, f"最小示例不应出现 {forbidden}")
+        self.assertEqual(scan_lab_page_html(html), [], "最小示例必须能通过 S8 静态扫描，否则复制出来即可用不成立")
+
+    def test_no_ticket_leaked_into_page_contract(self):
+        """C25/C45：说明明确票据只在平台父页面，不下发 attempt token 给页面。"""
+        lab_id = self._make_lab()
+        md = self._spec(lab_id).data["data"]["markdown"]
+        self.assertIn("只在平台父页面", md)
+        self.assertIn("iframe 内页面不接触", md)
+        self.assertNotIn("window.LabBridge.token", md)
+        self.assertNotIn("attemptToken", md)
+        # C40 的约束是「iframe 属性不得含 allow-same-origin」，说明文档里本就应
+        # 明确写出「无 allow-same-origin」；这里断言沙箱属性串正确且没有被放宽。
+        self.assertIn('sandbox="allow-scripts allow-forms allow-modals"', md)
+        self.assertNotIn("allow-scripts allow-forms allow-modals allow-same-origin", md)
+

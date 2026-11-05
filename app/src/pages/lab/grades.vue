@@ -17,13 +17,13 @@
         </view>
         <view v-if="row.total_score != null" class="detail">
           <view class="detail-row">
-            <text>基础分</text><text>{{ row.base_score ?? '—' }}</text>
+            <text>基础分</text><text>{{ isExternal(row) ? '不适用' : (row.base_score ?? '—') }}</text>
           </view>
           <view class="detail-row">
-            <text>完成效率</text><text>{{ row.efficiency_score ?? '—' }}</text>
+            <text>完成效率</text><text>{{ isExternal(row) ? '不适用' : (row.efficiency_score ?? '—') }}</text>
           </view>
           <view class="detail-row">
-            <text>题目得分</text><text>{{ row.question_score ?? '—' }}</text>
+            <text>实验用时</text><text>{{ fmtElapsed(row.elapsed_seconds) }}</text>
           </view>
           <view class="detail-row total">
             <text>总分</text><text>{{ row.total_score }} / {{ row.lab_total_score || 100 }}</text>
@@ -62,6 +62,20 @@ function statusText(s) {
 function scoreClass(row) {
   if (row.total_score == null) return 'pending'
   return row.total_score >= 60 ? 'pass' : 'fail'
+}
+
+// C6 / C17：question_score 幽灵字段已随 LabQuestion 删除；自定义实验无步骤分项，
+// 只展示总分与服务端用时，四项基准分标注「不适用」。
+function isExternal(row) {
+  return row.grading_source === 'external' || row.score_breakdown?.source === 'external'
+}
+
+function fmtElapsed(sec) {
+  const n = Number(sec || 0)
+  if (!Number.isFinite(n) || n <= 0) return '0 秒'
+  const m = Math.floor(n / 60)
+  const s = Math.round(n % 60)
+  return m ? `${m} 分 ${s} 秒` : `${s} 秒`
 }
 
 function fmtDate(s) {

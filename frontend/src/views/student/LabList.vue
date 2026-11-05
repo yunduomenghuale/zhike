@@ -20,10 +20,10 @@
       <article v-for="row in labs" :key="row.id" class="lab-card">
         <div class="lab-card-head">
           <span class="lab-badge">实验</span>
+          <el-tag v-if="row.page_source === 'custom'" size="small" type="warning" effect="plain" class="lab-custom-tag">自定义</el-tag>
           <div class="lab-title">{{ row.title }}</div>
-          <el-tag v-if="submissionOf(row)" :type="submissionOf(row).total_score != null ? 'success' : 'info'" size="small">
-            {{ submissionOf(row).total_score != null ? `${submissionOf(row).total_score} 分` : '进行中' }}
-          </el-tag>
+          <!-- C5：按 status 三分支，不再用 total_score != null 把「待评分」误显示成「进行中」 -->
+          <el-tag :type="scoreBadge(row).type" size="small">{{ scoreBadge(row).text }}</el-tag>
         </div>
         <div class="lab-desc">{{ row.description || '按步骤完成华为命令配置' }}</div>
         <div class="lab-meta">
@@ -50,7 +50,13 @@
               {{ submissionOf(row).total_score }}
               <em>/ {{ row.total_score }} 分</em>
             </span>
-            <span class="lab-score-meta">
+            <!-- 自定义实验（external）：只有总分 + 用时，平台不记录步骤明细 -->
+            <span v-if="isExternal(row)" class="lab-score-meta">
+              用时 {{ externalElapsed(submissionOf(row)) }}
+              · 提交于 {{ fmtDT(submissionOf(row).submitted_at) }}
+              <span class="external-note">（自定义实验，平台不记录步骤明细）</span>
+            </span>
+            <span v-else class="lab-score-meta">
               步骤通过 {{ breakdownOf(row).passed_steps }}/{{ breakdownOf(row).total_steps }}
               · 错误 {{ breakdownOf(row).error_count }} 次
               · 用时 {{ breakdownOf(row).elapsed_minutes }} 分钟（标准 {{ breakdownOf(row).standard_minutes }}）
@@ -58,7 +64,7 @@
             <el-tag v-if="submissionOf(row).reviewed" size="small" type="info" effect="plain">教师已复核</el-tag>
           </div>
 
-          <div class="lab-breakdown">
+          <div v-if="!isExternal(row)" class="lab-breakdown">
             <div v-for="item in breakdownItems(row)" :key="item.key" class="bk-item">
               <div class="bk-label">{{ item.label }}</div>
               <div class="bk-value" :class="{ zero: Number(item.value) <= 0 }">
@@ -69,7 +75,7 @@
               </div>
             </div>
           </div>
-          <div class="lab-score-note">{{ breakdownNote(row) }}</div>
+          <div v-if="!isExternal(row)" class="lab-score-note">{{ breakdownNote(row) }}</div>
           <div v-if="reviewCommentOf(row)" class="lab-review">
             <span class="lab-review-title">教师评语</span>
             <span class="lab-review-text">{{ reviewCommentOf(row) }}</span>
@@ -78,14 +84,16 @@
 
         <div class="lab-actions">
           <!-- 已提交：成绩明细直接展示在卡片上；仅允许重做的实验提供重做入口 -->
+          <!-- C12：自定义实验默认 allow_resubmit=False，已提交后不提供重做入口；
+               进行中的作答是「继续」而不是「重做」 -->
           <el-button
-            v-if="submissionOf(row) && hasOpenWindow(row) && canSubmit"
+            v-if="submissionOf(row) && row.allow_resubmit && hasOpenWindow(row) && canSubmit"
             type="warning"
             size="small"
             :loading="entering === row.id"
             @click="enter(row)"
           >
-            重做实验
+            {{ submissionOf(row).status === 'submitted' ? '重做实验' : '继续实验' }}
           </el-button>
           <el-button
             v-if="!submissionOf(row) && hasOpenWindow(row) && canSubmit"
@@ -167,6 +175,35 @@ function windowState(s) {
   if (close && now > close) return { text: `已于 ${fmt(close)} 结束`, cls: 'closed' }
   const left = close ? `，${fmt(close)} 截止` : ''
   return { text: `开放中${left}`, cls: 'open' }
+}
+
+/** C5：按 status 三分支徽标——未开始 / 进行中 / 已出分。 */
+function scoreBadge(row) {
+  const sub = submissionOf(row)
+  if (!sub) return { text: '未开始', type: 'info' }
+  if (sub.status === 'submitted') return { text: `${sub.total_score} 分`, type: 'success' }
+  return { text: '进行中', type: 'warning' }
+}
+
+/** 自定义实验只报总分 + 服务端用时，不渲染步骤明细表（C17/C18 学生端分支）。 */
+function isExternal(row) {
+  const sub = submissionOf(row)
+  return Boolean(sub && (sub.grading_source === 'external' || sub.score_breakdown?.source === 'external'))
+}
+
+function externalElapsed(sub) {
+  const sec = Number(sub?.elapsed_seconds || 0)
+  if (!Number.isFinite(sec) || sec <= 0) return '0 秒'
+  const m = Math.floor(sec / 60)
+  const s = Math.round(sec % 60)
+  return m ? `${m} 分 ${s} 秒` : `${s} 秒`
+}
+
+function fmtDT(t) {
+  if (!t) return '—'
+  const d = new Date(t)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
 function breakdownOf(row) {
@@ -258,7 +295,9 @@ onMounted(load)
 .lab-card { border: 1px solid #e4e7ed; border-radius: 10px; padding: 16px 18px; background: #fff; }
 .lab-card-head { display: flex; align-items: center; gap: 10px; }
 .lab-badge { background: #ecf5ff; color: #409eff; font-size: 12px; padding: 2px 8px; border-radius: 4px; }
+.lab-custom-tag { flex-shrink: 0; }
 .lab-title { font-size: 16px; font-weight: 600; flex: 1; }
+.external-note { color: #94a3b8; }
 .lab-desc { color: #6b7280; font-size: 13px; margin: 8px 0; }
 .lab-meta { display: flex; gap: 16px; color: #94a3b8; font-size: 12px; margin-bottom: 10px; }
 .lab-window { display: flex; gap: 8px; flex-wrap: wrap; margin: -2px 0 10px; }

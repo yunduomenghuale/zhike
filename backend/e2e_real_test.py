@@ -105,13 +105,33 @@ print('ok')
             json={"template": tpl_id, "course": course_id})
     lab_id = (j(r) or {}).get("id")
 
-    # 班级（创建时必须携带 courses）+ 学生入班(add-student) + 排课 + 发布
-    r = api("POST", "/classes/", token=tok_t, label="建班级(带课程)", expect=201,
-            json={"name": f"测试班{ts}", "courses": [course_id]})
-    class_id = (j(r) or {}).get("id")
-    assert class_id, f"❌ 建班级失败: {r.text[:200]}"
-    api("POST", f"/classes/{class_id}/add-student/", token=tok_t, label="学生入班",
-        json={"username": "20249999"})
+    # 班级与学籍：P0–P5 后班级 CRUD 收归平台管理员、入班走 ClassStudent 单一写入口，
+    # 教师端 /classes/ 与 /classes/{id}/add-student/ 均已下线（403）。此处用真实 ORM
+    # 建立等价数据，后续排课 / 发布 / 学生实验仍全部走真实 HTTP（不改任何业务断言）。
+    import re
+    import subprocess
+    shell_code = f'''
+from apps.classroom.models import ClassRoom, ClassCourse, ClassStudent
+from apps.classroom.services import assign_students
+from apps.courses.models import Course
+from apps.users.models import User
+course = Course.objects.get(pk={course_id})
+student = User.objects.get(username="20249999")
+rel = ClassStudent.objects.filter(student=student, learn_status__in=["active", "inactive"]).select_related("classroom").first()
+if rel:
+    cls = rel.classroom
+else:
+    cls = ClassRoom.objects.create(name="测试班{ts}", code="E2E{ts}", teacher=course.teacher)
+    assign_students(cls, [student], operator=course.teacher, note="e2e_real_test")
+ClassCourse.objects.get_or_create(classroom=cls, course=course)
+print("CLASS_ID=" + str(cls.id))
+'''
+    proc = subprocess.run([sys.executable, "manage.py", "shell", "-c", shell_code],
+                          capture_output=True, text=True)
+    m = re.search(r"CLASS_ID=(\d+)", proc.stdout or "")
+    assert m, f"❌ 班级/学籍准备失败: {(proc.stdout or '')[-400:]} {(proc.stderr or '')[-400:]}"
+    class_id = int(m.group(1))
+    print(f"✅ [ORM] 班级 + 学籍 + 课程关联就绪 class_id={class_id}")
     api("POST", "/lab-schedules/", token=tok_t, label="实验排课", expect=201,
         json={"lab": lab_id, "classroom": class_id})
     api("POST", f"/labs/{lab_id}/publish/", token=tok_t, label="发布实验", expect=200)
@@ -189,10 +209,13 @@ print('ok')
     r = api("GET", "/lab-submissions/", token=tok_s, label="移动端实验成绩列表", expect=200)
     subs = (j(r) or {}).get("results") or []
     mine = [s0 for s0 in subs if s0["id"] == sub_id][0]
+    # C6：question_score 已随 LabQuestion 删除，移动端成绩页改显示总分/用时
     need = ["lab_title", "course_name", "lab_total_score", "total_score",
-            "base_score", "efficiency_score", "question_score", "reviewed", "submitted_at", "status"]
+            "base_score", "efficiency_score", "elapsed_seconds", "grading_source",
+            "reviewed", "submitted_at", "status"]
     missing = [f for f in need if f not in mine]
     assert not missing, f"❌ 移动端成绩页缺字段: {missing}"
+    assert "question_score" not in mine, "❌ question_score 幽灵字段仍在响应中"
     assert mine["course_name"], "❌ course_name 为空"
     assert mine["lab_total_score"], "❌ lab_total_score 为空"
     print(f"   ✅ 移动端字段齐全: course_name={mine['course_name']} 满分={mine['lab_total_score']}")

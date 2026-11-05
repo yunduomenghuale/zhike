@@ -8,33 +8,19 @@
       <el-button type="warning" plain size="small" @click="guideDialog.open()">实验必读</el-button>
     </div>
 
-    <!-- 新建实验：选模板 → 绑课程 → 覆盖配置（按钮内联在最后一行右侧，不单独占行） -->
+    <!-- 新建实验：统一走公共抽屉（平台预置 / 自定义上传两个 Tab） -->
     <el-card shadow="never" class="mb12">
-      <template #header><span>新建实验</span></template>
-      <el-form :model="form" label-width="100px" style="max-width: 720px">
-        <el-form-item label="实验模板" required>
-          <el-select v-model="form.template" placeholder="选择平台预置实验" style="width: 100%">
-            <el-option v-for="t in templates" :key="t.id" :value="t.id" :label="t.title" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="所属课程">
-          <el-input :model-value="currentCourseName" disabled>
-            <template #append>当前课程</template>
-          </el-input>
-        </el-form-item>
-        <el-form-item label="实验名称">
-          <el-input v-model="form.title" placeholder="留空默认使用模板名称" />
-        </el-form-item>
-        <el-form-item label="标准时长">
-          <el-input-number v-model="form.standard_minutes" :min="5" :max="180" placeholder="分钟" />
-        </el-form-item>
-        <el-form-item>
-          <div class="weight-row">
-            <el-button class="create-btn" type="primary" :loading="creating" @click="create">创建实验</el-button>
-          </div>
-        </el-form-item>
-      </el-form>
+      <div class="create-bar">
+        <span>新建实验：引用平台预置模板，或上传自定义 HTML 页面</span>
+        <el-button type="primary" size="small" @click="createVisible = true">新建实验</el-button>
+      </div>
     </el-card>
+    <LabCreateDrawer
+      v-model="createVisible"
+      :courses="courses"
+      :fixed-course-id="fixedCourseId"
+      @created="onCreated"
+    />
 
     <!-- 我的实验列表 -->
     <el-card shadow="never" class="lab-manage-card">
@@ -167,6 +153,12 @@
             />
           </div>
 
+          <!-- 成绩接口：自定义实验的接入说明与在线调试（复用公共面板） -->
+          <div v-if="currentLab.page_source === 'custom'" class="d-section">
+            <div class="d-title">成绩接口</div>
+            <LabGradingPanel :lab-id="currentLab.id" :lab="currentLab" @updated="load" />
+          </div>
+
           <!-- 逐学生成绩 -->
           <div class="d-section">
             <div class="d-title">学生成绩</div>
@@ -227,27 +219,22 @@ import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/api/request'
 import LabGuideDialog from '@/components/LabGuideDialog.vue'
+import LabCreateDrawer from '@/components/lab/LabCreateDrawer.vue'
+import LabGradingPanel from '@/components/lab/LabGradingPanel.vue'
 import {
-  listLabs, createLab, deleteLab, publishLab, closeLab,
-  listLabTemplates, listLabSchedules, createLabSchedule,
+  listLabs, deleteLab, publishLab, closeLab,
+  listLabSchedules, createLabSchedule,
   listLabSubmissions,
 } from '@/api/labs'
 
 const route = useRoute()
 const fixedCourseId = computed(() => Number(route.params.id) || null)
-// 课程空间内新建实验：课程固定为当前路由课程，无需选择
-const currentCourseName = computed(
-  () => courses.value.find((c) => c.id === fixedCourseId.value)?.name || `课程 #${fixedCourseId.value}`,
-)
 
-const templates = ref([])
 const courses = ref([])
 const classes = ref([])
 const labs = ref([])
 const loading = ref(false)
-const creating = ref(false)
-
-const form = ref({ template: null, title: '', standard_minutes: 30 })
+const createVisible = ref(false)
 
 const scheduleVisible = ref(false)
 const scheduleForm = ref({ lab: null, classroom: null, open_at: '', close_at: '' })
@@ -289,11 +276,9 @@ async function load() {
   loading.value = true
   try {
     const params = fixedCourseId.value ? { course: fixedCourseId.value } : undefined
-    // 课程固定为当前课程：只需拉模板、实验列表、课程名（用于只读展示）
-    const [t, l, c] = await Promise.all([listLabTemplates(), listLabs(params), request.get('/courses/', { params })])
-    templates.value = t.results ?? t
-    labs.value = (l.results ?? l)
-    courses.value = (c.results ?? c)
+    const [l, c] = await Promise.all([listLabs(params), request.get('/courses/', { params })])
+    labs.value = l.results ?? l
+    courses.value = c.results ?? c
     // 已排课的实验后台预取统计（列表"学生完成/班级均分"列刷新后即有数据）
     labs.value
       .filter((lab) => (lab.schedules || []).length)
@@ -393,21 +378,11 @@ const detailStats = computed(() => labStatsCache.value[currentLab.value?.id] || 
   expected: 0, submitted: 0, ongoing: 0, notStarted: 0, avgScore: null, avgSteps: null, submitRate: 0,
 })
 
-async function create() {
-  if (!form.value.template) {
-    ElMessage.warning('请选择实验模板')
-    return
-  }
-  creating.value = true
-  try {
-    // course 由路由注入：本页面仅存在于课程空间内
-    await createLab({ ...form.value, course: fixedCourseId.value, title: form.value.title || undefined })
-    ElMessage.success('实验已创建，排课并发布后学生可见')
-    form.value = { template: null, title: '', standard_minutes: 30 }
-    await load()
-  } finally {
-    creating.value = false
-  }
+/** 公共抽屉创建成功后刷新列表；自定义实验顺手打开详情看接入说明。 */
+async function onCreated(lab) {
+  await load()
+  const row = labs.value.find((l) => l.id === lab.id) || lab
+  await openDetail(row)
 }
 
 async function openSchedule(row) {
@@ -485,8 +460,14 @@ onMounted(load)
 .lab-manage-card :deep(.el-table .el-scrollbar__bar.is-horizontal) {
   display: block !important;
 }
-.weight-row { display: flex; align-items: center; width: 100%; }
-.create-btn { margin-left: auto; }
+.create-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  color: #64748b;
+}
 .schedule-line { display: flex; align-items: center; gap: 8px; line-height: 1.9; }
 .schedule-class {
   flex-shrink: 0;
