@@ -69,8 +69,9 @@ services:
     container_name: zhike_s5test_frontend
     restart: unless-stopped
     ports:
-      # 对外 8092：若华为云安全组未放行，用 SSH 隧道访问（本地 18092 → 124:8092）
-      - "8092:80"
+      # 2026-11-06 用户指令：测试环境直接用老版 8088 端口（老版 frontend 容器已 stop，
+      # 回滚 = docker stop zhike_s5test_frontend && docker start zhike_v2_frontend）
+      - "8088:80"
     volumes:
       - ./dist:/usr/share/nginx/html:ro
       # 移动端 H5 未随本包部署：挂空目录保住 /m/ 路由，不 404 整站

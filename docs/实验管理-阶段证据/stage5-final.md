@@ -187,7 +187,27 @@ PASS | F10 全流程控制台无 error
 
 **部署期环境适配（已记录 `8092-deploy.log` §6）**：`DJANGO_SECURE_SSL_REDIRECT=False`（无 TLS，默认 True 会 301）；`DJANGO_SECURE_HSTS_SECONDS=0`（HSTS 按 host 记忆，避免把同 IP 老站 8088 强升 https）；`DJANGO_ALLOWED_HOSTS` 补 `testserver`（P1 的 APIClient）；P4/P5 脚本解释器路径跨平台化（Linux 容器用 `sys.executable`）+ `WORK_DIR` 自动创建；三个 E2E 脚本新增 `S5_REMOTE` 模式（ORM 段经 SSH 在容器内执行，与本会话已验证的 `manage.py shell` stdin 通道一致）。
 
-**仍未完成**：移动端 H5（`app/dist/build/h5` 未构建，nginx `/m/` 挂空目录）——待后续构建后补目检；8092 公网直连需在华为云控制台放行 8092（当前仅隧道可用）。本节回填后，§六 清单仅剩上述两项待办。
+**仍未完成**：移动端 H5（`app/dist/build/h5` 未构建，nginx `/m/` 挂空目录）——待后续构建后补目检。本节回填后，§六 清单仅剩该一项待办。
+
+---
+
+## 六·补测回填②（2026-11-06 下午，按用户指令切到老版端口 8088）
+
+用户指令「不用 8092，就用老版的 124.70.107.64:8088 端口」。执行：`docker stop zhike_v2_frontend`（老版前端下线，**回滚 = `docker stop zhike_s5test_frontend && docker start zhike_v2_frontend`，秒级**）→ s5test compose frontend 端口改 `8088:80`、`CORS_ALLOWED_ORIGINS` 改 `http://124.70.107.64:8088` → `up -d`。8088 安全组本就放行（老站同端口），**公网直连验证，无隧道**：`/` 200 且 chunk 为新构建 `index-DvGoeSAS.js`，登录 code=0。
+
+**8088 公网直连全套重跑（`8088-*.log`，JWT 已脱敏）**：
+
+| 项 | 结果 |
+| --- | --- |
+| setup（建课/学籍/从真实 spec 提取最小 HTML） | ✅ course=10 / class=1 |
+| 浏览器 E2E 52 项 | ✅ 52/52 `ALL_PASS` |
+| 落库核对 12 项 | ✅ 12/12 `ALL_PASS` |
+| 7 个预置实验回归 94 项 | ✅ 94/94 `ALL_PASS` |
+| 性能冒烟 13 项 | ✅ 13/13 `ALL_PASS`（批次 A `ok=16 / 429=4 / errors=0`，批次 B 10/10，`p50≈405ms` 公网 RTT 主导） |
+
+P1/P4/P5（`zk_e2e` 独立库）与回滚演练不依赖对外端口，维持 §六·补测回填① 的容器内结果（64/41/39 全绿 + 可逆）。
+
+**perf P1 断言的环境口径**：`lab_grade` 限流用 LocMemCache，gunicorn 4 worker **按进程分片计数**——20 次连打每 worker 仅 ~5 次（<10/min），429 可能不触发（本轮实际触发 4 次，属轮询分布波动）。`stage5-perf.py` 据此引入 `PERF_EXPECT_429`：本地单进程（runserver）默认仍**严格要求 429 必现**；`S5_REMOTE` 多 worker 栈默认按分片口径（零 5xx + 被挡响应均为预期 429），限流档位触发本身由 P5-8 在**单进程 runserver** 内验证（124 上 39/39 含 `ai_ask 61 次内 429`）。这是与 145 生产同构的既有分片特性，非功能退化。
 
 ---
 
