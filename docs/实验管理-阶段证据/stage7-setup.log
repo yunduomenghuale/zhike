@@ -1,0 +1,6 @@
+login OK: teacher=t101 student=20249999
+course OK: id=87 name=Stage4 实验管理UI-20261106185933
+class/student OK: class_id=1 name=网络2026届-1班
+spec OK: markdown=7466 chars, min-html=2152 chars -> D:\Claude_Code\智课系统V2\test\e2e\fixtures\stage4-from-spec.html
+temp lab deleted OK
+out=D:/tmp/stage4-setup.json

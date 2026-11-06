@@ -257,27 +257,29 @@ let CDP;
 
   let labId = null;
   try {
-    // ============ A：教师登录 + 顶级入口 ============
+    // ============ A：教师登录 + 课程内入口（Stage 7：实验管理仅保留在课程内） ============
     const mark0 = cdp.events.length;
     const landed = await login(cdp, setup.teacher, setup.password);
     check('A1 教师真实登录成功', landed !== '/login' && !String(landed).startsWith('/login('), landed);
-    const menu = await waitFor(cdp, `document.body.innerText.includes('实验管理') ? true : null`);
-    check('A2 教师侧栏出现「实验管理」', !!menu);
-    await cdp.send('Page.navigate', { url: BASE + '/teacher/labs' });
-    const pageReady = await waitFor(cdp, `document.querySelector('.page-title')?.textContent?.trim() === '实验管理' ? true : null`);
-    check('A3 顶级实验管理页渲染', !!pageReady);
-    const hasCourseFilter = await cdp.eval(`!!document.querySelector('.filter-card .el-select')`);
-    check('A4 课程筛选存在', !!hasCourseFilter);
+    check('A2 教师主导航不再出现「实验管理」入口（仅保留课程内）',
+      (await cdp.eval(`document.body.innerText.includes('实验管理') ? false : true`)) === true);
+    await cdp.send('Page.navigate', { url: BASE + `/teacher/courses/${setup.course_id}/labs` });
+    const pageReady = await waitFor(cdp, `document.querySelector('.lab-library-card') ? true : null`, 20000);
+    check('A3 课程内实验管理页渲染', !!pageReady);
+    const inCourseTab = await waitFor(cdp, `document.body.innerText.includes('实验管理') ? true : null`, 8000);
+    check('A3b 课程工作台出现「实验管理」Tab', !!inCourseTab);
+    const hasFilter = await cdp.eval(`!!document.querySelector('.filter-card .el-select')`);
+    check('A4 课程内模式：课程筛选器隐藏（课程已锁定）', !hasFilter);
     check('A5 新建实验按钮存在', await clickAvailable(cdp, '新建实验'));
     await cdp.shot(SHOT_PREFIX + '-library');
 
-    // ============ B：新建抽屉（自定义上传默认第一）+ 上传「说明里的」HTML ============
+    // ============ B：新建弹窗（自定义上传默认第一）+ 上传「说明里的」HTML ============
     await clickButton(null, '新建实验');
     const drawerOpen = await waitFor(cdp, `(() => {
-      const d = [...document.querySelectorAll('.el-drawer')].filter((e) => e.getClientRects().length);
+      const d = [...document.querySelectorAll('.el-dialog')].filter((e) => e.getClientRects().length);
       return d.some((e) => (e.textContent || '').includes('新建实验')) ? true : null;
     })()`);
-    check('B1 新建抽屉打开', !!drawerOpen);
+    check('B1 新建弹窗打开（Stage 7：抽屉改弹窗）', !!drawerOpen);
     const tabs = await cdp.eval(`[...document.querySelectorAll('.el-tabs__item')].filter((e)=>e.getClientRects().length).map((e)=>e.textContent.trim())`);
     check('B2 双 Tab：自定义上传排第一（教师反馈第 8 条）',
       tabs[0] === '自定义上传' && tabs.some((t) => t.includes('平台预置')), JSON.stringify(tabs));
@@ -291,10 +293,20 @@ let CDP;
       noTemplatePick.hasTemplate === false
       && !noTemplatePick.labels.includes('实验满分') && !noTemplatePick.labels.includes('允许重做'),
       JSON.stringify(noTemplatePick.labels));
+    // Stage 7：实验页面不再作为创建必填（引导先创建 → 看成绩接口 → 再上传页面）
+    check('B3c 实验页面可选（带引导提示）', (await cdp.eval(`(() => {
+      const tip = [...document.querySelectorAll('.upload-optional-tip')].filter((e) => e.getClientRects().length)[0];
+      return tip && tip.textContent.includes('创建后') ? true : null;
+    })()`)) === true);
     await sleep(500);
     const uploader = await cdp.eval(`!!document.querySelector('.lab-html-upload')`);
     check('B3b 单 HTML 上传区可见', !!uploader);
-    check('B4 选择所属课程', await selectFormOption('所属课程', setup.course_name));
+    check('B4 课程内创建：所属课程锁定为当前课程（disabled）', (await cdp.eval(`(() => {
+      const items = [...document.querySelectorAll('.el-form-item')].filter((e) => e.getClientRects().length);
+      const item = items.find((e) => ((e.querySelector('.el-form-item__label') || {}).textContent || '').includes('所属课程'));
+      const sel = item && item.querySelector('.el-select__wrapper');
+      return sel && sel.classList.contains('is-disabled') ? true : null;
+    })()`)) === true);
     check('B5 填写实验名称', (await setFormInput('实验名称', TITLE)) === 'OK');
 
     await cdp.send('DOM.getDocument').then(async ({ root }) => {
@@ -309,7 +321,7 @@ let CDP;
     await cdp.shot(SHOT_PREFIX + '-create');
 
     // ============ C：创建成功即打开「成绩接口」Tab（详情为弹窗，教师反馈第 4 条） ============
-    await clickButton('.el-drawer', '创建实验');
+    await clickButton(".el-dialog", "创建实验");
     const detailReady = await waitFor(cdp, `(() => {
       const d = [...document.querySelectorAll('.el-dialog')].filter((e) => e.getClientRects().length);
       return d.some((e) => (e.textContent || '').includes(${JSON.stringify(TITLE)})) ? true : null;
@@ -400,7 +412,7 @@ let CDP;
     check('E3 切到「概览与成绩」Tab', await clickTab('概览与成绩'));
     await sleep(800);
     // 教师反馈第 6 条：概览页内嵌统计图表 + 成绩明细
-    check('E3b 完成情况堆叠条渲染', !!await cdp.eval(`document.querySelector('.stack-bar')`));
+    check('E3b 完成情况饼图渲染', !!await cdp.eval(`document.querySelector('.pie')`));
     check('E3c 分数段分布图渲染', !!await cdp.eval(`document.querySelector('.bar-chart')`));
     check('E3d 成绩明细表并入概览', !!await cdp.eval(`(() => {
       const pane = [...document.querySelectorAll('.el-tab-pane')].find((p) => p.style.display !== 'none' && p.querySelector('.scores-title'));

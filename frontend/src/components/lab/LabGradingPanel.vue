@@ -66,7 +66,7 @@
     </div>
 
     <!-- 使用示例弹窗（教师反馈第 5 条） -->
-    <el-dialog v-model="helpVisible" title="如何使用接入说明" width="720px" append-to-body>
+    <el-dialog v-model="helpVisible" title="如何使用接入说明" width="720px" top="6vh" append-to-body class="help-dialog">
       <div class="help-doc">
         <h4>三步接入</h4>
         <ol>

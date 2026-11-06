@@ -12,7 +12,7 @@
         <div class="upload-mark">
           <el-icon><UploadFilled /></el-icon>
         </div>
-        <div class="upload-main">{{ modelValue ? '重新选择文件' : '拖入或选择 HTML 文件' }}</div>
+        <div class="upload-main">{{ modelValue ? '重新选择文件' : (page ? '拖入或选择 HTML 文件，替换当前页面' : '拖入或选择 HTML 文件') }}</div>
         <div class="upload-sub">单个 .html 文件，不超过 50MB；JS / CSS / 图片须全部内联</div>
       </div>
     </el-upload>

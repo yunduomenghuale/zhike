@@ -71,7 +71,8 @@ const routes = [
 
       { path: 'teacher/courses', name: 'courses', component: () => import('@/views/teacher/CourseList.vue'), meta: { title: '课程管理', role: 'teacher' } },
       { path: 'teacher/classes', name: 'classes', component: () => import('@/views/teacher/ClassManage.vue'), meta: { title: '班级管理', role: 'teacher' } },
-      { path: 'teacher/labs', name: 'lab-library', component: () => import('@/views/teacher/LabLibrary.vue'), meta: { title: '实验管理', role: 'teacher' } },
+      // Stage 7 教师反馈：顶级「实验管理」入口下线——实验管理只保留在课程工作台内
+      // （/teacher/courses/:id/labs），避免与课程内入口重复。
       { path: 'teacher/classes/:classId/students', name: 'class-students', component: () => import('@/views/teacher/ClassStudents.vue'), meta: { title: '学生名单', role: 'teacher', activeMenu: '/teacher/classes' } },
       { path: 'teacher/classes/:classId/students/:studentId', name: 'class-student-detail', component: () => import('@/views/teacher/StudentDetail.vue'), meta: { title: '学生详情', role: 'teacher' } },
       { path: 'teacher/knowledge', name: 'knowledge', component: () => import('@/views/teacher/KnowledgeBase.vue'), meta: { title: '知识库', role: 'teacher' } },

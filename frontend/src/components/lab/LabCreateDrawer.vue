@@ -1,15 +1,17 @@
 <template>
-  <el-drawer
+  <el-dialog
     :model-value="modelValue"
     title="新建实验"
-    size="580px"
+    width="640px"
+    top="6vh"
+    append-to-body
     @update:model-value="(v) => emit('update:modelValue', v)"
     @closed="resetForm"
   >
     <el-tabs v-model="tab" class="create-tabs">
       <el-tab-pane label="自定义上传" name="custom">
         <div class="tab-tip">
-          推荐方式：上传单个 HTML 实验页面，步骤与判分规则都写在页面里，平台只接收总分；创建后可在「成绩接口」页一键复制接入说明给 AI 生成页面。
+          推荐方式：先创建实验拿到接入说明，再上传单个 HTML 实验页面（步骤与判分规则都写在页面里，平台只接收总分）。
         </div>
       </el-tab-pane>
       <el-tab-pane label="平台预置（计算机网络实验）" name="preset">
@@ -54,8 +56,11 @@
       </el-alert>
 
       <template v-if="tab === 'custom'">
-        <el-form-item label="实验页面" required>
+        <el-form-item label="实验页面">
           <LabPageUploader v-model="pickedFile" :lab-id="null" />
+          <div class="upload-optional-tip">
+            可现在上传，也可以创建后到详情的「实验页面」页上传或替换（发布前必须已上传）。
+          </div>
         </el-form-item>
       </template>
     </el-form>
@@ -76,7 +81,7 @@
         <el-button type="primary" :loading="creating" @click="create">创建实验</el-button>
       </div>
     </template>
-  </el-drawer>
+  </el-dialog>
 </template>
 
 <script setup>
@@ -204,12 +209,11 @@ async function create() {
   if (!form.value.course) return ElMessage.warning('请选择所属课程')
   if (tab.value === 'preset' && !form.value.template) return ElMessage.warning('请选择实验模板')
   if (tab.value === 'custom' && !form.value.title.trim()) return ElMessage.warning('自定义实验请填写实验名称')
-  if (tab.value === 'custom' && !pickedFile.value) return ElMessage.warning('请上传实验 HTML 页面')
 
   creating.value = true
   try {
-    // Stage 6：满分/及格/时长/重做一律不再收集——后端默认 100/60、时长继承模板、
-    // 计分规则为「多次提交保留最高分」（allow_resubmit 走模型默认 True）
+    // Stage 6/7：满分/及格/时长/重做不再收集（后端默认 100/60，多次提交保留最高分）；
+    // 实验页面不作为创建必填——引导「先创建 → 看成绩接口说明 → 再上传页面（发布前必须已上传）」
     const payload = {
       course: form.value.course,
       catalog: form.value.catalog || undefined,
@@ -220,15 +224,20 @@ async function create() {
     }
     phase.value = '正在创建实验…'
     const lab = await createLab(payload)
+    let uploadedNow = false
     if (tab.value === 'custom' && pickedFile.value) {
       phase.value = `正在上传页面 ${pickedFile.value.name}…`
       uploadPercent.value = 1
       await uploadAfterCreate(lab.id, pickedFile.value.name)
-      phase.value = ''
-      uploadPercent.value = 0
-      ElMessage.success('实验与页面已就绪')
+      uploadedNow = true
+    }
+    phase.value = ''
+    uploadPercent.value = 0
+    if (tab.value === 'custom') {
+      ElMessage.success(uploadedNow
+        ? '实验与页面已就绪。接入说明见「成绩接口」页，可复制给 AI。'
+        : '实验已创建（草稿）。请先看「成绩接口」说明，再到「实验页面」上传 HTML 后发布。')
     } else {
-      phase.value = ''
       ElMessage.success('实验已创建')
     }
     emit('created', { ...lab, page_source: payload.page_source })
@@ -260,6 +269,7 @@ onMounted(loadTemplates)
 
 <style scoped>
 .create-tabs { margin-bottom: 6px; }
+.upload-optional-tip { margin-top: 8px; font-size: 12px; color: #94a3b8; line-height: 1.7; }
 .tab-tip { font-size: 12.5px; color: #64748b; line-height: 1.7; padding: 2px 2px 8px; }
 .create-form { padding-right: 8px; }
 .unit { margin-left: 10px; font-size: 12px; color: #94a3b8; }

@@ -19,6 +19,14 @@
       <span class="filter-summary">共 {{ labs.length }} 个实验</span>
     </el-card>
 
+    <!-- 课程内模式：Shell 会隐藏 page-header，操作入口放列表上方工具条 -->
+    <el-card v-if="fixedCourseId" shadow="never" class="create-bar-card">
+      <div class="create-bar">
+        <span>新建实验：自定义上传 HTML（推荐），或选择平台预置的计算机网络实验</span>
+        <el-button type="primary" size="small" @click="createVisible = true">新建实验</el-button>
+      </div>
+    </el-card>
+
     <el-card shadow="never" class="lab-library-card">
       <el-table :data="labs" v-loading="loading" :row-class-name="rowClassName">
         <el-table-column prop="title" label="实验名称" min-width="180" show-overflow-tooltip>
@@ -98,19 +106,27 @@
               <div class="stat-box avg"><div class="stat-num">{{ detailStats.avgSteps ?? '—' }}</div><div class="stat-label">平均步骤通过</div></div>
             </div>
 
-            <!-- 成绩统计图表（纯 CSS 实现，不引图表库） -->
+            <!-- 成绩统计图表（纯 CSS/SVG，无图表库依赖；教师反馈：完成情况用饼图） -->
             <div class="chart-row">
               <div class="chart-card">
                 <div class="chart-title">完成情况</div>
-                <div class="stack-bar">
-                  <div class="seg ok" :style="{ width: pctOf(detailStats.submitted) }"></div>
-                  <div class="seg ing" :style="{ width: pctOf(detailStats.ongoing) }"></div>
-                  <div class="seg none" :style="{ width: pctOf(pendingCount) }"></div>
-                </div>
-                <div class="legend">
-                  <span><i class="dot ok" />已提交 {{ detailStats.submitted }}</span>
-                  <span><i class="dot ing" />进行中 {{ detailStats.ongoing }}</span>
-                  <span><i class="dot none" />未开始 {{ pendingCount }}</span>
+                <div class="pie-wrap">
+                  <div
+                    class="pie"
+                    :style="{ background: pieGradient }"
+                    role="img"
+                    :aria-label="`完成情况：已提交 ${detailStats.submitted}，进行中 ${detailStats.ongoing}，未开始 ${pendingCount}`"
+                  >
+                    <div class="pie-hole">
+                      <b>{{ detailStats.expected }}</b>
+                      <span>应做人数</span>
+                    </div>
+                  </div>
+                  <div class="legend">
+                    <span><i class="dot ok" />已提交 {{ detailStats.submitted }}</span>
+                    <span><i class="dot ing" />进行中 {{ detailStats.ongoing }}</span>
+                    <span><i class="dot none" />未开始 {{ pendingCount }}</span>
+                  </div>
                 </div>
               </div>
               <div class="chart-card">
@@ -172,9 +188,10 @@
               </el-alert>
               <LabPageUploader
                 :key="currentLab.id"
+                v-model="pageFile"
                 :lab-id="currentLab.id"
                 :page="currentLab.has_custom_page ? { name: currentLab.custom_page_name } : null"
-                @uploaded="refreshCurrent"
+                @uploaded="onPageUploaded"
                 @changed="refreshCurrent"
               />
             </template>
@@ -254,6 +271,12 @@ const detailSubs = ref([])
 const labStatsCache = ref({})
 const guideDialog = ref(null)
 const scheduleForm = ref({ lab: null, classroom: null, open_at: '', close_at: '' })
+// 详情内「实验页面」的待上传文件（教师反馈：选择文件后要有文件状态条并可上传替换）
+const pageFile = ref(null)
+function onPageUploaded() {
+  pageFile.value = null
+  refreshCurrent()
+}
 
 const statusText = (s) => ({ draft: '草稿', published: '已发布', closed: '已下线' }[s] || s)
 const statusType = (s) => ({ draft: 'info', published: 'success', closed: 'warning' }[s] || 'info')
@@ -423,14 +446,16 @@ const detailStats = computed(() => labStatsCache.value[currentLab.value?.id] || 
   expected: 0, submitted: 0, ongoing: 0, avgScore: null, avgSteps: null,
 })
 
-// 完成情况堆叠条（纯 CSS）
+// 完成情况饼图（conic-gradient 甜甜圈，教师反馈：饼图展示）
 const pendingCount = computed(() =>
   Math.max(0, Number(detailStats.value.expected || 0) - Number(detailStats.value.submitted || 0) - Number(detailStats.value.ongoing || 0)))
-function pctOf(n) {
+const pieGradient = computed(() => {
   const total = Number(detailStats.value.expected || 0)
-  if (!total) return '0%'
-  return `${Math.round((Number(n || 0) / total) * 1000) / 10}%`
-}
+  if (!total) return 'conic-gradient(#e2e8f0 0deg 360deg)'
+  const okDeg = Math.round((Number(detailStats.value.submitted || 0) / total) * 360)
+  const ingDeg = Math.round((Number(detailStats.value.ongoing || 0) / total) * 360)
+  return `conic-gradient(#10b981 0deg ${okDeg}deg, #f59e0b ${okDeg}deg ${okDeg + ingDeg}deg, #e2e8f0 ${okDeg + ingDeg}deg 360deg)`
+})
 
 // 分数段分布（纯 CSS 柱状）
 const scoreBuckets = computed(() => {
@@ -486,6 +511,8 @@ onMounted(load)
 
 <style scoped>
 .header-actions { display: flex; align-items: center; gap: 10px; }
+.create-bar-card { margin-bottom: 12px; }
+.create-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; color: #475569; }
 .filter-card { margin-bottom: 12px; }
 .filter-label { font-size: 13px; color: #64748b; margin-right: 10px; }
 .filter-summary { margin-left: 16px; font-size: 12px; color: #94a3b8; }
@@ -523,17 +550,24 @@ onMounted(load)
 .stat-box.ing .stat-num { color: #d97706; }
 .stat-box.avg { background: #eff6ff; }
 .stat-box.avg .stat-num { color: #2563eb; }
-/* 图表（纯 CSS，教师反馈第 6 条） */
+/* 图表（纯 CSS/SVG，教师反馈：完成情况用饼图） */
 .chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 16px 0; }
 .chart-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px 16px; background: #fff; }
 .chart-title { font-size: 13px; font-weight: 600; color: #334155; margin-bottom: 12px; }
-.stack-bar { display: flex; height: 18px; border-radius: 9px; overflow: hidden; background: #f1f5f9; }
-.seg { height: 100%; min-width: 2px; }
-.seg.ok { background: #10b981; }
-.seg.ing { background: #f59e0b; }
-.seg.none { background: #e2e8f0; }
-.legend { display: flex; gap: 16px; margin-top: 10px; font-size: 12px; color: #64748b; }
-.legend .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+.pie-wrap { display: flex; align-items: center; gap: 26px; }
+.pie {
+  width: 132px; height: 132px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.04);
+}
+.pie-hole {
+  width: 84px; height: 84px; border-radius: 50%; background: #fff;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.pie-hole b { font-size: 22px; font-weight: 700; color: #1e293b; line-height: 1.2; }
+.pie-hole span { font-size: 11px; color: #94a3b8; }
+.legend { display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; color: #64748b; }
+.legend .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
 .dot.ok { background: #10b981; }
 .dot.ing { background: #f59e0b; }
 .dot.none { background: #e2e8f0; }
