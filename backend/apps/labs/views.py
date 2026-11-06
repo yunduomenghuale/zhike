@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 
+from types import SimpleNamespace
 from django.db import transaction
 from django.http import HttpResponse
 from django.utils import timezone
@@ -511,17 +512,13 @@ class LabSubmissionViewSet(BaseModelViewSet):
         return None
 
     def _reset_fields(self, sub, lab, operator):
-        """重做开始一轮：过程数据清零、状态回进行中；**成绩保留**——上一轮
-        分数/明细/提交时间不动，学生仍可见，新提交后覆盖为最新成绩。"""
+        """重做开始一轮：状态回进行中、attempt+1。
+        Stage 6 计分规则为「保留历史最高分」，成绩与明细（分数/步骤/报文/用时）
+        不再清空——在更高分出现之前，学生端与教师端看到的始终是最高分那次
+        的完整记录。"""
         sub.attempt += 1
         sub.random_seed = seedgen.generate_seed(lab, sub.student_id, sub.attempt)
         sub.status = LabSubmission.Status.IN_PROGRESS
-        sub.error_log = []
-        sub.steps_result = {}
-        sub.elapsed_seconds = 0
-        sub.error_count = 0
-        sub.passed_steps = 0
-        sub.total_steps = 0
         sub.started_at = timezone.now()
         sub.reset_by = operator
         sub.reset_at = timezone.now()
@@ -616,6 +613,19 @@ class LabSubmissionViewSet(BaseModelViewSet):
         error_count = len(error_log)
 
         def apply_result(sub, now):
+            # 计分规则（Stage 6 教师反馈）：首次提交的成绩即实验成绩，后续重做
+            # 只保留历史最高分——低分重做不覆盖任何成绩字段（含报文/明细/用时），
+            # 仅状态流转为 submitted（由 finalize_submission 统一处理）。
+            lab = sub.lab
+            # 用本轮上报的数据（而非 sub 上的上一轮旧值）预估新总分
+            probe = SimpleNamespace(
+                error_count=error_count, elapsed_seconds=elapsed,
+                total_steps=total, passed_steps=min(passed, total),
+            )
+            step_scores = scoring.calc_step_scores(probe, lab.effective_standard_minutes, lab.total_score)
+            new_total = scoring.calc_total(step_scores, lab.total_score)
+            if sub.total_score is not None and sub.total_score >= new_total:
+                return
             # 预置实验沿用客户端上报的用时（S1 只约束新增的 external 端点）
             sub.steps_result = steps
             sub.error_log = error_log
@@ -623,15 +633,12 @@ class LabSubmissionViewSet(BaseModelViewSet):
             sub.error_count = error_count
             sub.passed_steps = passed
             sub.total_steps = total
-            lab = sub.lab
-            step_scores = scoring.calc_step_scores(sub, lab.effective_standard_minutes, lab.total_score)
-            total_score = scoring.calc_total(step_scores, lab.total_score)
             sub.base_score = step_scores["base"]
             sub.accuracy_score = step_scores["accuracy"]
             sub.efficiency_score = step_scores["efficiency"]
             sub.completion_score = step_scores["completion"]
-            sub.total_score = total_score
-            sub.score_breakdown = scoring.build_breakdown(sub, step_scores, total_score)
+            sub.total_score = new_total
+            sub.score_breakdown = scoring.build_breakdown(sub, step_scores, new_total)
 
         def validate(sub, locked_ticket, now):
             # S2 锁后复验：窗口可能在锁等待期间关闭
@@ -828,6 +835,9 @@ class GradeReportView(APIView):
 
         def apply_result(sub, now):
             score = parsed["total_score"]
+            # 计分规则（Stage 6 教师反馈）：只保留历史最高分，低分重做不覆盖成绩
+            if sub.total_score is not None and sub.total_score >= score:
+                return
             elapsed = services.server_elapsed_seconds(sub, now)
             abnormal = services.is_abnormal(score, sub.lab, elapsed)
             raw = {

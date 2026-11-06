@@ -37,7 +37,7 @@ const tabs = [
   { name: 'course-homework', label: '作业', icon: Notebook },
   { name: 'course-exams', label: '考试', icon: Document },
   { name: 'course-resources', label: '教学资源', icon: VideoCamera },
-  { name: 'course-labs', label: '虚拟实验', icon: Pointer },
+  { name: 'course-labs', label: '实验管理', icon: Pointer },
   { name: 'course-analytics', label: '学习统计', icon: TrendCharts },
 ]
 

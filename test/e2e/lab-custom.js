@@ -196,7 +196,7 @@ async function selectFormOption(label, optionText) {
     return true;
   })()`);
   if (!opened) return false;
-  for (let i = 0; i < 24; i++) {
+  for (let i = 0; i < 60; i++) {
     await sleep(250);
     const ok = await CDP.eval(`(() => {
       const T = ${JSON.stringify(optionText)};
@@ -271,7 +271,7 @@ let CDP;
     check('A5 新建实验按钮存在', await clickAvailable(cdp, '新建实验'));
     await cdp.shot(SHOT_PREFIX + '-library');
 
-    // ============ B：新建抽屉双 Tab + 上传「说明里的」HTML ============
+    // ============ B：新建抽屉（自定义上传默认第一）+ 上传「说明里的」HTML ============
     await clickButton(null, '新建实验');
     const drawerOpen = await waitFor(cdp, `(() => {
       const d = [...document.querySelectorAll('.el-drawer')].filter((e) => e.getClientRects().length);
@@ -279,8 +279,18 @@ let CDP;
     })()`);
     check('B1 新建抽屉打开', !!drawerOpen);
     const tabs = await cdp.eval(`[...document.querySelectorAll('.el-tabs__item')].filter((e)=>e.getClientRects().length).map((e)=>e.textContent.trim())`);
-    check('B2 平台预置 / 自定义上传双 Tab', tabs.includes('平台预置') && tabs.includes('自定义上传'), JSON.stringify(tabs));
-    check('B3 切到自定义上传 Tab', await clickTab('自定义上传'));
+    check('B2 双 Tab：自定义上传排第一（教师反馈第 8 条）',
+      tabs[0] === '自定义上传' && tabs.some((t) => t.includes('平台预置')), JSON.stringify(tabs));
+    const activeTab0 = await cdp.eval(`[...document.querySelectorAll('.el-tabs__item.is-active')].filter((e)=>e.getClientRects().length).map((e)=>e.textContent.trim()).join('|')`);
+    check('B3 自定义上传默认选中', String(activeTab0).includes('自定义上传'), activeTab0);
+    const noTemplatePick = await cdp.eval(`(() => {
+      const labels = [...document.querySelectorAll('.el-form-item__label')].filter((e) => e.getClientRects().length).map((e) => e.textContent.trim());
+      return { hasTemplate: labels.some((l) => l.includes('实验模板')), labels };
+    })()`);
+    check('B3a 自定义上传不出现模板/满分等配置（教师反馈第 8 条）',
+      noTemplatePick.hasTemplate === false
+      && !noTemplatePick.labels.includes('实验满分') && !noTemplatePick.labels.includes('允许重做'),
+      JSON.stringify(noTemplatePick.labels));
     await sleep(500);
     const uploader = await cdp.eval(`!!document.querySelector('.lab-html-upload')`);
     check('B3b 单 HTML 上传区可见', !!uploader);
@@ -298,13 +308,13 @@ let CDP;
     check('B6 上传「从动态说明提取的」HTML', !!picked && String(picked).includes('stage4-from-spec.html'), picked);
     await cdp.shot(SHOT_PREFIX + '-create');
 
-    // ============ C：创建成功即打开「成绩接口」Tab ============
+    // ============ C：创建成功即打开「成绩接口」Tab（详情为弹窗，教师反馈第 4 条） ============
     await clickButton('.el-drawer', '创建实验');
     const detailReady = await waitFor(cdp, `(() => {
-      const d = [...document.querySelectorAll('.el-drawer')].filter((e) => e.getClientRects().length);
+      const d = [...document.querySelectorAll('.el-dialog')].filter((e) => e.getClientRects().length);
       return d.some((e) => (e.textContent || '').includes(${JSON.stringify(TITLE)})) ? true : null;
     })()`, 25000);
-    check('C1 创建成功并打开详情抽屉', !!detailReady);
+    check('C1 创建成功并打开详情弹窗', !!detailReady);
     const activeTab = await cdp.eval(`[...document.querySelectorAll('.el-tabs__item.is-active')].filter((e)=>e.getClientRects().length).map((e)=>e.textContent.trim()).join('|')`);
     check('C2 自动切到「成绩接口」Tab', String(activeTab).includes('成绩接口'), activeTab);
     const endpoint = await cdp.eval(`document.querySelector('.lab-grading-panel .endpoint')?.textContent?.trim() || ''`);
@@ -316,7 +326,8 @@ let CDP;
     check('C4 动态 Markdown 含实验名/满分/schema/最小HTML/AI指令',
       !!md && md.includes(TITLE) && md.includes('100') && md.includes('请求与响应 schema')
       && md.includes('LabBridge.reportGrade(') && md.includes('可直接复制给 AI'));
-    check('C5 动态说明无占位符残留', !!md && !md.includes('@@'));
+    check('C5 动态说明无占位符残留且无补充说明段',
+      !!md && !md.includes('@@') && !md.includes('教师补充说明'), md && md.slice(0, 80));
     check('C6 复制给 AI 可用', await clickButton('.lab-grading-panel', '复制给 AI'));
     const toast = await waitFor(cdp, `document.querySelector('.lab-grading-panel .copy-toast')?.textContent || null`, 6000);
     check('C6b 复制结果反馈', !!toast && String(toast).includes('接入说明'), toast);
@@ -338,20 +349,29 @@ let CDP;
     const preview = await cdp.eval(`document.querySelector('.debug-preview pre')?.textContent || ''`);
     check('D5 展示「若正式提交会写入」预览', preview.includes('external') && preview.includes('服务端'), preview.slice(0, 120));
 
-    check('D6 填写并保存补充说明', (await cdp.eval(`(() => {
-      const ta = document.querySelector('.lab-grading-panel textarea');
-      if (!ta) return false;
-      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(ta), 'value').set;
-      setter.call(ta, '补充说明：请重点考察任务二的判分规则。');
-      ta.dispatchEvent(new Event('input', { bubbles: true }));
-      return true;
-    })()`)) === true);
-    await clickButton('.lab-grading-panel', '保存');
-    const noteInSpec = await waitFor(cdp, `(() => {
-      const p = document.querySelector('.lab-grading-panel .spec-markdown');
-      return p && p.textContent.includes('补充说明：请重点考察任务二的判分规则。') ? true : null;
-    })()`, 12000);
-    check('D7 补充说明追加到接入说明末尾', !!noteInSpec);
+    // D6 补：问号帮助弹窗（教师反馈第 5 条）
+    check('D6 问号图标打开使用示例弹窗', await cdp.eval(`(() => {
+      const icon = document.querySelector('.lab-grading-panel .help-icon');
+      if (!icon) return false;
+      icon.click(); return true;
+    })()`));
+    const helpReady = await waitFor(cdp, `(() => {
+      const ds = [...document.querySelectorAll('.el-dialog')].filter((e) => e.getClientRects().length);
+      return ds.some((e) => (e.textContent || '').includes('如何使用接入说明')) ? true : null;
+    })()`, 8000);
+    check('D6b 帮助弹窗含使用规则与提示词示例',
+      !!helpReady && (await cdp.eval(`(() => {
+        const ds = [...document.querySelectorAll('.el-dialog')].filter((e) => e.getClientRects().length);
+        const d = ds.find((e) => (e.textContent || '').includes('如何使用接入说明'));
+        return d && d.textContent.includes('LabBridge.reportGrade') && d.textContent.includes('提示词示例') ? true : null;
+      })()`)));
+    await cdp.eval(`(() => {
+      const ds = [...document.querySelectorAll('.el-dialog')].filter((e) => e.getClientRects().length);
+      const d = ds.find((e) => (e.textContent || '').includes('如何使用接入说明'));
+      const b = d && [...d.querySelectorAll('button')].find((x) => (x.textContent || '').includes('关闭'));
+      if (b) b.click(); return true;
+    })()`);
+    await sleep(600);
     await cdp.shot(SHOT_PREFIX + '-debug');
 
     // 找到本次实验 id（真实 API 查询，避免同名实验点错行）
@@ -371,16 +391,24 @@ let CDP;
     check('E2 切到「排课」Tab', await clickTab('排课'));
     await sleep(400);
     check('E2b 选择班级', await selectFormOption('班级', setup.class_name));
-    check('E2c 保存排课', await clickButton('.el-drawer', '保存排课'));
+    check('E2c 保存排课', await clickButton('.el-dialog', '保存排课'));
     const scheduled = await waitFor(cdp, `(() => {
       const s = document.querySelector('.schedule-list');
       return s && s.textContent.includes(${JSON.stringify(setup.class_name)}) ? true : null;
     })()`, 15000);
     check('E2d 排课记录可见', !!scheduled);
-    check('E3 切到「概览」Tab', await clickTab('概览'));
-    check('E3b 切到「成绩」Tab', await clickTab('成绩'));
+    check('E3 切到「概览与成绩」Tab', await clickTab('概览与成绩'));
+    await sleep(800);
+    // 教师反馈第 6 条：概览页内嵌统计图表 + 成绩明细
+    check('E3b 完成情况堆叠条渲染', !!await cdp.eval(`document.querySelector('.stack-bar')`));
+    check('E3c 分数段分布图渲染', !!await cdp.eval(`document.querySelector('.bar-chart')`));
+    check('E3d 成绩明细表并入概览', !!await cdp.eval(`(() => {
+      const pane = [...document.querySelectorAll('.el-tab-pane')].find((p) => p.style.display !== 'none' && p.querySelector('.scores-title'));
+      return pane && pane.querySelector('.el-table') ? true : null;
+    })()`));
+    await cdp.shot(SHOT_PREFIX + '-overview');
     await cdp.eval(`(() => {
-      const b = [...document.querySelectorAll('.el-drawer__close-btn')].filter((e)=>e.getClientRects().length)[0];
+      const b = [...document.querySelectorAll('.el-dialog__headerbtn')].filter((e)=>e.getClientRects().length)[0];
       if (b) b.click();
     })()`);
     await sleep(800);
@@ -481,8 +509,8 @@ let CDP;
         .find((e) => (e.querySelector('.lab-title')?.textContent || '').trim() === ${JSON.stringify(TITLE)});
       return c ? [...c.querySelectorAll('button')].map((b) => b.textContent.trim()) : [];
     })()`);
-    check('F9 自定义实验提交后不提供重做入口（C12 allow_resubmit=False）',
-      Array.isArray(cardButtons) && !cardButtons.includes('重做实验'), JSON.stringify(cardButtons));
+    check('F9 重做入口存在（Stage 6 最高分规则：重做只记录最高分，允许重做）',
+      Array.isArray(cardButtons) && cardButtons.includes('重做实验'), JSON.stringify(cardButtons));
     await cdp.shot(SHOT_PREFIX + '-student');
 
     const errors = cdp.consoleErrors(mark0).filter((t) => !t.includes('favicon'));

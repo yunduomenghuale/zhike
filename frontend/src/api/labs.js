@@ -15,11 +15,15 @@ export const closeLab = (id) => request.post(`/labs/${id}/close/`)
 // ===== 自定义实验：页面上传 / 预览 / 接入说明 / 在线调试（Stage 4）=====
 // 上传命中静态扫描时后端返回 HTTP 400 + require_confirm，需由组件自行读取
 // e.response.data 展示命中项并二次确认；故这里统一 silent，不让拦截器抢先弹提示。
-export const uploadLabPage = (id, file, confirm = false) => {
+export const uploadLabPage = (id, file, confirm = false, onUploadProgress = null) => {
   const form = new FormData()
   form.append('file', file)
   if (confirm) form.append('confirm', '1')
-  return request.post(`/labs/${id}/page/`, form, { silent: true })
+  return request.post(`/labs/${id}/page/`, form, {
+    silent: true,
+    // 上传进度回调（教师反馈第 7 条：让上传过程可见）
+    onUploadProgress,
+  })
 }
 export const deleteLabPage = (id) => request.delete(`/labs/${id}/page/`)
 export const previewLabPage = (id) => request.get(`/labs/${id}/page/preview/`)

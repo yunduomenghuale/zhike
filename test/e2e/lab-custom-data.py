@@ -46,8 +46,8 @@ def main():
     if not lab:
         return
     lab_id = lab["id"]
-    check("D2 page_source=custom 且 allow_resubmit=False（C12）",
-          lab.get("page_source") == "custom" and lab.get("allow_resubmit") is False,
+    check("D2 page_source=custom 且 allow_resubmit=True（Stage 6：最高分规则允许重做）",
+          lab.get("page_source") == "custom" and lab.get("allow_resubmit") is True,
           {"page_source": lab.get("page_source"), "allow_resubmit": lab.get("allow_resubmit")})
     check("D3 last_debug 摘要已回写且最近一次通过",
           (lab.get("last_debug") or {}).get("passed") is True, lab.get("last_debug", {}).get("at"))

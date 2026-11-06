@@ -17,32 +17,19 @@
     <div class="gp-section">
       <div class="gp-title">
         动态接入说明
+        <el-icon class="help-icon" @click="helpVisible = true"><QuestionFilled /></el-icon>
         <el-button size="small" type="primary" :disabled="!specMarkdown" @click="copyText(specMarkdown, '接入说明')">
           复制给 AI
         </el-button>
         <span class="gp-meta">按「{{ specTitle || '本实验' }}」与满分 {{ specScore || '—' }} 生成</span>
       </div>
       <div class="gp-hint">
-        含请求 / 响应 schema、字段约束、错误码表、最小 HTML 片段与可整段复制给 AI 的生成指令。
+        告知 AI 三件事：上报地址、报文格式（只收 <code>total_score</code>，1 位小数，0 ~ 满分）、运行环境（沙箱内通过 <code>LabBridge</code> 桥接）。点击问号看使用示例。
       </div>
       <pre class="spec-markdown" ref="specBox">{{ specMarkdown }}</pre>
     </div>
 
-    <!-- 3. 教师补充说明 report_note（追加在接入说明末尾） -->
-    <div class="gp-section">
-      <div class="gp-title">
-        教师补充说明
-        <el-button size="small" :loading="savingNote" @click="saveNote">保存</el-button>
-      </div>
-      <el-input
-        v-model="reportNote"
-        type="textarea"
-        :rows="3"
-        placeholder="可选：写给 AI 的额外要求，会追加在接入说明末尾"
-      />
-    </div>
-
-    <!-- 4. 在线调试（dry-run，不入库） -->
+    <!-- 3. 在线调试（dry-run，不入库） -->
     <div class="gp-section">
       <div class="gp-title">
         在线调试
@@ -78,6 +65,48 @@
       </template>
     </div>
 
+    <!-- 使用示例弹窗（教师反馈第 5 条） -->
+    <el-dialog v-model="helpVisible" title="如何使用接入说明" width="720px" append-to-body>
+      <div class="help-doc">
+        <h4>三步接入</h4>
+        <ol>
+          <li><b>复制接入说明</b>：点上方「复制给 AI」，把整段说明发给任意 AI 编程工具（豆包 / Kimi / Copilot 等）。</li>
+          <li><b>让 AI 生成页面</b>：AI 会按说明产出<b>单文件 HTML</b> 实验页（界面、交互、判分都在页面里）。</li>
+          <li><b>上传并调试</b>：在「实验页面」上传该 HTML，用下方「在线调试」模拟提交，通过后发布实验。</li>
+        </ol>
+        <h4>使用规则（务必让 AI 遵守）</h4>
+        <ul>
+          <li>页面只上报一个总分（<code>total_score</code>，最多 1 位小数，0 ~ 满分）；用时仅留痕，正式用时由平台计算。</li>
+          <li>页面运行在平台沙箱 iframe 内：读不到票据和平台数据，须通过 <code>LabBridge.validate()</code> 取满分、<code>LabBridge.reportGrade()</code> 上报。</li>
+          <li>单文件：JS / CSS / 图片全部内联；不得访问浏览器存储、外链资源或平台接口（静态扫描会拦截）。</li>
+          <li>同一学生多次提交只记录<b>最高分</b>，可放心让学生重试。</li>
+        </ul>
+        <h4>发给 AI 的提示词示例（整段复制即可用）</h4>
+        <pre class="help-code">帮我开发一个校园网故障排查实验页面，要求如下：
+
+1. 交付物：单个 HTML 文件（所有 JS / CSS 内联，不引用任何外部资源）。
+2. 实验内容：给出一个拓扑图（可用 SVG 绘制），包含 3 个待排查任务：
+   任务一（40 分）找出 VLAN 划分错误；任务二（40 分）修复网关配置；
+   任务三（20 分）验证全网连通。每个任务提供交互式判断（选择 / 输入命令）。
+3. 界面：显示实验标题、满分（运行时从 LabBridge 读取，不要写死）、
+   任务列表与完成状态、作答计时。
+4. 提交：学生点「提交成绩」时，按完成情况计算总分（不超过满分），
+   调用 LabBridge.reportGrade({ total_score: 总分, elapsed_seconds: 用时秒 }) 上报，
+   并把返回结果展示给学生；重复点击要有防抖处理。
+5. 运行环境：页面将嵌入平台沙箱 iframe，通过 window.LabBridge 与平台通信：
+   - const ctx = await LabBridge.validate()  // 返回 { labId, submissionId, totalScore, gradeEndpoint }
+   - await LabBridge.reportGrade(payload)     // 返回平台响应 { code, message, ... }
+   - LabBridge.preview === true 表示教师预览模式，此时不要提交。
+6. 禁止：访问 localStorage / cookie、请求外部网址、使用 eval。
+
+请直接输出完整 HTML 文件内容。</pre>
+      </div>
+      <template #footer>
+        <el-button type="primary" @click="copyText(helpPromptText, '提示词示例')">复制提示词示例</el-button>
+        <el-button @click="helpVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
     <div v-if="copied" class="copy-toast">{{ copied }}已复制到剪贴板</div>
   </div>
 </template>
@@ -85,7 +114,8 @@
 <script setup>
 import { onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getIntegrationSpec, gradeDebug, updateLab } from '@/api/labs'
+import { QuestionFilled } from '@element-plus/icons-vue'
+import { getIntegrationSpec, gradeDebug } from '@/api/labs'
 
 const props = defineProps({
   labId: { type: [Number, String], required: true },
@@ -95,16 +125,32 @@ const emit = defineEmits(['updated'])
 
 const endpoint = '/api/lab-gate/grade/'
 const loading = ref(false)
-const savingNote = ref(false)
 const debugging = ref(false)
 const specMarkdown = ref('')
 const specTitle = ref('')
 const specScore = ref('')
-const reportNote = ref('')
 const copied = ref('')
 const specBox = ref(null)
 const debugForm = ref({ total_score: 100, elapsed_seconds: 60 })
 const debugResult = ref(null)
+const helpVisible = ref(false)
+const helpPromptText =
+  '帮我开发一个校园网故障排查实验页面，要求如下：\n\n' +
+  '1. 交付物：单个 HTML 文件（所有 JS / CSS 内联，不引用任何外部资源）。\n' +
+  '2. 实验内容：给出一个拓扑图（可用 SVG 绘制），包含 3 个待排查任务：\n' +
+  '   任务一（40 分）找出 VLAN 划分错误；任务二（40 分）修复网关配置；\n' +
+  '   任务三（20 分）验证全网连通。每个任务提供交互式判断（选择 / 输入命令）。\n' +
+  '3. 界面：显示实验标题、满分（运行时从 LabBridge 读取，不要写死）、\n' +
+  '   任务列表与完成状态、作答计时。\n' +
+  '4. 提交：学生点「提交成绩」时，按完成情况计算总分（不超过满分），\n' +
+  '   调用 LabBridge.reportGrade({ total_score: 总分, elapsed_seconds: 用时秒 }) 上报，\n' +
+  '   并把返回结果展示给学生；重复点击要有防抖处理。\n' +
+  '5. 运行环境：页面将嵌入平台沙箱 iframe，通过 window.LabBridge 与平台通信：\n' +
+  '   - const ctx = await LabBridge.validate()  // 返回 { labId, submissionId, totalScore, gradeEndpoint }\n' +
+  '   - await LabBridge.reportGrade(payload)     // 返回平台响应 { code, message, ... }\n' +
+  '   - LabBridge.preview === true 表示教师预览模式，此时不要提交。\n' +
+  '6. 禁止：访问 localStorage / cookie、请求外部网址、使用 eval。\n\n' +
+  '请直接输出完整 HTML 文件内容。'
 
 async function loadSpec() {
   if (!props.labId) return
@@ -114,7 +160,6 @@ async function loadSpec() {
     specMarkdown.value = data.markdown || ''
     specTitle.value = data.lab_title || ''
     specScore.value = data.total_score || ''
-    reportNote.value = data.report_note || props.lab?.report_note || ''
     debugForm.value.total_score = Number(data.total_score) || 100
   } finally {
     loading.value = false
@@ -138,18 +183,6 @@ async function copyText(text, label) {
   }
   copied.value = label
   ElMessage.success(`${label}已复制`)
-}
-
-async function saveNote() {
-  savingNote.value = true
-  try {
-    await updateLab(props.labId, { report_note: reportNote.value })
-    emit('updated')
-    await loadSpec()
-    ElMessage.success('补充说明已保存，接入说明已重新生成')
-  } finally {
-    savingNote.value = false
-  }
 }
 
 function fillExample(kind) {
@@ -199,6 +232,8 @@ onMounted(loadSpec)
   border-left: 3px solid #409eff;
 }
 .gp-title :deep(.el-button) { margin-left: 0; }
+.help-icon { color: #94a3b8; cursor: pointer; font-size: 16px; }
+.help-icon:hover { color: #409eff; }
 .gp-meta { margin-left: auto; font-size: 12px; font-weight: 400; color: #94a3b8; }
 .gp-subtitle { font-size: 13px; font-weight: 600; color: #334155; margin-bottom: 6px; }
 .gp-hint { font-size: 12.5px; color: #64748b; line-height: 1.8; margin-bottom: 8px; }
@@ -253,11 +288,18 @@ onMounted(loadSpec)
 .check-flag { font-weight: 700; font-family: 'JetBrains Mono', Consolas, monospace; }
 .check-item.ok .check-flag { color: #059669; }
 .check-item.bad .check-flag { color: #dc2626; }
-.check-item.info .check-flag { color: #94a3b8; }
 .check-name { font-weight: 600; color: #334155; }
 .check-item.info .check-name { color: #94a3b8; font-weight: 500; }
 .check-detail { color: #64748b; word-break: break-word; }
 .check-item.info .check-detail { color: #94a3b8; }
 .debug-preview { margin-top: 12px; }
 .copy-toast { font-size: 12px; color: #059669; }
+.help-doc h4 { margin: 14px 0 8px; color: #1e293b; }
+.help-doc ol, .help-doc ul { margin: 0 0 10px 22px; line-height: 1.9; color: #475569; font-size: 13px; }
+.help-doc code { background: #f1f5f9; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+.help-code {
+  background: #0f172a; color: #e2e8f0; padding: 12px 14px; border-radius: 8px;
+  font-size: 12px; line-height: 1.7; white-space: pre-wrap; word-break: break-word;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+}
 </style>

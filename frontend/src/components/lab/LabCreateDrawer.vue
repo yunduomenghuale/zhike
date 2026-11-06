@@ -7,12 +7,14 @@
     @closed="resetForm"
   >
     <el-tabs v-model="tab" class="create-tabs">
-      <el-tab-pane label="平台预置" name="preset">
-        <div class="tab-tip">选择平台已有的实验模板，步骤与判分由平台预置页面提供。</div>
-      </el-tab-pane>
       <el-tab-pane label="自定义上传" name="custom">
         <div class="tab-tip">
-          上传单个 HTML：步骤与判分规则都写在页面里，平台只接收总分与用时；创建后可在「成绩接口」Tab 一键复制接入说明给 AI。
+          推荐方式：上传单个 HTML 实验页面，步骤与判分规则都写在页面里，平台只接收总分；创建后可在「成绩接口」页一键复制接入说明给 AI 生成页面。
+        </div>
+      </el-tab-pane>
+      <el-tab-pane label="平台预置（计算机网络实验）" name="preset">
+        <div class="tab-tip">
+          平台内置的计算机网络课程虚拟仿真实验（交换机 / 路由 / 协议分析等 7 个），步骤与判分由平台预置页面提供，无需任何配置。
         </div>
       </el-tab-pane>
     </el-tabs>
@@ -25,7 +27,7 @@
           style="width: 100%"
           :disabled="Boolean(fixedCourseId)"
         >
-          <el-option v-for="c in courses" :key="c.id" :value="c.id" :label="c.name" />
+          <el-option v-for="c in courseList" :key="c.id" :value="c.id" :label="c.name" />
         </el-select>
       </el-form-item>
       <el-form-item label="所属章节">
@@ -33,50 +35,46 @@
           <el-option v-for="c in catalogOptions" :key="c.id" :value="c.id" :label="c.title" />
         </el-select>
       </el-form-item>
-      <el-form-item label="实验模板" required>
+      <el-form-item v-if="tab === 'preset'" label="实验模板" required>
         <el-select v-model="form.template" placeholder="选择平台预置实验" style="width: 100%">
           <el-option v-for="t in templates" :key="t.id" :value="t.id" :label="t.title" />
         </el-select>
       </el-form-item>
-      <el-form-item label="实验名称" :required="tab === 'custom'">
-        <el-input v-model="form.title" :placeholder="tab === 'custom' ? '必填，例如：VLAN 与 Trunk 配置' : '留空默认使用模板名称'" />
+      <el-form-item v-if="tab === 'preset'" label="实验说明">
+        <el-input v-model="form.description" type="textarea" :rows="2" placeholder="可选，留空使用模板说明" />
       </el-form-item>
-      <el-form-item label="实验说明">
-        <el-input v-model="form.description" type="textarea" :rows="2" placeholder="可选" />
+      <el-form-item v-if="tab === 'custom'" label="实验名称" required>
+        <el-input v-model="form.title" placeholder="必填，例如：VLAN 与 Trunk 配置" />
       </el-form-item>
-      <el-form-item label="实验满分">
-        <el-input-number v-model="form.total_score" :min="1" :max="1000" :step="10" />
-      </el-form-item>
-      <el-form-item label="及格分">
-        <el-input-number v-model="form.pass_score" :min="0" :max="1000" :step="5" />
-      </el-form-item>
-      <el-form-item label="标准时长">
-        <el-input-number v-model="form.standard_minutes" :min="5" :max="180" :step="5" />
-        <span class="unit">分钟</span>
-      </el-form-item>
-      <el-form-item label="允许重做">
-        <el-switch v-model="form.allow_resubmit" />
-        <span class="unit">自定义实验默认关闭（重做会保留上轮成绩，易造成误读）</span>
-      </el-form-item>
+
+      <el-alert type="info" :closable="false" class="rule-alert">
+        <template #title>
+          满分固定 100 分、及格 60 分，无需配置；同一学生多次提交只记录<strong>最高分</strong>。
+        </template>
+      </el-alert>
 
       <template v-if="tab === 'custom'">
         <el-form-item label="实验页面" required>
           <LabPageUploader v-model="pickedFile" :lab-id="null" />
         </el-form-item>
-        <el-form-item label="补充说明">
-          <el-input
-            v-model="form.report_note"
-            type="textarea"
-            :rows="2"
-            placeholder="可选：写给 AI 的额外要求，会追加在接入说明末尾"
-          />
-        </el-form-item>
       </template>
     </el-form>
 
     <template #footer>
-      <el-button @click="emit('update:modelValue', false)">取消</el-button>
-      <el-button type="primary" :loading="creating" @click="create">创建实验</el-button>
+      <div v-if="phase" class="phase-tip">
+        <el-icon class="is-loading"><Loading /></el-icon>
+        {{ phase }}
+        <el-progress
+          v-if="uploadPercent > 0"
+          :percentage="uploadPercent"
+          :stroke-width="8"
+          style="margin-top: 6px"
+        />
+      </div>
+      <div class="footer-btns">
+        <el-button @click="emit('update:modelValue', false)">取消</el-button>
+        <el-button type="primary" :loading="creating" @click="create">创建实验</el-button>
+      </div>
     </template>
   </el-drawer>
 </template>
@@ -84,6 +82,8 @@
 <script setup>
 import { onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Loading } from '@element-plus/icons-vue'
+import request from '@/api/request'
 import { listCatalogs } from '@/api/course'
 import { createLab, listLabTemplates, uploadLabPage } from '@/api/labs'
 import LabPageUploader from './LabPageUploader.vue'
@@ -95,30 +95,47 @@ const props = defineProps({
 })
 const emit = defineEmits(['update:modelValue', 'created'])
 
-const tab = ref('preset')
+// Stage 6：抽屉打开时自拉课程列表，不依赖父组件的加载时序
+// （父页 load() 会并发拉大量统计请求，课程下拉可能晚于抽屉打开就绪）。
+const courseList = ref([])
+async function loadCourseList() {
+  if (props.fixedCourseId) {
+    const fixed = props.courses.find((c) => String(c.id) === String(props.fixedCourseId))
+    courseList.value = fixed ? [fixed] : []
+    return
+  }
+  try {
+    const res = await request.get('/courses/', { params: { page_size: 100 } })
+    courseList.value = res.results ?? res ?? []
+  } catch {
+    courseList.value = []
+  }
+}
+
+// Stage 6 教师反馈：自定义上传是主路径，排在第一且默认选中
+const tab = ref('custom')
 const templates = ref([])
 const catalogOptions = ref([])
 const pickedFile = ref(null)
 const creating = ref(false)
+// 阶段反馈：创建 → 上传（含进度百分比），让整个流程可见（教师反馈第 7 条）
+const phase = ref('')
+const uploadPercent = ref(0)
 const blankForm = () => ({
   course: props.fixedCourseId || null,
   catalog: null,
   template: null,
   title: '',
   description: '',
-  total_score: 100,
-  pass_score: 60,
-  standard_minutes: 30,
-  // C12：自定义实验默认不允许重做（_reset_fields 刻意保留上轮成绩）
-  allow_resubmit: false,
-  report_note: '',
 })
 const form = ref(blankForm())
 
 function resetForm() {
   form.value = blankForm()
   pickedFile.value = null
-  tab.value = 'preset'
+  tab.value = 'custom'
+  phase.value = ''
+  uploadPercent.value = 0
 }
 
 function flattenCatalogs(nodes) {
@@ -153,12 +170,14 @@ async function loadCatalogs(courseId) {
 }
 
 /** 创建后再上传：先有 lab.id 才能走 /page/ 端点；命中 S8 扫描时二次确认重传。 */
-async function uploadAfterCreate(labId) {
+async function uploadAfterCreate(labId, fileName) {
   if (tab.value !== 'custom' || !pickedFile.value) return
   let force = false
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      await uploadLabPage(labId, pickedFile.value, force)
+      await uploadLabPage(labId, pickedFile.value, force, (e) => {
+        if (e.total) uploadPercent.value = Math.round((e.loaded / e.total) * 100)
+      })
       return
     } catch (e) {
       const body = e?.response?.data
@@ -169,13 +188,13 @@ async function uploadAfterCreate(labId) {
           { type: 'warning' },
         ).then(() => true).catch(() => false)
         if (!ok) {
-          ElMessage.warning('实验已创建，请稍后在「实验页面」Tab 补传页面')
+          ElMessage.warning('实验已创建，请稍后在「实验页面」页补传页面')
           return
         }
         force = true
         continue
       }
-      ElMessage.warning(`实验已创建，但页面上传失败：${body?.message || e?.message || '未知错误'}`)
+      ElMessage.warning(`实验已创建，但页面「${fileName}」上传失败：${body?.message || e?.message || '未知错误'}`)
       return
     }
   }
@@ -189,28 +208,37 @@ async function create() {
 
   creating.value = true
   try {
+    // Stage 6：满分/及格/时长/重做一律不再收集——后端默认 100/60、时长继承模板、
+    // 计分规则为「多次提交保留最高分」（allow_resubmit 走模型默认 True）
     const payload = {
       course: form.value.course,
       catalog: form.value.catalog || undefined,
       title: form.value.title.trim() || undefined,
       description: form.value.description || undefined,
-      total_score: form.value.total_score,
-      pass_score: form.value.pass_score,
-      standard_minutes: form.value.standard_minutes,
-      allow_resubmit: form.value.allow_resubmit,
       page_source: tab.value === 'custom' ? 'custom' : 'template',
       template: tab.value === 'preset' ? form.value.template : undefined,
-      report_note: tab.value === 'custom' ? form.value.report_note : '',
     }
+    phase.value = '正在创建实验…'
     const lab = await createLab(payload)
-    await uploadAfterCreate(lab.id)
-    ElMessage.success('实验已创建')
+    if (tab.value === 'custom' && pickedFile.value) {
+      phase.value = `正在上传页面 ${pickedFile.value.name}…`
+      uploadPercent.value = 1
+      await uploadAfterCreate(lab.id, pickedFile.value.name)
+      phase.value = ''
+      uploadPercent.value = 0
+      ElMessage.success('实验与页面已就绪')
+    } else {
+      phase.value = ''
+      ElMessage.success('实验已创建')
+    }
     emit('created', { ...lab, page_source: payload.page_source })
     emit('update:modelValue', false)
   } catch (e) {
     ElMessage.error(e?.message || '创建实验失败')
   } finally {
     creating.value = false
+    phase.value = ''
+    uploadPercent.value = 0
   }
 }
 
@@ -222,6 +250,7 @@ watch(() => form.value.course, (id) => loadCatalogs(id))
 watch(() => props.modelValue, (open) => {
   if (open) {
     form.value.course = props.fixedCourseId || form.value.course
+    loadCourseList()
     loadTemplates()
     loadCatalogs(form.value.course)
   }
@@ -234,4 +263,11 @@ onMounted(loadTemplates)
 .tab-tip { font-size: 12.5px; color: #64748b; line-height: 1.7; padding: 2px 2px 8px; }
 .create-form { padding-right: 8px; }
 .unit { margin-left: 10px; font-size: 12px; color: #94a3b8; }
+.rule-alert { margin: 4px 0 10px; }
+.phase-tip {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: #2563eb; padding: 4px 2px 10px;
+  flex: 1;
+}
+.footer-btns { display: flex; gap: 10px; justify-content: flex-end; }
 </style>

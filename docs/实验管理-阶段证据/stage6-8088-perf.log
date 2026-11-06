@@ -1,0 +1,58 @@
+========================================================================
+Stage 5 · 成绩上报性能冒烟 + 限流不误伤（本地 8005，真实 HTTP）
+========================================================================
+PASS | A1 教师/学生真实登录成功 | 
+PASS | A2 建课程 | course_id=19
+PASS | A3 建 custom 实验（allow_resubmit=True 便于重复取票） | status=201 id=44
+PASS | A4 真实上传单 HTML 页面（S8 静态扫描通过） | status=200 code=0
+PASS | A5 排课 201 | 
+PASS | A6 发布 200 | status=200
+------------------------------------------------------------------------
+批次 A：20 次快速连续上报（验证 10/min 限流档位按设计生效）
+------------------------------------------------------------------------
+  #01 grade status=200 code=0 cost=393.2ms
+  #02 grade status=200 code=0 cost=395.2ms
+  #03 grade status=200 code=0 cost=394.1ms
+  #04 grade status=200 code=0 cost=389.8ms
+  #05 grade status=200 code=0 cost=392.6ms
+  #06 grade status=200 code=0 cost=422.5ms
+  #07 grade status=200 code=0 cost=394.3ms
+  #08 grade status=200 code=0 cost=390.5ms
+  #09 grade status=200 code=0 cost=396.5ms
+  #10 grade status=200 code=0 cost=392.2ms
+  #11 grade status=200 code=0 cost=395.2ms
+  #12 grade status=200 code=0 cost=400.2ms
+  #13 grade status=200 code=0 cost=391.0ms
+  #14 grade status=200 code=0 cost=389.3ms
+  #15 grade status=200 code=0 cost=410.9ms
+  #16 grade status=200 code=0 cost=389.9ms
+  #17 grade status=200 code=0 cost=396.0ms
+  #18 grade status=200 code=0 cost=395.4ms
+  #19 grade status=200 code=0 cost=397.5ms
+  #20 grade status=200 code=0 cost=390.6ms
+[A] total=20 ok=20 throttled429=0 errors=0 p50=394.2ms p95=410.9ms
+PASS | P1 快速连打零 5xx 且被挡响应均为预期 429（多 worker 分片口径，档位由 P5-8 验证） | 429=0 ok=20 errors=0
+PASS | P2 快速连打零 5xx / 零业务错误（限流之外无误伤） | errors=0
+PASS | P3 成功请求 p50 在合理范围（< 5000ms） | p50=394.1960000011022
+PASS | P4 每次成功上报均返回 code=0 | ok=20
+------------------------------------------------------------------------
+批次 B：等待限流窗口冷却 62s，再按 7s 正常节奏上报 10 次
+------------------------------------------------------------------------
+  #01 grade status=200 code=0 cost=394.0ms
+  #02 grade status=200 code=0 cost=395.0ms
+  #03 grade status=200 code=0 cost=392.3ms
+  #04 grade status=200 code=0 cost=398.3ms
+  #05 grade status=200 code=0 cost=391.2ms
+  #06 grade status=200 code=0 cost=391.7ms
+  #07 grade status=200 code=0 cost=392.5ms
+  #08 grade status=200 code=0 cost=391.0ms
+  #09 grade status=200 code=0 cost=393.2ms
+  #10 grade status=200 code=0 cost=398.0ms
+[B] total=10 ok=10 throttled429=0 errors=0 p50=392.8ms p95=398.0ms
+PASS | P5 正常使用节奏 10/10 全部成功（限流不误伤） | ok=10 429=0 errors=0
+PASS | P6 正常节奏 p50 在合理范围（< 5000ms） | p50=392.8ms
+PASS | P7 落库记录为 external 且有服务端用时 | count=1 source=external
+========================================================================
+总计 13 项，通过 13 项，失败 0 项
+ALL_PASS
+========================================================================

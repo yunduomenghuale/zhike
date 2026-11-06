@@ -38,6 +38,12 @@
       </template>
     </el-alert>
 
+    <!-- 上传进度（教师反馈第 7 条：中间过程可见） -->
+    <div v-if="uploading" class="progress-row">
+      <el-progress :percentage="percent" :stroke-width="10" />
+      <div class="progress-tip">正在上传 {{ modelValue?.name || '' }}…</div>
+    </div>
+
     <div class="uploader-actions">
       <el-button
         v-if="labId"
@@ -47,10 +53,10 @@
         :disabled="!modelValue || disabled"
         @click="submit(false)"
       >
-        {{ needConfirm ? '确认继续上传' : '上传并保存' }}
+        {{ uploading ? `上传中 ${percent}%` : (needConfirm ? '确认继续上传' : '上传并保存') }}
       </el-button>
-      <el-button v-if="labId && page" size="small" @click="preview">预览页面</el-button>
-      <el-button v-if="labId && page" size="small" type="danger" plain @click="remove">删除页面</el-button>
+      <el-button v-if="labId && page" size="small" :disabled="uploading" @click="preview">预览页面</el-button>
+      <el-button v-if="labId && page" size="small" type="danger" plain :disabled="uploading" @click="remove">删除页面</el-button>
       <span v-if="!labId && modelValue" class="picked-tip">已选择，创建实验时将一并上传</span>
     </div>
   </div>
@@ -74,6 +80,7 @@ const emit = defineEmits(['update:modelValue', 'uploaded', 'changed'])
 const uploading = ref(false)
 const needConfirm = ref(false)
 const hits = ref([])
+const percent = ref(0)
 
 function fmtSize(size) {
   if (!size) return '0 B'
@@ -105,8 +112,11 @@ function onHtmlPicked(file) {
 async function submit(force) {
   if (!props.modelValue || !props.labId) return
   uploading.value = true
+  percent.value = 0
   try {
-    const res = await uploadLabPage(props.labId, props.modelValue, Boolean(force || needConfirm.value))
+    const res = await uploadLabPage(props.labId, props.modelValue, Boolean(force || needConfirm.value), (e) => {
+      if (e.total) percent.value = Math.round((e.loaded / e.total) * 100)
+    })
     needConfirm.value = false
     hits.value = []
     emit('update:modelValue', null)
@@ -165,6 +175,8 @@ async function remove() {
 .file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-size { color: #94a3b8; font-size: 12px; }
 .scan-alert { margin-top: 10px; }
+.progress-row { margin-top: 10px; }
+.progress-tip { margin-top: 4px; font-size: 12px; color: #64748b; }
 .scan-hits { font-weight: 600; line-height: 1.7; }
 .scan-tip { margin-top: 4px; font-size: 12px; }
 .uploader-actions { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }

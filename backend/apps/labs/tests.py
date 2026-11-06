@@ -1431,8 +1431,7 @@ class LabIntegrationSpecTest(TestCase):
 
     def test_dynamic_markdown_contains_all_required_sections(self):
         """§6.2：按实验名 / 总分 / 上报地址动态渲染，含 schema、错误码、最小 HTML、AI 指令。"""
-        lab_id = self._make_lab(title="VLAN 与 Trunk 配置实验", total_score="85.5",
-                                report_note="请重点考察 trunk 允许列表的配置顺序。")
+        lab_id = self._make_lab(title="VLAN 与 Trunk 配置实验", total_score="85.5")
         res = self._spec(lab_id)
         self.assertEqual(res.status_code, 200, res.data)
         data = res.data["data"]
@@ -1449,20 +1448,22 @@ class LabIntegrationSpecTest(TestCase):
             '"submission_id"', "## 5. 最小可运行示例", "## 7. 可直接复制给 AI",
             "LabBridge.validate()", "LabBridge.reportGrade(", "ctx.totalScore",
             "本次实验已提交", "成绩超出实验总分范围", "实验票据已使用",
-            "提交过于频繁", "请重点考察 trunk 允许列表的配置顺序。",
+            "提交过于频繁",
         ):
             self.assertIn(text, md, f"接入说明缺少：{text}")
         # 同源绝对地址由 request 预填，不是写死的内部 IP
         self.assertIn("http://testserver/api/lab-gate/grade/", md)
+        # Stage 6：教师补充说明功能下线，说明里不再出现该段
+        self.assertNotIn("report_note", data, "补充说明字段不应再出现在接入说明响应中")
+        self.assertNotIn("教师补充说明", md)
 
-    def test_report_note_appended_at_end(self):
-        """report_note 追加在末尾；未填写时给出明确占位说明。"""
-        lab_id = self._make_lab(report_note="补充说明：满分需完成全部 5 个任务。")
-        md = self._spec(lab_id).data["data"]["markdown"]
-        self.assertTrue(md.rstrip().endswith("补充说明：满分需完成全部 5 个任务。"))
-        empty_id = self._make_lab(title="无补充说明实验")
-        md2 = self._spec(empty_id).data["data"]["markdown"]
-        self.assertIn("（教师未填写补充说明）", md2)
+    def test_report_note_section_removed(self):
+        """Stage 6：教师补充说明功能整体下线——创建时不入说明，旧存量数据也不回显。"""
+        lab_id = self._make_lab()
+        res = self._spec(lab_id).data["data"]
+        self.assertNotIn("report_note", res)
+        self.assertNotIn("（教师未填写补充说明）", res["markdown"])
+        self.assertNotIn("## 8. 教师补充说明", res["markdown"])
 
     def test_permissions_teacher_only_and_row_level(self):
         """C46：显式 [IsTeacher]（不含 admin），行级归属由 get_queryset 保证。"""
@@ -1540,3 +1541,120 @@ class LabIntegrationSpecTest(TestCase):
         self.assertIn('sandbox="allow-scripts allow-forms allow-modals"', md)
         self.assertNotIn("allow-scripts allow-forms allow-modals allow-same-origin", md)
 
+
+
+class LabBestScorePolicyTest(TestCase):
+    """Stage 6 计分规则：首次提交的成绩即实验成绩，后续重做只保留历史最高分。
+
+    低分重做不覆盖任何成绩字段（步骤明细/报文/用时），仅状态流转为 submitted。
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.teacher = User.objects.create_user("t501", password="pass1234", role="teacher", real_name="赵老师")
+        cls.student = User.objects.create_user("20280001", password="pass1234", role="student", real_name="钱同学")
+        cls.course = Course.objects.create(name="计算机网络", teacher=cls.teacher)
+        cls.catalog = Catalog.objects.create(course=cls.course, title="第5章 计分规则", is_published=True)
+        cls.classroom = ClassRoom.objects.create(name="网络2801", teacher=cls.teacher)
+        ClassCourse.objects.create(classroom=cls.classroom, course=cls.course)
+        ClassStudent.objects.create(classroom=cls.classroom, student=cls.student)
+        cls.template = LabTemplate.objects.create(
+            code="st6-arp", title="ARP实验", default_standard_minutes=30,
+            random_config={"ranges": {"s1": [1, 9], "s2": [1, 9]}},
+        )
+
+    def setUp(self):
+        self.tc = APIClient()
+        self.tc.force_authenticate(self.teacher)
+        self.sc = APIClient()
+        self.sc.force_authenticate(self.student)
+
+    HTML = """<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+    <title>计分规则测试页</title></head><body><h1>自定义实验</h1>
+    <script>window.__custom_lab__ = true;</script></body></html>""".encode("utf-8")
+
+    def _make_lab(self, page_source="template"):
+        payload = {
+            "course": self.course.id, "catalog": self.catalog.id,
+            "total_score": "100", "page_source": page_source,
+        }
+        if page_source == "template":
+            payload["template"] = self.template.id
+        res = self.tc.post("/api/labs/", payload, format="json")
+        self.assertEqual(res.status_code, 201, res.data)
+        lab_id = res.data["data"]["id"]
+        if page_source == "custom":
+            from django.core.files.uploadedfile import SimpleUploadedFile
+
+            res = self.tc.post(f"/api/labs/{lab_id}/page/", {
+                "file": SimpleUploadedFile("best.html", self.HTML, content_type="text/html"),
+            }, format="multipart")
+            self.assertEqual(res.status_code, 200, res.data)
+        res = self.tc.post("/api/lab-schedules/", {"lab": lab_id, "classroom": self.classroom.id}, format="json")
+        self.assertIn(res.status_code, (200, 201), res.data)
+        res = self.tc.post(f"/api/labs/{lab_id}/publish/", format="json")
+        self.assertIn(res.status_code, (200, 201), res.data)
+        return lab_id
+
+    def _start(self, lab_id):
+        res = self.sc.post("/api/lab-submissions/start/", {"lab": lab_id}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        data = res.data["data"]
+        return data["attempt_token"], data["submission"]["id"]
+
+    def _submit_template(self, lab_id, passes):
+        token, sub_id = self._start(lab_id)
+        steps = {str(i + 1): ("pass" if i < passes else "fail") for i in range(5)}
+        res = self.sc.post(f"/api/lab-submissions/{sub_id}/submit/", {
+            "attempt_token": token, "steps_result": steps,
+            "error_log": [], "elapsed_seconds": 600,
+        }, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        return self.sc.get("/api/lab-submissions/", {"lab": lab_id}).data["data"]["results"][0]
+
+    def _grade_external(self, lab_id, total):
+        token, sub_id = self._start(lab_id)
+        res = self.gc_normal().post(
+            "/api/lab-gate/grade/", {"total_score": total, "elapsed_seconds": 300},
+            format="json", HTTP_X_LAB_TOKEN=token,
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        return self.sc.get("/api/lab-submissions/", {"lab": lab_id}).data["data"]["results"][0]
+
+    def gc_normal(self):
+        from rest_framework.test import APIClient as _C
+
+        c = _C()
+        return c
+
+    def test_template_redo_keeps_higher_score(self):
+        lab_id = self._make_lab("template")
+        first = self._submit_template(lab_id, passes=5)   # 高分
+        self.assertGreater(Decimal(str(first["total_score"])), Decimal("80"))
+        high_snapshot = (first["total_score"], first["steps_result"], first["elapsed_seconds"])
+        second = self._submit_template(lab_id, passes=2)  # 低分重做
+        self.assertEqual(second["attempt"], 2)
+        self.assertEqual(second["status"], "submitted")
+        self.assertEqual(Decimal(str(second["total_score"])), Decimal(str(high_snapshot[0])),
+                         "低分重做不得覆盖历史最高分")
+        self.assertEqual(second["steps_result"], high_snapshot[1], "步骤明细应保留最高分那次的数据")
+        self.assertEqual(second["elapsed_seconds"], high_snapshot[2])
+
+    def test_template_redo_updates_on_higher(self):
+        lab_id = self._make_lab("template")
+        first = self._submit_template(lab_id, passes=2)   # 低分
+        second = self._submit_template(lab_id, passes=5)  # 高分重做
+        self.assertGreater(Decimal(str(second["total_score"])), Decimal(str(first["total_score"])),
+                           "高分重做应更新成绩")
+        self.assertEqual(second["attempt"], 2)
+
+    def test_external_best_score(self):
+        lab_id = self._make_lab("custom")
+        s1 = self._grade_external(lab_id, 60)
+        self.assertEqual(Decimal(str(s1["total_score"])), Decimal("60"))
+        s2 = self._grade_external(lab_id, 90)
+        self.assertEqual(Decimal(str(s2["total_score"])), Decimal("90"), "高分重做应更新")
+        s3 = self._grade_external(lab_id, 50)
+        self.assertEqual(Decimal(str(s3["total_score"])), Decimal("90"), "低分重做保留最高分")
+        self.assertEqual(s3["grading_source"], "external")
+        self.assertIsNotNone(s3["submitted_at"])

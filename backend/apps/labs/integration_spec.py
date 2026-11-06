@@ -265,10 +265,6 @@ X-Lab-Token: <由平台父页面自动附带，iframe 内页面不接触>
 ```text
 @@AI_PROMPT@@
 ```
-
-## 8. 教师补充说明（`report_note`）
-
-@@REPORT_NOTE@@
 """
 
 
@@ -279,7 +275,6 @@ def build_integration_spec(lab, absolute_grade_url=None) -> dict:
     :param absolute_grade_url: 可选，由视图用 `request.build_absolute_uri()` 生成的同源绝对地址
     """
     score = _fmt_score(lab.total_score)
-    note = (lab.report_note or "").strip() or "（教师未填写补充说明）"
     replacements = {
         "@@LAB_TITLE@@": str(lab.title or ""),
         "@@LAB_ID@@": str(lab.id),
@@ -289,7 +284,6 @@ def build_integration_spec(lab, absolute_grade_url=None) -> dict:
         "@@DEBUG_ENDPOINT@@": f"/api/labs/{lab.id}/grade-debug/",
         "@@MIN_HTML@@": _MIN_HTML,
         "@@AI_PROMPT@@": _AI_PROMPT,
-        "@@REPORT_NOTE@@": note,
     }
     markdown = _SPEC_TEMPLATE
     # 多轮展开：`@@MIN_HTML@@` / `@@AI_PROMPT@@` 的替换值里本身还带
@@ -306,6 +300,5 @@ def build_integration_spec(lab, absolute_grade_url=None) -> dict:
         "total_score": score,
         "grade_endpoint": GRADE_ENDPOINT,
         "grade_debug_endpoint": f"/api/labs/{lab.id}/grade-debug/",
-        "report_note": (lab.report_note or ""),
         "markdown": markdown,
     }

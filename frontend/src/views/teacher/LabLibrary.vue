@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <div class="page-title">实验管理</div>
-        <div class="page-subtitle">平台预置与自定义实验统一管理；自定义实验创建后即可复制接入说明给 AI 生成页面</div>
+        <div class="page-subtitle">{{ fixedCourseId ? '本课程的实验，创建后即可课程内排课发布' : '平台预置与自定义实验统一管理；自定义实验创建后即可复制接入说明给 AI 生成页面' }}</div>
       </div>
       <div class="header-actions">
         <el-button type="warning" plain size="small" @click="guideDialog.open()">实验必读</el-button>
@@ -11,7 +11,7 @@
       </div>
     </div>
 
-    <el-card shadow="never" class="filter-card">
+    <el-card v-if="!fixedCourseId" shadow="never" class="filter-card">
       <span class="filter-label">课程筛选</span>
       <el-select v-model="courseFilter" clearable placeholder="全部课程" style="width: 240px" @change="load">
         <el-option v-for="c in courses" :key="c.id" :value="c.id" :label="c.name" />
@@ -24,7 +24,7 @@
         <el-table-column prop="title" label="实验名称" min-width="180" show-overflow-tooltip>
           <template #default="{ row }"><span class="lab-name">{{ row.title }}</span></template>
         </el-table-column>
-        <el-table-column prop="course_name" label="课程" min-width="130" show-overflow-tooltip />
+        <el-table-column v-if="!fixedCourseId" prop="course_name" label="课程" min-width="130" show-overflow-tooltip />
         <el-table-column label="类型" width="96">
           <template #default="{ row }">
             <el-tag :type="row.page_source === 'custom' ? 'warning' : 'info'" size="small" effect="plain">
@@ -54,7 +54,7 @@
             <span v-else class="sub-text">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="240">
+        <el-table-column label="操作" width="300" class-name="op-col">
           <template #default="{ row }">
             <el-button size="small" type="primary" plain @click="openDetail(row)">详情</el-button>
             <el-button size="small" @click="openDetail(row, 'schedule')">排课</el-button>
@@ -67,13 +67,20 @@
       </el-table>
     </el-card>
 
-    <!-- 新建抽屉：平台预置 / 自定义上传 -->
-    <LabCreateDrawer v-model="createVisible" :courses="courses" @created="onCreated" />
+    <!-- 新建抽屉：自定义上传 / 平台预置（计算机网络实验） -->
+    <LabCreateDrawer v-model="createVisible" :courses="courses" :fixed-course-id="fixedCourseId" @created="onCreated" />
 
-    <!-- 详情抽屉：概览 / 实验页面 / 成绩接口 / 排课 / 成绩 -->
-    <el-drawer v-model="detailVisible" :title="currentLab?.title || '实验详情'" size="76%">
+    <!-- 详情弹窗：概览（含图表与成绩列表）/ 实验页面 / 成绩接口 / 排课 -->
+    <el-dialog
+      v-model="detailVisible"
+      :title="currentLab?.title || '实验详情'"
+      width="86%"
+      top="4vh"
+      destroy-on-close
+      class="lab-detail-dialog"
+    >
       <el-tabs v-if="currentLab" v-model="detailTab" class="detail-tabs">
-        <el-tab-pane label="概览" name="overview">
+        <el-tab-pane label="概览与成绩" name="overview">
           <div v-loading="detailLoading" class="tab-body">
             <div class="d-grid">
               <div class="d-item"><span class="d-k">状态</span><el-tag :type="statusType(currentLab.status)" size="small">{{ statusText(currentLab.status) }}</el-tag></div>
@@ -90,6 +97,70 @@
               <div class="stat-box avg"><div class="stat-num">{{ detailStats.avgScore ?? '—' }}</div><div class="stat-label">提交均分</div></div>
               <div class="stat-box avg"><div class="stat-num">{{ detailStats.avgSteps ?? '—' }}</div><div class="stat-label">平均步骤通过</div></div>
             </div>
+
+            <!-- 成绩统计图表（纯 CSS 实现，不引图表库） -->
+            <div class="chart-row">
+              <div class="chart-card">
+                <div class="chart-title">完成情况</div>
+                <div class="stack-bar">
+                  <div class="seg ok" :style="{ width: pctOf(detailStats.submitted) }"></div>
+                  <div class="seg ing" :style="{ width: pctOf(detailStats.ongoing) }"></div>
+                  <div class="seg none" :style="{ width: pctOf(pendingCount) }"></div>
+                </div>
+                <div class="legend">
+                  <span><i class="dot ok" />已提交 {{ detailStats.submitted }}</span>
+                  <span><i class="dot ing" />进行中 {{ detailStats.ongoing }}</span>
+                  <span><i class="dot none" />未开始 {{ pendingCount }}</span>
+                </div>
+              </div>
+              <div class="chart-card">
+                <div class="chart-title">分数段分布（已提交）</div>
+                <div class="bar-chart">
+                  <div v-for="b in scoreBuckets" :key="b.label" class="bar-col">
+                    <div class="bar-count">{{ b.count || '' }}</div>
+                    <div class="bar-track"><div class="bar-fill" :style="{ height: barHeight(b.count) }" /></div>
+                    <div class="bar-label">{{ b.label }}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 成绩列表（原「成绩」Tab 内容，移到概览底部） -->
+            <div class="scores-title">成绩明细</div>
+            <el-table :data="detailRows" size="small">
+              <el-table-column label="学生" min-width="130">
+                <template #default="{ row }">
+                  <span class="stu-name">{{ row.name }}</span>
+                  <span class="stu-no">{{ row.username }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="状态" width="80">
+                <template #default="{ row }">
+                  <el-tag v-if="row.state === 'submitted'" type="success" size="small">已提交</el-tag>
+                  <el-tag v-else-if="row.state === 'ongoing'" type="warning" size="small">进行中</el-tag>
+                  <el-tag v-else type="info" size="small" effect="plain">未开始</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="总分" width="70" align="center">
+                <template #default="{ row }">
+                  <span v-if="row.state === 'submitted'" class="score-num">{{ row.total_score }}</span>
+                  <span v-else class="sub-text">—</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="步骤" width="72" align="center">
+                <template #default="{ row }">
+                  <span v-if="row.state === 'not_started'">—</span>
+                  <span v-else-if="row.grading_source === 'external'" class="sub-text">不适用</span>
+                  <span v-else>{{ `${row.passed_steps ?? 0}/${row.total_steps ?? '—'}` }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="用时" width="70" align="center">
+                <template #default="{ row }">{{ row.state === 'not_started' ? '—' : `${Math.round((row.elapsed_seconds ?? 0) / 60)}分` }}</template>
+              </el-table-column>
+              <el-table-column label="提交时间" width="130">
+                <template #default="{ row }">{{ row.submitted_at ? fmtDT(row.submitted_at) : '—' }}</template>
+              </el-table-column>
+            </el-table>
           </div>
         </el-tab-pane>
 
@@ -143,47 +214,8 @@
             </div>
           </div>
         </el-tab-pane>
-
-        <el-tab-pane label="成绩" name="scores">
-          <div class="tab-body">
-            <el-table :data="detailRows" size="small">
-              <el-table-column label="学生" min-width="130">
-                <template #default="{ row }">
-                  <span class="stu-name">{{ row.name }}</span>
-                  <span class="stu-no">{{ row.username }}</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="状态" width="80">
-                <template #default="{ row }">
-                  <el-tag v-if="row.state === 'submitted'" type="success" size="small">已提交</el-tag>
-                  <el-tag v-else-if="row.state === 'ongoing'" type="warning" size="small">进行中</el-tag>
-                  <el-tag v-else type="info" size="small" effect="plain">未开始</el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="总分" width="70" align="center">
-                <template #default="{ row }">
-                  <span v-if="row.state === 'submitted'" class="score-num">{{ row.total_score }}</span>
-                  <span v-else class="sub-text">—</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="步骤" width="72" align="center">
-                <template #default="{ row }">
-                  <span v-if="row.state === 'not_started'">—</span>
-                  <span v-else-if="row.grading_source === 'external'" class="sub-text">不适用</span>
-                  <span v-else>{{ `${row.passed_steps ?? 0}/${row.total_steps ?? '—'}` }}</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="用时" width="70" align="center">
-                <template #default="{ row }">{{ row.state === 'not_started' ? '—' : `${Math.round((row.elapsed_seconds ?? 0) / 60)}分` }}</template>
-              </el-table-column>
-              <el-table-column label="提交时间" width="130">
-                <template #default="{ row }">{{ row.submitted_at ? fmtDT(row.submitted_at) : '—' }}</template>
-              </el-table-column>
-            </el-table>
-          </div>
-        </el-tab-pane>
       </el-tabs>
-    </el-drawer>
+    </el-dialog>
 
     <LabGuideDialog ref="guideDialog" is-teacher-view />
   </div>
@@ -202,11 +234,16 @@ import {
   createLabSchedule, listLabSubmissions,
 } from '@/api/labs'
 
+// fixedCourseId：课程工作台内嵌模式（教师反馈第 1 条）——实验归属该课程，锁定课程筛选
+const props = defineProps({
+  fixedCourseId: { type: [Number, String], default: null },
+})
+
 const courses = ref([])
 const classes = ref([])
 const labs = ref([])
 const loading = ref(false)
-const courseFilter = ref(null)
+const courseFilter = ref(props.fixedCourseId ? Number(props.fixedCourseId) : null)
 const createVisible = ref(false)
 const detailVisible = ref(false)
 const detailTab = ref('overview')
@@ -263,9 +300,10 @@ async function load() {
     const courseParams = courseFilter.value ? { course: courseFilter.value } : undefined
     const labParams = { ...(courseParams || {}), page_size: 100 }
     // 课程下拉同样一次取全（否则课程超过默认 20 条时，新建抽屉里选不到最新课程）。
-    const courseListParams = { page_size: 100 }
-    const [l, c] = await Promise.all([listLabs(labParams), request.get('/courses/', { params: courseListParams })])
-    courses.value = c.results ?? c
+    const requests = [listLabs(labParams)]
+    if (!props.fixedCourseId) requests.push(request.get('/courses/', { params: { page_size: 100 } }))
+    const [l, c] = await Promise.all(requests)
+    if (c) courses.value = c.results ?? c
     labs.value = (l.results ?? l).slice().sort((a, b) => b.id - a.id)
     labs.value
       .filter((lab) => (lab.schedules || []).length)
@@ -279,7 +317,7 @@ async function load() {
   }
 }
 
-/** 与课程空间 LabManage.vue 同口径的统计（C17：external 排除步骤指标）。 */
+/** 与课程空间同口径的统计（C17：external 排除步骤指标）。 */
 async function fetchLabStats(lab) {
   const classroomIds = (lab.schedules || []).map((s) => s.classroom)
   if (!classroomIds.length) {
@@ -385,6 +423,34 @@ const detailStats = computed(() => labStatsCache.value[currentLab.value?.id] || 
   expected: 0, submitted: 0, ongoing: 0, avgScore: null, avgSteps: null,
 })
 
+// 完成情况堆叠条（纯 CSS）
+const pendingCount = computed(() =>
+  Math.max(0, Number(detailStats.value.expected || 0) - Number(detailStats.value.submitted || 0) - Number(detailStats.value.ongoing || 0)))
+function pctOf(n) {
+  const total = Number(detailStats.value.expected || 0)
+  if (!total) return '0%'
+  return `${Math.round((Number(n || 0) / total) * 1000) / 10}%`
+}
+
+// 分数段分布（纯 CSS 柱状）
+const scoreBuckets = computed(() => {
+  const buckets = [
+    { label: '0-59', min: 0, max: 59.99 },
+    { label: '60-69', min: 60, max: 69.99 },
+    { label: '70-79', min: 70, max: 79.99 },
+    { label: '80-89', min: 80, max: 89.99 },
+    { label: '90-100', min: 90, max: 1000 },
+  ]
+  const subs = detailSubs.value.filter((s) => s.status === 'submitted' && s.total_score != null)
+  const counts = buckets.map((b) => subs.filter((s) => Number(s.total_score) >= b.min && Number(s.total_score) <= b.max).length)
+  const max = Math.max(...counts, 1)
+  return buckets.map((b, i) => ({ ...b, count: counts[i], ratio: counts[i] / max }))
+})
+function barHeight(count) {
+  const b = scoreBuckets.value.find((x) => x.count === count) || {}
+  return `${Math.max(4, Math.round((b.ratio || 0) * 96))}px`
+}
+
 async function saveSchedule() {
   if (!scheduleForm.value.classroom) return ElMessage.warning('请选择班级')
   try {
@@ -430,6 +496,9 @@ onMounted(load)
 .stu-name { display: block; font-size: 13px; font-weight: 600; color: #1e293b; }
 .stu-no { display: block; font-size: 12px; color: #94a3b8; }
 .score-num { font-weight: 700; color: #2563eb; }
+/* 操作列：4 个按钮保持单行（教师反馈第 3 条） */
+.op-col :deep(.cell) { white-space: nowrap; }
+.op-col :deep(.el-button + .el-button) { margin-left: 8px; }
 .detail-tabs { padding: 0 6px; }
 .tab-body { padding: 8px 4px 20px; }
 .page-alert { margin-bottom: 14px; }
@@ -454,8 +523,30 @@ onMounted(load)
 .stat-box.ing .stat-num { color: #d97706; }
 .stat-box.avg { background: #eff6ff; }
 .stat-box.avg .stat-num { color: #2563eb; }
+/* 图表（纯 CSS，教师反馈第 6 条） */
+.chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 16px 0; }
+.chart-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px 16px; background: #fff; }
+.chart-title { font-size: 13px; font-weight: 600; color: #334155; margin-bottom: 12px; }
+.stack-bar { display: flex; height: 18px; border-radius: 9px; overflow: hidden; background: #f1f5f9; }
+.seg { height: 100%; min-width: 2px; }
+.seg.ok { background: #10b981; }
+.seg.ing { background: #f59e0b; }
+.seg.none { background: #e2e8f0; }
+.legend { display: flex; gap: 16px; margin-top: 10px; font-size: 12px; color: #64748b; }
+.legend .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+.dot.ok { background: #10b981; }
+.dot.ing { background: #f59e0b; }
+.dot.none { background: #e2e8f0; }
+.bar-chart { display: flex; align-items: flex-end; gap: 18px; height: 130px; padding: 0 6px; }
+.bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; }
+.bar-count { font-size: 12px; color: #475569; font-weight: 600; }
+.bar-track { flex: 1; width: 34px; display: flex; align-items: flex-end; background: #f8fafc; border-radius: 6px 6px 0 0; overflow: hidden; }
+.bar-fill { width: 100%; background: linear-gradient(180deg, #60a5fa, #2563eb); border-radius: 6px 6px 0 0; transition: height .3s; }
+.bar-label { margin-top: 6px; font-size: 11px; color: #94a3b8; }
+.scores-title { font-size: 14px; font-weight: 600; color: #1e293b; margin: 6px 0 10px; padding-left: 8px; border-left: 3px solid #10b981; }
 .schedule-list { margin-top: 14px; }
 .schedule-line { display: flex; align-items: center; gap: 8px; line-height: 1.9; }
 .schedule-class { padding: 1px 8px; border-radius: 4px; background: #ecf5ff; color: #409eff; font-size: 12px; }
 .schedule-time { color: #64748b; font-size: 12px; }
+@media (max-width: 1100px) { .chart-row { grid-template-columns: 1fr; } }
 </style>
