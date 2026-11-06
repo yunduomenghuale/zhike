@@ -5,14 +5,6 @@
         <div class="page-title">虚拟实验</div>
         <div class="page-subtitle">在开放时间内完成实验步骤并提交，提交后即时出分</div>
       </div>
-      <el-button
-        type="warning"
-        plain
-        size="small"
-        @click="guideDialog.open()"
-      >
-        实验必读
-      </el-button>
     </div>
 
     <TableSkeleton v-if="loading" :cols="5" />
@@ -117,8 +109,6 @@
     </div>
     <el-empty v-else description="暂无可参加的虚拟实验" />
 
-    <!-- 实验必读（学生只读浏览） -->
-    <LabGuideDialog ref="guideDialog" />
   </div>
 </template>
 
@@ -126,7 +116,6 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import LabGuideDialog from '@/components/LabGuideDialog.vue'
 import { useUserStore } from '@/store/user'
 import { listLabs, listLabSubmissions, startLab } from '@/api/labs'
 
@@ -142,7 +131,6 @@ const labs = ref([])
 const submissions = ref([])
 const loading = ref(false)
 const entering = ref(null)
-const guideDialog = ref(null)
 
 function submissionOf(row) {
   return submissions.value.find((s) => s.lab === row.id)

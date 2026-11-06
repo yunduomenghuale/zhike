@@ -21,6 +21,7 @@
       <el-icon><Document /></el-icon>
       <span class="file-name" :title="modelValue.name">{{ modelValue.name }}</span>
       <span class="file-size">{{ fmtSize(modelValue.size) }}</span>
+      <el-tag v-if="page" size="small" type="warning" effect="plain" class="overwrite-tag">上传后将覆盖当前生效页面</el-tag>
     </div>
 
     <!-- S8 静态扫描命中：展示命中项，由教师显式二次确认后才落库 -->
@@ -53,10 +54,17 @@
         :disabled="!modelValue || disabled"
         @click="submit(false)"
       >
-        {{ uploading ? `上传中 ${percent}%` : (needConfirm ? '确认继续上传' : '上传并保存') }}
+        {{ uploading ? `上传中 ${percent}%` : (page ? '上传并覆盖当前页面' : (needConfirm ? '确认继续上传' : '上传并保存')) }}
       </el-button>
-      <el-button v-if="labId && page" size="small" :disabled="uploading" @click="preview">预览页面</el-button>
-      <el-button v-if="labId && page" size="small" type="danger" plain :disabled="uploading" @click="remove">删除页面</el-button>
+      <el-button v-if="labId && page" size="small" :disabled="uploading" @click="preview">预览当前生效页面</el-button>
+      <el-tooltip
+        v-if="labId && page && !canDelete"
+        content="自定义实验没有可回退的模板页面，删除会使实验无法访问；直接上传新页面覆盖即可"
+        placement="top"
+      >
+        <span class="delete-disabled-tip">不可删除</span>
+      </el-tooltip>
+      <el-button v-if="labId && page && canDelete" size="small" type="danger" plain :disabled="uploading" @click="remove">删除当前页面</el-button>
       <span v-if="!labId && modelValue" class="picked-tip">已选择，创建实验时将一并上传</span>
     </div>
   </div>
@@ -69,11 +77,14 @@ import { UploadFilled, Document } from '@element-plus/icons-vue'
 import { uploadLabPage, deleteLabPage, previewLabPage } from '@/api/labs'
 
 const props = defineProps({
-  // 已有实验：直接上传 / 替换；为空表示新建抽屉内暂存文件，由父组件创建后再传
+  // 已有实验：直接上传 / 替换；为空表示新建弹窗内暂存文件，由父组件创建后再传
   labId: { type: [Number, String], default: null },
   modelValue: { type: Object, default: null },
   page: { type: Object, default: null },
   disabled: { type: Boolean, default: false },
+  // 是否允许删除已上传页面：实验绑定了模板（可回退）才显示删除；
+  // 自定义实验删除页面会变成不可访问的死实验（后端会 400 拒绝），应直接上传覆盖
+  canDelete: { type: Boolean, default: true },
 })
 const emit = defineEmits(['update:modelValue', 'uploaded', 'changed'])
 
@@ -148,7 +159,10 @@ async function preview() {
 }
 
 async function remove() {
-  await ElMessageBox.confirm('删除后该实验将回退为平台预置模式，确认删除？', '提示', { type: 'warning' })
+  await ElMessageBox.confirm(
+    '删除后该实验将回退为平台预置模式，学生将无法进入实验页面（可重新上传恢复）。确认删除？',
+    '删除当前生效页面', { type: 'warning', confirmButtonText: '确认删除' },
+  )
   await deleteLabPage(props.labId)
   emit('update:modelValue', null)
   emit('changed')
@@ -174,6 +188,7 @@ async function remove() {
 }
 .file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-size { color: #94a3b8; font-size: 12px; }
+.overwrite-tag { margin-left: 8px; flex-shrink: 0; }
 .scan-alert { margin-top: 10px; }
 .progress-row { margin-top: 10px; }
 .progress-tip { margin-top: 4px; font-size: 12px; color: #64748b; }

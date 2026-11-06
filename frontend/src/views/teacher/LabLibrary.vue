@@ -6,7 +6,6 @@
         <div class="page-subtitle">{{ fixedCourseId ? '本课程的实验，创建后即可课程内排课发布' : '平台预置与自定义实验统一管理；自定义实验创建后即可复制接入说明给 AI 生成页面' }}</div>
       </div>
       <div class="header-actions">
-        <el-button type="warning" plain size="small" @click="guideDialog.open()">实验必读</el-button>
         <el-button type="primary" size="small" @click="createVisible = true">新建实验</el-button>
       </div>
     </div>
@@ -191,6 +190,7 @@
                 v-model="pageFile"
                 :lab-id="currentLab.id"
                 :page="currentLab.has_custom_page ? { name: currentLab.custom_page_name } : null"
+                :can-delete="Boolean(currentLab.template_id)"
                 @uploaded="onPageUploaded"
                 @changed="refreshCurrent"
               />
@@ -234,7 +234,6 @@
       </el-tabs>
     </el-dialog>
 
-    <LabGuideDialog ref="guideDialog" is-teacher-view />
   </div>
 </template>
 
@@ -242,7 +241,6 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/api/request'
-import LabGuideDialog from '@/components/LabGuideDialog.vue'
 import LabCreateDrawer from '@/components/lab/LabCreateDrawer.vue'
 import LabPageUploader from '@/components/lab/LabPageUploader.vue'
 import LabGradingPanel from '@/components/lab/LabGradingPanel.vue'
@@ -269,7 +267,6 @@ const currentLab = ref(null)
 const detailRoster = ref([])
 const detailSubs = ref([])
 const labStatsCache = ref({})
-const guideDialog = ref(null)
 const scheduleForm = ref({ lab: null, classroom: null, open_at: '', close_at: '' })
 // 详情内「实验页面」的待上传文件（教师反馈：选择文件后要有文件状态条并可上传替换）
 const pageFile = ref(null)
@@ -552,22 +549,23 @@ onMounted(load)
 .stat-box.avg .stat-num { color: #2563eb; }
 /* 图表（纯 CSS/SVG，教师反馈：完成情况用饼图） */
 .chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 16px 0; }
-.chart-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px 16px; background: #fff; }
-.chart-title { font-size: 13px; font-weight: 600; color: #334155; margin-bottom: 12px; }
-.pie-wrap { display: flex; align-items: center; gap: 26px; }
+.chart-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px 20px; background: #fff; }
+.chart-title { font-size: 13px; font-weight: 600; color: #334155; margin-bottom: 14px; }
+.pie-wrap { display: flex; align-items: center; justify-content: center; gap: 40px; padding: 6px 0 2px; }
 .pie {
-  width: 132px; height: 132px; border-radius: 50%;
+  width: 168px; height: 168px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   box-shadow: inset 0 0 0 1px rgba(0,0,0,.04);
+  flex-shrink: 0;
 }
 .pie-hole {
-  width: 84px; height: 84px; border-radius: 50%; background: #fff;
+  width: 106px; height: 106px; border-radius: 50%; background: #fff;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
 }
-.pie-hole b { font-size: 22px; font-weight: 700; color: #1e293b; line-height: 1.2; }
-.pie-hole span { font-size: 11px; color: #94a3b8; }
-.legend { display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; color: #64748b; }
-.legend .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+.pie-hole b { font-size: 28px; font-weight: 700; color: #1e293b; line-height: 1.2; }
+.pie-hole span { font-size: 12px; color: #94a3b8; }
+.legend { display: flex; flex-direction: column; gap: 12px; font-size: 13.5px; color: #475569; }
+.legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; }
 .dot.ok { background: #10b981; }
 .dot.ing { background: #f59e0b; }
 .dot.none { background: #e2e8f0; }
