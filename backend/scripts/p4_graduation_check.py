@@ -103,9 +103,15 @@ def prepare_env():
 
 def start_server() -> subprocess.Popen:
     env = dict(os.environ)
+    # 解释器：默认当前进程同款（Linux 容器内是 /usr/local/bin/python）；
+    # Windows 本地约定 venv 路径仅在存在时使用（8092/124 复测在容器内跑）。
+    exe = sys.executable
+    win_venv = BASE_DIR / "venv" / "Scripts" / "python.exe"
+    if os.name == "nt" and win_venv.exists():
+        exe = str(win_venv)
     proc = subprocess.Popen(
         [
-            str(BASE_DIR / "venv" / "Scripts" / "python.exe"),
+            exe,
             "manage.py", "runserver", str(PORT), "--noreload",
         ],
         cwd=BASE_DIR, env=env,

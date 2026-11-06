@@ -129,10 +129,17 @@ def start_server(port: int, extra_env: dict | None = None) -> subprocess.Popen:
     env.update(extra_env or {})
     # ⚠ 输出必须落文件而非 PIPE：schema 生成会向 stderr 打大量警告，PIPE 无人
     # 读取时 64K 缓冲写满，子进程写日志阻塞 → 整个服务冻结（实测踩坑）
+    WORK_DIR.mkdir(parents=True, exist_ok=True)
     log_fh = open(WORK_DIR / f"server_{port}.log", "w", encoding="utf-8")
+    # 解释器：默认当前进程同款（Linux 容器内是 /usr/local/bin/python）；
+    # Windows 本地约定 venv 路径仅在存在时使用（8092/124 复测在容器内跑）。
+    exe = sys.executable
+    win_venv = BASE_DIR / "venv" / "Scripts" / "python.exe"
+    if os.name == "nt" and win_venv.exists():
+        exe = str(win_venv)
     proc = subprocess.Popen(
         [
-            str(BASE_DIR / "venv" / "Scripts" / "python.exe"),
+            exe,
             "manage.py", "runserver", str(port), "--noreload",
         ],
         cwd=BASE_DIR, env=env,

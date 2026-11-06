@@ -29,9 +29,35 @@ OUT = os.environ.get("OUT", "D:/tmp/stage4-setup.json")
 FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "stage4-from-spec.html")
 TEACHER = ("t101", "pass1234")
 STUDENT = ("20249999", "pass1234")
+# S5_REMOTE 非空时，ORM 段经 SSH 在 124 的 zhike_s5test_backend 容器里执行
+# （BASE 走 SSH 隧道，如 http://127.0.0.1:18092）；为空则维持本地 manage.py 子进程。
+S5_REMOTE = os.environ.get("S5_REMOTE", "")
 
 s = requests.Session()
 s.trust_env = False
+
+
+def run_manage_shell(code):
+    """manage.py shell：默认本地子进程；S5_REMOTE 时经 SSH 灌进远端容器的 REPL stdin。"""
+    if S5_REMOTE:
+        import paramiko
+
+        cli = paramiko.SSHClient()
+        cli.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        cli.connect("124.70.107.64", port=22, username="root",
+                    key_filename=os.path.expanduser("~/.ssh/id_claude_server"),
+                    look_for_keys=False, allow_agent=False, timeout=20,
+                    banner_timeout=30, auth_timeout=30)
+        stdin, stdout, stderr = cli.exec_command(
+            "docker exec -i zhike_s5test_backend python manage.py shell", timeout=300)
+        stdin.write(code if code.endswith("\n") else code + "\n")
+        stdin.channel.shutdown_write()
+        out = stdout.read().decode("utf-8", "replace")
+        err = stderr.read().decode("utf-8", "replace")
+        cli.close()
+        return type("R", (), {"stdout": out, "stderr": err})()
+    return subprocess.run([sys.executable, "manage.py", "shell", "-c", code],
+                          capture_output=True, text=True, check=True)
 
 
 def api(method, path, token=None, expect=200, **kw):
@@ -56,14 +82,16 @@ def main():
         s_token = login(*STUDENT)
     except AssertionError:
         # 开发库账号密码被改过：与 e2e_real_test.py 同款真实库重置
-        subprocess.run([sys.executable, "manage.py", "shell", "-c", """
+        proc = run_manage_shell("""
 from django.contrib.auth import get_user_model
 U = get_user_model()
 t, _ = U.objects.get_or_create(username='t101', defaults={'role': 'teacher'})
 t.set_password('pass1234'); t.role = 'teacher'; t.is_staff = True; t.save()
 s, _ = U.objects.get_or_create(username='20249999', defaults={'role': 'student'})
 s.set_password('pass1234'); s.role = 'student'; s.save()
-"""], check=True)
+print('PWD_RESET_DONE')
+""")
+        assert "PWD_RESET_DONE" in proc.stdout, f"密码复位失败: {proc.stdout[-300:]} {proc.stderr[-300:]}"
         t_token = login(*TEACHER)
         s_token = login(*STUDENT)
     print("login OK: teacher=t101 student=20249999")
@@ -90,8 +118,7 @@ ClassCourse.objects.get_or_create(classroom=cls, course=course)
 print("CLASS_ID=" + str(cls.id))
 print("CLASS_NAME=" + cls.name)
 '''
-    proc = subprocess.run([sys.executable, "manage.py", "shell", "-c", shell_code],
-                          capture_output=True, text=True, check=True)
+    proc = run_manage_shell(shell_code)
     m = re.search(r"CLASS_ID=(\d+)", proc.stdout)
     m_name = re.search(r"CLASS_NAME=(.+)", proc.stdout)
     assert m and m_name, f"班级准备失败: {proc.stdout[-400:]} {proc.stderr[-400:]}"

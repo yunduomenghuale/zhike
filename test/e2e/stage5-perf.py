@@ -30,6 +30,34 @@ FIXTURE = os.path.join(ROOT, "test", "e2e", "fixtures", "stage4-from-spec.html")
 S = requests.Session()
 S.trust_env = False
 
+# S5_REMOTE 非空 → ORM 段经 SSH 在 124 的 zhike_s5test_backend 容器内执行（8092 复测模式）。
+# 注意必须与 BASE 指向同一环境：class_id 若取自本地库而 lab 建在远端，
+# 排课会被「只能给自己课程的实验、自己的班级排课」拦下（ClassCourse 未关联）。
+S5_REMOTE = os.environ.get("S5_REMOTE", "")
+
+
+def run_manage_shell(code):
+    """manage.py shell：默认本地子进程；S5_REMOTE 时灌进远端容器 REPL stdin。"""
+    if S5_REMOTE:
+        import paramiko
+
+        cli = paramiko.SSHClient()
+        cli.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        cli.connect("124.70.107.64", port=22, username="root",
+                    key_filename=os.path.expanduser("~/.ssh/id_claude_server"),
+                    look_for_keys=False, allow_agent=False, timeout=20,
+                    banner_timeout=30, auth_timeout=30)
+        stdin, stdout, stderr = cli.exec_command(
+            "docker exec -i zhike_s5test_backend python manage.py shell", timeout=300)
+        stdin.write(code if code.endswith("\n") else code + "\n")
+        stdin.channel.shutdown_write()
+        out = stdout.read().decode("utf-8", "replace")
+        err = stderr.read().decode("utf-8", "replace")
+        cli.close()
+        return type("R", (), {"stdout": out, "stderr": err})()
+    return subprocess.run([sys.executable, "manage.py", "shell", "-c", code],
+                          cwd=BACKEND, capture_output=True, text=True)
+
 PASSED = 0
 FAILED = 0
 
@@ -66,6 +94,7 @@ def login(username, password):
 
 def orm_prepare(course_id, ts):
     code = f'''
+print("ORM_BEGIN course_id={course_id}")
 from apps.classroom.models import ClassRoom, ClassCourse, ClassStudent
 from apps.classroom.services import assign_students
 from apps.courses.models import Course
@@ -80,11 +109,11 @@ else:
     assign_students(cls, [student], operator=course.teacher, note="stage5-perf")
 ClassCourse.objects.get_or_create(classroom=cls, course=course)
 print("CLASS_ID=" + str(cls.id))
+print("ORM_END")
 '''
-    p = subprocess.run([sys.executable, "manage.py", "shell", "-c", code],
-                       cwd=BACKEND, capture_output=True, text=True)
+    p = run_manage_shell(code)
     m = re.search(r"CLASS_ID=(\d+)", p.stdout or "")
-    assert m, f"班级准备失败: {p.stdout[-300:]} {p.stderr[-300:]}"
+    assert m, f"班级准备失败: stdout={(p.stdout or '')[-1200:]} stderr={(p.stderr or '')[-400:]}"
     return int(m.group(1))
 
 

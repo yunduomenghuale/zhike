@@ -1,0 +1,89 @@
+# 智课系统 V2 · 124 测试环境编排（项目名 zhike_s5test）
+# 目的：在不触碰 124 现有服务（/data/zhike-v2 老版 8088 部署、campus-vehicle 全家桶）
+# 的前提下，为实验管理模块（Stage 0–5）提供一套独立的测试环境。
+# 依赖全部来自 124 本地已有镜像：zhike-v2-backend:20261031 / mysql:8.0 / nginx:1.25-alpine。
+# 唯一代码级差异 qdrant-client 未装——RAG_VECTOR_BACKEND=json 不触发其懒加载，无需安装。
+
+services:
+  mysql80:
+    image: mysql:8.0
+    container_name: zhike_s5test_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: "S5Root2026"
+      MYSQL_DATABASE: "zk_s5test"
+      MYSQL_USER: "s5test"
+      MYSQL_PASSWORD: "S5test2026"
+      TZ: "Asia/Shanghai"
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+00:00
+      - --max-allowed-packet=64M
+      - --innodb-buffer-pool-size=512M
+      # 磁盘余量 ~11G：binlog 保留 3 天、单个 128M 封顶
+      - --binlog-expire-logs-seconds=259200
+      - --max-binlog-size=128M
+    ports:
+      # 只绑本机回环，供运维排查；容器间走 compose 网络的 mysql80:3306
+      - "127.0.0.1:3309:3306"
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    mem_limit: 1500m
+    networks:
+      - zhike_s5test_net
+
+  backend:
+    # 复用 124 已有的 10-31 后端镜像（Python3.12 + LibreOffice + torch CPU + 本地模型依赖），
+    # 代码经 bind mount 覆盖 /app（与 145 测试环境 zhike_qv 同模式），改文件重启即生效。
+    image: zhike-v2-backend:20261031
+    container_name: zhike_s5test_backend
+    restart: unless-stopped
+    env_file: .env.s5test
+    depends_on:
+      mysql80:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8091:8000"
+    volumes:
+      - ./backend:/app
+      - ./media:/app/media
+      - ./staticfiles:/app/staticfiles
+      # 实验静态页 / 课程扩展资源 / 中文字体映射：与生产同构
+      - ./deploy/labs:/app/labs:ro
+      - ./deploy/resources:/app/resources:ro
+      - ./deploy/fonts.conf:/etc/fonts/local.conf:ro
+      # 本地 AI 模型（BGE-M3 + Qwen3-Reranker）：只读复用 124 现有模型，不重复占盘
+      - /data/zhike-v2/data/models:/app/data/models:ro
+    mem_limit: 6g
+    networks:
+      - zhike_s5test_net
+
+  frontend:
+    image: nginx:1.25-alpine
+    container_name: zhike_s5test_frontend
+    restart: unless-stopped
+    ports:
+      # 对外 8092：若华为云安全组未放行，用 SSH 隧道访问（本地 18092 → 124:8092）
+      - "8092:80"
+    volumes:
+      - ./dist:/usr/share/nginx/html:ro
+      # 移动端 H5 未随本包部署：挂空目录保住 /m/ 路由，不 404 整站
+      - ./app-h5:/usr/share/nginx/m:ro
+      - ./nginx.s5test.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./media:/app/media:ro
+      - ./staticfiles:/app/staticfiles:ro
+    depends_on:
+      - backend
+    mem_limit: 128m
+    networks:
+      - zhike_s5test_net
+
+networks:
+  zhike_s5test_net:
+    name: zhike_s5test_net

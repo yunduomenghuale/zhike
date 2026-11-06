@@ -116,18 +116,24 @@ async function login(cdp, username, password) {
     if (await cdp.eval('document.readyState') === 'complete') break;
     await sleep(150);
   }
-  const n = await cdp.eval(`(() => {
+  // 隧道/慢网络下 Vue 挂载晚于 readyState：轮询等登录表单出现（最多 ~20s），
+  // 只补时序健壮性，不改变「表单必须渲染出两个输入框」的断言语义。
+  let n = 0;
+  for (let i = 0; i < 100; i++) {
+    n = await cdp.eval(`document.querySelectorAll('.split-auth__form-box--login input').length`).catch(() => 0);
+    if (n >= 2) break;
+    await sleep(200);
+  }
+  if (n !== 2) return '/login(inputs=' + n + ')';
+  await cdp.eval(`(() => {
     const setVal = (el, v) => {
       const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value').set;
       setter.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true }));
     };
     const inputs = document.querySelectorAll('.split-auth__form-box--login input');
-    if (inputs.length < 2) return inputs.length;
     setVal(inputs[0], ${JSON.stringify(username)});
     setVal(inputs[1], ${JSON.stringify(password)});
-    return inputs.length;
   })()`);
-  if (n !== 2) return '/login(inputs=' + n + ')';
   await sleep(300);
   await cdp.eval(`document.querySelector('.split-auth__form-box--login .auth-submit').click()`);
   for (let i = 0; i < 100; i++) {

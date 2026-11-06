@@ -1,0 +1,6 @@
+  Rendering model states... DONE
+  Unapplying labs.0006_lab_custom_page_grading... OK
+Running migrations:
+  Applying labs.0006_lab_custom_page_grading... OK
+ [X] 0005_remove_labquestion_lab_remove_labquestion_question_and_more
+ [X] 0006_lab_custom_page_grading

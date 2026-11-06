@@ -19,7 +19,12 @@ _FONT_CANDIDATES = [
     r"C:\Windows\Fonts\msyh.ttc",
     r"C:\Windows\Fonts\simhei.ttf",
     r"C:\Windows\Fonts\simsun.ttc",
-    # Linux（Docker 内 fonts-noto-cjk）
+    # Linux（Docker 内 fonts-noto-cjk 的 NotoSansCJK ttc 是 PostScript outlines，
+    # ReportLab 的 TTFont 不支持——124 生产同构镜像实测 500（Stage 5 8092 复测发现）。
+    # 容器内实际可注册的是文泉驿 / 文鼎（TrueType outlines），候选按可注册性优先排列。
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+    "/usr/share/fonts/truetype/arphic/uming.ttc",
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
@@ -30,13 +35,6 @@ _FONT_CANDIDATES = [
 # python-docx 用的字体名（Word 渲染时按名称查找查看方系统字体）
 DOCX_FONT_CJK = "微软雅黑"
 DOCX_FONT_EASTASIA = "微软雅黑"
-
-
-def _find_font() -> str | None:
-    for path in _FONT_CANDIDATES:
-        if os.path.exists(path):
-            return path
-    return None
 
 
 def _fmt_score(value) -> str:
@@ -210,11 +208,23 @@ def _render_pdf(ctx: dict) -> str:
     )
 
     font_name = "ReportCJK"
-    font_path = _find_font()
-    if font_path:
-        pdfmetrics.registerFont(TTFont(font_name, font_path, subfontIndex=0))
-    else:
-        font_name = "Helvetica"  # 兜底（无中文字体环境，生产 Docker 必有 noto）
+    font_path = None
+    last_err = None
+    for path in _FONT_CANDIDATES:
+        if not os.path.exists(path):
+            continue
+        try:
+            pdfmetrics.registerFont(TTFont(font_name, path, subfontIndex=0))
+            font_path = path
+            break
+        except Exception as exc:  # noqa: BLE001 - PostScript outlines 的 ttc 注册必败，逐个回退
+            last_err = exc
+            continue
+    if font_path is None:
+        # 兜底（无任何可注册中文字体环境）：Helvetica 渲染西文，中文会缺字
+        if last_err is not None:
+            print(f"[report] CJK 字体全部注册失败，PDF 回退 Helvetica：{last_err}")
+        font_name = "Helvetica"
 
     styles = {
         "title": ParagraphStyle("t", fontName=font_name, fontSize=20, leading=28, alignment=1, spaceAfter=6),

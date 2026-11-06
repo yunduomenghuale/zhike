@@ -1,0 +1,204 @@
+========================================================================
+Stage 5 · 7 个预置实验逐个真实回归（本地 8005，真实 HTTP）
+========================================================================
+  [200] OK POST /auth/login/ 登录 t101 {"code": 0, "message": "登录成功", "data": {"user": {"id": 2, "username": "t101", "real_name": "张老师", "role": "teacher", "role_display": "教师", "avatar": "", "is_active": true, "must_change_password": fals
+  [200] OK POST /auth/login/ 登录 20249999 {"code": 0, "message": "登录成功", "data": {"user": {"id": 3, "username": "20249999", "real_name": "李同学", "role": "student", "role_display": "学生", "avatar": "", "is_active": true, "must_change_password": 
+PASS | A1 教师/学生真实登录成功 | teacher=True student=True
+  [201] OK POST /courses/ 建回归课程 {"code": 0, "message": "创建成功", "data": {"id": 6, "name": "Stage5预置实验回归1793937119", "intro": "", "cover": "", "term": "2026秋", "term_id": 1, "teacher": 2, "teacher_name": "张老师", "status": "active", "st
+PASS | A2 建课程 | course_id=6
+  [200] OK GET /lab-templates/ 取模板列表 {"code": 0, "message": "ok", "data": {"total": 7, "page": 1, "page_size": 20, "results": [{"id": 1, "code": "switch-vlan-stp-lab", "title": "实验一：交换机基础配置与VLAN/STP实验", "description": "使用华为命令完成交换机基础配置、VL
+PASS | A3 7 个预置模板齐全且顺序一致 | ['switch-vlan-stp-lab', 'arp-ip-lab', 'routing-ospf-lab', 'vlan-nat-lab', 'tcp-udp-lab', 'app-layer-lab', 'comprehensive-lab']
+  [ORM] 班级 + 学籍 + 课程关联就绪 class_id=1
+------------------------------------------------------------------------
+模板 1/7  switch-vlan-stp-lab  实验一：交换机基础配置与VLAN/STP实验
+------------------------------------------------------------------------
+  [201] OK POST /labs/ 建实验 {"code": 0, "message": "创建成功", "data": {"id": 10, "template": 1, "template_code": "switch-vlan-stp-lab", "template_title": "实验一：交换机基础配置与VLAN/STP实验", "page_url": "/labs/switch-vlan-stp-lab.html", "page
+PASS | B1-1 建实验 201 且 page_source=template | id=10 page_source=template
+  [201] OK POST /lab-schedules/ 排课 {"code": 0, "message": "排课成功", "data": {"id": 9, "lab": 10, "lab_title": "实验一：交换机基础配置与VLAN/STP实验", "classroom": 1, "classroom_name": "Stage4班1793935220", "open_at": null, "close_at": null}}
+PASS | B1-2 排课 201 | 
+  [200] OK POST /labs/10/publish/ 发布 {"code": 0, "message": "实验已发布", "data": {"id": 10, "template": 1, "template_code": "switch-vlan-stp-lab", "template_title": "实验一：交换机基础配置与VLAN/STP实验", "page_url": "/labs/switch-vlan-stp-lab.html", "pag
+PASS | B1-3 发布 200 | lab_id=10
+  [200] OK POST /lab-submissions/start/ 学生 start {"code": 0, "message": "实验已开始", "data": {"submission": {"id": 9, "lab": 10, "lab_title": "实验一：交换机基础配置与VLAN/STP实验", "course_name": "Stage5预置实验回归1793937119", "lab_total_score": "100.0", "student": 3, "s
+PASS | B1-4 start 200 且返回票据/页面地址 | submission_id=9
+PASS | B1-5 template 门控页 200 且注入 <base>/bridge（原逻辑零回归） | status=200 bytes=89437 base=True bridge=True
+  [200] OK GET /lab-submissions/bridge-validate/?token=3r4b2auUz-yjDeSnKNmJOPxgdraOuo7JUz_jgwFi8Lg  bridge-validate {"code": 0, "message": "ok", "data": {"submission_id": 9, "lab": {"id": 10, "title": "实验一：交换机基础配置与VLAN/STP实验", "code": "switch-vlan-stp-lab", "page_source": "template", "total_score": 100.0, "standard
+PASS | B1-6 bridge-validate 200 且 context 严格四字段 | keys=['gradeEndpoint', 'labId', 'submissionId', 'totalScore'] expected_keys=True
+PASS | B1-6b 模板随机参数 expected 非空（预置实验零回归） | expected={'template': 'switch-vlan-stp-lab', 'params': {}}
+  [200] OK POST /lab-submissions/9/submit/ submit {"code": 0, "message": "实验提交成功，得分 76.5", "data": {"id": 9, "lab": 10, "lab_title": "实验一：交换机基础配置与VLAN/STP实验", "course_name": "Stage5预置实验回归1793937119", "lab_total_score": "100.0", "student": 3, "student
+PASS | B1-7 submit 200 且分数合法（template 沿用客户端用时） | score=76.5 max=100.0 elapsed=630 steps=3/4
+PASS | B1-8 grading_source=steps、breakdown 为 template 步骤评分分支（报告双分支零回归） | source=steps breakdown_keys=['accuracy', 'base', 'completion', 'efficiency', 'elapsed_minutes', 'error_count', 'generated_at', 'max_base', 'passed_steps', 'standard_minutes', 'step_total', 'total', 'total_steps']
+PASS | B1-9 status=submitted、submitted_at 有值、无 question_score 幽灵字段 | status=submitted submitted_at=2026-11-06T11:52:11.252923+08:00
+  [200] OK GET /lab-submissions/ 成绩列表 {"code": 0, "message": "ok", "data": {"total": 9, "page": 1, "page_size": 20, "results": [{"id": 9, "lab": 10, "lab_title": "实验一：交换机基础配置与VLAN/STP实验", "course_name": "Stage5预置实验回归1793937119", "lab_tota
+PASS | B1-10 成绩列表可见该提交且分数一致 | found=True score=76.5
+  [200] OK POST /lab-submissions/9/conclusion/ 结论 {"code": 0, "message": "实验结论已提交", "data": {"id": 8}}
+  [200] OK POST /lab-submissions/9/generate-report/ 生成报告 {"code": 0, "message": "实验报告已生成", "data": {"id": 8, "submission": 9, "conclusion": "Stage5 回归：switch-vlan-stp-lab 结论", "file_docx": "/media/lab_reports/de6a99a017c84e919c32872448313143.docx", "file_do
+PASS | B1-11 生成报告 PDF/DOCX 双产物 | pdf=True docx=True
+  [200] OK GET /lab-submissions/9/download-report/?type=pdf 下载 PDF <binary application/pdf 30139B>
+  [200] OK GET /lab-submissions/9/download-report/?type=docx 下载 DOCX <binary application/vnd.openxmlformats-officedocument.wordprocessingml.document 37231B>
+PASS | B1-12 报告下载 200 且内容非空 | pdf=30139B docx=37231B
+------------------------------------------------------------------------
+模板 2/7  arp-ip-lab  实验二：ARP与IP子网综合实验
+------------------------------------------------------------------------
+  [201] OK POST /labs/ 建实验 {"code": 0, "message": "创建成功", "data": {"id": 11, "template": 2, "template_code": "arp-ip-lab", "template_title": "实验二：ARP与IP子网综合实验", "page_url": "/labs/arp-ip-lab.html", "page_source": "template", "r
+PASS | B2-1 建实验 201 且 page_source=template | id=11 page_source=template
+  [201] OK POST /lab-schedules/ 排课 {"code": 0, "message": "排课成功", "data": {"id": 10, "lab": 11, "lab_title": "实验二：ARP与IP子网综合实验", "classroom": 1, "classroom_name": "Stage4班1793935220", "open_at": null, "close_at": null}}
+PASS | B2-2 排课 201 | 
+  [200] OK POST /labs/11/publish/ 发布 {"code": 0, "message": "实验已发布", "data": {"id": 11, "template": 2, "template_code": "arp-ip-lab", "template_title": "实验二：ARP与IP子网综合实验", "page_url": "/labs/arp-ip-lab.html", "page_source": "template", "
+PASS | B2-3 发布 200 | lab_id=11
+  [200] OK POST /lab-submissions/start/ 学生 start {"code": 0, "message": "实验已开始", "data": {"submission": {"id": 10, "lab": 11, "lab_title": "实验二：ARP与IP子网综合实验", "course_name": "Stage5预置实验回归1793937119", "lab_total_score": "100.0", "student": 3, "studen
+PASS | B2-4 start 200 且返回票据/页面地址 | submission_id=10
+PASS | B2-5 template 门控页 200 且注入 <base>/bridge（原逻辑零回归） | status=200 bytes=83807 base=True bridge=True
+  [200] OK GET /lab-submissions/bridge-validate/?token=h31tq4j3xv78jkU9pNf4qPRwcnVXFZFszsPCgJen5RE  bridge-validate {"code": 0, "message": "ok", "data": {"submission_id": 10, "lab": {"id": 11, "title": "实验二：ARP与IP子网综合实验", "code": "arp-ip-lab", "page_source": "template", "total_score": 100.0, "standard_minutes": 30,
+PASS | B2-6 bridge-validate 200 且 context 严格四字段 | keys=['gradeEndpoint', 'labId', 'submissionId', 'totalScore'] expected_keys=True
+PASS | B2-6b 模板随机参数 expected 非空（预置实验零回归） | expected={'template': 'arp-ip-lab', 'params': {'subnet1': '192.168.7.0', 'subnet2': '192.
+  [200] OK POST /lab-submissions/10/submit/ submit {"code": 0, "message": "实验提交成功，得分 76.5", "data": {"id": 10, "lab": 11, "lab_title": "实验二：ARP与IP子网综合实验", "course_name": "Stage5预置实验回归1793937119", "lab_total_score": "100.0", "student": 3, "student_name
+PASS | B2-7 submit 200 且分数合法（template 沿用客户端用时） | score=76.5 max=100.0 elapsed=660 steps=3/4
+PASS | B2-8 grading_source=steps、breakdown 为 template 步骤评分分支（报告双分支零回归） | source=steps breakdown_keys=['accuracy', 'base', 'completion', 'efficiency', 'elapsed_minutes', 'error_count', 'generated_at', 'max_base', 'passed_steps', 'standard_minutes', 'step_total', 'total', 'total_steps']
+PASS | B2-9 status=submitted、submitted_at 有值、无 question_score 幽灵字段 | status=submitted submitted_at=2026-11-06T11:52:17.270358+08:00
+  [200] OK GET /lab-submissions/ 成绩列表 {"code": 0, "message": "ok", "data": {"total": 10, "page": 1, "page_size": 20, "results": [{"id": 10, "lab": 11, "lab_title": "实验二：ARP与IP子网综合实验", "course_name": "Stage5预置实验回归1793937119", "lab_total_sc
+PASS | B2-10 成绩列表可见该提交且分数一致 | found=True score=76.5
+  [200] OK POST /lab-submissions/10/conclusion/ 结论 {"code": 0, "message": "实验结论已提交", "data": {"id": 9}}
+  [200] OK POST /lab-submissions/10/generate-report/ 生成报告 {"code": 0, "message": "实验报告已生成", "data": {"id": 9, "submission": 10, "conclusion": "Stage5 回归：arp-ip-lab 结论", "file_docx": "/media/lab_reports/2faf4469949a4a98a6bbef83393882ce.docx", "file_docx_url":
+PASS | B2-11 生成报告 PDF/DOCX 双产物 | pdf=True docx=True
+  [200] OK GET /lab-submissions/10/download-report/?type=pdf 下载 PDF <binary application/pdf 29975B>
+  [200] OK GET /lab-submissions/10/download-report/?type=docx 下载 DOCX <binary application/vnd.openxmlformats-officedocument.wordprocessingml.document 37218B>
+PASS | B2-12 报告下载 200 且内容非空 | pdf=29975B docx=37218B
+------------------------------------------------------------------------
+模板 3/7  routing-ospf-lab  实验三：路由器基础与OSPF动态路由实验
+------------------------------------------------------------------------
+  [201] OK POST /labs/ 建实验 {"code": 0, "message": "创建成功", "data": {"id": 12, "template": 3, "template_code": "routing-ospf-lab", "template_title": "实验三：路由器基础与OSPF动态路由实验", "page_url": "/labs/routing-ospf-lab.html", "page_source"
+PASS | B3-1 建实验 201 且 page_source=template | id=12 page_source=template
+  [201] OK POST /lab-schedules/ 排课 {"code": 0, "message": "排课成功", "data": {"id": 11, "lab": 12, "lab_title": "实验三：路由器基础与OSPF动态路由实验", "classroom": 1, "classroom_name": "Stage4班1793935220", "open_at": null, "close_at": null}}
+PASS | B3-2 排课 201 | 
+  [200] OK POST /labs/12/publish/ 发布 {"code": 0, "message": "实验已发布", "data": {"id": 12, "template": 3, "template_code": "routing-ospf-lab", "template_title": "实验三：路由器基础与OSPF动态路由实验", "page_url": "/labs/routing-ospf-lab.html", "page_source
+PASS | B3-3 发布 200 | lab_id=12
+  [200] OK POST /lab-submissions/start/ 学生 start {"code": 0, "message": "实验已开始", "data": {"submission": {"id": 11, "lab": 12, "lab_title": "实验三：路由器基础与OSPF动态路由实验", "course_name": "Stage5预置实验回归1793937119", "lab_total_score": "100.0", "student": 3, "st
+PASS | B3-4 start 200 且返回票据/页面地址 | submission_id=11
+PASS | B3-5 template 门控页 200 且注入 <base>/bridge（原逻辑零回归） | status=200 bytes=113814 base=True bridge=True
+  [200] OK GET /lab-submissions/bridge-validate/?token=4rFTIMmTM09u9s3b_TOh3tACJkzzl7o0i8TVI-q9f2I  bridge-validate {"code": 0, "message": "ok", "data": {"submission_id": 11, "lab": {"id": 12, "title": "实验三：路由器基础与OSPF动态路由实验", "code": "routing-ospf-lab", "page_source": "template", "total_score": 100.0, "standard_min
+PASS | B3-6 bridge-validate 200 且 context 严格四字段 | keys=['gradeEndpoint', 'labId', 'submissionId', 'totalScore'] expected_keys=True
+PASS | B3-6b 模板随机参数 expected 非空（预置实验零回归） | expected={'template': 'routing-ospf-lab', 'params': {'subnet1': '192.168.9.0'}}
+  [200] OK POST /lab-submissions/11/submit/ submit {"code": 0, "message": "实验提交成功，得分 76.5", "data": {"id": 11, "lab": 12, "lab_title": "实验三：路由器基础与OSPF动态路由实验", "course_name": "Stage5预置实验回归1793937119", "lab_total_score": "100.0", "student": 3, "student_
+PASS | B3-7 submit 200 且分数合法（template 沿用客户端用时） | score=76.5 max=100.0 elapsed=690 steps=3/4
+PASS | B3-8 grading_source=steps、breakdown 为 template 步骤评分分支（报告双分支零回归） | source=steps breakdown_keys=['accuracy', 'base', 'completion', 'efficiency', 'elapsed_minutes', 'error_count', 'generated_at', 'max_base', 'passed_steps', 'standard_minutes', 'step_total', 'total', 'total_steps']
+PASS | B3-9 status=submitted、submitted_at 有值、无 question_score 幽灵字段 | status=submitted submitted_at=2026-11-06T11:52:22.798126+08:00
+  [200] OK GET /lab-submissions/ 成绩列表 {"code": 0, "message": "ok", "data": {"total": 11, "page": 1, "page_size": 20, "results": [{"id": 11, "lab": 12, "lab_title": "实验三：路由器基础与OSPF动态路由实验", "course_name": "Stage5预置实验回归1793937119", "lab_tota
+PASS | B3-10 成绩列表可见该提交且分数一致 | found=True score=76.5
+  [200] OK POST /lab-submissions/11/conclusion/ 结论 {"code": 0, "message": "实验结论已提交", "data": {"id": 10}}
+  [200] OK POST /lab-submissions/11/generate-report/ 生成报告 {"code": 0, "message": "实验报告已生成", "data": {"id": 10, "submission": 11, "conclusion": "Stage5 回归：routing-ospf-lab 结论", "file_docx": "/media/lab_reports/90fb1e45c5284ce2bedcf40a276b3d54.docx", "file_doc
+PASS | B3-11 生成报告 PDF/DOCX 双产物 | pdf=True docx=True
+  [200] OK GET /lab-submissions/11/download-report/?type=pdf 下载 PDF <binary application/pdf 30345B>
+  [200] OK GET /lab-submissions/11/download-report/?type=docx 下载 DOCX <binary application/vnd.openxmlformats-officedocument.wordprocessingml.document 37231B>
+PASS | B3-12 报告下载 200 且内容非空 | pdf=30345B docx=37231B
+------------------------------------------------------------------------
+模板 4/7  vlan-nat-lab  实验四：VLAN间通信与NAT地址转换实验
+------------------------------------------------------------------------
+  [201] OK POST /labs/ 建实验 {"code": 0, "message": "创建成功", "data": {"id": 13, "template": 4, "template_code": "vlan-nat-lab", "template_title": "实验四：VLAN间通信与NAT地址转换实验", "page_url": "/labs/vlan-nat-lab.html", "page_source": "temp
+PASS | B4-1 建实验 201 且 page_source=template | id=13 page_source=template
+  [201] OK POST /lab-schedules/ 排课 {"code": 0, "message": "排课成功", "data": {"id": 12, "lab": 13, "lab_title": "实验四：VLAN间通信与NAT地址转换实验", "classroom": 1, "classroom_name": "Stage4班1793935220", "open_at": null, "close_at": null}}
+PASS | B4-2 排课 201 | 
+  [200] OK POST /labs/13/publish/ 发布 {"code": 0, "message": "实验已发布", "data": {"id": 13, "template": 4, "template_code": "vlan-nat-lab", "template_title": "实验四：VLAN间通信与NAT地址转换实验", "page_url": "/labs/vlan-nat-lab.html", "page_source": "tem
+PASS | B4-3 发布 200 | lab_id=13
+  [200] OK POST /lab-submissions/start/ 学生 start {"code": 0, "message": "实验已开始", "data": {"submission": {"id": 12, "lab": 13, "lab_title": "实验四：VLAN间通信与NAT地址转换实验", "course_name": "Stage5预置实验回归1793937119", "lab_total_score": "100.0", "student": 3, "s
+PASS | B4-4 start 200 且返回票据/页面地址 | submission_id=12
+PASS | B4-5 template 门控页 200 且注入 <base>/bridge（原逻辑零回归） | status=200 bytes=111303 base=True bridge=True
+  [200] OK GET /lab-submissions/bridge-validate/?token=B1BaMbLnBv-B3xcJ2Z-2afHGoWMSVfnEL6_Z91SjLu4  bridge-validate {"code": 0, "message": "ok", "data": {"submission_id": 12, "lab": {"id": 13, "title": "实验四：VLAN间通信与NAT地址转换实验", "code": "vlan-nat-lab", "page_source": "template", "total_score": 100.0, "standard_minute
+PASS | B4-6 bridge-validate 200 且 context 严格四字段 | keys=['gradeEndpoint', 'labId', 'submissionId', 'totalScore'] expected_keys=True
+PASS | B4-6b 模板随机参数 expected 非空（预置实验零回归） | expected={'template': 'vlan-nat-lab', 'params': {'subnet1': '192.168.3.0', 'subnet2': '19
+  [200] OK POST /lab-submissions/12/submit/ submit {"code": 0, "message": "实验提交成功，得分 76.5", "data": {"id": 12, "lab": 13, "lab_title": "实验四：VLAN间通信与NAT地址转换实验", "course_name": "Stage5预置实验回归1793937119", "lab_total_score": "100.0", "student": 3, "student
+PASS | B4-7 submit 200 且分数合法（template 沿用客户端用时） | score=76.5 max=100.0 elapsed=720 steps=3/4
+PASS | B4-8 grading_source=steps、breakdown 为 template 步骤评分分支（报告双分支零回归） | source=steps breakdown_keys=['accuracy', 'base', 'completion', 'efficiency', 'elapsed_minutes', 'error_count', 'generated_at', 'max_base', 'passed_steps', 'standard_minutes', 'step_total', 'total', 'total_steps']
+PASS | B4-9 status=submitted、submitted_at 有值、无 question_score 幽灵字段 | status=submitted submitted_at=2026-11-06T11:52:28.655853+08:00
+  [200] OK GET /lab-submissions/ 成绩列表 {"code": 0, "message": "ok", "data": {"total": 12, "page": 1, "page_size": 20, "results": [{"id": 12, "lab": 13, "lab_title": "实验四：VLAN间通信与NAT地址转换实验", "course_name": "Stage5预置实验回归1793937119", "lab_tot
+PASS | B4-10 成绩列表可见该提交且分数一致 | found=True score=76.5
+  [200] OK POST /lab-submissions/12/conclusion/ 结论 {"code": 0, "message": "实验结论已提交", "data": {"id": 11}}
+  [200] OK POST /lab-submissions/12/generate-report/ 生成报告 {"code": 0, "message": "实验报告已生成", "data": {"id": 11, "submission": 12, "conclusion": "Stage5 回归：vlan-nat-lab 结论", "file_docx": "/media/lab_reports/fd510d0f5c524990b61375bf51f59f3e.docx", "file_docx_ur
+PASS | B4-11 生成报告 PDF/DOCX 双产物 | pdf=True docx=True
+  [200] OK GET /lab-submissions/12/download-report/?type=pdf 下载 PDF <binary application/pdf 30381B>
+  [200] OK GET /lab-submissions/12/download-report/?type=docx 下载 DOCX <binary application/vnd.openxmlformats-officedocument.wordprocessingml.document 37228B>
+PASS | B4-12 报告下载 200 且内容非空 | pdf=30381B docx=37228B
+------------------------------------------------------------------------
+模板 5/7  tcp-udp-lab  实验五：传输层TCP/UDP协议分析实验
+------------------------------------------------------------------------
+  [201] OK POST /labs/ 建实验 {"code": 0, "message": "创建成功", "data": {"id": 14, "template": 5, "template_code": "tcp-udp-lab", "template_title": "实验五：传输层TCP/UDP协议分析实验", "page_url": "/labs/tcp-udp-lab.html", "page_source": "templat
+PASS | B5-1 建实验 201 且 page_source=template | id=14 page_source=template
+  [201] OK POST /lab-schedules/ 排课 {"code": 0, "message": "排课成功", "data": {"id": 13, "lab": 14, "lab_title": "实验五：传输层TCP/UDP协议分析实验", "classroom": 1, "classroom_name": "Stage4班1793935220", "open_at": null, "close_at": null}}
+PASS | B5-2 排课 201 | 
+  [200] OK POST /labs/14/publish/ 发布 {"code": 0, "message": "实验已发布", "data": {"id": 14, "template": 5, "template_code": "tcp-udp-lab", "template_title": "实验五：传输层TCP/UDP协议分析实验", "page_url": "/labs/tcp-udp-lab.html", "page_source": "templa
+PASS | B5-3 发布 200 | lab_id=14
+  [200] OK POST /lab-submissions/start/ 学生 start {"code": 0, "message": "实验已开始", "data": {"submission": {"id": 13, "lab": 14, "lab_title": "实验五：传输层TCP/UDP协议分析实验", "course_name": "Stage5预置实验回归1793937119", "lab_total_score": "100.0", "student": 3, "st
+PASS | B5-4 start 200 且返回票据/页面地址 | submission_id=13
+PASS | B5-5 template 门控页 200 且注入 <base>/bridge（原逻辑零回归） | status=200 bytes=88082 base=True bridge=True
+  [200] OK GET /lab-submissions/bridge-validate/?token=0C82JI4k4ZbIl1sYi523yLasJvVvbbgHMWOyBC_pJD8  bridge-validate {"code": 0, "message": "ok", "data": {"submission_id": 13, "lab": {"id": 14, "title": "实验五：传输层TCP/UDP协议分析实验", "code": "tcp-udp-lab", "page_source": "template", "total_score": 100.0, "standard_minutes"
+PASS | B5-6 bridge-validate 200 且 context 严格四字段 | keys=['gradeEndpoint', 'labId', 'submissionId', 'totalScore'] expected_keys=True
+PASS | B5-6b 模板随机参数 expected 非空（预置实验零回归） | expected={'template': 'tcp-udp-lab', 'params': {}}
+  [200] OK POST /lab-submissions/13/submit/ submit {"code": 0, "message": "实验提交成功，得分 76.5", "data": {"id": 13, "lab": 14, "lab_title": "实验五：传输层TCP/UDP协议分析实验", "course_name": "Stage5预置实验回归1793937119", "lab_total_score": "100.0", "student": 3, "student_
+PASS | B5-7 submit 200 且分数合法（template 沿用客户端用时） | score=76.5 max=100.0 elapsed=750 steps=3/4
+PASS | B5-8 grading_source=steps、breakdown 为 template 步骤评分分支（报告双分支零回归） | source=steps breakdown_keys=['accuracy', 'base', 'completion', 'efficiency', 'elapsed_minutes', 'error_count', 'generated_at', 'max_base', 'passed_steps', 'standard_minutes', 'step_total', 'total', 'total_steps']
+PASS | B5-9 status=submitted、submitted_at 有值、无 question_score 幽灵字段 | status=submitted submitted_at=2026-11-06T11:52:34.460834+08:00
+  [200] OK GET /lab-submissions/ 成绩列表 {"code": 0, "message": "ok", "data": {"total": 13, "page": 1, "page_size": 20, "results": [{"id": 13, "lab": 14, "lab_title": "实验五：传输层TCP/UDP协议分析实验", "course_name": "Stage5预置实验回归1793937119", "lab_tota
+PASS | B5-10 成绩列表可见该提交且分数一致 | found=True score=76.5
+  [200] OK POST /lab-submissions/13/conclusion/ 结论 {"code": 0, "message": "实验结论已提交", "data": {"id": 12}}
+  [200] OK POST /lab-submissions/13/generate-report/ 生成报告 {"code": 0, "message": "实验报告已生成", "data": {"id": 12, "submission": 13, "conclusion": "Stage5 回归：tcp-udp-lab 结论", "file_docx": "/media/lab_reports/3207adf51ab74ac6b43b991a09d15d54.docx", "file_docx_url
+PASS | B5-11 生成报告 PDF/DOCX 双产物 | pdf=True docx=True
+  [200] OK GET /lab-submissions/13/download-report/?type=pdf 下载 PDF <binary application/pdf 30437B>
+  [200] OK GET /lab-submissions/13/download-report/?type=docx 下载 DOCX <binary application/vnd.openxmlformats-officedocument.wordprocessingml.document 37227B>
+PASS | B5-12 报告下载 200 且内容非空 | pdf=30437B docx=37227B
+------------------------------------------------------------------------
+模板 6/7  app-layer-lab  实验六：应用层协议（DNS/DHCP/HTTP）实验
+------------------------------------------------------------------------
+  [201] OK POST /labs/ 建实验 {"code": 0, "message": "创建成功", "data": {"id": 15, "template": 6, "template_code": "app-layer-lab", "template_title": "实验六：应用层协议（DNS/DHCP/HTTP）实验", "page_url": "/labs/app-layer-lab.html", "page_source"
+PASS | B6-1 建实验 201 且 page_source=template | id=15 page_source=template
+  [201] OK POST /lab-schedules/ 排课 {"code": 0, "message": "排课成功", "data": {"id": 14, "lab": 15, "lab_title": "实验六：应用层协议（DNS/DHCP/HTTP）实验", "classroom": 1, "classroom_name": "Stage4班1793935220", "open_at": null, "close_at": null}}
+PASS | B6-2 排课 201 | 
+  [200] OK POST /labs/15/publish/ 发布 {"code": 0, "message": "实验已发布", "data": {"id": 15, "template": 6, "template_code": "app-layer-lab", "template_title": "实验六：应用层协议（DNS/DHCP/HTTP）实验", "page_url": "/labs/app-layer-lab.html", "page_source
+PASS | B6-3 发布 200 | lab_id=15
+  [200] OK POST /lab-submissions/start/ 学生 start {"code": 0, "message": "实验已开始", "data": {"submission": {"id": 14, "lab": 15, "lab_title": "实验六：应用层协议（DNS/DHCP/HTTP）实验", "course_name": "Stage5预置实验回归1793937119", "lab_total_score": "100.0", "student": 
+PASS | B6-4 start 200 且返回票据/页面地址 | submission_id=14
+PASS | B6-5 template 门控页 200 且注入 <base>/bridge（原逻辑零回归） | status=200 bytes=160648 base=True bridge=True
+  [200] OK GET /lab-submissions/bridge-validate/?token=P6tiYKgvhTsEyeSg70g0CHfSPg5Wt7R5ANHKOqaO9Zs  bridge-validate {"code": 0, "message": "ok", "data": {"submission_id": 14, "lab": {"id": 15, "title": "实验六：应用层协议（DNS/DHCP/HTTP）实验", "code": "app-layer-lab", "page_source": "template", "total_score": 100.0, "standard_
+PASS | B6-6 bridge-validate 200 且 context 严格四字段 | keys=['gradeEndpoint', 'labId', 'submissionId', 'totalScore'] expected_keys=True
+PASS | B6-6b 模板随机参数 expected 非空（预置实验零回归） | expected={'template': 'app-layer-lab', 'params': {'subnet1': '192.168.3.0'}}
+  [200] OK POST /lab-submissions/14/submit/ submit {"code": 0, "message": "实验提交成功，得分 76.5", "data": {"id": 14, "lab": 15, "lab_title": "实验六：应用层协议（DNS/DHCP/HTTP）实验", "course_name": "Stage5预置实验回归1793937119", "lab_total_score": "100.0", "student": 3, "st
+PASS | B6-7 submit 200 且分数合法（template 沿用客户端用时） | score=76.5 max=100.0 elapsed=780 steps=3/4
+PASS | B6-8 grading_source=steps、breakdown 为 template 步骤评分分支（报告双分支零回归） | source=steps breakdown_keys=['accuracy', 'base', 'completion', 'efficiency', 'elapsed_minutes', 'error_count', 'generated_at', 'max_base', 'passed_steps', 'standard_minutes', 'step_total', 'total', 'total_steps']
+PASS | B6-9 status=submitted、submitted_at 有值、无 question_score 幽灵字段 | status=submitted submitted_at=2026-11-06T11:52:40.235052+08:00
+  [200] OK GET /lab-submissions/ 成绩列表 {"code": 0, "message": "ok", "data": {"total": 14, "page": 1, "page_size": 20, "results": [{"id": 14, "lab": 15, "lab_title": "实验六：应用层协议（DNS/DHCP/HTTP）实验", "course_name": "Stage5预置实验回归1793937119", "la
+PASS | B6-10 成绩列表可见该提交且分数一致 | found=True score=76.5
+  [200] OK POST /lab-submissions/14/conclusion/ 结论 {"code": 0, "message": "实验结论已提交", "data": {"id": 13}}
+  [200] OK POST /lab-submissions/14/generate-report/ 生成报告 {"code": 0, "message": "实验报告已生成", "data": {"id": 13, "submission": 14, "conclusion": "Stage5 回归：app-layer-lab 结论", "file_docx": "/media/lab_reports/bd613d3330ce47e783063629a8e30297.docx", "file_docx_u
+PASS | B6-11 生成报告 PDF/DOCX 双产物 | pdf=True docx=True
+  [200] OK GET /lab-submissions/14/download-report/?type=pdf 下载 PDF <binary application/pdf 30353B>
+  [200] OK GET /lab-submissions/14/download-report/?type=docx 下载 DOCX <binary application/vnd.openxmlformats-officedocument.wordprocessingml.document 37234B>
+PASS | B6-12 报告下载 200 且内容非空 | pdf=30353B docx=37234B
+------------------------------------------------------------------------
+模板 7/7  comprehensive-lab  实验七：综合组网实验
+------------------------------------------------------------------------
+  [201] OK POST /labs/ 建实验 {"code": 0, "message": "创建成功", "data": {"id": 16, "template": 7, "template_code": "comprehensive-lab", "template_title": "实验七：综合组网实验", "page_url": "/labs/comprehensive-lab.html", "page_source": "templ
+PASS | B7-1 建实验 201 且 page_source=template | id=16 page_source=template
+  [201] OK POST /lab-schedules/ 排课 {"code": 0, "message": "排课成功", "data": {"id": 15, "lab": 16, "lab_title": "实验七：综合组网实验", "classroom": 1, "classroom_name": "Stage4班1793935220", "open_at": null, "close_at": null}}
+PASS | B7-2 排课 201 | 
+  [200] OK POST /labs/16/publish/ 发布 {"code": 0, "message": "实验已发布", "data": {"id": 16, "template": 7, "template_code": "comprehensive-lab", "template_title": "实验七：综合组网实验", "page_url": "/labs/comprehensive-lab.html", "page_source": "temp
+PASS | B7-3 发布 200 | lab_id=16
+  [200] OK POST /lab-submissions/start/ 学生 start {"code": 0, "message": "实验已开始", "data": {"submission": {"id": 15, "lab": 16, "lab_title": "实验七：综合组网实验", "course_name": "Stage5预置实验回归1793937119", "lab_total_score": "100.0", "student": 3, "student_name
+PASS | B7-4 start 200 且返回票据/页面地址 | submission_id=15
+PASS | B7-5 template 门控页 200 且注入 <base>/bridge（原逻辑零回归） | status=200 bytes=196965 base=True bridge=True
+  [200] OK GET /lab-submissions/bridge-validate/?token=8_qAGzPL-OuO4B53kxfk16QrtLsWyzSYOBrgb-iXNHU  bridge-validate {"code": 0, "message": "ok", "data": {"submission_id": 15, "lab": {"id": 16, "title": "实验七：综合组网实验", "code": "comprehensive-lab", "page_source": "template", "total_score": 100.0, "standard_minutes": 45
+PASS | B7-6 bridge-validate 200 且 context 严格四字段 | keys=['gradeEndpoint', 'labId', 'submissionId', 'totalScore'] expected_keys=True
+PASS | B7-6b 模板随机参数 expected 非空（预置实验零回归） | expected={'template': 'comprehensive-lab', 'params': {'subnet1': '192.168.8.0', 'subnet2'
+  [200] OK POST /lab-submissions/15/submit/ submit {"code": 0, "message": "实验提交成功，得分 76.5", "data": {"id": 15, "lab": 16, "lab_title": "实验七：综合组网实验", "course_name": "Stage5预置实验回归1793937119", "lab_total_score": "100.0", "student": 3, "student_name": "李同
+PASS | B7-7 submit 200 且分数合法（template 沿用客户端用时） | score=76.5 max=100.0 elapsed=810 steps=3/4
+PASS | B7-8 grading_source=steps、breakdown 为 template 步骤评分分支（报告双分支零回归） | source=steps breakdown_keys=['accuracy', 'base', 'completion', 'efficiency', 'elapsed_minutes', 'error_count', 'generated_at', 'max_base', 'passed_steps', 'standard_minutes', 'step_total', 'total', 'total_steps']
+PASS | B7-9 status=submitted、submitted_at 有值、无 question_score 幽灵字段 | status=submitted submitted_at=2026-11-06T11:52:46.121890+08:00
+  [200] OK GET /lab-submissions/ 成绩列表 {"code": 0, "message": "ok", "data": {"total": 15, "page": 1, "page_size": 20, "results": [{"id": 15, "lab": 16, "lab_title": "实验七：综合组网实验", "course_name": "Stage5预置实验回归1793937119", "lab_total_score": 
+PASS | B7-10 成绩列表可见该提交且分数一致 | found=True score=76.5
+  [200] OK POST /lab-submissions/15/conclusion/ 结论 {"code": 0, "message": "实验结论已提交", "data": {"id": 14}}
+  [200] OK POST /lab-submissions/15/generate-report/ 生成报告 {"code": 0, "message": "实验报告已生成", "data": {"id": 14, "submission": 15, "conclusion": "Stage5 回归：comprehensive-lab 结论", "file_docx": "/media/lab_reports/0db6c7ec7802482cbc68937ee73751ab.docx", "file_do
+PASS | B7-11 生成报告 PDF/DOCX 双产物 | pdf=True docx=True
+  [200] OK GET /lab-submissions/15/download-report/?type=pdf 下载 PDF <binary application/pdf 29985B>
+  [200] OK GET /lab-submissions/15/download-report/?type=docx 下载 DOCX <binary application/vnd.openxmlformats-officedocument.wordprocessingml.document 37214B>
+PASS | B7-12 报告下载 200 且内容非空 | pdf=29985B docx=37214B
+========================================================================
+总计 94 项，通过 94 项，失败 0 项
+ALL_PASS
+========================================================================

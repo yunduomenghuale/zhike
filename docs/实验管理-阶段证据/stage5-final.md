@@ -166,6 +166,31 @@ PASS | F10 全流程控制台无 error
 
 ---
 
+## 六·补测回填（2026-11-06，用户指定改在 124.70.107.64 测试环境执行）
+
+**环境**：用户指令「尝试连接 http://124.70.107.64:8088/，如果可以连接上的话先在这台服务器上进行测试」。124 实测可达（老版 8088 仍在跑），但上面是 **10-31 时点的旧代码 + SQLite 老数据**，不可覆盖。故按 145 `zhike_qv` 同模式**新建独立栈** `/data/zhike-s5test`（compose 项目 `zhike_s5test`：mysql:8.0 容器独立库 `zk_s5test` + backend 复用本地已有镜像 `zhike-v2-backend:20261031` bind mount 当前代码 + nginx 直出新 dist 对外 8092），**老站 8088 / campus-vehicle / 历史数据全程未动**。依赖差异仅 `qdrant-client`（json 后端不触发懒加载，无需安装）。公网 8092 被安全组挡（与当年 5273 同因），全部验证经 **SSH 隧道 `127.0.0.1:18092 → 124:8092`** 完成。部署记录：`8092-deploy.log`。
+
+**补测结果（全部真实执行，输出落 `8092-*.log`）**：
+
+| # | 清单项 | 结果 | 证据 |
+| --- | --- | --- | --- |
+| Stage 4 §六 | `BASE=http://127.0.0.1:18092` 浏览器 E2E 52 项 | ✅ 52/52 `ALL_PASS`（sandbox iframe 真实上报、external 展示、C12、控制台零 error） | `8092-browser.log` |
+| Stage 4 §六 | `API_BASE` 落库核对 12 项 | ✅ 12/12 `ALL_PASS` | `8092-data.log` |
+| Stage 5 项 3 | 7 个预置实验逐个回归 94 项 | ✅ 94/94 `ALL_PASS`（门控页/bridge-validate/submit/报告 PDF+DOCX） | `8092-preset.log` |
+| Stage 5 项 4 | 回滚演练（`zk_e2e` 库：真回退 0006 → 真前进） | ✅ Unapply OK / Apply OK，0006 `[ ]→[X]` 可逆 | `8092-rollback.log` |
+| Stage 5 项 5 | 性能冒烟 13 项 | ✅ 13/13 `ALL_PASS`：批次 A 20 次连打 `ok=17 / 429=3 / errors=0`，批次 B 正常节奏 10/10 全过 `p50≈408ms`（隧道 RTT 主导，服务端处理与本机一致 ~10ms） | `8092-perf.log` |
+| Stage 5 项 2 | P1 64 / P4 41 / P5 39 | ✅ 64/64、41/41、39/39（`zk_e2e` 独立库，P4/P5 容器内自起 runserver） | `8092-p1/p4/p5.log` |
+
+**429=3（而非本地的 10）的说明**：`lab_grade` 限流用 LocMemCache，gunicorn 4 worker 每**进程独立计数**——20 次请求被轮询分摊后单 worker 只累计 13 次（10 过 + 3 挡）。这是与 145 生产同构的既有实现特性（限流分片），非本次缺陷；「正常节奏不误伤、零 5xx」结论不变。
+
+**补测发现并当场修复的真缺陷**：`report_generator.py` 的 PDF 字体注册在 Linux 容器必 500——`fonts-noto-cjk` 的 `NotoSansCJK-*.ttc` 是 **PostScript outlines**，ReportLab TTFont 不支持；本地 Windows 字体（simhei，TrueType）验收时被掩盖。修复为**逐候选 try/回退**并把容器内实际可注册的 `wqy-microhei.ttc` 置前；容器内复现 `REPORT_OK`，本地回归 labs 单测 `OK` + 全链路 `🎉`。**145 生产镜像同 Dockerfile，发布前应随本修复一起构建**。
+
+**部署期环境适配（已记录 `8092-deploy.log` §6）**：`DJANGO_SECURE_SSL_REDIRECT=False`（无 TLS，默认 True 会 301）；`DJANGO_SECURE_HSTS_SECONDS=0`（HSTS 按 host 记忆，避免把同 IP 老站 8088 强升 https）；`DJANGO_ALLOWED_HOSTS` 补 `testserver`（P1 的 APIClient）；P4/P5 脚本解释器路径跨平台化（Linux 容器用 `sys.executable`）+ `WORK_DIR` 自动创建；三个 E2E 脚本新增 `S5_REMOTE` 模式（ORM 段经 SSH 在容器内执行，与本会话已验证的 `manage.py shell` stdin 通道一致）。
+
+**仍未完成**：移动端 H5（`app/dist/build/h5` 未构建，nginx `/m/` 挂空目录）——待后续构建后补目检；8092 公网直连需在华为云控制台放行 8092（当前仅隧道可用）。本节回填后，§六 清单仅剩上述两项待办。
+
+---
+
 ## 七、交付索引
 
 | 阶段 | 证据 | commit |

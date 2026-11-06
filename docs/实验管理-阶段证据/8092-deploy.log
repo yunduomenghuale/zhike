@@ -1,0 +1,60 @@
+# 124（124.70.107.64）测试环境部署记录 · 2026-11-06
+# 说明：部署过程为交互式 SSH（root + ~/.ssh/id_claude_server 密钥）执行，
+# 本文件按时间顺序整理真实执行的关键命令与输出，供复盘与回滚参考。
+# 原则：不触碰 124 现有服务（/data/zhike-v2 老版 8088 部署、campus-vehicle 全家桶、历史数据）。
+
+--- [0] 连通性探测（本地） ---
+curl http://124.70.107.64:8088/  → 200（老版前端仍在跑）
+/dev/tcp/124.70.107.64/22        → OPEN
+SSH lymatrix2020 + 145 密码      → Authentication failed（124 与 145 凭据不同）
+SSH root + id_claude_server 密钥 → SSH_OK（lit-jsj-labs-0002）
+
+--- [1] 服务器摸底 ---
+CentOS 7.2 / Docker 26.1.4 / 磁盘 40G 用 27G（余 11G）/ 内存 24G
+容器：zhike_v2_frontend(8088) zhike_v2_backend cv_nginx cv_celery_beat cv_celery cv_backend cv_mysql(127.0.0.1:3308) cv_redis
+/data：zhike-v2 15G（老部署+media+models）、migration-pack-20261030、AIzhike、Virtual-Human…
+124 代码时点：apps/labs/migrations 只到 0005，无 integration_spec.py，无 .git（≠ 当前代码）
+镜像：zhike-v2-backend:20261031（3.95GB，10-31 构建）——当前 requirements 与其差异仅 qdrant-client
+（qdrant_client 全部函数内懒加载，RAG_VECTOR_BACKEND=json 不触发，无需安装）
+
+--- [2] 打包与上传（本地 → 124 SFTP） ---
+tar czf zhike-s5test-pack.tar.gz（排除 venv/data/media/staticfiles/db*/__pycache__/*.pyc 与各缓存目录）
+  内容：backend 源码 + frontend/dist + deploy/{labs,resources,fonts.conf}   共 24,985,995B
+SFTP 上传 18.4s；另传 docker-compose.s5test.yml / .env.s5test / nginx.s5test.conf
+
+--- [3] 组装与启动 ---
+tar xzf /data/zhike-s5test-pack.tar.gz -C /data/zhike-s5test
+mv frontend/dist dist && mkdir -p media staticfiles app-h5 data
+grep DJANGO_SECRET_KEY /data/zhike-v2/deploy/.env.production >> .env.s5test   # 密钥继承旧部署，不落仓库
+docker compose -f docker-compose.s5test.yml -p zhike_s5test up -d
+→ zhike_s5test_mysql Healthy / backend Started / frontend Started
+entrypoint：等 MySQL 就绪 → migrate 全部应用（含 labs.0006、ai.0017/0018 生成列）→ collectstatic 163 → gunicorn 4×12
+
+--- [4] 初始化 ---
+seed_lab_templates → 实验模板就绪：共 7 个新建，7 个在库
+账号：admin(A0987654) / t101(pass1234) / 20249999(pass1234)
+CONVERT_TZ 验证 2026-11-06 12:00 UTC → 20:00 CST（该 mysql:8.0 镜像自带 tzdata，无需灌时区）
+
+--- [5] 外网与隧道 ---
+curl http://124.70.107.64:8092/ → 000 超时（华为云安全组未放行 8092，与当年 5273 同因）
+SSH 隧道：ssh -N -L 18092:127.0.0.1:8092（ServerAliveInterval=20，无 keepalive 会在 ~4.5 分钟被远端断开）
+curl http://127.0.0.1:18092/ → 200；登录接口 t101/20249999 均 code=0
+
+--- [6] 部署期修的三个问题 ---
+a) POST /api/ 全 301 → https：DJANGO_SECURE_SSL_REDIRECT 默认 True（TLS 代码就绪待授权）。
+   修复：.env.s5test 加 DJANGO_SECURE_SSL_REDIRECT=False；同时设 DJANGO_SECURE_HSTS_SECONDS=0
+   （HSTS 按 host 记忆，不关会把同 IP 的老站 8088 浏览器访问也强制升 https，破坏现有服务）。
+b) generate-report 500：ReportLab TTFont 不支持 PostScript outlines 的
+   /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc（fonts-noto-cjk）。
+   修复：report_generator.py 字体注册改逐候选 try/回退，候选表补
+   /usr/share/fonts/truetype/wqy/wqy-microhei.ttc（TrueType，容器内可注册）；
+   容器内复现 → REPORT_OK file_pdf=True file_docx=True。本地回归：labs 单测 OK + e2e_real_test 🎉。
+   注：145 生产镜像同 Dockerfile，该缺陷此前在本地（Windows 字体）验收中被掩盖。
+c) P1 在 124 跑「建班 400」：APIClient Host=testserver 不在 DJANGO_ALLOWED_HOSTS
+   → DisallowedHost。修复：.env.s5test 补 testserver（exec 层覆盖验证后写入模板）。
+
+--- [7] 最终容器状态 ---
+zhike_s5test_mysql  Up (healthy)   127.0.0.1:3309
+zhike_s5test_backend Up           127.0.0.1:8091
+zhike_s5test_frontend Up          0.0.0.0:8092（公网需安全组放行；当前经 SSH 隧道访问）
+老站 8088 / campus-vehicle / 历史数据全程未动。
