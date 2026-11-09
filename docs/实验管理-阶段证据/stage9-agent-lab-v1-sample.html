@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>十进制与二进制转换练习</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+    background: #f0f4f8;
+    color: #2d3748;
+    padding: 24px;
+    line-height: 1.6;
+  }
+  .container { max-width: 720px; margin: 0 auto; }
+  header {
+    background: #fff;
+    border-radius: 10px;
+    padding: 20px 24px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    margin-bottom: 20px;
+  }
+  header h1 { font-size: 20px; color: #2b6cb0; margin-bottom: 6px; }
+  header .meta { font-size: 14px; color: #718096; }
+  header .meta strong { color: #2d3748; }
+  .status-bar {
+    display: flex;
+    gap: 24px;
+    background: #ebf8ff;
+    border: 1px solid #bee3f8;
+    border-radius: 8px;
+    padding: 10px 16px;
+    margin-bottom: 20px;
+    font-size: 14px;
+  }
+  .question {
+    background: #fff;
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 14px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    border-left: 5px solid #cbd5e0;
+  }
+  .question.correct { border-left-color: #48bb78; }
+  .question.wrong   { border-left-color: #f56565; }
+  .question p { font-size: 15px; margin-bottom: 10px; }
+  .question .tag {
+    display: inline-block;
+    font-size: 12px;
+    background: #edf2f7;
+    color: #4a5568;
+    border-radius: 4px;
+    padding: 1px 8px;
+    margin-right: 8px;
+  }
+  .answer-row { display: flex; align-items: center; gap: 10px; }
+  .answer-row input {
+    flex: 0 0 240px;
+    padding: 8px 10px;
+    border: 1px solid #cbd5e0;
+    border-radius: 6px;
+    font-size: 15px;
+    font-family: Consolas, Menlo, monospace;
+  }
+  .answer-row input:disabled { background: #f7fafc; color: #2f855a; }
+  .answer-row input:focus { outline: 2px solid #90cdf4; border-color: #4299e1; }
+  .feedback { font-size: 14px; }
+  .feedback.ok  { color: #2f855a; font-weight: bold; }
+  .feedback.err { color: #c53030; }
+  .submit-area {
+    background: #fff;
+    border-radius: 10px;
+    padding: 20px;
+    text-align: center;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    margin-top: 20px;
+  }
+  #submitBtn {
+    background: #3182ce;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 12px 40px;
+    font-size: 16px;
+    cursor: pointer;
+  }
+  #submitBtn:hover { background: #2b6cb0; }
+  #submitBtn:disabled { background: #a0aec0; cursor: not-allowed; }
+  #message {
+    margin-top: 12px;
+    font-size: 14px;
+    min-height: 20px;
+  }
+  #message.ok  { color: #2f855a; }
+  #message.err { color: #c53030; }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>十进制与二进制转换练习</h1>
+    <div class="meta">共 5 题，每题 <strong id="perQ">20</strong> 分，满分 <strong id="fullScore">100</strong> 分。<span id="previewTip" style="display:none;color:#b7791f;">（教师预览模式：仅作展示，不会上报成绩）</span></div>
+  </header>
+
+  <div class="status-bar">
+    <span>已答对：<strong id="correctCount">0</strong> / 5 题</span>
+    <span>当前得分：<strong id="curScore">0</strong> 分</span>
+    <span>用时：<strong id="timer">0</strong> 秒</span>
+  </div>
+
+  <div id="quiz"></div>
+
+  <div class="submit-area">
+    <button id="submitBtn" disabled>提交成绩</button>
+    <div id="message"></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+(function () {
+  var QUESTIONS = [
+    { type: "dec2bin", prompt: "将十进制数 45 转换为二进制数",       answer: "101101" },
+    { type: "dec2bin", prompt: "将十进制数 100 转换为二进制数",      answer: "1100100" },
+    { type: "dec2bin", prompt: "将十进制数 255 转换为二进制数",      answer: "11111111" },
+    { type: "bin2dec", prompt: "将二进制数 101011 转换为十进制数",   answer: "43" },
+    { type: "bin2dec", prompt: "将二进制数 11001100 转换为十进制数", answer: "204" }
+  ];
+
+  var fullScore = 100;      // 会被 LabBridge.validate() 返回的 ctx.totalScore 覆盖
+  var preview = false;
+  var startTime = Date.now();
+  var submitted = false;    // 保证 reportGrade 成功后不再重复上报
+  var submitting = false;
+  var correctFlags = QUESTIONS.map(function () { return false; });
+
+  var quizEl = document.getElementById("quiz");
+  var submitBtn = document.getElementById("submitBtn");
+  var messageEl = document.getElementById("message");
+
+  function perQuestionScore() {
+    return fullScore / QUESTIONS.length;
+  }
+
+  function currentScore() {
+    var n = 0;
+    for (var i = 0; i < correctFlags.length; i++) if (correctFlags[i]) n++;
+    var s = n * perQuestionScore();
+    return Math.round(s * 10) / 10; // 最多 1 位小数
+  }
+
+  function refreshStatus() {
+    var n = 0;
+    for (var i = 0; i < correctFlags.length; i++) if (correctFlags[i]) n++;
+    document.getElementById("correctCount").textContent = String(n);
+    document.getElementById("curScore").textContent = String(currentScore());
+  }
+
+  function normalize(v) {
+    return String(v).replace(/\s+/g, "").toLowerCase();
+  }
+
+  function buildQuiz() {
+    quizEl.innerHTML = "";
+    QUESTIONS.forEach(function (q, idx) {
+      var div = document.createElement("div");
+      div.className = "question";
+      div.id = "q" + idx;
+
+      var typeText = q.type === "dec2bin" ? "十 → 二" : "二 → 十";
+      var p = document.createElement("p");
+      var tag = document.createElement("span");
+      tag.className = "tag";
+      tag.textContent = "第 " + (idx + 1) + " 题 · " + typeText;
+      p.appendChild(tag);
+      p.appendChild(document.createTextNode(q.prompt));
+      div.appendChild(p);
+
+      var row = document.createElement("div");
+      row.className = "answer-row";
+      var input = document.createElement("input");
+      input.type = "text";
+      input.id = "input" + idx;
+      input.autocomplete = "off";
+      input.placeholder = q.type === "dec2bin" ? "请输入二进制数，如 1010" : "请输入十进制数，如 42";
+      var fb = document.createElement("span");
+      fb.className = "feedback";
+      fb.id = "fb" + idx;
+      row.appendChild(input);
+      row.appendChild(fb);
+      div.appendChild(row);
+      quizEl.appendChild(div);
+
+      function check() {
+        if (correctFlags[idx]) return;
+        var val = normalize(input.value);
+        if (val === "") return; // 空答案不打分，允许继续作答
+        if (val === q.answer) {
+          correctFlags[idx] = true;
+          input.disabled = true;
+          div.className = "question correct";
+          fb.className = "feedback ok";
+          fb.textContent = "✓ 回答正确";
+          refreshStatus();
+        } else {
+          div.className = "question wrong";
+          fb.className = "feedback err";
+          fb.textContent = "✗ 回答错误，请再试一次";
+        }
+      }
+
+      input.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") { e.preventDefault(); check(); }
+      });
+      input.addEventListener("blur", check);
+    });
+  }
+
+  function startTimer() {
+    var timerEl = document.getElementById("timer");
+    setInterval(function () {
+      timerEl.textContent = String(Math.floor((Date.now() - startTime) / 1000));
+    }, 1000);
+  }
+
+  function showMessage(text, cls) {
+    messageEl.textContent = text;
+    messageEl.className = cls || "";
+  }
+
+  async function init() {
+    try {
+      var ctx = await window.LabBridge.validate();
+      if (ctx && typeof ctx.totalScore === "number" && isFinite(ctx.totalScore) && ctx.totalScore > 0) {
+        fullScore = ctx.totalScore;
+      }
+      if (ctx && ctx.preview === true) {
+        preview = true;
+        document.getElementById("previewTip").style.display = "inline";
+      }
+    } catch (err) {
+      showMessage("实验初始化失败：" + (err && err.message ? err.message : "无法连接实验环境"), "err");
+      return; // 初始化失败时不启用提交
+    }
+
+    document.getElementById("fullScore").textContent = String(fullScore);
+    document.getElementById("perQ").textContent = String(Math.round(perQuestionScore() * 10) / 10);
+    buildQuiz();
+    refreshStatus();
+    startTimer();
+    submitBtn.disabled = false;
+  }
+
+  submitBtn.addEventListener("click", async function () {
+    if (preview) {
+      showMessage("当前为教师预览模式，成绩不会上报。", "ok");
+      return;
+    }
+    if (submitted || submitting) return;
+    submitting = true;
+    submitBtn.disabled = true;
+    showMessage("正在提交成绩…", "");
+
+    try {
+      var elapsed = Math.floor((Date.now() - startTime) / 1000);
+      await window.LabBridge.reportGrade({
+        total_score: currentScore(),
+        elapsed_seconds: elapsed
+      });
+      submitted = true;
+      showMessage("成绩提交成功！最终得分：" + currentScore() + " 分。", "ok");
+    } catch (err) {
+      submitting = false;
+      submitBtn.disabled = false;
+      showMessage("成绩提交失败：" + (err && err.message ? err.message : "未知错误") + "，请重试。", "err");
+    }
+  });
+
+  init();
+})();
+</script>
+</body>
+</html>
