@@ -55,7 +55,8 @@
             @click="goTab(item.name)"
           >
             <span class="menu-icon">
-              <el-icon><component :is="item.icon" /></el-icon>
+              <img v-if="item.img" :src="item.img" class="menu-logo" alt="" />
+              <el-icon v-else><component :is="item.icon" /></el-icon>
             </span>
             <span class="menu-text">{{ item.label }}</span>
           </button>
@@ -489,6 +490,12 @@ watch([activeTab, () => props.courseName], updatePageTitle, { immediate: true })
   color: inherit;
   position: relative;
   z-index: 1;
+}
+
+.menu-logo {
+  width: 16px;
+  height: 16px;
+  display: block;
 }
 
 .menu-text {

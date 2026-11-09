@@ -279,18 +279,29 @@ class LabViewSet(BaseModelViewSet):
                 "name": name, "ok": bool(ok), "detail": str(detail), "blocking": blocking,
             })
 
-        # 只有「模拟报文本身」的校验参与通过判定；发布状态 / 页面文件是环境提示，
-        # 草稿态也必须能调试（Stage 4 的 UI 顺序是 创建 → 调试 → 发布）。
-        check("票据模拟", True, "正式提交由平台父页面自动附带一次性票据；dry-run 不校验真实票据", blocking=False)
-        check("页面来源", lab.page_source == Lab.PageSource.CUSTOM,
-              "custom 才走页面成绩上报" if lab.page_source == Lab.PageSource.CUSTOM else "当前为平台预置实验",
-              blocking=False)
-        check("发布状态", lab.status == Lab.Status.PUBLISHED,
-              "已发布" if lab.status == Lab.Status.PUBLISHED else f"当前 {lab.status}（草稿态也可 dry-run）",
-              blocking=False)
-        check("页面文件", getattr(lab, "custom_page", None) is not None,
-              "已上传" if getattr(lab, "custom_page", None) is not None else "尚未上传自定义页面",
-              blocking=False)
+        # Stage 9 教师反馈：环境提示项（票据模拟/页面来源/发布状态）对排障没有信息量，全部移除；
+        # 「页面文件」升级为页面静态健康检查——dry-run 必须能发现「页面没有接入桥接」这类问题，
+        # 而不是无论页面长什么样都 PASS。草稿态依然可调试（创建 → 调试 → 发布的 UI 顺序不变）。
+        is_custom = lab.page_source == Lab.PageSource.CUSTOM
+        has_page = getattr(lab, "custom_page", None) is not None
+        if is_custom and not has_page:
+            check("页面文件", False, "尚未上传自定义页面，无法检查页面接入；请先在「实验页面」上传 HTML", blocking=True)
+        elif is_custom and has_page:
+            html_src = lab.custom_page.file.read().decode("utf-8", "replace")
+            check("页面脚本", "<script" in html_src.lower(),
+                  "已包含 <script>（页面可交互）" if "<script" in html_src.lower()
+                  else "页面源码没有任何 <script>——纯静态页面无法判分与上报，请检查上传的文件是否完整",
+                  blocking=True)
+            has_validate = "LabBridge.validate" in html_src
+            check("读取满分（LabBridge.validate）", has_validate,
+                  "已通过 LabBridge.validate 读取满分" if has_validate
+                  else "页面没有调用 LabBridge.validate()——满分应运行时从平台读取而不是写死",
+                  blocking=True)
+            has_report = "reportGrade" in html_src
+            check("成绩上报（LabBridge.reportGrade）", has_report,
+                  "已调用 LabBridge.reportGrade 上报成绩" if has_report
+                  else "页面没有调用 LabBridge.reportGrade()——学生成绩将无法上报",
+                  blocking=True)
 
         parsed = None
         try:

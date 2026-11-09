@@ -1,0 +1,67 @@
+FAIL | A1 教师真实登录成功 | /login(inputs=0)
+PASS | A2 教师主导航不再出现「实验管理」入口（仅保留课程内）
+FAIL | A3 课程内实验管理页渲染
+FAIL | A3b 课程工作台出现「实验管理」Tab
+PASS | A4 课程内模式：课程筛选器隐藏（课程已锁定）
+FAIL | A5 新建实验按钮存在
+shot -> test/screenshots/s9-8088-library.png
+FAIL | B1 新建弹窗打开（Stage 7：抽屉改弹窗）
+FAIL | B2 双 Tab：自定义上传排第一（教师反馈第 8 条） | []
+FAIL | B3 自定义上传默认选中 | 
+PASS | B3a 自定义上传不出现模板/满分等配置（教师反馈第 8 条） | []
+FAIL | B3c 实验页面可选（带引导提示）
+FAIL | B3b 单 HTML 上传区可见
+FAIL | B4 课程内创建：所属课程锁定为当前课程（disabled）
+FAIL | B5 填写实验名称
+FAIL | B6 上传「从动态说明提取的」HTML | null
+shot -> test/screenshots/s9-8088-create.png
+FAIL | C1 创建成功并打开详情弹窗
+FAIL | C2 自动切到「成绩接口」Tab | 
+FAIL | C3 成绩上报地址正确 | 
+FAIL | C4 动态 Markdown 含实验名/满分/桥接要点/AI 指令（Stage 9 精简版）
+FAIL | C5 动态说明精简且无占位符残留 | len=null
+FAIL | C6 复制给 AI 可用
+FAIL | C6b 复制结果反馈 | null
+shot -> test/screenshots/s9-8088-grading.png
+FAIL | D1 满分示例填充
+FAIL | D2 发送调试请求
+FAIL | D3 调试通过且标注 dry-run | null
+FAIL | D4 页面静态健康检查三项 PASS（页面脚本/读取满分/成绩上报，Stage 9） | {"total":0,"info":0,"bad":0,"ok":0}
+FAIL | D5 展示「若正式提交会写入」预览 | 
+FAIL | D6 问号图标打开使用示例弹窗
+FAIL | D6b 帮助弹窗含使用规则与提示词示例
+shot -> test/screenshots/s9-8088-debug.png
+FAIL | EXCEPTION | TypeError: fetch failed
+    at node:internal/deps/undici/undici:14976:13
+    at async api (D:\Claude_Code\智课系统V2\test\e2e\lab-custom.js:229:13)
+    at async D:\Claude_Code\智课系统V2\test\e2e\lab-custom.js:405:21
+
+总计 30 项，通过 3 项，失败 27 项
+FAILED:
+  - A1 教师真实登录成功
+  - A3 课程内实验管理页渲染
+  - A3b 课程工作台出现「实验管理」Tab
+  - A5 新建实验按钮存在
+  - B1 新建弹窗打开（Stage 7：抽屉改弹窗）
+  - B2 双 Tab：自定义上传排第一（教师反馈第 8 条）
+  - B3 自定义上传默认选中
+  - B3c 实验页面可选（带引导提示）
+  - B3b 单 HTML 上传区可见
+  - B4 课程内创建：所属课程锁定为当前课程（disabled）
+  - B5 填写实验名称
+  - B6 上传「从动态说明提取的」HTML
+  - C1 创建成功并打开详情弹窗
+  - C2 自动切到「成绩接口」Tab
+  - C3 成绩上报地址正确
+  - C4 动态 Markdown 含实验名/满分/桥接要点/AI 指令（Stage 9 精简版）
+  - C5 动态说明精简且无占位符残留
+  - C6 复制给 AI 可用
+  - C6b 复制结果反馈
+  - D1 满分示例填充
+  - D2 发送调试请求
+  - D3 调试通过且标注 dry-run
+  - D4 页面静态健康检查三项 PASS（页面脚本/读取满分/成绩上报，Stage 9）
+  - D5 展示「若正式提交会写入」预览
+  - D6 问号图标打开使用示例弹窗
+  - D6b 帮助弹窗含使用规则与提示词示例
+  - EXCEPTION

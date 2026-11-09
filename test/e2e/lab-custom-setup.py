@@ -27,6 +27,7 @@ import requests
 BASE = os.environ.get("BASE", "http://127.0.0.1:8005")
 OUT = os.environ.get("OUT", "D:/tmp/stage4-setup.json")
 FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "stage4-from-spec.html")
+MIN_LAB = os.path.join(os.path.dirname(__file__), "fixtures", "min-lab.html")
 TEACHER = ("t101", "pass1234")
 STUDENT = ("20249999", "pass1234")
 # S5_REMOTE 非空时，ORM 段经 SSH 在 124 的 zhike_s5test_backend 容器里执行
@@ -127,7 +128,8 @@ print("CLASS_NAME=" + cls.name)
     print(f"course OK: id={course_id} name={course['name']}")
     print(f"class/student OK: class_id={class_id} name={class_name}")
 
-    # 2. 从真实动态接入说明里提取最小 HTML 作为上传样本
+    # 2. 校验动态接入说明的关键要素（Stage 9：说明精简后不再内嵌最小 HTML，
+    #    上传样本改用仓库内的静态 fixture test/e2e/fixtures/min-lab.html）
     tmp = api("POST", "/labs/", token=t_token, expect=201, json={
         "course": course_id, "title": f"临时说明提取-{stamp}",
         "total_score": "100", "pass_score": "60", "page_source": "custom",
@@ -135,16 +137,16 @@ print("CLASS_NAME=" + cls.name)
     tmp_id = tmp["id"]
     spec = api("GET", f"/labs/{tmp_id}/integration-spec/", token=t_token)
     md = spec["markdown"]
-    blocks = re.findall(r"```html\n(.*?)\n```", md, flags=re.S)
-    assert len(blocks) == 1, "动态说明里应有且仅有一个最小 HTML 代码块"
-    html = blocks[0]
-    assert "<!DOCTYPE html>" in html and "LabBridge.reportGrade(" in html
+    for text in ("LabBridge.validate()", "LabBridge.reportGrade(", "ctx.totalScore",
+                 "本次实验已提交", "成绩超出实验总分范围", "实验票据已使用", "提交过于频繁"):
+        assert text in md, f"动态说明缺少关键要素：{text}"
     assert "@@" not in md, "动态说明占位符未完全展开"
+    api("DELETE", f"/labs/{tmp_id}/", token=t_token, expect=200)
+    html = io.open(MIN_LAB, encoding="utf-8").read()
     os.makedirs(os.path.dirname(FIXTURE), exist_ok=True)
     with io.open(FIXTURE, "w", encoding="utf-8", newline="\n") as f:
         f.write(html)
-    api("DELETE", f"/labs/{tmp_id}/", token=t_token, expect=200)
-    print(f"spec OK: markdown={len(md)} chars, min-html={len(html)} chars -> {FIXTURE}")
+    print(f"spec OK: markdown={len(md)} chars -> {FIXTURE} (static min-lab {len(html)} chars)")
     print("temp lab deleted OK")
 
     out = {

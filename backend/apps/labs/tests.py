@@ -875,7 +875,15 @@ class LabGradeReportTest(TestCase):
 
     HTML = """<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
     <title>成绩上报测试页</title></head><body><h1>自定义实验</h1>
-    <script>window.__custom_lab__ = true;</script></body></html>""".encode("utf-8")
+    <script>
+      window.__custom_lab__ = true;
+      // 接入说明要求：运行时读取满分并上报成绩（静态健康检查会查这两个调用）
+      (async function () {
+        const ctx = await window.LabBridge.validate();
+        window.__maxScore__ = ctx.totalScore;
+        window.LabBridge.reportGrade({ total_score: 0, elapsed_seconds: 0 });
+      })();
+    </script></body></html>""".encode("utf-8")
 
     @classmethod
     def setUpTestData(cls):
@@ -956,6 +964,29 @@ class LabGradeReportTest(TestCase):
         from apps.labs.models import LabSubmission
 
         return LabSubmission.objects.get(pk=sub_id)
+
+    def test_grade_debug_detects_page_without_bridge(self):
+        """Stage 9 教师反馈：把页面里的 script 删掉后，dry-run 必须能发现页面没接入桥接，
+        而不是无论页面长什么样都 PASS。"""
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        lab_id = self._make_lab("无桥接调用实验")
+        bad_html = ("<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
+                    "<title>静态页</title></head><body><h1>纯展示页，没有任何脚本</h1></body></html>").encode("utf-8")
+        res = self.tc.post(f"/api/labs/{lab_id}/page/", {
+            "file": SimpleUploadedFile("bad.html", bad_html, content_type="text/html"),
+        }, format="multipart")
+        self.assertEqual(res.status_code, 200, res.data)
+        self._publish(lab_id)
+        res = self.tc.post(f"/api/labs/{lab_id}/grade-debug/", {
+            "total_score": "88.5", "elapsed_seconds": 60,
+        }, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertFalse(res.data["data"]["passed"], "无桥接调用的页面必须判失败")
+        names = {c["name"]: c for c in res.data["data"]["checks"]}
+        self.assertFalse(names["页面脚本"]["ok"])
+        self.assertFalse(names["读取满分（LabBridge.validate）"]["ok"])
+        self.assertFalse(names["成绩上报（LabBridge.reportGrade）"]["ok"])
 
     def test_invalid_expired_consumed_ticket(self):
         """六分支 1：票据无效 / 过期 / 已消费 / 完全缺失，一律拒绝且不落库。"""
@@ -1171,8 +1202,13 @@ class LabGradeReportTest(TestCase):
         }, format="json")
         self.assertEqual(res.status_code, 200, res.data)
         self.assertTrue(res.data["data"]["passed"], "草稿态 dry-run 不应被发布状态拦下")
-        self.assertFalse(any(c["blocking"] for c in res.data["data"]["checks"]
-                             if c["name"] in ("发布状态", "页面文件")))
+        # Stage 9：环境提示项已移除；页面静态健康检查为 blocking（草稿+已上传页面应全 PASS）
+        names = {c["name"] for c in res.data["data"]["checks"]}
+        self.assertNotIn("票据模拟", names)
+        self.assertNotIn("发布状态", names)
+        self.assertIn("成绩上报（LabBridge.reportGrade）", names)
+        self.assertTrue(all(c["ok"] for c in res.data["data"]["checks"] if c["blocking"]),
+                        "已上传页面的静态健康检查应全部通过")
 
         lab_id = self._setup()
         for score in ("100", "0", "86.5"):
@@ -1444,9 +1480,9 @@ class LabIntegrationSpecTest(TestCase):
         for text in (
             "VLAN 与 Trunk 配置实验", "85.5", "/api/lab-gate/grade/",
             f"/api/labs/{lab_id}/grade-debug/",
-            "## 4. 请求与响应 schema", '"total_score"', '"elapsed_seconds"',
-            '"submission_id"', "## 5. 最小可运行示例", "## 7. 可直接复制给 AI",
+            "## 1. 你的任务", "## 2. 与平台交互", "## 4. 可直接复制给 AI",
             "LabBridge.validate()", "LabBridge.reportGrade(", "ctx.totalScore",
+            "同一学生多次提交只保留最高分",
             "本次实验已提交", "成绩超出实验总分范围", "实验票据已使用",
             "提交过于频繁",
         ):
@@ -1506,34 +1542,26 @@ class LabIntegrationSpecTest(TestCase):
         self.assertIn("实验乙", mb)
         self.assertIn("0 ~ 120", mb)
 
-    def test_min_html_is_uploadable_and_scan_clean(self):
-        """验收「复制出来的说明可直接使用」：最小 HTML 单文件、静态扫描零命中、四个 API 齐全。"""
+    def test_markdown_is_concise_and_scan_clean(self):
+        """Stage 9 教师反馈：接入说明精简——无大段 schema/最小 HTML 代码块，保留桥接要点。"""
         import re
-
-        from apps.labs.serializers import scan_lab_page_html
 
         lab_id = self._make_lab()
         md = self._spec(lab_id).data["data"]["markdown"]
-        blocks = re.findall(r"```html\n(.*?)\n```", md, flags=re.S)
-        self.assertEqual(len(blocks), 1, "说明里必须恰有一个最小 HTML 代码块")
-        html = blocks[0]
-        self.assertIn("<!DOCTYPE html>", html)
-        self.assertIn("</html>", html)
-        self.assertIn("LabBridge.preview", html)
-        self.assertIn("await LabBridge.validate()", html)
-        self.assertIn("ctx.totalScore", html)
-        self.assertIn("await LabBridge.reportGrade(", html)
-        # 上传约束：不自带桥接 script src、不自己发请求、不碰票据
-        for forbidden in ("<script src", "lab-bridge.js", "X-Lab-Token", "fetch(", "<base"):
-            self.assertNotIn(forbidden, html, f"最小示例不应出现 {forbidden}")
-        self.assertEqual(scan_lab_page_html(html), [], "最小示例必须能通过 S8 静态扫描，否则复制出来即可用不成立")
+        # 不再内嵌最小 HTML 代码块（避免复制给 AI 的内容冗余）
+        self.assertEqual(re.findall(r"```html", md), [], "精简版说明不应再内嵌 ```html 代码块")
+        # LabBridge 用法的 js 代码块仍保留（教师/AI 需要知道三个 API）
+        self.assertIn("```js", md)
+        self.assertIn("LabBridge.reportGrade(", md)
+        # 体积约束：精简后说明不应超过 6KB（原版 ~7.4KB）
+        self.assertLess(len(md.encode("utf-8")), 6 * 1024, "接入说明应保持精简")
 
     def test_no_ticket_leaked_into_page_contract(self):
         """C25/C45：说明明确票据只在平台父页面，不下发 attempt token 给页面。"""
         lab_id = self._make_lab()
         md = self._spec(lab_id).data["data"]["markdown"]
-        self.assertIn("只在平台父页面", md)
-        self.assertIn("iframe 内页面不接触", md)
+        self.assertIn("平台父页面", md)
+        self.assertIn("iframe 内页面不接触票据", md)
         self.assertNotIn("window.LabBridge.token", md)
         self.assertNotIn("attemptToken", md)
         # C40 的约束是「iframe 属性不得含 allow-same-origin」，说明文档里本就应

@@ -26,6 +26,19 @@ const setup = JSON.parse(fs.readFileSync(SETUP_PATH, 'utf-8'));
 // 浏览器一律走前端（本地 5273 直出 dist 并代理 /api；8092 走 nginx）。
 // setup.base 是准备脚本用的后端地址，不能拿来当浏览器入口。
 const BASE = process.env.BASE || 'http://127.0.0.1:5273';
+// 环境防呆：setup.base 与 BASE 指向不同环境时，course/token 全部错位（曾致 41 项连锁假失败），
+// 直接快速失败并提示重跑对应环境的 setup，而不是漫山遍野的断言错误。
+{
+  const setupOrigin = String(setup.base || '').replace(/\/$/, '');
+  const baseOrigin = BASE.replace(/\/$/, '');
+  const sameHost = setupOrigin === baseOrigin
+    || (setupOrigin.includes('127.0.0.1') && baseOrigin.includes('127.0.0.1'));
+  if (setup.base && !sameHost) {
+    console.log(`FATAL: setup.base=${setupOrigin} 与 BASE=${baseOrigin} 不是同一环境。`);
+    console.log('请先重跑该环境的 lab-custom-setup.py（BASE=<该环境>），再执行本脚本。');
+    process.exit(2);
+  }
+}
 const TITLE = setup.lab_title;
 
 class Cdp {
@@ -335,11 +348,13 @@ let CDP;
       const p = document.querySelector('.lab-grading-panel .spec-markdown');
       return p && p.textContent.length > 1000 ? p.textContent : null;
     })()`);
-    check('C4 动态 Markdown 含实验名/满分/schema/最小HTML/AI指令',
-      !!md && md.includes(TITLE) && md.includes('100') && md.includes('请求与响应 schema')
+    check('C4 动态 Markdown 含实验名/满分/桥接要点/AI 指令（Stage 9 精简版）',
+      !!md && md.includes(TITLE) && md.includes('100') && md.includes('## 1. 你的任务')
+      && md.includes('同一学生多次提交只保留最高分')
       && md.includes('LabBridge.reportGrade(') && md.includes('可直接复制给 AI'));
-    check('C5 动态说明无占位符残留且无补充说明段',
-      !!md && !md.includes('@@') && !md.includes('教师补充说明'), md && md.slice(0, 80));
+    check('C5 动态说明精简且无占位符残留',
+      !!md && !md.includes('@@') && !md.includes('教师补充说明') && md.length < 6 * 1024,
+      `len=${md && md.length}`);
     check('C6 复制给 AI 可用', await clickButton('.lab-grading-panel', '复制给 AI'));
     const toast = await waitFor(cdp, `document.querySelector('.lab-grading-panel .copy-toast')?.textContent || null`, 6000);
     check('C6b 复制结果反馈', !!toast && String(toast).includes('接入说明'), toast);
@@ -356,8 +371,8 @@ let CDP;
                bad: all.filter((e)=>e.classList.contains('bad')).length,
                ok: all.filter((e)=>e.classList.contains('ok')).length };
     })()`);
-    check('D4 提示项渲染为灰色「提示」而非红色失败（blocking=false）',
-      checks && checks.info >= 1 && checks.bad === 0, JSON.stringify(checks));
+    check('D4 页面静态健康检查三项 PASS（页面脚本/读取满分/成绩上报，Stage 9）',
+      checks && checks.ok >= 3 && checks.bad === 0, JSON.stringify(checks));
     const preview = await cdp.eval(`document.querySelector('.debug-preview pre')?.textContent || ''`);
     check('D5 展示「若正式提交会写入」预览', preview.includes('external') && preview.includes('服务端'), preview.slice(0, 120));
 
