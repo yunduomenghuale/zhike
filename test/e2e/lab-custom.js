@@ -386,11 +386,11 @@ let CDP;
       const ds = [...document.querySelectorAll('.el-dialog')].filter((e) => e.getClientRects().length);
       return ds.some((e) => (e.textContent || '').includes('如何使用接入说明')) ? true : null;
     })()`, 8000);
-    check('D6b 帮助弹窗含使用规则与提示词示例',
+    check('D6b 帮助弹窗含使用规则/提示词模板/实测范例',
       !!helpReady && (await cdp.eval(`(() => {
         const ds = [...document.querySelectorAll('.el-dialog')].filter((e) => e.getClientRects().length);
         const d = ds.find((e) => (e.textContent || '').includes('如何使用接入说明'));
-        return d && d.textContent.includes('LabBridge.reportGrade') && d.textContent.includes('提示词示例') ? true : null;
+        return d && d.textContent.includes('LabBridge.reportGrade') && d.textContent.includes('提示词模板') && d.textContent.includes('实测范例') ? true : null;
       })()`)));
     await cdp.eval(`(() => {
       const ds = [...document.querySelectorAll('.el-dialog')].filter((e) => e.getClientRects().length);

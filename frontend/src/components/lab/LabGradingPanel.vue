@@ -82,28 +82,22 @@
           <li>单文件：JS / CSS / 图片全部内联；不得访问浏览器存储、外链资源或平台接口（静态扫描会拦截）。</li>
           <li>同一学生多次提交只记录<b>最高分</b>，可放心让学生重试。</li>
         </ul>
-        <h4>发给 AI 的提示词示例（整段复制即可用）</h4>
-        <pre class="help-code">帮我开发一个校园网故障排查实验页面，要求如下：
-
-1. 交付物：单个 HTML 文件（所有 JS / CSS 内联，不引用任何外部资源）。
-2. 实验内容：给出一个拓扑图（可用 SVG 绘制），包含 3 个待排查任务：
-   任务一（40 分）找出 VLAN 划分错误；任务二（40 分）修复网关配置；
-   任务三（20 分）验证全网连通。每个任务提供交互式判断（选择 / 输入命令）。
-3. 界面：显示实验标题、满分（运行时从 LabBridge 读取，不要写死）、
-   任务列表与完成状态、作答计时。
-4. 提交：学生点「提交成绩」时，按完成情况计算总分（不超过满分），
-   调用 LabBridge.reportGrade({ total_score: 总分, elapsed_seconds: 用时秒 }) 上报，
-   并把返回结果展示给学生；重复点击要有防抖处理。
-5. 运行环境：页面将嵌入平台沙箱 iframe，通过 window.LabBridge 与平台通信：
-   - const ctx = await LabBridge.validate()  // 返回 { labId, submissionId, totalScore, gradeEndpoint }
-   - await LabBridge.reportGrade(payload)     // 返回平台响应 { code, message, ... }
-   - LabBridge.preview === true 表示教师预览模式，此时不要提交。
-6. 禁止：访问 localStorage / cookie、请求外部网址、使用 eval。
-
-请直接输出完整 HTML 文件内容。</pre>
+        <h4>发给 AI 的提示词模板（填一行主题即可用）</h4>
+        <pre class="help-code">{{ helpPromptText }}</pre>
+        <h4>实测范例：主题描述的推荐写法（已验证有效）</h4>
+        <div class="help-tip-line">
+          「复制给 AI」说明已替你预填实验名与满分；AI 只差一段<b>具体的主题描述</b>。
+          下面是按此写法实测的范例——把「实验主题与判分需求」的占位符替换成这样的描述（场景化操作 + 明确计分），
+          AI 就会产出带 SVG 场景与动画的交互实验（本范例由 AI 按此描述生成并通过全部健康检查）：
+        </div>
+        <pre class="help-code">十进制与二进制转换练习实验。满分 100 分，判分基于学生在场景中的操作结果：
+学生通过拨动「二进制位开关」构造出一个指定的二进制数（教师面板给出目标十进制值），
+共 5 关，每关目标值不同（难度递增），构造正确并点击「确认本关」得 20 分；
+全部达成得满分。</pre>
       </div>
       <template #footer>
-        <el-button type="primary" @click="copyText(helpPromptText, '提示词示例')">复制提示词示例</el-button>
+        <el-button type="primary" @click="copyText(helpPromptText, '提示词模板')">复制提示词模板</el-button>
+        <el-button type="success" plain @click="copyText(helpExampleText, '实测范例主题描述')">复制范例主题描述</el-button>
         <el-button @click="helpVisible = false">关闭</el-button>
       </template>
     </el-dialog>
@@ -135,6 +129,12 @@ const specBox = ref(null)
 const debugForm = ref({ total_score: 100, elapsed_seconds: 60 })
 const debugResult = ref(null)
 const helpVisible = ref(false)
+const helpExampleText =
+  '十进制与二进制转换练习实验。满分 100 分，判分基于学生在场景中的操作结果：\n' +
+  '学生通过拨动「二进制位开关」构造出一个指定的二进制数（教师面板给出目标十进制值），\n' +
+  '共 5 关，每关目标值不同（难度递增），构造正确并点击「确认本关」得 20 分；\n' +
+  '全部达成得满分。'
+
 const helpPromptText =
   '请为我开发一个智课平台的自定义实验页面，交付物是单个 HTML 文件\n' +
   '（所有 CSS/JS/图片内联，不引用外部资源、不使用 eval）。\n\n' +
@@ -299,6 +299,7 @@ onMounted(loadSpec)
 .debug-preview { margin-top: 12px; }
 .copy-toast { font-size: 12px; color: #059669; }
 .help-doc h4 { margin: 14px 0 8px; color: #1e293b; }
+.help-tip-line { font-size: 12.5px; color: #64748b; line-height: 1.8; margin-bottom: 8px; }
 .help-doc ol, .help-doc ul { margin: 0 0 10px 22px; line-height: 1.9; color: #475569; font-size: 13px; }
 .help-doc code { background: #f1f5f9; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
 .help-code {
