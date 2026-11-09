@@ -109,17 +109,20 @@ function onHtmlPicked(file) {
   emit('update:modelValue', file)
   needConfirm.value = false
   hits.value = []
-  // 教师反馈：已有实验时选择文件后直接上传，不再需要点「上传并覆盖页面」按钮
-  if (props.labId) submit(false)
+  // 教师反馈：已有实验时选择文件后直接上传，不再需要点「上传并覆盖页面」按钮。
+  // 注意：emit 后 props.modelValue 要到下一轮渲染才更新，必须把 file 直接传下去，
+  // 否则 submit 读到的还是旧值（null）会静默返回——这正是「选了文件但没上传也没提示」的根因。
+  if (props.labId) submit(false, file)
   return false // 阻止 el-upload 自动上传，统一由 submit() 显式提交
 }
 
-async function submit(force) {
-  if (!props.modelValue || !props.labId) return
+async function submit(force, fileOverride) {
+  const f = fileOverride || props.modelValue
+  if (!f || !props.labId) return
   uploading.value = true
   percent.value = 0
   try {
-    const res = await uploadLabPage(props.labId, props.modelValue, Boolean(force || needConfirm.value), (e) => {
+    const res = await uploadLabPage(props.labId, f, Boolean(force || needConfirm.value), (e) => {
       if (e.total) percent.value = Math.round((e.loaded / e.total) * 100)
     })
     needConfirm.value = false
@@ -134,7 +137,8 @@ async function submit(force) {
       hits.value = body.hits || []
       ElMessage.warning(body.message || '页面源码命中安全扫描规则，请确认后重试')
     } else {
-      ElMessage.error(body?.message || e?.message || '页面上传失败')
+      ElMessage.error(body?.message || e?.message || '页面上传失败，请重试')
+      // 失败时保留文件状态条，学生/教师可直接重试（不清空 modelValue）
     }
   } finally {
     uploading.value = false
