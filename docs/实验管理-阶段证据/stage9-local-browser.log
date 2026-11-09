@@ -35,7 +35,7 @@ PASS | D5 展示「若正式提交会写入」预览 | {
 PASS | D6 问号图标打开使用示例弹窗
 PASS | D6b 帮助弹窗含使用规则与提示词示例
 shot -> test/screenshots/s9-local-debug.png
-PASS | D8 真实 API 能查到新建的自定义实验 | 142
+PASS | D8 真实 API 能查到新建的自定义实验 | 154
 PASS | D9 dry-run 未产生任何真实提交 | count=0
 PASS | E1 切到「实验页面」Tab
 PASS | E1b 显示已上传页面文件名 | 单 HTML 自定义页面页面运行在平台父页面的沙箱 iframe 内；上传后可先「预览页面」检查。当前文件：stage4-from-spec.html（2.4 KB）
@@ -48,7 +48,7 @@ PASS | E3b 完成情况饼图渲染
 PASS | E3c 分数段分布图渲染
 PASS | E3d 成绩明细表并入概览
 shot -> test/screenshots/s9-local-overview.png
-PASS | E4 列表徽标「最近通过」+ 草稿态 | Stage4 自定义实验-20261109093310
+PASS | E4 列表徽标「最近通过」+ 草稿态 | Stage4 自定义实验-20261109103018
 	
 自定义
 	
@@ -72,33 +72,34 @@ PASS | E6b 列表徽标「最近失败」
 PASS | E6c 满分报文 dry-run 判通过
 PASS | F1 学生开始实验拿到门控链接 | status=200 message=实验已开始
 PASS | F2 sandbox iframe 独立上下文可定位
+PASS | F2b 浏览器标签页图标为项目 logo（favicon 内联）
 PASS | F3 说明里的最小 HTML 正常运行（3 个任务渲染）
 PASS | F4 页面经 LabBridge.reportGrade 真实上报成功 | {
   "code": 0,
   "message": "成绩已提交",
   "data": {
-    "submission_id": 91,
+    "submission_id": 100,
     "total_score": 100,
     "status": "submitted",
-    "submitted_at": "2026-11-09T01:33:23.516926+00:00",
-    "graded_at": "2
+    "submitted_at": "2026-11-09T02:30:32.400267+00:00",
+    "graded_at": "
 PASS | F5 学生真实登录成功 | /dashboard
 PASS | F6 学生端看到该自定义实验且标「自定义」 | 实验
 自定义
-Stage4 自定义实验-20261109093310
+Stage4 自定义实验-20261109103018
 100.0 分
 按步骤完成华为命令配置
-Stage4 实验管理UI-20261109093310
+Stage4 实验管理UI-20261109103018
 标准时长 30 分钟
 满分 100.0 分
 网络2026届-1班 · 长期开放
 100.0 / 100.0 分
-用时 0 秒 · 提交于 2026-11-09 09:33 （自定义实验，平台不
-PASS | F7 external 只显示总分 + 用时、不渲染步骤表 | {"text":"实验\n自定义\nStage4 自定义实验-20261109093310\n100.0 分\n按步骤完成华为命令配置\nStage4 实验管理UI-20261109093310\n标准时长 30 分钟\n满分 100.0 分\n网络2026届-1班 · 长期开放\n100.0 / 100.0 分\n用时 0 秒 · 提交于 2026-11-09 09:33 （自定义实验，平台不记录步骤明细）\n重做实验","hasBr
+用时 0 秒 · 提交于 2026-11-09 10:30 （自定义实验，平台不
+PASS | F7 external 只显示总分 + 用时、不渲染步骤表 | {"text":"实验\n自定义\nStage4 自定义实验-20261109103018\n100.0 分\n按步骤完成华为命令配置\nStage4 实验管理UI-20261109103018\n标准时长 30 分钟\n满分 100.0 分\n网络2026届-1班 · 长期开放\n100.0 / 100.0 分\n用时 0 秒 · 提交于 2026-11-09 10:30 （自定义实验，平台不记录步骤明细）\n重做实验","hasBr
 PASS | F8 总分可见 | 100.0 / 100.0 分
 PASS | F9 重做入口存在（Stage 6 最高分规则：重做只记录最高分，允许重做） | ["重做实验"]
 shot -> test/screenshots/s9-local-student.png
 PASS | F10 全流程控制台无 error | 
 
-总计 57 项，通过 57 项，失败 0 项
+总计 58 项，通过 58 项，失败 0 项
 ALL_PASS

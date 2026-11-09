@@ -1,0 +1,9 @@
+E:\Miniconda\python.exe: can't open file 'D:\\Claude_Code\\智课系统V2\\manage.py': [Errno 2] No such file or directory
+PASS | 1 页面渲染非空
+PASS | 2 LabBridge.validate 被调用（读取满分） | count=1
+PASS | 3 找到并点击提交按钮 | 提交成绩
+PASS | 4 reportGrade 被调用（上报链路通） | [{"total_score":0,"elapsed_seconds":3}]
+PASS | 5 total_score 合法（0~100 数字） | [{"total_score":0,"elapsed_seconds":3}]
+PASS | 6 控制台零 error
+总计 6 项，通过 6 项，失败 0 项
+ALL_PASS

@@ -481,6 +481,9 @@ let CDP;
       await cdp.send('Page.navigate', { url: BASE.replace(/\/$/, '') + gateUrl });
       const frameSession = await cdp.attachIframe(sinceF);
       check('F2 sandbox iframe 独立上下文可定位', !!frameSession);
+      // Stage 9：实验页面浏览器标签图标 = 项目 logo（gate 父页面 head 内联 data URI）
+      const faviconReady = await waitFor(cdp, `document.querySelector('link[rel="icon"]')?.href.startsWith('data:image/svg+xml') ? true : null`, 8000);
+      check('F2b 浏览器标签页图标为项目 logo（favicon 内联）', !!faviconReady);
       const tasksReady = frameSession && await waitFor(cdp, `(() => {
         const b = document.getElementById('tasks');
         return b && b.children.length === 3 ? true : null;
