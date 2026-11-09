@@ -129,7 +129,7 @@ async function submit(force, fileOverride) {
     hits.value = []
     emit('update:modelValue', null)
     emit('uploaded', res)
-    ElMessage.success(page?.name ? '新页面已上传并覆盖当前页面' : '实验页面已保存')
+    ElMessage.success(props.page?.name ? '新页面已上传并覆盖当前页面' : '实验页面已保存')
   } catch (e) {
     const body = e?.response?.data
     if (body?.require_confirm) {
