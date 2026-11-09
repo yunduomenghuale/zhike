@@ -48,6 +48,8 @@ _AI_PROMPT = """请为我开发一个智课平台的自定义实验页面，交�
    失败时把返回的 message 展示给学生并允许重试；同一学生多次提交平台只保留最高分。
    上报成功后：停止计时、锁定所有作答交互，页面只展示最终结果与成绩，
    不要再改变计时器读数或允许继续作答。
+   响应契约：{ code, message }。必须检查 code === 0 才显示「成绩已提交」；
+   code 非 0 时必须原样展示 message 并允许重试——绝不能把失败当作成功。
 3. 禁止访问 localStorage/sessionStorage/cookie、fetch 平台 /api、触碰 window.parent/opener；
    票据由平台父页面自动附带，页面不要读取 location.search 或拼接任何 token。
 
@@ -101,7 +103,7 @@ def build_integration_spec(lab, absolute_grade_url=None) -> dict:
     """按实验参数渲染接入说明。纯渲染，不写库。
 
     :param lab: `Lab` 实例
-    :param absolute_grade_url: 可选，由视图用 `request.build_absolute_uri()` 生成的同源绝对地址
+    :param absolute_grade_url: 已废弃（Stage 11）：上报地址一律相对路径，避免反代/多端口场景写错
     """
     score = _fmt_score(lab.total_score)
     replacements = {
@@ -109,7 +111,8 @@ def build_integration_spec(lab, absolute_grade_url=None) -> dict:
         "@@LAB_ID@@": str(lab.id),
         "@@TOTAL_SCORE@@": score,
         "@@GRADE_ENDPOINT@@": GRADE_ENDPOINT,
-        "@@GRADE_URL@@": absolute_grade_url or ("<平台域名>" + GRADE_ENDPOINT),
+        # 说明里的上报地址一律相对路径（同源，由平台父页面代发，不写死域名/端口）
+        "@@GRADE_URL@@": GRADE_ENDPOINT,
         "@@DEBUG_ENDPOINT@@": f"/api/labs/{lab.id}/grade-debug/",
         "@@AI_PROMPT@@": _AI_PROMPT,
     }

@@ -1,0 +1,107 @@
+PASS | A1 教师真实登录成功 | /dashboard
+PASS | A2 教师主导航不再出现「实验管理」入口（仅保留课程内）
+PASS | A3 课程内实验管理页渲染
+PASS | A3b 课程工作台出现「实验管理」Tab
+PASS | A4 课程内模式：课程筛选器隐藏（课程已锁定）
+PASS | A5 新建实验按钮存在
+shot -> test/screenshots/s12-qv-library.png
+PASS | B1 新建弹窗打开（Stage 7：抽屉改弹窗）
+PASS | B2 双 Tab：自定义上传排第一（教师反馈第 8 条） | ["自定义上传","平台预置（计算机网络实验）"]
+PASS | B3 自定义上传默认选中 | 自定义上传
+PASS | B3a 自定义上传不出现模板/满分等配置（教师反馈第 8 条） | ["所属课程","所属章节","实验名称","实验页面"]
+PASS | B3c 实验页面可选（带引导提示）
+PASS | B3b 单 HTML 上传区可见
+PASS | B4 课程内创建：所属课程锁定为当前课程（disabled）
+PASS | B5 填写实验名称
+PASS | B6 上传「从动态说明提取的」HTML | stage4-from-spec.html
+shot -> test/screenshots/s12-qv-create.png
+PASS | C1 创建成功并打开详情弹窗
+PASS | C2 自动切到「成绩接口」Tab | 成绩接口|自定义上传
+PASS | C3 成绩上报地址正确 | POST /api/lab-gate/grade/
+PASS | C4 动态 Markdown 含实验名/满分/桥接要点/AI 指令（Stage 9 精简版）
+PASS | C5 动态说明精简且无占位符残留 | len=2463
+PASS | C6 复制给 AI 可用
+PASS | C6b 复制结果反馈 | 接入说明已复制到剪贴板
+shot -> test/screenshots/s12-qv-grading.png
+PASS | D1 满分示例填充
+PASS | D2 发送调试请求
+PASS | D3 调试通过且标注 dry-run | 调试通过 （模拟报文，未产生真实提交）
+PASS | D4 页面静态健康检查三项 PASS（页面脚本/读取满分/成绩上报，Stage 9） | {"total":6,"info":0,"bad":0,"ok":6}
+PASS | D5 展示「若正式提交会写入」预览 | {
+  "status": "submitted",
+  "grading_source": "external",
+  "total_score": 100,
+  "submitted_at": "服务端 timezone.now() 生
+PASS | D6 问号图标打开使用示例弹窗
+PASS | D6b 帮助弹窗含使用规则/提示词模板/实测范例
+shot -> test/screenshots/s12-qv-debug.png
+PASS | D8 真实 API 能查到新建的自定义实验 | 24
+PASS | D9 dry-run 未产生任何真实提交 | count=0
+PASS | E1 切到「实验页面」Tab
+PASS | E1b 显示已上传页面文件名 | 单 HTML 自定义页面页面运行在平台父页面的沙箱 iframe 内；上传后可先「预览页面」检查。当前文件：stage4-from-spec.html（2.4 KB）
+PASS | E2 切到「排课」Tab
+PASS | E2b 选择班级
+PASS | E2c 新增排课（Stage 11：按钮改名+列表化）
+PASS | E2d 排课列表可见（表格展示）
+PASS | E2e 排课行内编辑入口
+PASS | E3 切到「概览与成绩」Tab
+PASS | E3b 完成情况饼图渲染
+PASS | E3c 分数段分布图渲染
+PASS | E3d 成绩明细表并入概览
+shot -> test/screenshots/s12-qv-overview.png
+PASS | E4 列表徽标「最近通过」+ 草稿态 | Stage4 自定义实验-20261109145157
+	
+自定义
+	
+草稿
+	
+最近通过
+	
+0/0
+	
+—
+	
+详情
+排课
+发布
+删除
+PASS | E5 发布实验
+PASS | E5b 列表状态变为「已发布」
+shot -> test/screenshots/s12-qv-published.png
+PASS | E6 越界报文 dry-run 判失败 | passed=false
+PASS | E6b 列表徽标「最近失败」
+PASS | E6c 满分报文 dry-run 判通过
+PASS | F1 学生开始实验拿到门控链接 | status=200 message=实验已开始
+PASS | F2 sandbox iframe 独立上下文可定位
+PASS | F2b 浏览器标签页图标为项目 logo（favicon 内联）
+PASS | F3 说明里的最小 HTML 正常运行（3 个任务渲染）
+PASS | F4 页面经 LabBridge.reportGrade 真实上报成功 | {
+  "code": 0,
+  "message": "成绩已提交",
+  "data": {
+    "submission_id": 16,
+    "total_score": 100,
+    "status": "submitted",
+    "submitted_at": "2026-11-09T06:52:13.884536+00:00",
+    "graded_at": "2
+PASS | F5 学生真实登录成功 | /dashboard
+PASS | F6 学生端看到该自定义实验且标「自定义」 | 实验
+自定义
+Stage4 自定义实验-20261109145157
+100.0 分
+按步骤完成华为命令配置
+Stage4 实验管理UI-20261109145157
+标准时长 30 分钟
+满分 100.0 分
+Stage4班1794197063 · 长期开放
+100.0 / 100.0 分
+用时 0 秒 · 提交于 2026-11-09 14:52
+实验成
+PASS | F7 完成记录：实验成绩=第一次锁定、无步骤表、只记总分与用时（Stage 11） | {"text":"实验\n自定义\nStage4 自定义实验-20261109145157\n100.0 分\n按步骤完成华为命令配置\nStage4 实验管理UI-20261109145157\n标准时长 30 分钟\n满分 100.0 分\nStage4班1794197063 · 长期开放\n100.0 / 100.0 分\n用时 0 秒 · 提交于 2026-11-09 14:52\n实验成绩（第一次，已锁定）\n自定义实验只记录
+PASS | F8 总分可见 | 100.0 / 100.0 分
+PASS | F9 重做入口存在（Stage 11：实验成绩锁定第一次，重做另记最高成绩/最短用时） | ["重新实验"]
+shot -> test/screenshots/s12-qv-student.png
+PASS | F10 全流程控制台无 error | 
+
+总计 59 项，通过 59 项，失败 0 项
+ALL_PASS

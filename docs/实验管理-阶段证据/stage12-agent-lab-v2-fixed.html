@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>十进制与二进制转换练习</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0f172a;
+    color: #e2e8f0;
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  header {
+    width: 100%;
+    max-width: 980px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 16px 4px;
+  }
+  header h1 { font-size: 18px; font-weight: 600; color: #7dd3fc; }
+  .hstats { display: flex; gap: 14px; font-size: 13px; color: #94a3b8; flex-wrap: wrap; }
+  .hstats b { color: #fbbf24; font-family: Consolas, "Courier New", monospace; }
+  .badge {
+    font-size: 12px; padding: 2px 10px; border-radius: 10px;
+    background: #7c2d12; color: #fdba74; border: 1px solid #ea580c;
+    display: none;
+  }
+  main { width: 100%; max-width: 980px; padding: 4px 8px; }
+  svg#scene { width: 100%; height: auto; display: block; }
+
+  /* ===== SVG 场景样式 ===== */
+  .titleTxt  { fill: #7dd3fc; font-size: 20px; font-weight: 600; }
+  .panelLab  { fill: #94a3b8; font-size: 13px; }
+  .bigNum    { fill: #fbbf24; font-family: Consolas, "Courier New", monospace; font-weight: 700; }
+  .bigNum.ok { fill: #4ade80; }
+  .panelRect { fill: #111c33; stroke: #24344f; stroke-width: 1.5; rx: 10; }
+
+  .sw { cursor: pointer; }
+  .sw .hit { fill: transparent; pointer-events: all; }
+  .sw .base { fill: #1b2a44; stroke: #2f4569; stroke-width: 1.5; rx: 8; transition: stroke .25s; }
+  .sw:hover .base { stroke: #38bdf8; }
+  .sw .track { fill: #0b1220; stroke: #2f4569; }
+  .sw .lever { fill: #94a3b8; transition: transform .22s ease, fill .22s ease; }
+  .sw.on .lever { fill: #fbbf24; }
+  .sw .onlab, .sw .offlab { fill: #475569; font-size: 11px; font-family: Consolas, monospace; }
+  .sw .lamp { fill: #3f4a5f; transition: fill .3s ease; }
+  .sw.on .lamp { fill: #fbbf24; filter: drop-shadow(0 0 8px #fbbf24); }
+  .sw .ring { fill: none; stroke: #fbbf24; opacity: 0; transform-box: fill-box; transform-origin: center; }
+  .sw.on .ring { animation: ringPulse 1s ease-out infinite; }
+  .sw .bit { fill: #64748b; font-size: 22px; font-weight: 700; font-family: Consolas, monospace; transition: fill .25s; }
+  .sw.on .bit { fill: #fbbf24; }
+  .sw .wt { fill: #cbd5e1; font-size: 15px; font-weight: 600; font-family: Consolas, monospace; }
+  .sw .wsub { fill: #64748b; font-size: 10px; }
+  .sw .contrib { fill: #475569; font-size: 12px; font-family: Consolas, monospace; transition: fill .25s; }
+  .sw.on .contrib { fill: #38bdf8; }
+
+  .spark { fill: #fbbf24; animation: sparkFly .7s ease-in forwards; }
+  .confetti { animation: popOut .9s ease-out forwards; }
+
+  #displayG { transform-box: fill-box; transform-origin: center; }
+  #displayG.shake { animation: shakeK .35s ease; }
+  #dispVal { transform-box: fill-box; transform-origin: center; }
+  #dispVal.bump { animation: bumpK .45s ease; }
+  #dispBin { fill: #7dd3fc; font-size: 18px; letter-spacing: 6px; font-family: Consolas, monospace; }
+
+  #sceneMsg.ok   { fill: #4ade80; }
+  #sceneMsg.err  { fill: #f87171; }
+  #sceneMsg.warn { fill: #fbbf24; }
+  #sceneMsg.info { fill: #94a3b8; }
+
+  .dot { fill: #1e293b; stroke: #475569; transition: fill .3s; }
+  .dot.passed { fill: #4ade80; stroke: #4ade80; }
+  .dot.cur    { fill: #fbbf24; stroke: #fbbf24; }
+
+  @keyframes ringPulse {
+    0%   { transform: scale(1);    opacity: .8; }
+    100% { transform: scale(2.1);  opacity: 0; }
+  }
+  @keyframes sparkFly {
+    to { transform: translate(var(--dx), var(--dy)); opacity: .15; }
+  }
+  @keyframes popOut {
+    to { transform: translate(var(--tx), var(--ty)); opacity: 0; }
+  }
+  @keyframes bumpK {
+    30% { transform: scale(1.28); fill: #fbbf24; }
+    100% { transform: scale(1); }
+  }
+  @keyframes shakeK {
+    25% { transform: translateX(-7px); }
+    50% { transform: translateX(6px); }
+    75% { transform: translateX(-4px); }
+  }
+
+  /* ===== 页脚控件 ===== */
+  footer {
+    width: 100%;
+    max-width: 980px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 16px 20px;
+  }
+  #msg { min-height: 22px; font-size: 14px; text-align: center; }
+  #msg.ok   { color: #4ade80; }
+  #msg.err  { color: #f87171; }
+  #msg.warn { color: #fbbf24; }
+  #msg.info { color: #94a3b8; }
+  .btnrow { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+  button {
+    font-size: 15px; padding: 9px 26px; border-radius: 8px; cursor: pointer;
+    border: 1px solid #2f4569; background: #1b2a44; color: #e2e8f0;
+    transition: background .2s, transform .1s;
+  }
+  button:hover { background: #24365a; }
+  button:active { transform: scale(.97); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  #confirmBtn {
+    background: #166534; border-color: #22c55e; color: #dcfce7; font-weight: 600;
+  }
+  #confirmBtn:hover { background: #15803d; }
+  #retryBtn { display: none; background: #7c2d12; border-color: #ea580c; color: #fdba74; }
+</style>
+</head>
+<body>
+<header>
+  <h1>十进制与二进制转换练习</h1>
+  <span class="badge" id="previewBadge">教师预览模式（不提交成绩）</span>
+  <div class="hstats">
+    <span>关卡：<b id="levelEl">1 / 5</b></span>
+    <span>累计得分：<b id="scoreEl">0</b> / <b id="fullEl">100</b></span>
+    <span>用时：<b id="timeEl">00:00</b></span>
+  </div>
+</header>
+
+<main>
+<svg id="scene" viewBox="0 0 960 620" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="二进制信号发生器实验场景">
+  <defs>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0 H0 V32" fill="none" stroke="#16233c" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <!-- 背景与标题 -->
+  <rect x="0" y="0" width="960" height="620" fill="#0f172a"/>
+  <rect x="0" y="0" width="960" height="620" fill="url(#grid)"/>
+  <text class="titleTxt" x="480" y="32" text-anchor="middle">二进制信号发生器 · 拨动 8 位开关，点亮目标数值</text>
+
+  <!-- 目标面板（左上） -->
+  <g id="targetPanel">
+    <rect class="panelRect" x="60" y="52" width="220" height="78" rx="10"/>
+    <text class="panelLab" x="80" y="78">目标十进制值（本关）</text>
+    <text id="targetVal" class="bigNum" x="80" y="118" font-size="34">5</text>
+  </g>
+
+  <!-- 关卡进度面板（右上） -->
+  <g id="levelPanel">
+    <rect class="panelRect" x="680" y="52" width="220" height="78" rx="10"/>
+    <text class="panelLab" id="levelLab" x="700" y="78">第 1 / 5 关</text>
+    <g id="dots"></g>
+  </g>
+
+  <!-- 总线导线（先画底层） -->
+  <path d="M480 395 V425" stroke="#16305a" stroke-width="10" fill="none"/>
+  <path id="busLines" d="" stroke="#16305a" stroke-width="9" fill="none" stroke-linecap="round"/>
+  <path id="busLines2" d="" stroke="#38bdf8" stroke-width="3" fill="none" stroke-linecap="round" opacity="0.8"/>
+
+  <!-- 8 位开关组（JS 生成） -->
+  <g id="switches"></g>
+
+  <!-- 信号粒子层 -->
+  <g id="sparks"></g>
+  <g id="confettiLayer"></g>
+
+  <!-- 译码显示器（中央下方） -->
+  <g id="displayG">
+    <rect class="panelRect" x="330" y="425" width="300" height="108" rx="10"/>
+    <text class="panelLab" x="480" y="448" text-anchor="middle">译码显示器 · 当前十进制</text>
+    <text id="dispVal" class="bigNum" x="480" y="490" font-size="40" text-anchor="middle">0</text>
+    <text id="dispBin" x="480" y="516" text-anchor="middle">00000000</text>
+  </g>
+
+  <!-- 场景提示信息 -->
+  <text id="sceneMsg" class="info" x="480" y="576" text-anchor="middle" font-size="15">请拨动开关，使当前值等于目标值</text>
+</svg>
+</main>
+
+<footer>
+  <div id="msg" class="info">正在连接实验平台……</div>
+  <div class="btnrow">
+    <button id="confirmBtn" type="button">确认本关</button>
+    <button id="resetBtn" type="button">重置本关开关</button>
+    <button id="retryBtn" type="button">重新提交成绩</button>
+  </div>
+</footer>
+
+<script>
+"use strict";
+/* ============ 全局状态 ============ */
+var BITS = 8;                                   // 8 个二进制位
+var WEIGHTS = [128, 64, 32, 16, 8, 4, 2, 1];    // 位权（bit7 → bit0）
+var SUP = "⁷⁶⁵⁴³²¹⁰";                            // 2 的上标
+// 5 关目标值，难度递增（所需点亮位数与高位组合逐步增加）
+var TARGETS = [5, 23, 78, 156, 199];
+
+var totalScore = 100;   // 满分：由 LabBridge.validate() 读取，不写死
+var preview = false;    // 教师预览模式
+var perLevel = 20;      // 每关分值 = totalScore / 5
+var level = 0;          // 当前关索引 0..4
+var passedCount = 0;    // 已通过关数
+var bits = new Array(BITS).fill(0);
+var startTs = Date.now();
+var submitted = false;  // reportGrade 是否已成功调用（只成功提交一次）
+var submitting = false; // 防止并发提交
+var transitioning = false;
+var timerId = null;
+
+/* ============ SVG 元素引用 ============ */
+var svgNS = "http://www.w3.org/2000/svg";
+var elSwitches = document.getElementById("switches");
+var elSparks = document.getElementById("sparks");
+var elConfetti = document.getElementById("confettiLayer");
+var elTargetVal = document.getElementById("targetVal");
+var elDispVal = document.getElementById("dispVal");
+var elDispBin = document.getElementById("dispBin");
+var elSceneMsg = document.getElementById("sceneMsg");
+var elDisplayG = document.getElementById("displayG");
+var elDots = document.getElementById("dots");
+var elLevelLab = document.getElementById("levelLab");
+var elLevelEl = document.getElementById("levelEl");
+var elScoreEl = document.getElementById("scoreEl");
+var elFullEl = document.getElementById("fullEl");
+var elTimeEl = document.getElementById("timeEl");
+var elMsg = document.getElementById("msg");
+var elConfirm = document.getElementById("confirmBtn");
+var elReset = document.getElementById("resetBtn");
+var elRetry = document.getElementById("retryBtn");
+var elBadge = document.getElementById("previewBadge");
+
+/* ============ 构建场景 ============ */
+function buildScene() {
+  var swHtml = "", busD = "", busD2 = "";
+  for (var i = 0; i < BITS; i++) {
+    var cx = 105 + i * 106;             // 每个开关中心 x
+    var w = WEIGHTS[i];
+    // 开关组：指示灯 + 拨杆 + 位值/位权/贡献标注
+    swHtml +=
+      '<g class="sw off" data-i="' + i + '">' +
+        '<rect class="hit" x="' + (cx - 40) + '" y="150" width="80" height="230"/>' +
+        '<circle class="ring" cx="' + cx + '" cy="170" r="14"/>' +
+        '<circle class="lamp" cx="' + cx + '" cy="170" r="11"/>' +
+        '<rect class="base" x="' + (cx - 36) + '" y="190" width="72" height="110" rx="8"/>' +
+        '<text class="onlab" x="' + (cx + 22) + '" y="216">1</text>' +
+        '<text class="offlab" x="' + (cx + 22) + '" y="264">0</text>' +
+        '<rect class="track" x="' + (cx - 16) + '" y="205" width="32" height="64" rx="16"/>' +
+        '<rect class="lever" x="' + (cx - 13) + '" y="210" width="26" height="24" rx="6"/>' +
+        '<text class="bit" x="' + cx + '" y="322" text-anchor="middle">0</text>' +
+        '<text class="wt" x="' + (cx - 3) + '" y="347" text-anchor="end">' + w + '</text>' +
+        '<text class="wsub" x="' + (cx + 1) + '" y="347">2' + SUP[i] + '</text>' +
+        '<text class="contrib" x="' + cx + '" y="368" text-anchor="middle">+0</text>' +
+      '</g>';
+    // 该位接入总线的导线
+    busD += " M" + cx + " 300 V395";
+    busD2 += " M" + cx + " 300 V395";
+  }
+  busD += " M70 395 H890 M480 395 V425";
+  busD2 += " M70 395 H890 M480 395 V425";
+  elSwitches.innerHTML = swHtml;
+  document.getElementById("busLines").setAttribute("d", busD);
+  document.getElementById("busLines2").setAttribute("d", busD2);
+
+  // 关卡进度圆点
+  var dotsHtml = "";
+  for (var k = 0; k < TARGETS.length; k++) {
+    dotsHtml += '<circle class="dot" id="dot' + k + '" cx="' + (710 + k * 36) + '" cy="108" r="8"/>';
+  }
+  elDots.innerHTML = dotsHtml;
+
+  // 绑定开关点击：切换该位并联动场景
+  var groups = elSwitches.querySelectorAll(".sw");
+  for (var j = 0; j < groups.length; j++) {
+    (function (g) {
+      g.addEventListener("click", function () { toggleBit(parseInt(g.getAttribute("data-i"), 10)); });
+    })(groups[j]);
+  }
+}
+
+/* ============ 交互与联动 ============ */
+function toggleBit(i) {
+  if (transitioning) return;
+  bits[i] = bits[i] ^ 1;
+  var cx = 105 + i * 106;
+  updateScene();
+  // 信号粒子：从该开关沿导线"飞"向译码显示器
+  spawnSparks(cx);
+  // 值已匹配时给一次轻提示（不强制确认）
+  if (currentVal() === TARGETS[level]) {
+    setSceneMsg("ok", "当前值 " + currentVal() + " 已与目标一致，请点击「确认本关」");
+  }
+}
+
+function currentVal() {
+  var s = 0;
+  for (var i = 0; i < BITS; i++) s += bits[i] * WEIGHTS[i];
+  return s;
+}
+
+function updateScene() {
+  var groups = elSwitches.querySelectorAll(".sw");
+  for (var i = 0; i < BITS; i++) {
+    var g = groups[i];
+    var on = bits[i] === 1;
+    g.setAttribute("class", "sw " + (on ? "on" : "off"));
+    g.querySelector(".bit").textContent = on ? "1" : "0";
+    g.querySelector(".contrib").textContent = "+" + (on ? WEIGHTS[i] : 0);
+  }
+  elDispVal.textContent = String(currentVal());
+  elDispBin.textContent = bits.join("");
+  var matched = currentVal() === TARGETS[level];
+  elTargetVal.setAttribute("class", "bigNum" + (matched ? " ok" : ""));
+}
+
+// 信号粒子动画：3 个粒子沿总线汇入显示器
+function spawnSparks(cx) {
+  for (var k = 0; k < 3; k++) {
+    (function (k) {
+      var c = document.createElementNS(svgNS, "circle");
+      c.setAttribute("class", "spark");
+      c.setAttribute("cx", cx + (Math.random() * 16 - 8));
+      c.setAttribute("cy", 395 + (Math.random() * 6 - 3));
+      c.setAttribute("r", 3 + Math.random() * 2);
+      c.style.setProperty("--dx", (480 - cx) + "px");
+      c.style.setProperty("--dy", (470 - 395) + "px");
+      c.style.animationDuration = (0.55 + Math.random() * 0.3) + "s";
+      elSparks.appendChild(c);
+      setTimeout(function () {
+        if (c.parentNode) c.parentNode.removeChild(c);
+        bumpDisplay();
+      }, 650 + k * 60);
+    })(k);
+  }
+}
+
+function bumpDisplay() {
+  elDispVal.classList.remove("bump");
+  void elDispVal.getBBox; // 触发重排以便重放动画
+  elDispVal.classList.add("bump");
+  setTimeout(function () { elDispVal.classList.remove("bump"); }, 480);
+}
+
+// 通关庆祝：彩色粒子从显示器喷出
+function celebrate() {
+  var colors = ["#fbbf24", "#4ade80", "#38bdf8", "#f472b6"];
+  for (var k = 0; k < 14; k++) {
+    (function (k) {
+      var c = document.createElementNS(svgNS, "circle");
+      c.setAttribute("class", "confetti");
+      c.setAttribute("cx", 480 + (Math.random() * 120 - 60));
+      c.setAttribute("cy", 470);
+      c.setAttribute("r", 3 + Math.random() * 3);
+      c.setAttribute("fill", colors[k % colors.length]);
+      c.style.setProperty("--tx", (Math.random() * 440 - 220) + "px");
+      c.style.setProperty("--ty", (-(60 + Math.random() * 120)) + "px");
+      elConfetti.appendChild(c);
+      setTimeout(function () { if (c.parentNode) c.parentNode.removeChild(c); }, 950);
+    })(k);
+  }
+}
+
+/* ============ 提示与状态栏 ============ */
+function setSceneMsg(type, text) {
+  elSceneMsg.setAttribute("class", type);
+  elSceneMsg.textContent = text;
+}
+function setMsg(type, text) {
+  elMsg.setAttribute("class", type);
+  elMsg.textContent = text;
+}
+function updateHeader() {
+  elLevelEl.textContent = (level + 1) + " / " + TARGETS.length;
+  elScoreEl.textContent = String(Math.round(passedCount * perLevel * 10) / 10);
+  elLevelLab.textContent = "第 " + (level + 1) + " / " + TARGETS.length + " 关";
+  for (var k = 0; k < TARGETS.length; k++) {
+    var d = document.getElementById("dot" + k);
+    var cls = "dot";
+    if (k < passedCount) cls += " passed";
+    else if (k === level) cls += " cur";
+    d.setAttribute("class", cls);
+  }
+}
+function tickTimer() {
+  var s = Math.floor((Date.now() - startTs) / 1000);
+  var mm = ("0" + Math.floor(s / 60)).slice(-2);
+  var ss = ("0" + (s % 60)).slice(-2);
+  elTimeEl.textContent = mm + ":" + ss;
+}
+
+/* ============ 关卡流转 ============ */
+function confirmLevel() {
+  if (transitioning || submitted) return;
+  var target = TARGETS[level];
+  var val = currentVal();
+  if (val !== target) {
+    // 错误反馈：显示器抖动 + 提示
+    elDisplayG.classList.remove("shake");
+    void elDisplayG.getBBox;
+    elDisplayG.classList.add("shake");
+    setTimeout(function () { elDisplayG.classList.remove("shake"); }, 400);
+    setSceneMsg("err", "构造不正确：当前值 " + val + " ≠ 目标值 " + target + "，请继续调整开关（二进制 " + bits.join("") + "）");
+    return;
+  }
+  // 正确：计分 + 庆祝动画，进入下一关
+  transitioning = true;
+  passedCount++;
+  updateHeader();
+  celebrate();
+  var gained = Math.round(perLevel * 10) / 10;
+  if (level < TARGETS.length - 1) {
+    setSceneMsg("ok", "正确！本关 +" + gained + " 分，即将进入下一关……");
+    setMsg("ok", "第 " + (level + 1) + " 关通过，累计 " + Math.round(passedCount * perLevel * 10) / 10 + " 分");
+    setTimeout(function () {
+      level++;
+      bits = new Array(BITS).fill(0);
+      elTargetVal.textContent = String(TARGETS[level]);
+      updateScene();
+      updateHeader();
+      setSceneMsg("info", "第 " + (level + 1) + " 关：请构造十进制 " + TARGETS[level] + " 对应的二进制数");
+      transitioning = false;
+    }, 1300);
+  } else {
+    setSceneMsg("ok", "全部 5 关完成！正在提交成绩……");
+    setMsg("ok", "全部关卡通过！正在提交成绩……");
+    var finalScore = Math.round(passedCount * totalScore / TARGETS.length * 10) / 10;
+    setTimeout(function () { finishAndReport(finalScore); }, 900);
+  }
+}
+
+function resetLevel() {
+  if (transitioning || submitted) return;
+  bits = new Array(BITS).fill(0);
+  updateScene();
+  setSceneMsg("info", "开关已全部归零，请重新构造 " + TARGETS[level]);
+}
+
+/* ============ 成绩提交（仅成功提交一次） ============ */
+function finishAndReport(score) {
+  if (preview) {
+    setMsg("warn", "教师预览模式：实验已完成（得分 " + score + "），不向平台提交成绩。");
+    setSceneMsg("ok", "预览完成：全部 5 关构造正确。");
+    return;
+  }
+  if (Number(score) >= fullScore) {
+    // 全部通关：上报后禁用确认按钮，避免「点击无反应」的困惑
+    if (elConfirm) elConfirm.disabled = true;
+  }
+  submitGrade(score);
+}
+
+async function submitGrade(score) {
+  if (submitted || submitting) return;
+  submitting = true;
+  elRetry.style.display = "none";
+  var elapsed = Math.max(0, Math.round((Date.now() - startTs) / 1000));
+  try {
+    var res = await window.LabBridge.reportGrade({
+      total_score: score,
+      elapsed_seconds: elapsed
+    });
+    if (!res || res.code !== 0) {
+      // 平台响应契约：{ code, message }——code !== 0 一律视为失败，必须原样展示 message
+      throw new Error((res && res.message) || "平台未接受本次成绩");
+    }
+    submitted = true;
+    setMsg("ok", "成绩已提交：" + score + " 分（用时 " + elapsed + " 秒）。实验完成，恭喜！");
+    setSceneMsg("ok", "实验完成：全部 5 关构造正确，得分 " + score + "。");
+  } catch (err) {
+    var m = (err && err.message) ? err.message : "未知错误";
+    setMsg("err", "成绩提交失败：" + m + "。可点击下方「重新提交成绩」重试。");
+    elRetry.style.display = "inline-block";
+  } finally {
+    submitting = false;
+  }
+}
+
+/* ============ 初始化：读取 LabBridge 上下文 ============ */
+async function init() {
+  buildScene();
+  updateScene();
+  updateHeader();
+  timerId = setInterval(tickTimer, 1000);
+  tickTimer();
+  try {
+    if (!window.LabBridge || typeof window.LabBridge.validate !== "function") {
+      throw new Error("未检测到 window.LabBridge");
+    }
+    var ctx = await window.LabBridge.validate();
+    totalScore = Number(ctx && ctx.totalScore) || 100;
+    preview = !!(ctx && ctx.preview === true);
+    perLevel = Math.round(totalScore / TARGETS.length * 10) / 10;
+    elFullEl.textContent = String(totalScore);
+    if (preview) elBadge.style.display = "inline-block";
+    setMsg("info", "满分 " + totalScore + " 分，共 5 关，每关 " + perLevel + " 分。" +
+      (preview ? "当前为教师预览模式，仅演示不提交。" : "请拨动开关构造第 1 关目标值。"));
+    setSceneMsg("info", "第 1 关：请构造十进制 " + TARGETS[0] + " 对应的二进制数");
+  } catch (e) {
+    setMsg("warn", "平台上下文获取失败：" + ((e && e.message) || e) + "。已进入本地演示模式，成绩将无法提交。");
+    setSceneMsg("info", "第 1 关：请构造十进制 " + TARGETS[0] + " 对应的二进制数");
+  }
+}
+
+elConfirm.addEventListener("click", confirmLevel);
+elReset.addEventListener("click", resetLevel);
+elRetry.addEventListener("click", function () {
+  submitGrade(Math.round(passedCount * totalScore / TARGETS.length * 10) / 10);
+});
+
+init();
+</script>
+</body>
+</html>

@@ -263,8 +263,10 @@ class LabViewSet(BaseModelViewSet):
         行级归属由 `get_queryset()` 保证；权限显式 `[IsTeacher]`（不含 admin，C46）。
         """
         lab = self.get_object()
+        # Stage 9 教师反馈：说明里的上报地址不再拼绝对地址（反代/多端口场景会写错）。
+        # 上报由平台父页面代发（同源相对路径），页面与教师都不需要知道域名。
         data = build_integration_spec(
-            lab, absolute_grade_url=request.build_absolute_uri(GRADE_ENDPOINT)
+            lab, absolute_grade_url=None
         )
         return api_response(data, message="接入说明已生成")
 

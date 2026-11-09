@@ -1488,7 +1488,9 @@ class LabIntegrationSpecTest(TestCase):
         ):
             self.assertIn(text, md, f"接入说明缺少：{text}")
         # 同源绝对地址由 request 预填，不是写死的内部 IP
-        self.assertIn("http://testserver/api/lab-gate/grade/", md)
+        # Stage 11：说明里的上报地址一律相对路径（不写死域名/端口）
+        self.assertIn("POST /api/lab-gate/grade/", md)
+        self.assertNotIn("http://testserver", md)
         # Stage 6：教师补充说明功能下线，说明里不再出现该段
         self.assertNotIn("report_note", data, "补充说明字段不应再出现在接入说明响应中")
         self.assertNotIn("教师补充说明", md)

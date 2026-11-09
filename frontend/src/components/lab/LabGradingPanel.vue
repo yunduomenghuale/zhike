@@ -153,6 +153,9 @@ const helpPromptText =
   '   await LabBridge.reportGrade({ total_score: <总分>, elapsed_seconds: <用时秒> })\n' +
   '   total_score 在 0 ~ 满分之间、最多 1 位小数；平台只接收这两个字段；\n' +
   '   失败时把返回的 message 展示给学生并允许重试；同一学生多次提交平台只保留最高分。\n' +
+  '   上报成功后：停止计时、锁定所有作答交互，页面只展示最终结果与成绩。\n' +
+  '   响应契约：{ code, message }。必须检查 code === 0 才显示「成绩已提交」；\n' +
+  '   code 非 0 时必须原样展示 message 并允许重试——绝不能把失败当作成功。\n' +
   '3. 禁止访问 localStorage/sessionStorage/cookie、fetch 平台 /api、触碰 window.parent/opener；\n' +
   '   票据由平台父页面自动附带，页面不要读取 location.search 或拼接任何 token。\n\n' +
   '请直接输出完整 HTML 文件内容。'
