@@ -28,6 +28,14 @@ S.trust_env = False  # 绕过系统代理
 
 # S5_REMOTE 非空 → ORM 段经 SSH 在 124 的 zhike_s5test_backend 容器内执行（8092 复测模式）
 S5_REMOTE = os.environ.get("S5_REMOTE", "")
+S5_REMOTE_HOST = os.environ.get("S5_REMOTE_HOST", "124.70.107.64")
+S5_REMOTE_USER = os.environ.get("S5_REMOTE_USER", "root")
+S5_REMOTE_AUTH = os.environ.get("S5_REMOTE_AUTH", "key")
+S5_REMOTE_KEY = os.environ.get("S5_REMOTE_KEY", "~/.ssh/id_claude_server")
+S5_REMOTE_PASSWORD = os.environ.get("S5_REMOTE_PASSWORD", "")
+S5_REMOTE_CONTAINER = os.environ.get("S5_REMOTE_CONTAINER", "zhike_s5test_backend")
+S5_REMOTE_SUDO = os.environ.get("S5_REMOTE_SUDO", "")
+SUDO_PFX = ("sudo " if S5_REMOTE_SUDO else "")
 
 
 def run_manage_shell(code):
@@ -37,12 +45,13 @@ def run_manage_shell(code):
 
         cli = paramiko.SSHClient()
         cli.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        cli.connect("124.70.107.64", port=22, username="root",
-                    key_filename=os.path.expanduser("~/.ssh/id_claude_server"),
-                    look_for_keys=False, allow_agent=False, timeout=20,
-                    banner_timeout=30, auth_timeout=30)
+        cli.connect(S5_REMOTE_HOST, port=22, username=S5_REMOTE_USER,
+                password=S5_REMOTE_PASSWORD if S5_REMOTE_AUTH == "password" else "",
+                key_filename=os.path.expanduser(S5_REMOTE_KEY) if S5_REMOTE_AUTH == "key" else None,
+                look_for_keys=False, allow_agent=False, timeout=20,
+                banner_timeout=30, auth_timeout=30),
         stdin, stdout, stderr = cli.exec_command(
-            "docker exec -i zhike_s5test_backend python manage.py shell", timeout=300)
+            "" + SUDO_PFX + "docker exec -i " + S5_REMOTE_CONTAINER + " python manage.py shell", timeout=300)
         stdin.write(code if code.endswith("\n") else code + "\n")
         stdin.channel.shutdown_write()
         out = stdout.read().decode("utf-8", "replace")
