@@ -405,7 +405,15 @@ async function fetchLabStats(lab) {
     })
     .filter((n) => n !== null && Number.isFinite(n))
   const avgScore = firstScores.length ? Math.round((firstScores.reduce((a, b) => a + b, 0) / firstScores.length) * 10) / 10 : null
-  const stepPairs = submitted.filter((s) => s.grading_source !== 'external' && s.total_steps > 0)
+  // Stage 11：avgSteps 按每名学生「第一次提交」的步骤指标聚合（external 排除），
+  // 与实验成绩口径一致。此处 submitted 已是数字（完成学生数），不能再当数组 filter。
+  const stepPairs = doneLists
+    .map((l) => {
+      const done = l.filter((s) => s.status === 'submitted')
+        .sort((a, b) => String(a.submitted_at || '').localeCompare(String(b.submitted_at || '')))
+      return done.length ? done[0] : null
+    })
+    .filter((s) => s && s.grading_source !== 'external' && s.total_steps > 0)
   const avgSteps = stepPairs.length
     ? Math.round((stepPairs.reduce((a, s) => a + s.passed_steps / s.total_steps, 0) / stepPairs.length) * 100)
     : null
