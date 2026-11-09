@@ -418,12 +418,16 @@ let CDP;
     check('E2 切到「排课」Tab', await clickTab('排课'));
     await sleep(400);
     check('E2b 选择班级', await selectFormOption('班级', setup.class_name));
-    check('E2c 保存排课', await clickButton('.el-dialog', '保存排课'));
+    check('E2c 新增排课（Stage 11：按钮改名+列表化）', await clickButton('.el-dialog', '新增排课'));
     const scheduled = await waitFor(cdp, `(() => {
-      const s = document.querySelector('.schedule-list');
-      return s && s.textContent.includes(${JSON.stringify(setup.class_name)}) ? true : null;
+      const t = document.querySelector('.schedule-table');
+      return t && t.textContent.includes(${JSON.stringify(setup.class_name)}) ? true : null;
     })()`, 15000);
-    check('E2d 排课记录可见', !!scheduled);
+    check('E2d 排课列表可见（表格展示）', !!scheduled);
+    check('E2e 排课行内编辑入口', !!await cdp.eval(`(() => {
+      const t = document.querySelector('.schedule-table');
+      return t && [...t.querySelectorAll('button')].some((b) => b.textContent.trim() === '编辑') ? true : null;
+    })()`));
     check('E3 切到「概览与成绩」Tab', await clickTab('概览与成绩'));
     await sleep(800);
     // 教师反馈第 6 条：概览页内嵌统计图表 + 成绩明细
@@ -526,12 +530,13 @@ let CDP;
       return {
         text: c.innerText,
         hasBreakdown: !!c.querySelector('.lab-breakdown'),
-        hasExternalNote: !!c.querySelector('.external-note'),
+        hasExternalNote: !!c.querySelector('.lab-score-note') && c.querySelector('.lab-score-note').textContent.includes('只记录总分与用时'),
         total: c.querySelector('.lab-score-total')?.textContent?.trim() || '',
       };
     })()`);
-    check('F7 external 只显示总分 + 用时、不渲染步骤表',
-      !!ext && ext.hasBreakdown === false && ext.hasExternalNote === true && ext.text.includes('用时'),
+    check('F7 完成记录：实验成绩=第一次锁定、无步骤表、只记总分与用时（Stage 11）',
+      !!ext && ext.hasBreakdown === false && ext.hasExternalNote === true
+      && ext.text.includes('实验成绩') && ext.text.includes('已锁定') && ext.text.includes('用时'),
       JSON.stringify(ext));
     check('F8 总分可见', !!ext && /100/.test(ext.total), ext && ext.total);
     const cardButtons = await cdp.eval(`(() => {
@@ -539,8 +544,8 @@ let CDP;
         .find((e) => (e.querySelector('.lab-title')?.textContent || '').trim() === ${JSON.stringify(TITLE)});
       return c ? [...c.querySelectorAll('button')].map((b) => b.textContent.trim()) : [];
     })()`);
-    check('F9 重做入口存在（Stage 6 最高分规则：重做只记录最高分，允许重做）',
-      Array.isArray(cardButtons) && cardButtons.includes('重做实验'), JSON.stringify(cardButtons));
+    check('F9 重做入口存在（Stage 11：实验成绩锁定第一次，重做另记最高成绩/最短用时）',
+      Array.isArray(cardButtons) && cardButtons.includes('重新实验'), JSON.stringify(cardButtons));
     await cdp.shot(SHOT_PREFIX + '-student');
 
     const errors = cdp.consoleErrors(mark0).filter((t) => !t.includes('favicon'));

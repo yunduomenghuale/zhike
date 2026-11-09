@@ -1,0 +1,15 @@
+PASS | D1 真实 API 查到本次自定义实验 | 20
+PASS | D2 page_source=custom 且 allow_resubmit=True（Stage 6：最高分规则允许重做） | {'page_source': 'custom', 'allow_resubmit': True}
+PASS | D3 last_debug 摘要已回写且最近一次通过 | 2026-11-09T06:25:28.475479+00:00
+PASS | D4 恰有 1 条提交且状态 submitted | count=1
+PASS | D5 grading_source=external 且 score_breakdown.source=external | {'total': 100.0, 'source': 'external', 'elapsed_seconds': 0}
+PASS | D6 总分为页面上报值 100 | 100.0
+PASS | D7 S1 落库用时 == submitted_at - started_at | 0 vs 0
+PASS | D8 submitted_at / graded_at 均由服务端生成 | 2026-11-09T14:25:28.880561+08:00 / 2026-11-09T14:25:28.880561+08:00
+PASS | D9 grade_raw 原文与 sha256 摘要留痕 | digest=396336c3647826ea49bd0ea647d440e92345543d916cb7cbc9a6f315dc01c249
+PASS | D10 C6 question_score 幽灵字段不在响应中
+PASS | D11 C8 grade_raw 角色裁剪（教师可见 / 学生 None） | teacher=dict student=None
+PASS | D12 学生端 external 展示所需字段齐全 | ['abnormal', 'accuracy_score', 'attempt', 'base_score', 'completion_score', 'course_name', 'efficiency_score', 'elapsed_seconds']
+
+总计 12 项，通过 12 项，失败 0 项
+ALL_PASS

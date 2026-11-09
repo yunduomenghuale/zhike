@@ -178,7 +178,8 @@ async function saveUser() {
 async function changeActive(row, value) {
   try { await updateAdminUser(row.id, { is_active: value }); row.is_active = value; ElMessage.success(value ? '账号已启用' : '账号已停用') } catch { row.is_active = !value }
 }
-function openReset(row) { resetTarget.value = row; const name = String(row.username || '').trim(); resetPassword.value = name.length >= 6 ? `Zk${name.slice(-6)}` : ''; resetVisible.value = true }
+function openReset(row) { resetTarget.value = row; const name = String(row.username || '').trim(); // 与后端初始密码规则一致：用户名后 6 位，不足 6 位左补零（如 wgy → Zk000wgy）
+  resetPassword.value = name ? `Zk${name.slice(-6).padStart(6, '0')}` : ''; resetVisible.value = true }
 async function submitReset() {
   if (resetPassword.value.length < 8 || resetPassword.value.length > 12) return ElMessage.warning('密码长度应为 8～12 位')
   resetting.value = true

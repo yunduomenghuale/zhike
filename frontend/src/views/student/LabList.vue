@@ -35,39 +35,44 @@
           </span>
         </div>
 
-        <!-- 成绩明细（已提交的实验：即时展示评分构成） -->
-        <div v-if="breakdownOf(row)" class="lab-score">
+        <!-- Stage 11 完成记录：实验成绩 = 第一次提交（锁定）；重做另记最高成绩/最短用时 -->
+        <div v-if="summaryOf(row)" class="lab-score">
           <div class="lab-score-head">
             <span class="lab-score-total">
-              {{ submissionOf(row).total_score }}
+              {{ summaryOf(row).first.total_score }}
               <em>/ {{ row.total_score }} 分</em>
             </span>
-            <!-- 自定义实验（external）：只有总分 + 用时，平台不记录步骤明细 -->
-            <span v-if="isExternal(row)" class="lab-score-meta">
-              用时 {{ externalElapsed(submissionOf(row)) }}
-              · 提交于 {{ fmtDT(submissionOf(row).submitted_at) }}
-              <span class="external-note">（自定义实验，平台不记录步骤明细）</span>
+            <span class="lab-score-meta">
+              用时 {{ externalElapsed(summaryOf(row).first) }}
+              · 提交于 {{ fmtDT(summaryOf(row).first.submitted_at) }}
             </span>
-            <span v-else class="lab-score-meta">
-              步骤通过 {{ breakdownOf(row).passed_steps }}/{{ breakdownOf(row).total_steps }}
-              · 错误 {{ breakdownOf(row).error_count }} 次
-              · 用时 {{ breakdownOf(row).elapsed_minutes }} 分钟（标准 {{ breakdownOf(row).standard_minutes }}）
-            </span>
-            <el-tag v-if="submissionOf(row).reviewed" size="small" type="info" effect="plain">教师已复核</el-tag>
+            <el-tag size="small" type="success" effect="plain">实验成绩（第一次，已锁定）</el-tag>
           </div>
 
-          <div v-if="!isExternal(row)" class="lab-breakdown">
-            <div v-for="item in breakdownItems(row)" :key="item.key" class="bk-item">
-              <div class="bk-label">{{ item.label }}</div>
-              <div class="bk-value" :class="{ zero: Number(item.value) <= 0 }">
-                {{ item.value }}<em> / {{ item.max }}</em>
-              </div>
-              <div class="bk-bar">
-                <span :style="{ width: item.percent + '%', background: item.color }"></span>
+          <div v-if="isExternal(row)" class="lab-score-note" style="margin-top: 6px">
+            自定义实验只记录总分与用时，步骤明细在实验页面内呈现。
+          </div>
+          <template v-else>
+            <div class="lab-breakdown">
+              <div v-for="item in breakdownItems(row)" :key="item.key" class="bk-item">
+                <div class="bk-label">{{ item.label }}</div>
+                <div class="bk-value" :class="{ zero: Number(item.value) <= 0 }">
+                  {{ item.value }}<em> / {{ item.max }}</em>
+                </div>
+                <div class="bk-bar">
+                  <span :style="{ width: item.percent + '%', background: item.color }"></span>
+                </div>
               </div>
             </div>
+            <div class="lab-score-note">{{ breakdownNote(row) }}</div>
+          </template>
+
+          <div v-if="summaryOf(row).count > 1" class="lab-redo-record">
+            <span class="redo-title">重做记录</span>
+            最高成绩 <b>{{ summaryOf(row).best.total_score }}</b> 分
+            · 最短用时 {{ externalElapsed(summaryOf(row).fastest) }}
+            · 已完成 {{ summaryOf(row).count }} 次
           </div>
-          <div v-if="!isExternal(row)" class="lab-score-note">{{ breakdownNote(row) }}</div>
           <div v-if="reviewCommentOf(row)" class="lab-review">
             <span class="lab-review-title">教师评语</span>
             <span class="lab-review-text">{{ reviewCommentOf(row) }}</span>
@@ -85,7 +90,7 @@
             :loading="entering === row.id"
             @click="enter(row)"
           >
-            {{ submissionOf(row).status === 'submitted' ? '重做实验' : '继续实验' }}
+            {{ summaryOf(row) ? '重新实验' : '继续实验' }}
           </el-button>
           <el-button
             v-if="!submissionOf(row) && hasOpenWindow(row) && canSubmit"
@@ -134,6 +139,28 @@ const entering = ref(null)
 
 function submissionOf(row) {
   return submissions.value.find((s) => s.lab === row.id)
+}
+
+/** 该实验我的全部提交（学生接口按 student 过滤，含重做历史）。 */
+function submissionsOf(row) {
+  return submissions.value.filter((s) => s.lab === row.id)
+}
+
+/** Stage 11 计分口径：实验成绩 = 第一次提交（锁定）；重做另记最高成绩与最短用时。 */
+function summaryOf(row) {
+  const done = submissionsOf(row)
+    .filter((s) => s.status === 'submitted')
+    .sort((a, b) => String(a.submitted_at || '').localeCompare(String(b.submitted_at || '')))
+  if (!done.length) return null
+  let best = done[0]
+  let fastest = done[0]
+  for (const s of done) {
+    if (Number(s.total_score) > Number(best.total_score) ||
+        (Number(s.total_score) === Number(best.total_score) &&
+          Number(s.elapsed_seconds ?? 1e9) < Number(best.elapsed_seconds ?? 1e9))) best = s
+    if (Number(s.elapsed_seconds ?? 1e9) < Number(fastest.elapsed_seconds ?? 1e9)) fastest = s
+  }
+  return { first: done[0], best, fastest, count: done.length, last: done[done.length - 1] }
 }
 
 /** 我所在班级的排课窗口（学生接口只返回自己班级的）。 */
@@ -195,7 +222,7 @@ function fmtDT(t) {
 }
 
 function breakdownOf(row) {
-  const sub = submissionOf(row)
+  const sub = summaryOf(row) ? summaryOf(row).first : submissionOf(row)
   const bk = sub?.score_breakdown
   if (!bk || bk.total == null) return null
   return bk
@@ -346,6 +373,21 @@ onMounted(load)
 }
 .bk-bar span { display: block; height: 100%; border-radius: 2px; transition: width 0.4s ease; }
 .lab-score-note { margin-top: 10px; color: #94a3b8; font-size: 12px; }
+.lab-redo-record {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  font-size: 12.5px;
+  color: #92400e;
+  line-height: 1.8;
+}
+.redo-title {
+  font-weight: 600;
+  margin-right: 8px;
+}
+.redo-title::before { content: '🏆 '; }
 .lab-review {
   display: flex;
   gap: 8px;

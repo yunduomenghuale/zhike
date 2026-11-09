@@ -141,7 +141,10 @@
             </div>
 
             <!-- 成绩列表（原「成绩」Tab 内容，移到概览底部） -->
-            <div class="scores-title">成绩明细</div>
+            <div class="scores-title">
+              成绩明细
+              <span class="scores-note">实验成绩 = 第一次提交（锁定不变）；重做后另记最高成绩与最短用时</span>
+            </div>
             <el-table :data="detailRows" size="small">
               <el-table-column label="学生" min-width="130">
                 <template #default="{ row }">
@@ -149,30 +152,35 @@
                   <span class="stu-no">{{ row.username }}</span>
                 </template>
               </el-table-column>
-              <el-table-column label="状态" width="80">
+              <el-table-column label="状态" width="96">
                 <template #default="{ row }">
-                  <el-tag v-if="row.state === 'submitted'" type="success" size="small">已提交</el-tag>
+                  <el-tag v-if="row.state === 'submitted'" type="success" size="small">已完成</el-tag>
                   <el-tag v-else-if="row.state === 'ongoing'" type="warning" size="small">进行中</el-tag>
                   <el-tag v-else type="info" size="small" effect="plain">未开始</el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="总分" width="70" align="center">
+              <el-table-column label="实验成绩" width="92" align="center">
                 <template #default="{ row }">
-                  <span v-if="row.state === 'submitted'" class="score-num">{{ row.total_score }}</span>
+                  <span v-if="row.total_score !== null && row.total_score !== undefined" class="score-num">{{ row.total_score }}</span>
                   <span v-else class="sub-text">—</span>
                 </template>
               </el-table-column>
-              <el-table-column label="步骤" width="72" align="center">
+              <el-table-column label="用时" width="72" align="center">
+                <template #default="{ row }">{{ row.elapsed_seconds !== null && row.elapsed_seconds !== undefined ? `${Math.round((row.elapsed_seconds ?? 0) / 60)}分` : '—' }}</template>
+              </el-table-column>
+              <el-table-column label="最高成绩" width="92" align="center">
                 <template #default="{ row }">
-                  <span v-if="row.state === 'not_started'">—</span>
-                  <span v-else-if="row.grading_source === 'external'" class="sub-text">不适用</span>
-                  <span v-else>{{ `${row.passed_steps ?? 0}/${row.total_steps ?? '—'}` }}</span>
+                  <span v-if="row.best_score !== null && row.best_score !== undefined" :class="{ 'best-score': Number(row.best_score) > Number(row.total_score ?? -1) }">{{ row.best_score }}</span>
+                  <span v-else class="sub-text">—</span>
                 </template>
               </el-table-column>
-              <el-table-column label="用时" width="70" align="center">
-                <template #default="{ row }">{{ row.state === 'not_started' ? '—' : `${Math.round((row.elapsed_seconds ?? 0) / 60)}分` }}</template>
+              <el-table-column label="最短用时" width="88" align="center">
+                <template #default="{ row }">{{ row.min_elapsed !== null && row.min_elapsed !== undefined ? `${Math.round((row.min_elapsed ?? 0) / 60)}分` : '—' }}</template>
               </el-table-column>
-              <el-table-column label="提交时间" width="130">
+              <el-table-column label="次数" width="60" align="center">
+                <template #default="{ row }">{{ row.count || '—' }}</template>
+              </el-table-column>
+              <el-table-column label="最后提交" width="130">
                 <template #default="{ row }">{{ row.submitted_at ? fmtDT(row.submitted_at) : '—' }}</template>
               </el-table-column>
             </el-table>
@@ -190,7 +198,6 @@
                 v-model="pageFile"
                 :lab-id="currentLab.id"
                 :page="currentLab.has_custom_page ? { name: currentLab.custom_page_name } : null"
-                :can-delete="Boolean(currentLab.template_id)"
                 @uploaded="onPageUploaded"
                 @changed="refreshCurrent"
               />
@@ -207,6 +214,42 @@
 
         <el-tab-pane label="排课" name="schedule">
           <div class="tab-body">
+            <!-- Stage 11：当前排课用列表展示，支持行内编辑 -->
+            <div class="schedule-block-title">当前排课</div>
+            <el-table v-if="currentLab.schedules?.length" :data="currentLab.schedules" size="small" class="schedule-table">
+              <el-table-column label="班级" min-width="140">
+                <template #default="{ row }">
+                  <span v-if="editScheduleId !== row.id">{{ row.classroom_name }}</span>
+                  <el-select v-else v-model="editScheduleForm.classroom" size="small" style="width: 100%">
+                    <el-option v-for="c in classes" :key="c.id" :value="c.id" :label="c.name" />
+                  </el-select>
+                </template>
+              </el-table-column>
+              <el-table-column label="开放时间" min-width="180">
+                <template #default="{ row }">
+                  <span v-if="editScheduleId !== row.id">{{ row.open_at ? fmtDT(row.open_at) : '立即开放' }}</span>
+                  <el-date-picker v-else v-model="editScheduleForm.open_at" type="datetime" size="small" style="width: 100%" placeholder="留空 = 立即开放" />
+                </template>
+              </el-table-column>
+              <el-table-column label="截止时间" min-width="180">
+                <template #default="{ row }">
+                  <span v-if="editScheduleId !== row.id">{{ row.close_at ? fmtDT(row.close_at) : '不限制' }}</span>
+                  <el-date-picker v-else v-model="editScheduleForm.close_at" type="datetime" size="small" style="width: 100%" placeholder="留空 = 不限制" />
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="150">
+                <template #default="{ row }">
+                  <template v-if="editScheduleId === row.id">
+                    <el-button size="small" type="primary" :loading="scheduleSaving" @click="saveEditSchedule(row)">保存</el-button>
+                    <el-button size="small" @click="cancelEditSchedule">取消</el-button>
+                  </template>
+                  <el-button v-else size="small" text type="primary" @click="startEditSchedule(row)">编辑</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <el-empty v-else description="尚未排课：选择班级并新增排课后，学生即可进入实验" :image-size="60" />
+
+            <div class="schedule-block-title" style="margin-top: 18px">新增排课</div>
             <el-form :model="scheduleForm" label-width="90px" style="max-width: 560px">
               <el-form-item label="班级" required>
                 <el-select v-model="scheduleForm.classroom" style="width: 100%">
@@ -220,15 +263,9 @@
                 <el-date-picker v-model="scheduleForm.close_at" type="datetime" style="width: 100%" placeholder="留空 = 不限制" />
               </el-form-item>
               <el-form-item>
-                <el-button type="primary" @click="saveSchedule">保存排课</el-button>
+                <el-button type="primary" @click="saveSchedule">新增排课</el-button>
               </el-form-item>
             </el-form>
-            <div v-if="currentLab.schedules?.length" class="schedule-list">
-              <div v-for="s in currentLab.schedules" :key="s.id" class="schedule-line">
-                <span class="schedule-class">{{ s.classroom_name }}</span>
-                <span class="schedule-time">{{ s.open_at ? fmtDT(s.open_at) : '立即开放' }} ~ {{ s.close_at ? fmtDT(s.close_at) : '不限制' }}</span>
-              </div>
-            </div>
           </div>
         </el-tab-pane>
       </el-tabs>
@@ -245,7 +282,7 @@ import LabCreateDrawer from '@/components/lab/LabCreateDrawer.vue'
 import LabPageUploader from '@/components/lab/LabPageUploader.vue'
 import LabGradingPanel from '@/components/lab/LabGradingPanel.vue'
 import {
-  listLabs, getLab, deleteLab, publishLab, closeLab, listLabSchedules,
+  listLabs, getLab, deleteLab, publishLab, closeLab, listLabSchedules, updateLabSchedule,
   createLabSchedule, listLabSubmissions,
 } from '@/api/labs'
 
@@ -350,10 +387,24 @@ async function fetchLabStats(lab) {
   let roster = rosterRes.results ?? rosterRes
   if (!Array.isArray(roster)) roster = []
   const subs = subRes.results ?? subRes
-  const submitted = subs.filter((s) => s.status === 'submitted')
-  const ongoing = subs.filter((s) => s.status !== 'submitted')
-  const scores = submitted.map((s) => Number(s.total_score || 0)).filter((n) => Number.isFinite(n))
-  const avgScore = scores.length ? Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10 : null
+  // Stage 11 计分口径：按「学生」聚合——实验成绩 = 第一次提交；重做后另记最高成绩/最短用时。
+  // 已完成 = 有 SUBMITTED 记录的学生（即使又开了新一次作答）；进行中 = 只有进行中提交的学生。
+  const byStudent = new Map()
+  subs.forEach((s) => {
+    if (!byStudent.has(s.student)) byStudent.set(s.student, [])
+    byStudent.get(s.student).push(s)
+  })
+  const doneLists = [...byStudent.values()].filter((l) => l.some((s) => s.status === 'submitted'))
+  const ongoing = [...byStudent.values()].length - doneLists.length
+  const submitted = doneLists.length
+  const firstScores = doneLists
+    .map((l) => {
+      const done = l.filter((s) => s.status === 'submitted')
+        .sort((a, b) => String(a.submitted_at || '').localeCompare(String(b.submitted_at || '')))
+      return done.length ? Number(done[0].total_score || 0) : null
+    })
+    .filter((n) => n !== null && Number.isFinite(n))
+  const avgScore = firstScores.length ? Math.round((firstScores.reduce((a, b) => a + b, 0) / firstScores.length) * 10) / 10 : null
   const stepPairs = submitted.filter((s) => s.grading_source !== 'external' && s.total_steps > 0)
   const avgSteps = stepPairs.length
     ? Math.round((stepPairs.reduce((a, s) => a + s.passed_steps / s.total_steps, 0) / stepPairs.length) * 100)
@@ -417,27 +468,64 @@ async function onCreated(lab) {
   await openDetail(fresh, fresh.page_source === 'custom' ? 'grading' : 'overview')
 }
 
+// Stage 11 计分口径聚合：实验成绩 = 第一次提交（锁定不变）；重做另记最高成绩与最短用时。
+function summarizeSubs(list) {
+  const done = list
+    .filter((s) => s.status === 'submitted')
+    .sort((a, b) => String(a.submitted_at || '').localeCompare(String(b.submitted_at || '')))
+  if (!done.length) {
+    const ongoing = list.find((s) => s.status !== 'submitted') || list[0] || null
+    return { state: ongoing ? 'ongoing' : 'not_started', count: 0, first: null, best: null, fastest: null, last: ongoing }
+  }
+  let best = done[0]
+  let fastest = done[0]
+  for (const s of done) {
+    if (Number(s.total_score) > Number(best.total_score) ||
+        (Number(s.total_score) === Number(best.total_score) &&
+          Number(s.elapsed_seconds ?? 1e9) < Number(best.elapsed_seconds ?? 1e9))) best = s
+    if (Number(s.elapsed_seconds ?? 1e9) < Number(fastest.elapsed_seconds ?? 1e9)) fastest = s
+  }
+  return { state: 'submitted', count: done.length, first: done[0], best, fastest, last: done[done.length - 1] }
+}
+
 const detailRows = computed(() => {
-  const mapSub = (s, name, username) => ({
-    id: s.id,
-    name: name || s.student_name,
-    username: username || s.student_username,
-    state: s.status === 'submitted' ? 'submitted' : 'ongoing',
-    total_score: s.total_score,
-    grading_source: s.grading_source,
-    passed_steps: s.passed_steps,
-    total_steps: s.total_steps,
-    elapsed_seconds: s.elapsed_seconds,
-    submitted_at: s.submitted_at,
-    student: s.student,
+  const byStudent = new Map()
+  detailSubs.value.forEach((s) => {
+    if (!byStudent.has(s.student)) byStudent.set(s.student, [])
+    byStudent.get(s.student).push(s)
   })
-  if (!detailRoster.value.length) return detailSubs.value.map((s) => mapSub(s))
-  const byStudent = new Map(detailSubs.value.map((s) => [s.student, s]))
-  return detailRoster.value.map((r) => {
-    const s = byStudent.get(r.student)
-    if (!s) return { id: null, name: r.student_name, username: r.username, state: 'not_started' }
-    return mapSub(s, r.student_name, r.username)
+  const mkRow = (name, username, student, list) => {
+    const sm = summarizeSubs(list)
+    const first = sm.first || sm.last || {}
+    return {
+      name, username, student, sm,
+      state: sm.state,
+      total_score: sm.first ? sm.first.total_score : null,
+      grading_source: first.grading_source,
+      passed_steps: first.passed_steps,
+      total_steps: first.total_steps,
+      elapsed_seconds: sm.first ? sm.first.elapsed_seconds : (first.elapsed_seconds ?? null),
+      submitted_at: sm.last ? sm.last.submitted_at : null,
+      best_score: sm.best ? sm.best.total_score : null,
+      min_elapsed: sm.fastest ? sm.fastest.elapsed_seconds : null,
+      count: sm.count,
+    }
+  }
+  const rows = []
+  const seen = new Set()
+  detailRoster.value.forEach((r) => {
+    const list = byStudent.get(r.student) || []
+    seen.add(r.student)
+    if (!list.length) return rows.push({ id: null, name: r.student_name, username: r.username, state: 'not_started' })
+    rows.push(mkRow(r.student_name, r.username, r.student, list))
   })
+  detailSubs.value.forEach((s) => {
+    if (!seen.has(s.student)) {
+      seen.add(s.student)
+      rows.push(mkRow(s.student_name, s.student_username, s.student, byStudent.get(s.student) || [s]))
+    }
+  })
+  return rows
 })
 const detailStats = computed(() => labStatsCache.value[currentLab.value?.id] || {
   expected: 0, submitted: 0, ongoing: 0, avgScore: null, avgSteps: null,
@@ -481,10 +569,40 @@ async function saveSchedule() {
       open_at: scheduleForm.value.open_at || null,
       close_at: scheduleForm.value.close_at || null,
     })
-    ElMessage.success('排课已保存')
+    ElMessage.success('排课已新增')
     await refreshCurrent()
   } catch (e) {
     ElMessage.error(e?.message || '排课失败')
+  }
+}
+
+// Stage 11：排课行内编辑
+const editScheduleId = ref(null)
+const editScheduleForm = ref({ classroom: null, open_at: '', close_at: '' })
+const scheduleSaving = ref(false)
+function startEditSchedule(row) {
+  editScheduleId.value = row.id
+  editScheduleForm.value = { classroom: row.classroom, open_at: row.open_at || '', close_at: row.close_at || '' }
+}
+function cancelEditSchedule() {
+  editScheduleId.value = null
+}
+async function saveEditSchedule(row) {
+  if (!editScheduleForm.value.classroom) return ElMessage.warning('请选择班级')
+  scheduleSaving.value = true
+  try {
+    await updateLabSchedule(row.id, {
+      classroom: editScheduleForm.value.classroom,
+      open_at: editScheduleForm.value.open_at || null,
+      close_at: editScheduleForm.value.close_at || null,
+    })
+    ElMessage.success('排课已更新')
+    editScheduleId.value = null
+    await refreshCurrent()
+  } catch (e) {
+    ElMessage.error(e?.message || '排课更新失败')
+  } finally {
+    scheduleSaving.value = false
   }
 }
 async function publish(row) {
@@ -509,6 +627,8 @@ onMounted(load)
 <style scoped>
 .header-actions { display: flex; align-items: center; gap: 10px; }
 .create-bar-card { margin-bottom: 12px; }
+.schedule-block-title { font-size: 13px; font-weight: 600; color: #334155; margin-bottom: 10px; }
+.schedule-table { width: 100%; }
 .create-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; color: #475569; }
 .filter-card { margin-bottom: 12px; }
 .filter-label { font-size: 13px; color: #64748b; margin-right: 10px; }
@@ -582,3 +702,5 @@ onMounted(load)
 .schedule-time { color: #64748b; font-size: 12px; }
 @media (max-width: 1100px) { .chart-row { grid-template-columns: 1fr; } }
 </style>
+.score-num.best-score { color: #d97706; font-weight: 700; }
+.scores-note { margin-left: 10px; font-size: 12px; font-weight: 400; color: #94a3b8; }

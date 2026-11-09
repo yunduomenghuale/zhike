@@ -1,27 +1,40 @@
 <template>
   <div class="lab-page-uploader">
+    <!-- 当前生效页面（教师反馈：预览的是当前生效页面，信息卡置顶） -->
+    <div v-if="page" class="page-active-card">
+      <el-icon class="page-active-icon"><Document /></el-icon>
+      <span class="page-active-name" :title="page.name">{{ page.name || '当前实验页面' }}</span>
+      <el-button size="small" text type="primary" :disabled="uploading" @click="preview">预览当前生效页面</el-button>
+    </div>
+
     <el-upload
       drag
       :show-file-list="false"
       :before-upload="onHtmlPicked"
       :accept="'.html,.htm'"
-      :disabled="disabled"
+      :disabled="disabled || uploading"
       class="lab-html-upload"
     >
       <div class="upload-inner">
         <div class="upload-mark">
           <el-icon><UploadFilled /></el-icon>
         </div>
-        <div class="upload-main">{{ modelValue ? '重新选择文件' : (page ? '拖入或选择 HTML 文件，替换当前页面' : '拖入或选择 HTML 文件') }}</div>
-        <div class="upload-sub">单个 .html 文件，不超过 50MB；JS / CSS / 图片须全部内联</div>
+        <div class="upload-main">
+          {{ page ? '拖入或选择 HTML 文件，将覆盖当前页面' : '拖入或选择 HTML 文件' }}
+        </div>
+        <div class="upload-sub">
+          单个 .html 文件，不超过 50MB；JS / CSS / 图片须全部内联
+          <template v-if="page">；选择后<b>立即上传并覆盖</b></template>
+        </div>
       </div>
     </el-upload>
 
-    <div v-if="modelValue" class="file-status">
+    <!-- 已选择待上传文件（新建弹窗场景暂存；已有实验则选择后立即自动上传） -->
+    <div v-if="modelValue && !uploading" class="file-status">
       <el-icon><Document /></el-icon>
       <span class="file-name" :title="modelValue.name">{{ modelValue.name }}</span>
       <span class="file-size">{{ fmtSize(modelValue.size) }}</span>
-      <el-tag v-if="page" size="small" type="warning" effect="plain" class="overwrite-tag">上传后将覆盖当前生效页面</el-tag>
+      <el-tag v-if="page" size="small" type="warning" effect="plain" class="overwrite-tag">将覆盖当前生效页面</el-tag>
     </div>
 
     <!-- S8 静态扫描命中：展示命中项，由教师显式二次确认后才落库 -->
@@ -42,31 +55,13 @@
     <!-- 上传进度（教师反馈第 7 条：中间过程可见） -->
     <div v-if="uploading" class="progress-row">
       <el-progress :percentage="percent" :stroke-width="10" />
-      <div class="progress-tip">正在上传 {{ modelValue?.name || '' }}…</div>
+      <div class="progress-tip">正在上传并覆盖{{ page ? '当前页面' : '' }} {{ modelValue?.name || '' }}…</div>
     </div>
 
-    <div class="uploader-actions">
-      <el-button
-        v-if="labId"
-        type="primary"
-        size="small"
-        :loading="uploading"
-        :disabled="!modelValue || disabled"
-        @click="submit(false)"
-      >
-        {{ uploading ? `上传中 ${percent}%` : (page ? '上传并覆盖当前页面' : (needConfirm ? '确认继续上传' : '上传并保存')) }}
-      </el-button>
-      <el-button v-if="labId && page" size="small" :disabled="uploading" @click="preview">预览当前生效页面</el-button>
-      <el-tooltip
-        v-if="labId && page && !canDelete"
-        content="自定义实验没有可回退的模板页面，删除会使实验无法访问；直接上传新页面覆盖即可"
-        placement="top"
-      >
-        <span class="delete-disabled-tip">不可删除</span>
-      </el-tooltip>
-      <el-button v-if="labId && page && canDelete" size="small" type="danger" plain :disabled="uploading" @click="remove">删除当前页面</el-button>
-      <span v-if="!labId && modelValue" class="picked-tip">已选择，创建实验时将一并上传</span>
+    <div v-if="needConfirm" class="uploader-actions">
+      <el-button type="warning" size="small" :loading="uploading" @click="submit(true)">确认继续上传</el-button>
     </div>
+    <span v-if="!labId && modelValue" class="picked-tip">已选择，创建实验时将一并上传</span>
   </div>
 </template>
 
@@ -74,17 +69,14 @@
 import { ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { UploadFilled, Document } from '@element-plus/icons-vue'
-import { uploadLabPage, deleteLabPage, previewLabPage } from '@/api/labs'
+import { uploadLabPage, previewLabPage } from '@/api/labs'
 
 const props = defineProps({
-  // 已有实验：直接上传 / 替换；为空表示新建弹窗内暂存文件，由父组件创建后再传
+  // 已有实验：选择文件后立即上传/覆盖；为空表示新建弹窗内暂存文件，由父组件创建后再传
   labId: { type: [Number, String], default: null },
   modelValue: { type: Object, default: null },
   page: { type: Object, default: null },
   disabled: { type: Boolean, default: false },
-  // 是否允许删除已上传页面：实验绑定了模板（可回退）才显示删除；
-  // 自定义实验删除页面会变成不可访问的死实验（后端会 400 拒绝），应直接上传覆盖
-  canDelete: { type: Boolean, default: true },
 })
 const emit = defineEmits(['update:modelValue', 'uploaded', 'changed'])
 
@@ -117,7 +109,9 @@ function onHtmlPicked(file) {
   emit('update:modelValue', file)
   needConfirm.value = false
   hits.value = []
-  return false // 阻止 el-upload 自动上传，由下方按钮显式提交
+  // 教师反馈：已有实验时选择文件后直接上传，不再需要点「上传并覆盖页面」按钮
+  if (props.labId) submit(false)
+  return false // 阻止 el-upload 自动上传，统一由 submit() 显式提交
 }
 
 async function submit(force) {
@@ -132,7 +126,7 @@ async function submit(force) {
     hits.value = []
     emit('update:modelValue', null)
     emit('uploaded', res)
-    ElMessage.success('实验页面已保存')
+    ElMessage.success(page?.name ? '新页面已上传并覆盖当前页面' : '实验页面已保存')
   } catch (e) {
     const body = e?.response?.data
     if (body?.require_confirm) {
@@ -157,24 +151,28 @@ async function preview() {
     ElMessage.error(e?.message || '预览失败')
   }
 }
-
-async function remove() {
-  await ElMessageBox.confirm(
-    '删除后该实验将回退为平台预置模式，学生将无法进入实验页面（可重新上传恢复）。确认删除？',
-    '删除当前生效页面', { type: 'warning', confirmButtonText: '确认删除' },
-  )
-  await deleteLabPage(props.labId)
-  emit('update:modelValue', null)
-  emit('changed')
-  ElMessage.success('自定义页面已删除')
-}
 </script>
 
 <style scoped>
+.page-active-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: #334155;
+}
+.page-active-icon { color: #10b981; font-size: 16px; }
+.page-active-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .upload-inner { padding: 14px 8px; text-align: center; }
 .upload-mark { font-size: 30px; color: #409eff; line-height: 1.2; }
 .upload-main { margin-top: 6px; font-size: 14px; color: #334155; font-weight: 600; }
 .upload-sub { margin-top: 4px; font-size: 12px; color: #94a3b8; }
+.upload-sub b { color: #d97706; }
 .file-status {
   display: flex;
   align-items: center;

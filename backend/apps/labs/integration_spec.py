@@ -46,6 +46,8 @@ _AI_PROMPT = """请为我开发一个智课平台的自定义实验页面，交�
    await LabBridge.reportGrade({ total_score: <总分>, elapsed_seconds: <用时秒> })
    total_score 在 0 ~ @@TOTAL_SCORE@@ 之间、最多 1 位小数；平台只接收这两个字段；
    失败时把返回的 message 展示给学生并允许重试；同一学生多次提交平台只保留最高分。
+   上报成功后：停止计时、锁定所有作答交互，页面只展示最终结果与成绩，
+   不要再改变计时器读数或允许继续作答。
 3. 禁止访问 localStorage/sessionStorage/cookie、fetch 平台 /api、触碰 window.parent/opener；
    票据由平台父页面自动附带，页面不要读取 location.search 或拼接任何 token。
 

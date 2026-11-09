@@ -33,6 +33,7 @@ export const gradeDebug = (id, data) => request.post(`/labs/${id}/grade-debug/`,
 // ===== 排课 =====
 export const listLabSchedules = (params) => request.get('/lab-schedules/', { params })
 export const createLabSchedule = (data) => request.post('/lab-schedules/', data)
+export const updateLabSchedule = (id, data) => request.patch(`/lab-schedules/${id}/`, data)
 export const deleteLabSchedule = (id) => request.delete(`/lab-schedules/${id}/`)
 
 // ===== 作答与成绩 =====
