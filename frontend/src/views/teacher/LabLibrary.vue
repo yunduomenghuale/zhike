@@ -417,7 +417,9 @@ async function fetchLabStats(lab) {
   const avgSteps = stepPairs.length
     ? Math.round((stepPairs.reduce((a, s) => a + s.passed_steps / s.total_steps, 0) / stepPairs.length) * 100)
     : null
-  return { expected: roster.length, submitted: submitted.length, ongoing: ongoing.length, avgScore, avgSteps, roster, subs }
+  // Stage 11：submitted/ongoing 已是「学生数」（数字），直接返回——
+  // 曾遗留 submitted.length/ongoing.length（undefined）导致详情统计消失。
+  return { expected: roster.length, submitted, ongoing, avgScore, avgSteps, roster, subs }
 }
 
 async function loadClasses(lab) {
