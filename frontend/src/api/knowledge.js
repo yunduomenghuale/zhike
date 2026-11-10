@@ -35,9 +35,14 @@ export const getIndexHealth = (course) => request.get('/materials/index-health/'
 // 在线预览（PDF/Word/PPT 逐页图；txt 返回文本）
 export const previewMaterial = (id) => request.get(`/materials/${id}/preview/`)
 
-// 下载资料（blob 透传：响应拦截器对非统一 {code,message,data} 结构直接返回）
-export const downloadMaterial = (id) =>
-  request.get(`/materials/${id}/download/`, { responseType: 'blob', timeout: 300000 })
+// 下载资料（blob 透传：响应拦截器对非统一 {code,message,data} 结构直接返回）。
+// inline=1 时后端不强制 attachment，PDF 可在新标签页内嵌预览
+export const downloadMaterial = (id, { inline = false } = {}) =>
+  request.get(`/materials/${id}/download/`, {
+    responseType: 'blob',
+    timeout: 300000,
+    params: inline ? { inline: 1 } : undefined,
+  })
 
 // ===== 问答记录 =====
 export const listQaRecords = (params) => request.get('/qa-records/', { params })

@@ -208,14 +208,20 @@
                   <div v-if="!materials.length" class="dock-empty">
                     <el-empty description="本课程还没有可查看的资料" :image-size="90" />
                   </div>
-                  <a v-for="m in materials" :key="m.id" class="material-item" :href="fileUrl(m.file)" target="_blank" rel="noopener">
+                  <button
+                    v-for="m in materials"
+                    :key="m.id"
+                    type="button"
+                    class="material-item"
+                    @click="viewMaterial(m)"
+                  >
                     <span class="material-icon"><el-icon><Document /></el-icon></span>
                     <span class="material-copy">
                       <span class="material-name">{{ m.file_name }}</span>
                       <span class="material-meta">{{ (m.file_type || '文件').toUpperCase() }} · {{ m.chunk_count || 0 }} 片段 · {{ m.parse_status_display || '已解析' }}</span>
                     </span>
                     <el-icon class="material-open"><Right /></el-icon>
-                  </a>
+                  </button>
                 </template>
               </div>
 
@@ -562,12 +568,13 @@ import { listClasses } from '@/api/classroom'
 import { listCatalogs, listCourses, listPpts, listVideos, listWatchProgress, reportVideoProgress } from '@/api/course'
 import { chapterProgress } from '@/utils/learningProgress'
 import { listQuestions, practiceSubmit } from '@/api/question'
-import { listMaterials, getQaVisionCapability } from '@/api/knowledge'
+import { listMaterials, getQaVisionCapability, downloadMaterial } from '@/api/knowledge'
 import { renderQaAnswer } from '@/utils/markdown'
 import CitedSources from '@/components/qa/CitedSources.vue'
 import QuestionImage from '@/components/QuestionImage.vue'
 import QaFeedback from '@/components/qa/QaFeedback.vue'
 import { listQaSessions, listQaSessionRecords } from '@/api/knowledge'
+import { openFetchedFile } from '@/utils/open-tab'
 import { submitChapterSummary, getChapterSummary } from '@/api/chapter-summary'
 import { useAiTaskPolling } from '@/composables/useAiTaskPolling'
 import { blankAnswerText } from '@/utils/blank-answer'
@@ -1310,8 +1317,15 @@ function onChatAreaClick(e) {
   sourcesEl?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
 }
 
-function fileUrl(file) {
-  return file || '#'
+// 查看资料：经认证接口取回 blob（media 直链在零信任网关/公网入口不转发 /media/ 会 404，
+// 且 <a> 跳转无法携带 JWT）。PDF/文本新标签页内嵌预览，其余类型以原文件名下载。
+async function viewMaterial(m) {
+  const inline = ['pdf', 'txt', 'md'].includes((m.file_type || '').toLowerCase())
+  try {
+    await openFetchedFile(() => downloadMaterial(m.id, { inline }), m.file_name, { inline })
+  } catch {
+    ElMessage.error('资料获取失败，请稍后重试')
+  }
 }
 
 function fmtTime(sec) {
@@ -2645,6 +2659,15 @@ onUnmounted(() => {
   color: inherit;
   background: #fff;
   text-decoration: none;
+}
+
+/* a→button（blob 下载替代 media 直链）：还原 UA 默认样式，保持原视觉 */
+button.material-item {
+  width: 100%;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  appearance: none;
 }
 
 .material-icon {

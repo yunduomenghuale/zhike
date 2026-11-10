@@ -225,13 +225,12 @@
               <div v-if="!materials.length" class="dock-empty">
                 <el-empty description="本课程还没有上传知识库资料" :image-size="90" />
               </div>
-              <a
+              <button
                 v-for="m in materials"
                 :key="m.id"
+                type="button"
                 class="material-item"
-                :href="fileUrl(m.file)"
-                target="_blank"
-                rel="noopener"
+                @click="viewMaterial(m)"
               >
                 <span class="material-icon" :class="'ext-' + (m.file_type || 'file')">
                   <el-icon><Document /></el-icon>
@@ -245,7 +244,7 @@
                   </span>
                 </span>
                 <el-icon class="material-open"><Right /></el-icon>
-              </a>
+              </button>
             </template>
           </div>
 
@@ -940,7 +939,8 @@ import {
   previewCatalogFromFile, listPpts, uploadPpt, listVideos, updateVideoScript, regenerateVideoScriptPage,
   regenerateVideoAudioPage,
 } from '@/api/course'
-import { listMaterials, getQaVisionCapability } from '@/api/knowledge'
+import { listMaterials, getQaVisionCapability, downloadMaterial } from '@/api/knowledge'
+import { openFetchedFile } from '@/utils/open-tab'
 import { useGenerationStore } from '@/store/generation'
 import { renderAiMarkdown } from '@/utils/markdown'
 import { groupCitedSources, citedSourceLabel } from '@/utils/cited-sources'
@@ -1595,8 +1595,15 @@ function scrollChatToBottom() {
   })
 }
 
-function fileUrl(file) {
-  return file || '#'
+// 查看资料：经认证接口取回 blob（media 直链在零信任网关/公网入口不转发 /media/ 会 404，
+// 且 <a> 跳转无法携带 JWT）。PDF/文本新标签页内嵌预览，其余类型以原文件名下载。
+async function viewMaterial(m) {
+  const inline = ['pdf', 'txt', 'md'].includes((m.file_type || '').toLowerCase())
+  try {
+    await openFetchedFile(() => downloadMaterial(m.id, { inline }), m.file_name, { inline })
+  } catch {
+    ElMessage.error('资料获取失败，请稍后重试')
+  }
 }
 
 const currentPlayerPage = computed(() => playerPages.value[playerPageIndex.value] || null)
@@ -3877,6 +3884,14 @@ onUnmounted(() => {
   background: rgba(255, 255, 255, 0.8);
   text-decoration: none;
   transition: all 0.18s ease;
+}
+/* a→button（blob 下载替代 media 直链）：还原 UA 默认样式，保持原视觉 */
+button.material-item {
+  width: 100%;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  appearance: none;
 }
 .material-item:hover {
   border-color: rgba(37, 99, 235, 0.34);

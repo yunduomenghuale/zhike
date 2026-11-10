@@ -95,15 +95,9 @@
             </div>
             <div class="kb-row-actions">
               <div class="kb-action-group">
-                <a
-                  v-if="m.file"
-                  class="kb-action-btn"
-                  :href="m.file"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
+                <button v-if="m.file" class="kb-action-btn" @click="viewMaterial(m)">
                   <el-icon><View /></el-icon> 查看资料
-                </a>
+                </button>
                 <button class="kb-action-btn" @click="reparse(m)">
                   <el-icon><Refresh /></el-icon> 重新解析
                 </button>
@@ -183,10 +177,11 @@ import {
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog.vue'
+import { openFetchedFile } from '@/utils/open-tab'
 import { listCourses, listCatalogs } from '@/api/course'
 import {
   listMaterials, uploadMaterial, updateMaterial, reparseMaterial, toggleQa, deleteMaterial, rebuildVectors,
-  getIndexHealth,
+  getIndexHealth, downloadMaterial,
 } from '@/api/knowledge'
 
 const courses = ref([])
@@ -208,6 +203,17 @@ const rebuildDialog = reactive({ visible: false, loading: false, report: null, e
 
 function statusType(s) {
   return { done: 'success', failed: 'danger', parsing: 'warning', pending: 'info' }[s] || 'info'
+}
+
+// 查看资料：经认证接口取回 blob（media 直链在零信任网关/公网入口不转发 /media/ 会 404，
+// 且 <a> 跳转无法携带 JWT）。PDF/文本新标签页内嵌预览，其余类型以原文件名下载。
+async function viewMaterial(m) {
+  const inline = ['pdf', 'txt', 'md'].includes((m.file_type || '').toLowerCase())
+  try {
+    await openFetchedFile(() => downloadMaterial(m.id, { inline }), m.file_name, { inline })
+  } catch {
+    ElMessage.error('资料获取失败，请稍后重试')
+  }
 }
 
 async function loadCourses() {

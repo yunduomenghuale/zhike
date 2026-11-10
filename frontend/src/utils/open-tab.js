@@ -30,3 +30,41 @@ export function downloadUrl(url) {
   a.click()
   a.remove()
 }
+
+/* 经认证接口拉取文件并以 blob 方式打开/下载。
+ * 背景：media 直链（/media/...）在零信任网关/公网 nginx 不转发该路径时 404，
+ * 且 <a> 跳转无法携带 JWT，故改走带 Authorization 的 /api/ 接口取回 blob。
+ * - inline=true（PDF/文本等可内嵌渲染类型）：复用用户手势占位新标签页，
+ *   取回后写入 blob URL 内嵌预览（需后端接口支持 ?inline=1 返回 inline disposition）；
+ * - 否则（word/ppt 等浏览器无法内嵌展示的类型）：关闭占位页，触发下载，
+ *   文件名用原始文件名（blob URL 无 Content-Disposition，必须显式 a.download）。
+ * fetchBlob: 返回 Blob 的异步函数（如 downloadMaterial(id, { inline })）；
+ * fallbackName: 下载时展示的文件名；失败时关闭占位页并向上抛错由调用方提示。
+ */
+export async function openFetchedFile(fetchBlob, fallbackName = 'download', { inline = false } = {}) {
+  const tab = openTabDeferred()
+  let url = ''
+  try {
+    const blob = await fetchBlob()
+    if (!(blob instanceof Blob)) throw new Error('unexpected-response')
+    url = URL.createObjectURL(blob)
+    if (inline) {
+      tab.open(url)
+      // blob URL 交给浏览器后即可延后释放；延迟留足 PDF viewer 加载时间
+      setTimeout(() => URL.revokeObjectURL(url), 120000)
+    } else {
+      tab.close()
+      const a = document.createElement('a')
+      a.href = url
+      a.download = fallbackName || 'download'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 120000)
+    }
+  } catch (err) {
+    tab.close()
+    if (url) URL.revokeObjectURL(url)
+    throw err
+  }
+}

@@ -369,15 +369,20 @@ class MaterialViewSet(BaseModelViewSet):
 
     @action(detail=True, methods=["get"], url_path="download")
     def download(self, request, pk=None):
-        """资料下载：强制 attachment 并把文件名还原为原始文件名（存储名是 uuid）。
+        """资料下载：FileResponse 流式返回，不走统一响应包装；权限由 get_object() 行级过滤。
 
-        FileResponse 流式返回，不走统一响应包装；权限同样由 get_object() 行级过滤。
+        默认强制 attachment 并把文件名还原为原始文件名（存储名是 uuid）。
+        ?inline=1 时不强制 attachment，供前端 blob 方式在新标签页内嵌预览
+        （PDF）——media 直链在零信任网关/公网入口不转发 /media/ 时会 404，
+        前端统一改走本接口。上传白名单（serializer.allowed_extensions）不含
+        HTML/SVG/JS，inline 不会引入存储型 XSS。
         """
         material = self.get_object()
         if not material.file or not default_storage.exists(material.file.name):
             raise NotFound("资料文件不存在或已被移除")
         fh = default_storage.open(material.file.name, "rb")
-        return FileResponse(fh, as_attachment=True, filename=material.file_name)
+        inline = str(request.query_params.get("inline") or "").lower() in ("1", "true")
+        return FileResponse(fh, as_attachment=not inline, filename=material.file_name)
 
 
 
