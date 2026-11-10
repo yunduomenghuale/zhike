@@ -87,14 +87,22 @@ def build_class_stats(classroom, course_id) -> dict:
         exam_missing = [ex.name for ex in exam_list_qs if ex.id not in exam_taken_ids]
         avg_exam = exam_subs.aggregate(a=Avg("total_score"))["a"]
 
-        # 实验维度（循环外无法按生过滤的轻量查询；量级 = 班级人数 × 实验数）
+        # 实验维度（循环外无法按生过滤的轻量查询；量级 = 班级人数 × 实验数）。
+        # Stage 11 多轮记录：done = 出现过提交的实验数；均分 = 每个 lab 的
+        # 第一次提交（锁定口径）分数均值，重做记录不参与平均。
         lab_subs = LabSubmission.objects.filter(
             student=stu, lab_id__in=lab_ids, status=LabSubmission.Status.SUBMITTED
+        ).order_by("created_at")
+        first_by_lab = {}
+        for s in lab_subs:
+            if s.lab_id not in first_by_lab:
+                first_by_lab[s.lab_id] = s
+        lab_done = len(first_by_lab)
+        lab_missing = [lab.title for lab in lab_list if lab.id not in first_by_lab]
+        first_scores = [s.total_score for s in first_by_lab.values() if s.total_score is not None]
+        avg_lab = (
+            sum(first_scores) / len(first_scores) if first_scores else None
         )
-        lab_done_ids = set(lab_subs.values_list("lab_id", flat=True))
-        lab_done = len(lab_done_ids)
-        lab_missing = [lab.title for lab in lab_list if lab.id not in lab_done_ids]
-        avg_lab = lab_subs.aggregate(a=Avg("total_score"))["a"]
 
         last_ar = practice.order_by("-submitted_at").first()
         last_active = last_ar.submitted_at if last_ar else None
@@ -323,15 +331,22 @@ def build_class_stats_v2(classroom, course_id) -> dict:
     for lab in Lab.objects.filter(
         course_id=course_id, status=Lab.Status.PUBLISHED, schedules__classroom=classroom
     ).distinct().order_by("id"):
-        subs = LabSubmission.objects.filter(lab=lab, status=LabSubmission.Status.SUBMITTED)
-        done = subs.count()
-        avg_score = subs.aggregate(a=Avg("total_score"))["a"]
+        # Stage 11 多轮记录：每生取第一次提交（锁定口径），重做不重复计数
+        first_ids = []
+        seen_students = set()
+        for s in LabSubmission.objects.filter(lab=lab, status=LabSubmission.Status.SUBMITTED).order_by("created_at"):
+            if s.student_id not in seen_students:
+                seen_students.add(s.student_id)
+                first_ids.append(s.id)
+        firsts = LabSubmission.objects.filter(id__in=first_ids)
+        done = len(first_ids)
+        avg_score = firsts.aggregate(a=Avg("total_score"))["a"]
         lab_detail.append({
             "title": lab.title,
             "done": done,
             "student_count": len(rows),
             "avg_score": round(float(avg_score), 1) if avg_score is not None else None,
-            "reviewed": subs.filter(reviewed=True).count(),
+            "reviewed": firsts.filter(reviewed=True).count(),
         })
 
     # ---- 班级级：提问热度 / 学习行为 / 时间趋势 ----
@@ -612,7 +627,14 @@ def build_chapter_profile(student, catalog, *, for_student: bool) -> dict:
     # ---- 实验（提交即出分，无门控）----
     labs_out = []
     for lab in Lab.objects.filter(course_id=course_id, catalog_id=catalog.id, status=Lab.Status.PUBLISHED):
-        sub = LabSubmission.objects.filter(lab=lab, student=student).first()
+        # Stage 11：实验成绩 = 第一次提交（锁定）；重做新建记录不影响画像口径，
+        # 仅在毫无提交时（进行中）取最新记录展示空分。
+        sub = (
+            LabSubmission.objects.filter(lab=lab, student=student, status=LabSubmission.Status.SUBMITTED)
+            .order_by("created_at")
+            .first()
+            or LabSubmission.objects.filter(lab=lab, student=student).order_by("-created_at").first()
+        )
         if not sub:
             continue
         # C17：自定义实验（external）没有步骤数据，0/0 会把章节画像的

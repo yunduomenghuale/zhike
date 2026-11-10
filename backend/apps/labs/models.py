@@ -182,9 +182,13 @@ class LabSchedule(BaseModel):
 
 
 class LabSubmission(BaseModel):
-    """学生实验作答。unique(lab, student)：一次提交 + 教师重置后覆盖。
+    """学生实验作答：**每轮作答一条记录**（多轮并存，attempt 递增）。
 
-    与考试不同：提交即出分，无 score_released 门控；reviewed 仅标记教师复核改过分。
+    Stage 11 计分口径：实验成绩 = 第一次提交（锁定不变）；重做（学生自助或
+    教师重置）总是新建一条 in_progress 记录，历史提交全部保留——教师端/
+    学生端按 (lab, student) 取全部记录聚合出「第一次成绩 / 最高成绩 / 最短
+    用时 / 次数」。提交即出分，无 score_released 门控；reviewed 仅标记教师
+    复核改过分。
     """
 
     class Status(models.TextChoices):
@@ -240,7 +244,6 @@ class LabSubmission(BaseModel):
     class Meta:
         verbose_name = "实验作答"
         verbose_name_plural = verbose_name
-        unique_together = ("lab", "student")
         ordering = ["-created_at"]
 
     def __str__(self):

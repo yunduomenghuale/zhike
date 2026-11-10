@@ -327,17 +327,29 @@ class ClassStudentViewSet(BaseModelViewSet):
     # 名单可读；增删改一律管理员（移出 = 组织动作，不是教学动作）
     permission_classes = [IsAdminOrReadOnly]
     http_method_names = ["get", "patch", "delete", "head", "options"]
-    filterset_fields = ["classroom", "learn_status"]
+    filterset_fields = ["learn_status"]
 
     def get_queryset(self):
         # 只返回占用中的记录（active/inactive）。transferred/removed 是历史留痕
         # （P4 转出/移出语义），不应出现在教师/管理端名单里——否则会出现
         # 「名单里有这个学生、点详情却报不在此班级」的矛盾（transferred 学生
         # 不进 build_class_stats 分母）。
-        return ClassStudent.objects.filter(
+        qs = ClassStudent.objects.filter(
             classroom__in=classrooms_for_user(self.request.user),
             learn_status__in=ClassStudent.OCCUPYING_STATUSES,
         ).select_related("student", "classroom").order_by("id")
+        # classroom 多值过滤：支持重复参数（a=1&a=2）与逗号分隔（a=1,2）。
+        # 原先交给 filterset_fields 的 classroom 是单值过滤——数组参数
+        # （classroom[]=1）会被静默忽略，导致教师实验成绩页误见名下全部班级学籍。
+        ids = set()
+        for raw in self.request.query_params.getlist("classroom"):
+            for part in str(raw).replace("，", ",").split(","):
+                part = part.strip()
+                if part.isdigit():
+                    ids.add(int(part))
+        if ids:
+            qs = qs.filter(classroom_id__in=ids)
+        return qs
 
     def perform_destroy(self, instance):
         """移出班级一律软删（learn_status=removed），不物理删除。

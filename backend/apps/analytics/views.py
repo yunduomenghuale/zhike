@@ -441,16 +441,21 @@ class ClassStudentDetailView(APIView):
         for lab in Lab.objects.filter(
             course_id=course.id, status=Lab.Status.PUBLISHED, schedules__classroom=classroom
         ).distinct().order_by("order", "id"):
-            sub = LabSubmission.objects.filter(lab=lab, student=stu).first()
-            done = sub is not None and sub.status == LabSubmission.Status.SUBMITTED
+            # Stage 11：done/成绩按第一次提交（锁定）；status 无提交时取最新一轮
+            first_sub = LabSubmission.objects.filter(
+                lab=lab, student=stu, status=LabSubmission.Status.SUBMITTED
+            ).order_by("created_at").first()
+            latest = LabSubmission.objects.filter(lab=lab, student=stu).order_by("-created_at").first()
+            cur = first_sub or latest
+            done = first_sub is not None
             labs.append({
                 "id": lab.id,
                 "title": lab.title,
-                "status": sub.status if sub else None,
+                "status": cur.status if cur else None,
                 "done": done,
-                "score": float(sub.total_score) if done and sub.total_score is not None else None,
-                "reviewed": sub.reviewed if sub else False,
-                "submitted_at": sub.submitted_at if done else None,
+                "score": float(first_sub.total_score) if done and first_sub.total_score is not None else None,
+                "reviewed": first_sub.reviewed if done else False,
+                "submitted_at": first_sub.submitted_at if done else None,
             })
 
         recent = (

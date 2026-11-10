@@ -482,24 +482,35 @@ class LabSubmissionViewSet(BaseModelViewSet):
 
         now = timezone.now()
         with transaction.atomic():
-            sub, created = LabSubmission.objects.select_for_update().get_or_create(
-                lab=lab, student=request.user,
-                defaults={
-                    "schedule": schedule, "started_at": now,
-                    "status": LabSubmission.Status.IN_PROGRESS,
-                    "random_seed": seedgen.generate_seed(lab, request.user.id, 1),
-                },
+            # 每轮作答一条记录（Stage 11：第一次提交锁定为实验成绩）：
+            # 有进行中的记录 → 继续该轮；否则首次开始 / 重做都新建一条。
+            sub = (
+                LabSubmission.objects.select_for_update()
+                .filter(lab=lab, student=request.user, status=LabSubmission.Status.IN_PROGRESS)
+                .order_by("-created_at")
+                .first()
             )
-            if not created and sub.status == LabSubmission.Status.SUBMITTED:
-                if not lab.allow_resubmit:
+            if sub is None:
+                last = (
+                    LabSubmission.objects.filter(lab=lab, student=request.user)
+                    .order_by("-created_at")
+                    .first()
+                )
+                if last and last.status == LabSubmission.Status.SUBMITTED and not lab.allow_resubmit:
                     raise ValidationError("实验已提交，如需重做请联系教师重置")
-                self._reset_fields(sub, lab, request.user)
-            if not sub.random_seed:
-                sub.random_seed = seedgen.generate_seed(lab, request.user.id, sub.attempt)
+                attempt = (last.attempt if last else 0) + 1
+                sub = LabSubmission.objects.create(
+                    lab=lab,
+                    student=request.user,
+                    schedule=schedule,
+                    started_at=now,
+                    status=LabSubmission.Status.IN_PROGRESS,
+                    attempt=attempt,
+                    random_seed=seedgen.generate_seed(lab, request.user.id, attempt),
+                )
             if sub.schedule_id != schedule.id:
                 sub.schedule = schedule
             sub.started_at = sub.started_at or now
-            sub.status = LabSubmission.Status.IN_PROGRESS
             sub.save()
 
         ticket = bridge.issue_token(sub)
@@ -525,18 +536,6 @@ class LabSubmissionViewSet(BaseModelViewSet):
             if s.is_open():
                 return s
         return None
-
-    def _reset_fields(self, sub, lab, operator):
-        """重做开始一轮：状态回进行中、attempt+1。
-        Stage 6 计分规则为「保留历史最高分」，成绩与明细（分数/步骤/报文/用时）
-        不再清空——在更高分出现之前，学生端与教师端看到的始终是最高分那次
-        的完整记录。"""
-        sub.attempt += 1
-        sub.random_seed = seedgen.generate_seed(lab, sub.student_id, sub.attempt)
-        sub.status = LabSubmission.Status.IN_PROGRESS
-        sub.started_at = timezone.now()
-        sub.reset_by = operator
-        sub.reset_at = timezone.now()
 
     # ---- 桥接：静态页换取随机参数 ----
     @action(detail=False, methods=["get"], url_path="bridge-validate",
@@ -731,9 +730,26 @@ class LabSubmissionViewSet(BaseModelViewSet):
         if sub.lab.course.teacher_id != request.user.id:
             raise PermissionDenied("只能重置自己课程的实验")
         with transaction.atomic():
-            sub = LabSubmission.objects.select_for_update().get(pk=sub.pk)
-            self._reset_fields(sub, sub.lab, request.user)
-            sub.save()
+            src = LabSubmission.objects.select_for_update().get(pk=sub.pk)
+            # Stage 11：重置 = 开新一轮（新建 in_progress 记录），原提交历史保留——
+            # 「第一次提交锁定」的实验成绩与重做最高分/最短用时都依赖历史不被覆盖。
+            last = (
+                LabSubmission.objects.filter(lab=src.lab, student=src.student)
+                .order_by("-created_at")
+                .first()
+            )
+            attempt = (last.attempt if last else 0) + 1
+            sub = LabSubmission.objects.create(
+                lab=src.lab,
+                student=src.student,
+                schedule=src.schedule,
+                started_at=timezone.now(),
+                status=LabSubmission.Status.IN_PROGRESS,
+                attempt=attempt,
+                random_seed=seedgen.generate_seed(src.lab, src.student_id, attempt),
+                reset_by=request.user,
+                reset_at=timezone.now(),
+            )
         from apps.users.models import Notification
 
         Notification.objects.create(

@@ -141,9 +141,19 @@
             </div>
 
             <!-- 成绩列表（原「成绩」Tab 内容，移到概览底部） -->
-            <div class="scores-title">
+            <div class="scores-title scores-title-row">
               成绩明细
               <span class="scores-note">实验成绩 = 第一次提交（锁定不变）；重做后另记最高成绩与最短用时</span>
+              <el-select
+                v-if="classroomOptions.length > 1"
+                v-model="detailClassroomFilter"
+                clearable
+                placeholder="全部班级"
+                size="small"
+                class="classroom-filter"
+              >
+                <el-option v-for="c in classroomOptions" :key="c.id" :value="c.id" :label="c.name" />
+              </el-select>
             </div>
             <el-table :data="detailRows" size="small" class="score-table" :default-sort="{ prop: 'username', order: 'ascending' }">
               <el-table-column label="学生" min-width="170" prop="username" sortable :sort-method="cmpUsername">
@@ -165,8 +175,8 @@
                   <span v-else class="sub-text">—</span>
                 </template>
               </el-table-column>
-              <el-table-column label="用时（分）" min-width="125" align="center" sortable :sort-method="cmpElapsed">
-                <template #default="{ row }">{{ fmtMin(row.elapsed_seconds) }}</template>
+              <el-table-column label="用时" min-width="125" align="center" sortable :sort-method="cmpElapsed">
+                <template #default="{ row }">{{ fmtDuration(row.elapsed_seconds) }}</template>
               </el-table-column>
               <el-table-column label="最高成绩" min-width="105" align="center" sortable :sort-method="cmpBest">
                 <template #default="{ row }">
@@ -174,8 +184,8 @@
                   <span v-else class="sub-text">—</span>
                 </template>
               </el-table-column>
-              <el-table-column label="最短用时（分）" min-width="155" align="center" sortable :sort-method="cmpFastest">
-                <template #default="{ row }">{{ fmtMin(row.min_elapsed) }}</template>
+              <el-table-column label="最短用时" min-width="155" align="center" sortable :sort-method="cmpFastest">
+                <template #default="{ row }">{{ fmtDuration(row.min_elapsed) }}</template>
               </el-table-column>
               <el-table-column label="次数" min-width="80" align="center" sortable :sort-method="cmpCount">
                 <template #default="{ row }">{{ row.count || '—' }}</template>
@@ -374,23 +384,11 @@ async function load() {
   }
 }
 
-/** 与课程空间同口径的统计（C17：external 排除步骤指标）。 */
-async function fetchLabStats(lab) {
-  const classroomIds = (lab.schedules || []).map((s) => s.classroom)
-  if (!classroomIds.length) {
-    return { expected: 0, submitted: 0, ongoing: 0, avgScore: null, avgSteps: null, roster: [], subs: [] }
-  }
-  const [rosterRes, subRes] = await Promise.all([
-    request.get('/class-students/', { params: { classroom: classroomIds, learn_status: 'active', page_size: 500 } }),
-    listLabSubmissions({ lab: lab.id, page_size: 500 }),
-  ])
-  let roster = rosterRes.results ?? rosterRes
-  if (!Array.isArray(roster)) roster = []
-  const subs = subRes.results ?? subRes
-  // Stage 11 计分口径：按「学生」聚合——实验成绩 = 第一次提交；重做后另记最高成绩/最短用时。
-  // 已完成 = 有 SUBMITTED 记录的学生（即使又开了新一次作答）；进行中 = 只有进行中提交的学生。
+/** 从花名册与提交记录聚合统计（纯函数）：班级筛选前后共用同一口径。
+ *  Stage 11 计分口径：实验成绩 = 第一次提交（锁定）；重做后另记最高成绩/最短用时。 */
+function computeStats(roster, subs) {
   const byStudent = new Map()
-  subs.forEach((s) => {
+  ;(subs || []).forEach((s) => {
     if (!byStudent.has(s.student)) byStudent.set(s.student, [])
     byStudent.get(s.student).push(s)
   })
@@ -405,8 +403,7 @@ async function fetchLabStats(lab) {
     })
     .filter((n) => n !== null && Number.isFinite(n))
   const avgScore = firstScores.length ? Math.round((firstScores.reduce((a, b) => a + b, 0) / firstScores.length) * 10) / 10 : null
-  // Stage 11：avgSteps 按每名学生「第一次提交」的步骤指标聚合（external 排除），
-  // 与实验成绩口径一致。此处 submitted 已是数字（完成学生数），不能再当数组 filter。
+  // avgSteps 按每名学生「第一次提交」的步骤指标聚合（external 排除），与实验成绩口径一致。
   const stepPairs = doneLists
     .map((l) => {
       const done = l.filter((s) => s.status === 'submitted')
@@ -417,9 +414,28 @@ async function fetchLabStats(lab) {
   const avgSteps = stepPairs.length
     ? Math.round((stepPairs.reduce((a, s) => a + s.passed_steps / s.total_steps, 0) / stepPairs.length) * 100)
     : null
-  // Stage 11：submitted/ongoing 已是「学生数」（数字），直接返回——
-  // 曾遗留 submitted.length/ongoing.length（undefined）导致详情统计消失。
-  return { expected: roster.length, submitted, ongoing, avgScore, avgSteps, roster, subs }
+  return { expected: (roster || []).length, submitted, ongoing, avgScore, avgSteps }
+}
+
+/** 与课程空间同口径的统计（C17：external 排除步骤指标）。 */
+async function fetchLabStats(lab) {
+  const classroomIds = (lab.schedules || []).map((s) => s.classroom)
+  if (!classroomIds.length) {
+    return { expected: 0, submitted: 0, ongoing: 0, avgScore: null, avgSteps: null, roster: [], subs: [] }
+  }
+  const [rosterRes, subRes] = await Promise.all([
+    // classroom 多值用逗号分隔（服务端支持单值/逗号/重复参数）
+    request.get('/class-students/', { params: { classroom: classroomIds.join(','), learn_status: 'active', page_size: 500 } }),
+    listLabSubmissions({ lab: lab.id, page_size: 500 }),
+  ])
+  let roster = rosterRes.results ?? rosterRes
+  if (!Array.isArray(roster)) roster = []
+  // 本地兜底：只保留该实验排课班级的学籍（排课班级之外的学生绝不进成绩列表）
+  const allowedClassrooms = new Set(classroomIds)
+  roster = roster.filter((r) => allowedClassrooms.has(r.classroom))
+  const subs = subRes.results ?? subRes
+  // submitted/ongoing 已是「学生数」（数字）——曾遗留 submitted.length 导致详情统计消失。
+  return { ...computeStats(roster, subs), roster, subs }
 }
 
 async function loadClasses(lab) {
@@ -444,6 +460,7 @@ async function openDetail(row, tab = 'overview') {
   currentLab.value = row
   detailTab.value = tab
   detailVisible.value = true
+  detailClassroomFilter.value = null
   detailLoading.value = true
   try {
     const [st] = await Promise.all([fetchLabStats(row), loadClasses(row)])
@@ -524,10 +541,16 @@ const cmpUsername = (a, b) => {
   if (x === y) return 0
   return x < y ? -1 : 1
 }
-/** 用时列：入参秒，出参分钟数字（表头已带单位），无数据显示 —。 */
-function fmtMin(sec) {
+/** 用时列：入参秒，出参「X秒 / X分YY秒 / X时YY分」（超过 1 小时才显示小时），无数据显示 —。 */
+function fmtDuration(sec) {
   if (sec === null || sec === undefined || sec === '') return '—'
-  return Math.round(Number(sec) / 60)
+  const s = Math.max(0, Math.round(Number(sec)))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const ss = s % 60
+  if (h) return `${h}时${String(m).padStart(2, '0')}分`
+  if (m) return `${m}分${String(ss).padStart(2, '0')}秒`
+  return `${ss}秒`
 }
 function cmpSubmitted(a, b) {
   const x = String(a.submitted_at || '')
@@ -538,9 +561,27 @@ function cmpSubmitted(a, b) {
   return x.localeCompare(y)
 }
 
+// 多班级筛选：成绩明细/统计只看所选班级的花名册与提交（默认全部班级）；
+// 同一学生在多班时按排课口径在每个班级下分别可见。
+const detailClassroomFilter = ref(null)
+const classroomOptions = computed(() =>
+  (currentLab.value?.schedules || []).map((s) => ({ id: s.classroom, name: s.classroom_name })))
+const filteredRoster = computed(() => {
+  const f = detailClassroomFilter.value
+  const roster = detailRoster.value || []
+  return f ? roster.filter((r) => r.classroom === f) : roster
+})
+const filteredSubs = computed(() => {
+  const f = detailClassroomFilter.value
+  const subs = detailSubs.value || []
+  if (!f) return subs
+  const ids = new Set(filteredRoster.value.map((r) => r.student))
+  return subs.filter((s) => ids.has(s.student))
+})
+
 const detailRows = computed(() => {
   const byStudent = new Map()
-  detailSubs.value.forEach((s) => {
+  filteredSubs.value.forEach((s) => {
     if (!byStudent.has(s.student)) byStudent.set(s.student, [])
     byStudent.get(s.student).push(s)
   })
@@ -563,13 +604,13 @@ const detailRows = computed(() => {
   }
   const rows = []
   const seen = new Set()
-  detailRoster.value.forEach((r) => {
+  filteredRoster.value.forEach((r) => {
     const list = byStudent.get(r.student) || []
     seen.add(r.student)
     if (!list.length) return rows.push({ id: null, name: r.student_name, username: r.username, state: 'not_started' })
     rows.push(mkRow(r.student_name, r.username, r.student, list))
   })
-  detailSubs.value.forEach((s) => {
+  filteredSubs.value.forEach((s) => {
     if (!seen.has(s.student)) {
       seen.add(s.student)
       rows.push(mkRow(s.student_name, s.student_username, s.student, byStudent.get(s.student) || [s]))
@@ -577,9 +618,8 @@ const detailRows = computed(() => {
   })
   return rows
 })
-const detailStats = computed(() => labStatsCache.value[currentLab.value?.id] || {
-  expected: 0, submitted: 0, ongoing: 0, avgScore: null, avgSteps: null,
-})
+// 详情统计随班级筛选现算（口径与列表页 fetchLabStats 完全一致）
+const detailStats = computed(() => computeStats(filteredRoster.value, filteredSubs.value))
 
 // 完成情况饼图（conic-gradient 甜甜圈，教师反馈：饼图展示）
 const pendingCount = computed(() =>
@@ -601,7 +641,7 @@ const scoreBuckets = computed(() => {
     { label: '80-89', min: 80, max: 89.99 },
     { label: '90-100', min: 90, max: 1000 },
   ]
-  const subs = detailSubs.value.filter((s) => s.status === 'submitted' && s.total_score != null)
+  const subs = filteredSubs.value.filter((s) => s.status === 'submitted' && s.total_score != null)
   const counts = buckets.map((b) => subs.filter((s) => Number(s.total_score) >= b.min && Number(s.total_score) <= b.max).length)
   const max = Math.max(...counts, 1)
   return buckets.map((b, i) => ({ ...b, count: counts[i], ratio: counts[i] / max }))
@@ -746,6 +786,8 @@ onMounted(load)
 .bar-fill { width: 100%; background: linear-gradient(180deg, #60a5fa, #2563eb); border-radius: 6px 6px 0 0; transition: height .3s; }
 .bar-label { margin-top: 6px; font-size: 11px; color: #94a3b8; }
 .scores-title { font-size: 14px; font-weight: 600; color: #1e293b; margin: 6px 0 10px; padding-left: 8px; border-left: 3px solid #10b981; }
+.scores-title-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.classroom-filter { margin-left: auto; width: 200px; }
 /* 成绩明细：表头（含排序箭头）不换行，箭头始终跟在列名右侧 */
 .score-table :deep(th .cell) { white-space: nowrap; }
 .schedule-list { margin-top: 14px; }

@@ -192,11 +192,13 @@ function windowState(s) {
   return { text: `开放中${left}`, cls: 'open' }
 }
 
-/** C5：按 status 三分支徽标——未开始 / 进行中 / 已出分。 */
+/** C5：按 status 三分支徽标——未开始 / 进行中 / 已出分。
+ *  Stage 11 多轮记录：已出分显示第一次提交的锁定分（与下方成绩区口径一致）。 */
 function scoreBadge(row) {
   const sub = submissionOf(row)
   if (!sub) return { text: '未开始', type: 'info' }
-  if (sub.status === 'submitted') return { text: `${sub.total_score} 分`, type: 'success' }
+  const sm = summaryOf(row)
+  if (sm) return { text: `${sm.first.total_score} 分`, type: 'success' }
   return { text: '进行中', type: 'warning' }
 }
 
@@ -206,12 +208,16 @@ function isExternal(row) {
   return Boolean(sub && (sub.grading_source === 'external' || sub.score_breakdown?.source === 'external'))
 }
 
+/** 用时展示：X秒 / X分YY秒 / X时YY分（超过 1 小时才显示小时）。 */
 function externalElapsed(sub) {
   const sec = Number(sub?.elapsed_seconds || 0)
   if (!Number.isFinite(sec) || sec <= 0) return '0 秒'
-  const m = Math.floor(sec / 60)
+  const h = Math.floor(sec / 3600)
+  const m = Math.floor((sec % 3600) / 60)
   const s = Math.round(sec % 60)
-  return m ? `${m} 分 ${s} 秒` : `${s} 秒`
+  if (h) return `${h}时${String(m).padStart(2, '0')}分`
+  if (m) return `${m}分${String(s).padStart(2, '0')}秒`
+  return `${s} 秒`
 }
 
 function fmtDT(t) {

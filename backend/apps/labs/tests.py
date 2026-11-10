@@ -1660,18 +1660,22 @@ class LabBestScorePolicyTest(TestCase):
         c = _C()
         return c
 
-    def test_template_redo_keeps_higher_score(self):
+    def test_template_redo_keeps_history(self):
+        """Stage 11 多轮记录：低分重做生成独立低分记录，第一次提交锁定不变。"""
         lab_id = self._make_lab("template")
         first = self._submit_template(lab_id, passes=5)   # 高分
         self.assertGreater(Decimal(str(first["total_score"])), Decimal("80"))
-        high_snapshot = (first["total_score"], first["steps_result"], first["elapsed_seconds"])
         second = self._submit_template(lab_id, passes=2)  # 低分重做
         self.assertEqual(second["attempt"], 2)
         self.assertEqual(second["status"], "submitted")
-        self.assertEqual(Decimal(str(second["total_score"])), Decimal(str(high_snapshot[0])),
-                         "低分重做不得覆盖历史最高分")
-        self.assertEqual(second["steps_result"], high_snapshot[1], "步骤明细应保留最高分那次的数据")
-        self.assertEqual(second["elapsed_seconds"], high_snapshot[2])
+        self.assertLess(Decimal(str(second["total_score"])), Decimal(str(first["total_score"])),
+                        "低分重做是独立的新一轮记录，分数如实保留")
+        subs = self.sc.get("/api/lab-submissions/", {"lab": lab_id}).data["data"]["results"]
+        self.assertEqual(len(subs), 2, "重做应保留历史：两轮记录并存")
+        first_locked = sorted(subs, key=lambda s: s["attempt"])[0]
+        self.assertEqual(Decimal(str(first_locked["total_score"])), Decimal(str(first["total_score"])),
+                         "第一次提交的成绩锁定不变（教师端「实验成绩」列口径）")
+        self.assertEqual(first_locked["submitted_at"], first["submitted_at"])
 
     def test_template_redo_updates_on_higher(self):
         lab_id = self._make_lab("template")
@@ -1681,13 +1685,20 @@ class LabBestScorePolicyTest(TestCase):
                            "高分重做应更新成绩")
         self.assertEqual(second["attempt"], 2)
 
-    def test_external_best_score(self):
+    def test_external_redo_keeps_history(self):
+        """Stage 11 多轮记录：三轮作答三条记录，第一次提交锁定、最高分可聚合。"""
         lab_id = self._make_lab("custom")
         s1 = self._grade_external(lab_id, 60)
         self.assertEqual(Decimal(str(s1["total_score"])), Decimal("60"))
         s2 = self._grade_external(lab_id, 90)
-        self.assertEqual(Decimal(str(s2["total_score"])), Decimal("90"), "高分重做应更新")
+        self.assertEqual(Decimal(str(s2["total_score"])), Decimal("90"), "重做产生独立的新一轮记录")
         s3 = self._grade_external(lab_id, 50)
-        self.assertEqual(Decimal(str(s3["total_score"])), Decimal("90"), "低分重做保留最高分")
+        self.assertEqual(Decimal(str(s3["total_score"])), Decimal("50"), "低分重做是独立的低分记录")
         self.assertEqual(s3["grading_source"], "external")
         self.assertIsNotNone(s3["submitted_at"])
+        subs = self.sc.get("/api/lab-submissions/", {"lab": lab_id}).data["data"]["results"]
+        self.assertEqual(len(subs), 3, "三轮作答三条记录，历史完整保留")
+        first_locked = sorted(subs, key=lambda s: s["attempt"])[0]
+        self.assertEqual(Decimal(str(first_locked["total_score"])), Decimal("60"), "第一次提交 60 分锁定")
+        best = max(Decimal(str(s["total_score"])) for s in subs)
+        self.assertEqual(best, Decimal("90"), "历史最高分 90 分可从记录聚合")
