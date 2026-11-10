@@ -87,13 +87,19 @@
         <h4>实测范例：主题描述的推荐写法（已验证有效）</h4>
         <div class="help-tip-line">
           「复制给 AI」说明已替你预填实验名与满分；AI 只差一段<b>具体的主题描述</b>。
-          下面是按此写法实测的范例——把「实验主题与判分需求」的占位符替换成这样的描述（场景化操作 + 明确计分），
-          AI 就会产出带 SVG 场景与动画的交互实验（本范例由 AI 按此描述生成并通过全部健康检查）：
+          把「实验主题与判分需求」的占位符替换成这样的描述（场景化操作 + 明确计分），
+          AI 就会产出带 SVG 场景与动画的交互实验：
         </div>
-        <pre class="help-code">十进制与二进制转换练习实验。满分 100 分，判分基于学生在场景中的操作结果：
-学生通过拨动「二进制位开关」构造出一个指定的二进制数（教师面板给出目标十进制值），
-共 5 关，每关目标值不同（难度递增），构造正确并点击「确认本关」得 20 分；
-全部达成得满分。</pre>
+        <pre class="help-code">{{ helpExampleText }}</pre>
+        <div class="help-tip-line">
+          上面这段描述正是下方参考案例的真实来源：AI 按此生成 → 平台实测全链路通过
+          （5 关通关、成绩上报、教师端出分）。可下载源码对照学习
+          <code>LabBridge.validate()</code> / <code>LabBridge.reportGrade()</code> 的正确用法，
+          也可以直接上传作为实验使用（满分 100 分，上传后建议先用「在线调试」确认）：
+          <a class="example-link" href="/labs-examples/agent-lab-v2.html" target="_blank" rel="noopener">预览案例页面</a>
+          ·
+          <a class="example-link" href="/labs-examples/agent-lab-v2.html" download="agent-lab-v2.html">下载案例 HTML</a>
+        </div>
       </div>
       <template #footer>
         <el-button type="primary" @click="copyText(helpPromptText, '提示词模板')">复制提示词模板</el-button>
@@ -157,7 +163,17 @@ const helpPromptText =
   '   响应契约：{ code, message }。必须检查 code === 0 才显示「成绩已提交」；\n' +
   '   code 非 0 时必须原样展示 message 并允许重试——绝不能把失败当作成功。\n' +
   '3. 禁止访问 localStorage/sessionStorage/cookie、fetch 平台 /api、触碰 window.parent/opener；\n' +
-  '   票据由平台父页面自动附带，页面不要读取 location.search 或拼接任何 token。\n\n' +
+  '   票据由平台父页面自动附带，页面不要读取 location.search 或拼接任何 token，\n' +
+  '   更不要自己调用 window.parent.postMessage（沙箱内该调用必抛错，上报只走 LabBridge）。\n' +
+  '4. 变量必须先声明再使用，全文统一命名：满分相关只用一个变量名（如 totalScore），\n' +
+  '   禁止再发明 fullScore 等同义变量；任何重命名都要全局替换并复查每一处引用。\n\n' +
+  '交付前自检清单（逐项执行后再输出代码，缺一不可）：\n' +
+  '1. 把每个 <script> 的内容做一次语法检查（如 node 中 new Function(src)，或 node --check）。\n' +
+  '2. 逐个核对提交链路（判分 → LabBridge.reportGrade → 检查 code === 0 → 展示成绩）上\n' +
+  '   出现的每个变量/函数都已定义且拼写一致，不存在未声明的引用。\n' +
+  '3. reportGrade 的调用整体包在 try/catch 里：任何异常都展示错误并显示「重新提交成绩」按钮，\n' +
+  '   绝不能让学生停留在「正在提交」的中间状态。\n' +
+  '4. 确认页面离线可用：无任何 http(s) 外链资源，无 eval / localStorage / cookie。\n\n' +
   '请直接输出完整 HTML 文件内容。'
 async function loadSpec() {
   if (!props.labId) return
@@ -303,6 +319,8 @@ onMounted(loadSpec)
 .copy-toast { font-size: 12px; color: #059669; }
 .help-doc h4 { margin: 14px 0 8px; color: #1e293b; }
 .help-tip-line { font-size: 12.5px; color: #64748b; line-height: 1.8; margin-bottom: 8px; }
+.example-link { color: #2563eb; font-weight: 600; text-decoration: none; white-space: nowrap; }
+.example-link:hover { text-decoration: underline; }
 .help-doc ol, .help-doc ul { margin: 0 0 10px 22px; line-height: 1.9; color: #475569; font-size: 13px; }
 .help-doc code { background: #f1f5f9; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
 .help-code {

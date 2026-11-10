@@ -1479,7 +1479,6 @@ class LabIntegrationSpecTest(TestCase):
         self.assertNotIn("@@", md, "所有占位符必须被替换，不能把模板泄漏给教师/AI")
         for text in (
             "VLAN 与 Trunk 配置实验", "85.5", "/api/lab-gate/grade/",
-            f"/api/labs/{lab_id}/grade-debug/",
             "## 1. 你的任务", "## 2. 与平台交互", "## 4. 可直接复制给 AI",
             "LabBridge.validate()", "LabBridge.reportGrade(", "ctx.totalScore",
             "同一学生多次提交只保留最高分",
@@ -1487,6 +1486,9 @@ class LabIntegrationSpecTest(TestCase):
             "提交过于频繁",
         ):
             self.assertIn(text, md, f"接入说明缺少：{text}")
+        # 调试端点与 AI 无关（教师在线调试由前端按钮自带 lab id），不应出现在说明里；
+        # 响应字段 grade_debug_endpoint 仍保留（API 兼容）。
+        self.assertNotIn("grade-debug", md)
         # 同源绝对地址由 request 预填，不是写死的内部 IP
         # Stage 11：说明里的上报地址一律相对路径（不写死域名/端口）
         self.assertIn("POST /api/lab-gate/grade/", md)
@@ -1555,8 +1557,9 @@ class LabIntegrationSpecTest(TestCase):
         # LabBridge 用法的 js 代码块仍保留（教师/AI 需要知道三个 API）
         self.assertIn("```js", md)
         self.assertIn("LabBridge.reportGrade(", md)
-        # 体积约束：精简后说明不应超过 6KB（原版 ~7.4KB）
-        self.assertLess(len(md.encode("utf-8")), 6 * 1024, "接入说明应保持精简")
+        # 体积约束：说明保持紧凑，不超过 8KB（Stage 9 原 6KB 上限放宽——
+        # 2026-11-09 教师确认质量优先：保留完整命名纪律与交付自检清单）
+        self.assertLess(len(md.encode("utf-8")), 8 * 1024, "接入说明应保持紧凑")
 
     def test_no_ticket_leaked_into_page_contract(self):
         """C25/C45：说明明确票据只在平台父页面，不下发 attempt token 给页面。"""

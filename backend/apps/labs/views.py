@@ -112,7 +112,9 @@ class LabViewSet(BaseModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        qs = Lab.objects.select_related("template", "course", "catalog")
+        # 创建时间倒序（id 单调递增等价创建顺序）：学生实验列表与教师端一致，
+        # 新建的实验排最前；模型 Meta 默认 ["course_id","order","id"] 是升序。
+        qs = Lab.objects.select_related("template", "course", "catalog").order_by("-id")
         if getattr(user, "is_student", False):
             # 学生可见：已发布 + 所在 active 班级被排课 + 班级关联该课程
             qs = qs.filter(

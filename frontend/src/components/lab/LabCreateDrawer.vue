@@ -106,7 +106,18 @@ const courseList = ref([])
 async function loadCourseList() {
   if (props.fixedCourseId) {
     const fixed = props.courses.find((c) => String(c.id) === String(props.fixedCourseId))
-    courseList.value = fixed ? [fixed] : []
+    if (fixed) {
+      courseList.value = [fixed]
+      return
+    }
+    // 课程工作台内嵌时父组件不拉课程列表（courses 为空），下拉没有匹配选项
+    // 会直接显示裸 id（如「5」）——按 id 回查课程详情兜底。
+    try {
+      const res = await request.get(`/courses/${props.fixedCourseId}/`)
+      courseList.value = res && res.id ? [res] : []
+    } catch {
+      courseList.value = []
+    }
     return
   }
   try {

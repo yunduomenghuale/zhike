@@ -145,42 +145,42 @@
               成绩明细
               <span class="scores-note">实验成绩 = 第一次提交（锁定不变）；重做后另记最高成绩与最短用时</span>
             </div>
-            <el-table :data="detailRows" size="small">
-              <el-table-column label="学生" min-width="130">
+            <el-table :data="detailRows" size="small" class="score-table" :default-sort="{ prop: 'username', order: 'ascending' }">
+              <el-table-column label="学生" min-width="170" prop="username" sortable :sort-method="cmpUsername">
                 <template #default="{ row }">
                   <span class="stu-name">{{ row.name }}</span>
                   <span class="stu-no">{{ row.username }}</span>
                 </template>
               </el-table-column>
-              <el-table-column label="状态" width="96">
+              <el-table-column label="状态" min-width="100" sortable :sort-method="cmpState">
                 <template #default="{ row }">
                   <el-tag v-if="row.state === 'submitted'" type="success" size="small">已完成</el-tag>
                   <el-tag v-else-if="row.state === 'ongoing'" type="warning" size="small">进行中</el-tag>
                   <el-tag v-else type="info" size="small" effect="plain">未开始</el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="实验成绩" width="92" align="center">
+              <el-table-column label="实验成绩" min-width="105" align="center" sortable :sort-method="cmpScore">
                 <template #default="{ row }">
                   <span v-if="row.total_score !== null && row.total_score !== undefined" class="score-num">{{ row.total_score }}</span>
                   <span v-else class="sub-text">—</span>
                 </template>
               </el-table-column>
-              <el-table-column label="用时" width="72" align="center">
-                <template #default="{ row }">{{ row.elapsed_seconds !== null && row.elapsed_seconds !== undefined ? `${Math.round((row.elapsed_seconds ?? 0) / 60)}分` : '—' }}</template>
+              <el-table-column label="用时（分）" min-width="125" align="center" sortable :sort-method="cmpElapsed">
+                <template #default="{ row }">{{ fmtMin(row.elapsed_seconds) }}</template>
               </el-table-column>
-              <el-table-column label="最高成绩" width="92" align="center">
+              <el-table-column label="最高成绩" min-width="105" align="center" sortable :sort-method="cmpBest">
                 <template #default="{ row }">
                   <span v-if="row.best_score !== null && row.best_score !== undefined" :class="{ 'best-score': Number(row.best_score) > Number(row.total_score ?? -1) }">{{ row.best_score }}</span>
                   <span v-else class="sub-text">—</span>
                 </template>
               </el-table-column>
-              <el-table-column label="最短用时" width="88" align="center">
-                <template #default="{ row }">{{ row.min_elapsed !== null && row.min_elapsed !== undefined ? `${Math.round((row.min_elapsed ?? 0) / 60)}分` : '—' }}</template>
+              <el-table-column label="最短用时（分）" min-width="155" align="center" sortable :sort-method="cmpFastest">
+                <template #default="{ row }">{{ fmtMin(row.min_elapsed) }}</template>
               </el-table-column>
-              <el-table-column label="次数" width="60" align="center">
+              <el-table-column label="次数" min-width="80" align="center" sortable :sort-method="cmpCount">
                 <template #default="{ row }">{{ row.count || '—' }}</template>
               </el-table-column>
-              <el-table-column label="最后提交" width="130">
+              <el-table-column label="最后提交" min-width="155" sortable :sort-method="cmpSubmitted">
                 <template #default="{ row }">{{ row.submitted_at ? fmtDT(row.submitted_at) : '—' }}</template>
               </el-table-column>
             </el-table>
@@ -498,6 +498,46 @@ function summarizeSubs(list) {
   return { state: 'submitted', count: done.length, first: done[0], best, fastest, last: done[done.length - 1] }
 }
 
+// 成绩明细排序：点表头即选排序项（再点切升降序）；空值始终排在最后
+function cmpWithNull(field) {
+  return (a, b) => {
+    const pick = (v) => (v === null || v === undefined || v === '' ? null : Number(v))
+    const x = pick(a[field])
+    const y = pick(b[field])
+    if (x === null && y === null) return 0
+    if (x === null) return 1
+    if (y === null) return -1
+    return x - y
+  }
+}
+const STATE_RANK = { not_started: 0, ongoing: 1, submitted: 2 }
+const cmpState = (a, b) => (STATE_RANK[a.state] ?? 9) - (STATE_RANK[b.state] ?? 9)
+const cmpScore = cmpWithNull('total_score')
+const cmpElapsed = cmpWithNull('elapsed_seconds')
+const cmpBest = cmpWithNull('best_score')
+const cmpFastest = cmpWithNull('min_elapsed')
+const cmpCount = cmpWithNull('count')
+/** 学号升序：字母数字混合按字符序（数字学号在前，字母学号在后）。 */
+const cmpUsername = (a, b) => {
+  const x = String(a.username || '')
+  const y = String(b.username || '')
+  if (x === y) return 0
+  return x < y ? -1 : 1
+}
+/** 用时列：入参秒，出参分钟数字（表头已带单位），无数据显示 —。 */
+function fmtMin(sec) {
+  if (sec === null || sec === undefined || sec === '') return '—'
+  return Math.round(Number(sec) / 60)
+}
+function cmpSubmitted(a, b) {
+  const x = String(a.submitted_at || '')
+  const y = String(b.submitted_at || '')
+  if (!x && !y) return 0
+  if (!x) return 1
+  if (!y) return -1
+  return x.localeCompare(y)
+}
+
 const detailRows = computed(() => {
   const byStudent = new Map()
   detailSubs.value.forEach((s) => {
@@ -706,6 +746,8 @@ onMounted(load)
 .bar-fill { width: 100%; background: linear-gradient(180deg, #60a5fa, #2563eb); border-radius: 6px 6px 0 0; transition: height .3s; }
 .bar-label { margin-top: 6px; font-size: 11px; color: #94a3b8; }
 .scores-title { font-size: 14px; font-weight: 600; color: #1e293b; margin: 6px 0 10px; padding-left: 8px; border-left: 3px solid #10b981; }
+/* 成绩明细：表头（含排序箭头）不换行，箭头始终跟在列名右侧 */
+.score-table :deep(th .cell) { white-space: nowrap; }
 .schedule-list { margin-top: 14px; }
 .schedule-line { display: flex; align-items: center; gap: 8px; line-height: 1.9; }
 .schedule-class { padding: 1px 8px; border-radius: 4px; background: #ecf5ff; color: #409eff; font-size: 12px; }

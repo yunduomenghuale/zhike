@@ -51,7 +51,20 @@ _AI_PROMPT = """请为我开发一个智课平台的自定义实验页面，交�
    响应契约：{ code, message }。必须检查 code === 0 才显示「成绩已提交」；
    code 非 0 时必须原样展示 message 并允许重试——绝不能把失败当作成功。
 3. 禁止访问 localStorage/sessionStorage/cookie、fetch 平台 /api、触碰 window.parent/opener；
-   票据由平台父页面自动附带，页面不要读取 location.search 或拼接任何 token。
+   票据由平台父页面自动附带，页面不要读取 location.search 或拼接任何 token；
+   也不要自行调用 window.parent.postMessage——沙箱 iframe 是 opaque origin，
+   该调用的 target origin 为 null 必抛 SyntaxError，一切上报只走 LabBridge。
+4. 变量纪律：变量必须先声明再使用；满分相关全文只用一个变量名（如 totalScore），
+   禁止混用 fullScore 等同义变量；任何重命名都必须全局替换并复查每一处引用。
+
+交付前自检清单（逐项执行完毕再输出代码，缺一不可）：
+1. 语法自检：把每个 <script> 的内容在 node 里做一次语法检查
+   （如 new Function(src)，或存成 .js 后 node --check），必须零报错。
+2. 引用自检：逐个核对提交链路（判分 → LabBridge.reportGrade → 检查 code === 0
+   → 展示成绩）上出现的每个变量/函数：都已定义、拼写一致，不存在未声明引用。
+3. 失败兜底：reportGrade 的调用整体包在 try/catch 里，任何异常都把错误展示给学生
+   并提供「重新提交成绩」按钮——绝不能让学生停留在「正在提交」的中间状态。
+4. 离线自检：确认无任何 http(s) 外链资源，无 eval / localStorage / cookie。
 
 实验名称：《@@LAB_TITLE@@》，满分 @@TOTAL_SCORE@@ 分。
 请直接输出完整 HTML 文件内容。"""
@@ -65,7 +78,7 @@ _SPEC_TEMPLATE = """# 「@@LAB_TITLE@@」实验页面接入说明
 - 实验名称：@@LAB_TITLE@@
 - 实验满分：**@@TOTAL_SCORE@@** 分（页面内从 LabBridge 读取，不要写死）
 - 成绩上报：`POST @@GRADE_URL@@`（同源，由平台父页面代发，页面不直接调用）
-- 在线调试：`@@DEBUG_ENDPOINT@@`（dry-run，不入库）
+- 本说明面向 AI 生成页面；教师的在线调试（dry-run，不入库）在平台「成绩接口」页直接操作，无需任何端点配置
 
 ## 2. 与平台交互（window.LabBridge）
 页面运行在沙箱 iframe（`sandbox="allow-scripts allow-forms allow-modals"`，无 allow-same-origin）内，
@@ -90,6 +103,12 @@ const res = await LabBridge.reportGrade({
 - **只上报总分与用时**两个字段，不要步骤明细等其他字段；提交时间与正式用时由服务端生成。
 - 禁止访问 localStorage / sessionStorage / cookie，禁止 fetch 平台 /api，
   禁止触碰 window.parent / window.opener，禁止 eval（沙箱内必失败，静态扫描会拦截）。
+- 沙箱上报纪律：不要自行调用 window.parent.postMessage（沙箱 iframe 是 opaque origin，
+  该调用的 target origin 为 null 必抛 SyntaxError），一切上报只走 LabBridge。
+- 变量纪律：变量先声明再使用；满分相关全文只用一个变量名（如 totalScore），
+  禁止混用 fullScore 等同义变量；重命名必须全局替换并复查每一处引用。
+- 交付质量：输出前做语法自检并核对提交链路上每个引用都已定义；
+  reportGrade 必须 try/catch 且失败可重试，绝不能让学生停留在「正在提交」状态。
 
 ## 4. 可直接复制给 AI 编程 agent 的指令
 
