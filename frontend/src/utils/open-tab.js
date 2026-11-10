@@ -31,6 +31,17 @@ export function downloadUrl(url) {
   a.remove()
 }
 
+/* 经认证接口拉取文件为 blob objectURL（img/el-image 用）。
+ * 返回 URL.createObjectURL；调用方负责在不再使用时 revokeObjectURL。
+ * 场景：/media/ 直链在零信任网关/公网入口不转发时 404 且无鉴权，
+ * 图片展示统一改走带 JWT 的 /api/ 接口取回。
+ */
+export async function fetchObjectUrl(fetchBlob) {
+  const blob = await fetchBlob()
+  if (!(blob instanceof Blob)) throw new Error('unexpected-response')
+  return URL.createObjectURL(blob)
+}
+
 /* 经认证接口拉取文件并以 blob 方式打开/下载。
  * 背景：media 直链（/media/...）在零信任网关/公网 nginx 不转发该路径时 404，
  * 且 <a> 跳转无法携带 JWT，故改走带 Authorization 的 /api/ 接口取回 blob。
@@ -47,7 +58,10 @@ export async function openFetchedFile(fetchBlob, fallbackName = 'download', { in
   try {
     const blob = await fetchBlob()
     if (!(blob instanceof Blob)) throw new Error('unexpected-response')
-    url = URL.createObjectURL(blob)
+    // 用 File 包装保留原始文件名：PDF 等可内嵌类型不受影响；docx 等浏览器
+    // 无法内嵌渲染的类型会触发下载，文件名取 File.name 而非随机的 "download"
+    const fileObj = fallbackName ? new File([blob], fallbackName, { type: blob.type }) : blob
+    url = URL.createObjectURL(fileObj)
     if (inline) {
       tab.open(url)
       // blob URL 交给浏览器后即可延后释放；延迟留足 PDF viewer 加载时间

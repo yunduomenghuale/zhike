@@ -9,9 +9,10 @@ from django.conf import settings
 from django.core.files.storage import default_storage
 from django.db import transaction
 from django.db.models import Sum
+from django.http import FileResponse
 from django.utils import timezone
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 
 from apps.classroom.models import ClassStudent
@@ -265,6 +266,32 @@ class HomeworkViewSet(BaseModelViewSet):
             page_urls = [rendered[key] for key in sorted(rendered)]
         return api_response({"pages": page_urls, "name": item.get("name", "")}, message="预览已就绪")
 
+    @action(detail=True, methods=["get"], url_path="attachments/download")
+    def download_attachment(self, request, pk=None):
+        """作业附件下载/内嵌预览（?url=<附件url>&inline=1）。
+
+        url 必须属于本作业的 attachments 列表且位于 homework/ 存储目录，
+        防止以本接口为跳板读取任意 media 文件。FileResponse 流式返回，
+        文件名还原为上传时的原始文件名（存储名是 uuid）。
+        inline=1 时不强制 attachment（PDF/文本内嵌预览用）。前端经此接口
+        携带 JWT 取回附件，替代 /media/ 直链——直链在零信任网关/公网入口
+        不转发该路径时会 404，且无鉴权（知道 uuid 即可下载）。
+        权限：继承 ViewSet（IsTeacherOrReadOnly + get_queryset 行级过滤）。
+        """
+        homework = self.get_object()
+        url = str(request.query_params.get("url") or "").strip()
+        item = next((a for a in (homework.attachments or []) if a.get("url") == url), None)
+        if item is None:
+            raise NotFound("附件不存在或已被移除，请刷新后重试")
+        if not url.startswith(settings.MEDIA_URL):
+            raise ValidationError({"url": "附件地址不合法"})
+        name = url[len(settings.MEDIA_URL):]
+        if not name.startswith("homework/") or not default_storage.exists(name):
+            raise NotFound("附件文件缺失，请重新上传")
+        fh = default_storage.open(name, "rb")
+        inline = str(request.query_params.get("inline") or "").lower() in ("1", "true")
+        return FileResponse(fh, as_attachment=not inline, filename=item.get("name") or Path(name).name)
+
     @action(detail=True, methods=["get"], url_path="stats", permission_classes=[IsTeacher])
     def stats(self, request, pk=None):
         """作业统计（对齐考试统计 T-E-07）：发布后全员提交/完成情况分析。
@@ -293,6 +320,35 @@ class HomeworkSubmissionViewSet(BaseModelViewSet):
         elif user.is_authenticated and user.is_teacher:
             qs = qs.filter(homework__course__teacher=user)
         return qs
+
+    @action(detail=True, methods=["get"], url_path="attachments/download")
+    def download_attachment(self, request, pk=None):
+        """学生提交附件下载/内嵌预览（?url=<附件url>&inline=1）。
+
+        兼容两种数据：新多附件 attachments JSON 列表（按 url 匹配）与旧单附件
+        attachment FileField（序列化 url 即 MEDIA_URL + 存储名）。url 必须位于
+        homework_submit/ 存储目录，防止越权读取任意 media 文件。
+        权限：学生仅本人提交（get_queryset 按 student=user 过滤），教师限本人课程。
+        """
+        submission = self.get_object()
+        url = str(request.query_params.get("url") or "").strip()
+        item = next((a for a in (submission.attachments or []) if a.get("url") == url), None)
+        if item is not None:
+            display_name = item.get("name") or ""
+        else:
+            # 旧数据：单附件 FileField，序列化输出的绝对地址与库内存储名一一对应
+            old_url = settings.MEDIA_URL + submission.attachment.name if submission.attachment else ""
+            if not old_url or url != old_url:
+                raise NotFound("附件不存在或已被移除，请刷新后重试")
+            display_name = Path(submission.attachment.name).name
+        if not url.startswith(settings.MEDIA_URL):
+            raise ValidationError({"url": "附件地址不合法"})
+        name = url[len(settings.MEDIA_URL):]
+        if not name.startswith("homework_submit/") or not default_storage.exists(name):
+            raise NotFound("附件文件缺失，请重新上传")
+        fh = default_storage.open(name, "rb")
+        inline = str(request.query_params.get("inline") or "").lower() in ("1", "true")
+        return FileResponse(fh, as_attachment=not inline, filename=display_name or Path(name).name)
 
     @transaction.atomic
     def create(self, request, *args, **kwargs):

@@ -225,9 +225,9 @@
                       <el-button v-if="isPdfName(item.name)" link type="primary" @click="togglePreview(item)">
                         <el-icon><View /></el-icon>{{ previewTarget === item.url ? '收起预览' : '预览' }}
                       </el-button>
-                      <a class="attachment-view-link" :href="item.url" target="_blank" rel="noopener noreferrer">
+                      <button class="attachment-view-link" type="button" @click="downloadAttachmentFile(item)">
                         <el-icon><Download /></el-icon>下载
-                      </a>
+                      </button>
                       <el-button link type="danger" @click="removeAttachment(index)">移除</el-button>
                     </div>
                   </div>
@@ -487,25 +487,24 @@
         <div v-if="gradeForm.attachments.length" class="student-attachments">
           <div class="grade-label">提交的附件（{{ gradeForm.attachments.length }}）</div>
           <div class="student-attachment-list">
-            <a
+            <button
               v-for="(file, fileIndex) in gradeForm.attachments"
               :key="fileIndex"
+              type="button"
               class="student-attachment-item"
-              :href="file.url"
-              target="_blank"
-              rel="noopener"
+              @click="viewStudentAttachment(file)"
             >
               <el-image
                 v-if="isImageFile(file.name)"
-                :src="file.url"
+                :src="gradeBlobSrc(file)"
                 fit="cover"
                 class="student-attachment-thumb"
-                :preview-src-list="gradeForm.attachments.filter((f) => isImageFile(f.name)).map((f) => f.url)"
+                :preview-src-list="gradeForm.attachments.filter((f) => isImageFile(f.name)).map((f) => gradeBlobSrc(f))"
               />
               <span v-else class="student-attachment-icon"><el-icon><Document /></el-icon></span>
               <span class="student-attachment-name" :title="file.name">{{ file.name }}</span>
               <span class="student-attachment-size">{{ file.size ? formatFileSize(file.size) : '' }}</span>
-            </a>
+            </button>
           </div>
         </div>
       </div>
@@ -544,9 +543,10 @@ import { listCatalogs } from '@/api/course'
 import { listQuestions } from '@/api/question'
 import {
   listHomeworks, createHomework, updateHomework, deleteHomework,
-  removeHomeworkAttachment,
+  removeHomeworkAttachment, downloadHomeworkAttachment, downloadSubmissionAttachment,
   listSubmissions, gradeSubmission,
 } from '@/api/homework'
+import { openFetchedFile, fetchObjectUrl } from '@/utils/open-tab'
 
 const classes = ref([])
 const classId = ref(null)
@@ -1288,6 +1288,54 @@ const grading = ref(false)
 const gradeForm = reactive({ id: null, content: '', score: 0, comment: '', attachments: [], answerItems: [] })
 // 待评分主观题数量：批改弹窗摘要与「定位」提示共用
 const pendingManualCount = computed(() => gradeForm.answerItems.filter((item) => item.needs_manual_grading && item.score == null).length)
+
+// ---- 附件取回一律走带 JWT 的 /api/ 接口（/media/ 直链在零信任网关/公网入口
+// ---- 不转发时会 404，且无鉴权）。PDF/文本新标签内嵌预览，其余类型原名下载。
+const INLINE_EXTS = ['pdf', 'txt', 'md']
+function attachmentExt(name) {
+  return String(name || '').split('.').pop().toLowerCase()
+}
+async function downloadAttachmentFile(item) {
+  try {
+    await openFetchedFile(
+      () => downloadHomeworkAttachment(form.id, item.url, { inline: false }),
+      item.name,
+      { inline: false },
+    )
+  } catch {
+    ElMessage.error('附件获取失败，请稍后重试')
+  }
+}
+async function viewStudentAttachment(file) {
+  if (!gradeForm.id) return
+  const inline = INLINE_EXTS.includes(attachmentExt(file.name))
+  try {
+    await openFetchedFile(
+      () => downloadSubmissionAttachment(gradeForm.id, file.url, { inline }),
+      file.name,
+      { inline },
+    )
+  } catch {
+    ElMessage.error('附件获取失败，请稍后重试')
+  }
+}
+// 批改弹窗里的学生图片附件：经接口取回 blob 展示（el-image 缩略图与大图预览均用 objectURL）
+const gradeBlobUrls = ref({})
+watch(() => gradeForm.attachments, async (files) => {
+  Object.values(gradeBlobUrls.value).forEach((u) => URL.revokeObjectURL(u))
+  gradeBlobUrls.value = {}
+  for (const f of (files || []).filter((x) => isImageFile(x.name))) {
+    try {
+      gradeBlobUrls.value[f.url] = await fetchObjectUrl(
+        () => downloadSubmissionAttachment(gradeForm.id, f.url),
+      )
+    } catch { /* 单张失败不影响其余 */ }
+  }
+}, { deep: true })
+function gradeBlobSrc(file) {
+  return gradeBlobUrls.value[file.url] || file.url
+}
+
 // 得分列：未批改的混合作业只出了客观题分，标注「客观 X 分」避免误读为最终成绩
 function submissionScoreLabel(row) {
   if (row.score == null) return '未批'
@@ -2859,6 +2907,13 @@ onMounted(loadClasses)
   text-decoration: none;
 }
 .attachment-view-link:hover { color: #1d4ed8; text-decoration: underline; }
+/* a→button（附件改走认证接口取回）：还原 UA 默认样式，保持原视觉 */
+button.attachment-view-link,
+button.student-attachment-item {
+  cursor: pointer;
+  font: inherit;
+  appearance: none;
+}
 @media (max-width: 1180px) {
   .creation-form-grid { grid-template-columns: 320px minmax(0, 1fr); gap: 10px; }
   .hw-card { padding: 12px 12px 14px; }

@@ -60,12 +60,12 @@
                     <span>{{ isPdfName(file.name) ? 'PDF 文档，可直接在线预览' : '教师提供的作业文件' }}{{ file.size ? ` · ${formatFileSize(file.size)}` : '' }}</span>
                   </div>
                   <div class="resource-file-actions">
-                    <a class="resource-action" :href="file.url" target="_blank" rel="noopener noreferrer">
+                    <button class="resource-action" type="button" @click="openTeacherAttachment(file, true)">
                       <el-icon><View /></el-icon>打开文件
-                    </a>
-                    <a class="resource-action primary" :href="file.url" download>
+                    </button>
+                    <button class="resource-action primary" type="button" @click="openTeacherAttachment(file, false)">
                       <el-icon><Download /></el-icon>下载
-                    </a>
+                    </button>
                   </div>
                 </div>
               </div>
@@ -249,16 +249,16 @@
                     <template v-for="(file, fileIndex) in submittedAttachments" :key="fileIndex">
                       <el-image
                         v-if="isImageFile(file.name)"
-                        :src="file.url"
+                        :src="submissionSrc(file)"
                         fit="cover"
                         class="submitted-attachment-thumb"
-                        :preview-src-list="submittedImageUrls"
+                        :preview-src-list="submittedAttachments.filter((f) => isImageFile(f.name)).map((f) => submissionSrc(f))"
                       />
-                      <a v-else class="submitted-attachment-file" :href="file.url" target="_blank" rel="noopener">
+                      <button v-else class="submitted-attachment-file" type="button" @click="openSubmissionAttachment(file)">
                         <el-icon><Document /></el-icon>
                         <span class="submitted-attachment-name" :title="file.name">{{ file.name }}</span>
                         <small>{{ file.size ? formatFileSize(file.size) : '' }}</small>
-                      </a>
+                      </button>
                     </template>
                   </div>
                 </div>
@@ -323,7 +323,8 @@ import { useUserStore } from '@/store/user'
 import { uploadWithProgress, isImageFile, fileNameFromUrl } from '@/utils/upload'
 import { abbrQtype } from '@/utils/question-abbr'
 import { blankAnswerText } from '@/utils/blank-answer'
-import { listHomeworks, listSubmissions, submitHomework } from '@/api/homework'
+import { listHomeworks, listSubmissions, submitHomework, downloadHomeworkAttachment, downloadSubmissionAttachment } from '@/api/homework'
+import { openFetchedFile, fetchObjectUrl } from '@/utils/open-tab'
 
 const route = useRoute()
 // 学籍门控（P4 流转）：提交类动作仅「在读」放行，文案与后端 403 逐字一致
@@ -422,6 +423,38 @@ const previewTeacherUrl = computed(() => {
   const pdf = teacherAttachments.value.find((item) => isPdfName(item.name))
   return pdf?.url || ''
 })
+
+// ---- 附件取回一律走带 JWT 的 /api/ 接口（/media/ 直链在零信任网关/公网入口
+// ---- 不转发时会 404，且无鉴权）。文档类：PDF/文本新标签内嵌预览，其余原名下载。
+const INLINE_EXTS = ['pdf', 'txt', 'md']
+function extOf(name) {
+  return String(name || '').split('.').pop().toLowerCase()
+}
+async function openTeacherAttachment(file, inline) {
+  try {
+    await openFetchedFile(
+      () => downloadHomeworkAttachment(current.value.id, file.url, { inline }),
+      file.name,
+      { inline },
+    )
+  } catch {
+    ElMessage.error('附件获取失败，请稍后重试')
+  }
+}
+async function openSubmissionAttachment(file) {
+  if (!viewData.value?.id) return
+  const inline = INLINE_EXTS.includes(extOf(file.name))
+  try {
+    await openFetchedFile(
+      () => downloadSubmissionAttachment(viewData.value.id, file.url, { inline }),
+      file.name,
+      { inline },
+    )
+  } catch {
+    ElMessage.error('附件获取失败，请稍后重试')
+  }
+}
+
 function correctAnswerText(snapshot) {
   const answer = snapshot?.answer || {}
   const options = snapshot?.options || []
@@ -640,7 +673,23 @@ const submittedAttachments = computed(() => {
   ;(viewData.value?.attachments || []).forEach((f) => list.push(f))
   return list
 })
-const submittedImageUrls = computed(() => submittedAttachments.value.filter((f) => isImageFile(f.name)).map((f) => f.url))
+// 已提交附件中的图片：经接口取回 blob 展示（el-image 的 src 与大图预览都用 objectURL，
+// 不再直接暴露 /media/ 直链）；视图关闭/切换时统一 revoke
+const submissionBlobUrls = ref({})
+watch(submittedAttachments, async (files) => {
+  Object.values(submissionBlobUrls.value).forEach((u) => URL.revokeObjectURL(u))
+  submissionBlobUrls.value = {}
+  for (const f of files.filter((x) => isImageFile(x.name))) {
+    try {
+      submissionBlobUrls.value[f.url] = await fetchObjectUrl(
+        () => downloadSubmissionAttachment(viewData.value.id, f.url),
+      )
+    } catch { /* 单张失败不影响其余 */ }
+  }
+}, { immediate: true })
+function submissionSrc(file) {
+  return submissionBlobUrls.value[file.url] || file.url
+}
 
 function formatAnswer(answer, snapshot) {
   if (!answer) return ''
@@ -1630,6 +1679,13 @@ onBeforeUnmount(() => {
   text-decoration: none;
 }
 .submitted-attachment-file:hover { border-color: #93c5fd; background: #eff6ff; }
+/* a→button（附件改走认证接口取回）：还原 UA 默认样式，保持原视觉 */
+button.resource-action,
+button.submitted-attachment-file {
+  cursor: pointer;
+  font: inherit;
+  appearance: none;
+}
 .submitted-attachment-name {
   white-space: nowrap;
   overflow: hidden;

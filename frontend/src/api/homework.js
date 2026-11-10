@@ -10,6 +10,20 @@ export const removeHomeworkAttachment = (id, url) =>
 // PDF 附件预览：后端逐页渲染为图片，前端无工具栏连续滚动
 export const previewHomeworkAttachment = (id, url) =>
   request.get(`/homeworks/${id}/attachments/preview/`, { params: { url } })
+// 作业附件下载（blob 透传；inline=1 时后端不强制 attachment，PDF 可内嵌预览）
+export const downloadHomeworkAttachment = (id, url, { inline = false } = {}) =>
+  request.get(`/homeworks/${id}/attachments/download/`, {
+    params: { url, ...(inline ? { inline: 1 } : {}) },
+    responseType: 'blob',
+    timeout: 300000,
+  })
+// 学生提交附件下载（blob 透传；学生仅本人提交，教师限本人课程）
+export const downloadSubmissionAttachment = (id, url, { inline = false } = {}) =>
+  request.get(`/homework-submissions/${id}/attachments/download/`, {
+    params: { url, ...(inline ? { inline: 1 } : {}) },
+    responseType: 'blob',
+    timeout: 300000,
+  })
 // 作业统计：发布后全员提交/完成情况分析（对齐考试统计）
 export const getHomeworkStats = (id) => request.get(`/homeworks/${id}/stats/`)
 
