@@ -94,3 +94,14 @@ export const signPresetPage = (path) => request.post('/course-resources/preset-s
 export const getClassroomOptions = (courseId) => request.get(`/courses/${courseId}/classroom-options/`)
 export const linkClassrooms = (courseId, classroomIds) =>
   request.post(`/courses/${courseId}/link-classrooms/`, { classroom_ids: classroomIds })
+
+// 解除课程与班级的关联：该班已有实验提交时后端返回 400 + require_confirm
+// （HTTP 400，走 axios error 分支），调用方读 e.response.data 二次带 confirm=1
+export const unlinkClassroom = (courseId, classroomId, confirm = false) =>
+  request.delete(
+    `/courses/${courseId}/classrooms/?classroom=${classroomId}${confirm ? '&confirm=1' : ''}`,
+    { silent: true },
+  )
+
+// 进入课程空间时 +1 访问计数（课程列表「常用优先」排序依据；进入即调一次）
+export const visitCourse = (courseId) => request.post(`/courses/${courseId}/visit/`, null, { silent: true })

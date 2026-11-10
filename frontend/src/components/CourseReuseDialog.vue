@@ -226,12 +226,13 @@ const assetRows = computed(() => {
     { key: 'material', label: '教辅资料', value: a.material_count || 0 },
     { key: 'chunk', label: '知识库片段', value: a.chunk_count || 0 },
     { key: 'resource', label: '教学资源', value: a.resource_count || 0 },
+    { key: 'lab', label: '实验', value: a.lab_count || 0 },
   ]
 })
 
 // 阶段顺序与后端 reuse.py 的 report() 调用一致；用于把「每阶段各自的 done/total」
 // 折算成一条整体进度条（否则进度条会在切阶段时回退，看着像卡住）
-const STAGE_ORDER = ['catalog', 'ppt', 'video', 'material', 'chunk', 'resource', 'question']
+const STAGE_ORDER = ['catalog', 'ppt', 'video', 'material', 'chunk', 'resource', 'question', 'lab']
 const STAGE_LABEL = {
   catalog: '复制章节结构',
   ppt: '复制课件与页图',
@@ -240,6 +241,7 @@ const STAGE_LABEL = {
   chunk: '复制知识库片段',
   resource: '复制教学资源',
   question: '复制题目',
+  lab: '复制实验定义',
   done: '完成',
 }
 
@@ -280,6 +282,7 @@ const resultSummary = computed(() => {
     copied.chunk ? `${copied.chunk} 条片段` : '',
     copied.resource ? `${copied.resource} 个资源` : '',
     copied.question ? `${copied.question} 道题` : '',
+    copied.lab ? `${copied.lab} 个实验` : '',
   ].filter(Boolean)
   const size = result.value?.media_human ? `，占用 ${result.value.media_human}` : ''
   return parts.length ? `${parts.join('、')}${size}` : `复制完成${size}`

@@ -161,3 +161,106 @@ class ClassRoomMyCourseTests(APITestCase):
         )
         self.assertEqual(resp.status_code, 403, resp.data)
         self.assertIn("未关联", resp.data["message"])
+
+
+class CourseClassroomUnlinkTests(APITestCase):
+    """Stage 12：解除关联闭环（教师自助）。
+
+    解除 = 删除 ClassCourse 关联：学生课程可见性与排课资格关闭，
+    历史成绩与学籍保留；已有实验提交时先 require_confirm 再执行。
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.teacher = User.objects.create_user(
+            username="cls-ul-t", password="pw123456!", role=User.Role.TEACHER, real_name="任课教师"
+        )
+        cls.other = User.objects.create_user(
+            username="cls-ul-o", password="pw123456!", role=User.Role.TEACHER, real_name="其他教师"
+        )
+        cls.student = User.objects.create_user(
+            username="2028ul01", password="pw123456!", role=User.Role.STUDENT, real_name="钱同学"
+        )
+        cls.course = Course.objects.create(name="解除关联测试课", teacher=cls.teacher)
+        cls.room = ClassRoom.objects.create(name="解除测试班", code="CLS-UL")
+        ClassStudent.objects.create(classroom=cls.room, student=cls.student)
+
+    def setUp(self):
+        self.tc = APIClient()
+        self.tc.force_authenticate(self.teacher)
+        self.link = ClassCourse.objects.create(classroom=self.room, course=self.course)
+
+    def _lab(self):
+        from apps.labs.models import Lab
+
+        return Lab._base_manager.create(
+            course=self.course, title="解除关联测试实验", total_score=100,
+            page_source=Lab.PageSource.CUSTOM, status=Lab.Status.PUBLISHED,
+        )
+
+    def _submission(self, lab, score="90.0"):
+        from django.utils import timezone
+
+        from apps.labs.models import LabSubmission
+
+        return LabSubmission._base_manager.create(
+            lab=lab, student=self.student, status=LabSubmission.Status.SUBMITTED,
+            started_at=timezone.now() - timezone.timedelta(seconds=300),
+            submitted_at=timezone.now(), total_score=score,
+        )
+
+    def test_unlink_without_submissions_direct(self):
+        res = self.tc.delete(f"/api/courses/{self.course.id}/classrooms/?classroom={self.room.id}")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertFalse(ClassCourse.objects.filter(course=self.course).exists())
+
+    def test_unlink_with_submissions_requires_confirm_then_succeeds(self):
+        lab = self._lab()
+        self._submission(lab)
+        first = self.tc.delete(
+            f"/api/courses/{self.course.id}/classrooms/?classroom={self.room.id}"
+        )
+        self.assertEqual(first.status_code, 400, first.data)
+        self.assertTrue(first.data["data"]["require_confirm"])
+        self.assertEqual(first.data["data"]["affected_submissions"], 1)
+        # 未 confirm 时不删除
+        self.assertTrue(ClassCourse.objects.filter(course=self.course).exists())
+
+        second = self.tc.delete(
+            f"/api/courses/{self.course.id}/classrooms/?classroom={self.room.id}&confirm=1"
+        )
+        self.assertEqual(second.status_code, 200, second.data)
+        self.assertFalse(ClassCourse.objects.filter(course=self.course).exists())
+        # 历史成绩与学籍保留
+        self.assertEqual(lab.submissions.filter(status="submitted").count(), 1)
+        self.assertTrue(
+            ClassStudent.objects.filter(classroom=self.room, student=self.student).exists()
+        )
+
+    def test_unlink_forbidden_for_other_teacher(self):
+        oc = APIClient()
+        oc.force_authenticate(self.other)
+        res = oc.delete(f"/api/courses/{self.course.id}/classrooms/?classroom={self.room.id}")
+        # 其他教师看不到这门课（courses_for_user 直接过滤），404 优先于 403
+        self.assertIn(res.status_code, (403, 404), res.data)
+        self.assertTrue(ClassCourse.objects.filter(course=self.course).exists())
+
+    def test_unlink_not_linked_returns_400(self):
+        res = self.tc.delete("/api/courses/{0}/classrooms/?classroom=999999".format(self.course.id))
+        self.assertEqual(res.status_code, 400, res.data)
+
+    def test_unlinked_student_no_longer_sees_course(self):
+        lab = self._lab()
+        self._submission(lab)
+        sc = APIClient()
+        sc.force_authenticate(self.student)
+        seen_before = sc.get("/api/courses/").data["data"]
+        rows_before = seen_before.get("results", seen_before)
+        self.assertIn(self.course.id, [row["id"] for row in rows_before])
+
+        self.tc.delete(
+            f"/api/courses/{self.course.id}/classrooms/?classroom={self.room.id}&confirm=1"
+        )
+        seen_after = sc.get("/api/courses/").data["data"]
+        rows_after = seen_after.get("results", seen_after)
+        self.assertNotIn(self.course.id, [row["id"] for row in rows_after])

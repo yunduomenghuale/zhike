@@ -268,7 +268,33 @@ export const useGenerationStore = defineStore('generation', () => {
   async function refreshActive() {
     try {
       const list = await listActiveAiTasks({ task_type: 'all' })
+      const activeIds = new Set()
       for (const t of list || []) {
+        // 课程复用：无 catalog 维度，直接进 tracked（任务中心展示 + 角标计数）——
+        // 此前被下面的 catalog 过滤跳过，导致关闭复用弹窗后进度无处可寻
+        if (t.task_type === 'course_reuse') {
+          activeIds.add(t.id)
+          if (tracked[t.id]) {
+            tracked[t.id].status = t.status
+            tracked[t.id].done = (t.progress || {}).done || 0
+            tracked[t.id].total = (t.progress || {}).total || 0
+            tracked[t.id].queuePosition = t.queue_position ?? null
+          } else {
+            tracked[t.id] = {
+              kind: 'reuse',
+              catalogId: null,
+              taskType: 'course_reuse',
+              status: t.status,
+              done: (t.progress || {}).done || 0,
+              total: (t.progress || {}).total || 0,
+              queuePosition: t.queue_position ?? null,
+              courseName: t.course_name || '',
+              catalogTitle: t.course_name || '',
+              error: '',
+            }
+          }
+          continue
+        }
         if (!t.catalog || !(t.task_type === 'script_gen' || t.task_type === 'audio_gen')) continue
         const kind = t.task_type === 'script_gen' ? 'script' : 'audio'
         if (tracked[t.id]) continue
@@ -282,6 +308,24 @@ export const useGenerationStore = defineStore('generation', () => {
           courseName: t.course_name || '',
           catalogTitle: t.catalog_title || '',
         })
+      }
+      // reuse 任务已不在 active 列表（进入终态）→ 拉单任务详情收尾，
+      // 任务中心显示最终状态（成功/失败），供教师查看与清除
+      for (const [taskId, item] of Object.entries(tracked)) {
+        if (item.taskType !== 'course_reuse' || activeIds.has(Number(taskId))) continue
+        if (['success', 'failed', 'cancelled'].includes(item.status)) continue
+        try {
+          const detail = await getAiTask(Number(taskId))
+          item.status = detail.status
+          item.done = (detail.progress || {}).done || 0
+          item.total = (detail.progress || {}).total || 0
+          item.error = detail.error || ''
+          if (['success', 'failed', 'cancelled'].includes(item.status)) {
+            completedTick.value++
+          }
+        } catch {
+          /* 详情拉取失败下次 refreshActive 再试 */
+        }
       }
     } catch {
       /* 未登录/网络错静默：下次提交或手动打开任务中心时再拉 */

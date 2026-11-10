@@ -245,13 +245,13 @@ def build_class_export_workbook(classroom, course, start=None, end=None, section
             student_id__in=stu_ids, exam__classroom=classroom, exam__course=course
         ).filter(_range_filter("submitted_at", start, end))
     }
-    lab_subs = {
-        (s.lab_id, s.student_id): s
-        for s in LabSubmission.objects.filter(
-            student_id__in=stu_ids, lab_id__in=[lab.id for lab in lab_list],
-            status=LabSubmission.Status.SUBMITTED,
-        ).filter(_range_filter("submitted_at", start, end))
-    }
+    lab_subs: dict = {}
+    for s in LabSubmission.objects.filter(
+        student_id__in=stu_ids, lab_id__in=[lab.id for lab in lab_list],
+        status=LabSubmission.Status.SUBMITTED,
+    ).filter(_range_filter("submitted_at", start, end)).order_by("created_at"):
+        # Stage 11 多轮记录：同一 (实验, 学生) 取第一次提交（锁定口径），重做不互相覆盖
+        lab_subs.setdefault((s.lab_id, s.student_id), s)
     exam_log_counts = {
         (row["exam_id"], row["student_id"]): row["n"]
         for row in ExamLog.objects.filter(exam__in=exam_list, student_id__in=stu_ids)

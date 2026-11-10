@@ -45,11 +45,13 @@
       <el-pagination
         v-if="total > pageSize"
         class="pager"
-        layout="prev, pager, next, total"
+        layout="prev, pager, next, sizes, total"
         :total="total"
         :page-size="pageSize"
+        :page-sizes="[20, 40, 60, 100]"
         :current-page="page"
         @current-change="(p) => { page = p; load() }"
+        @size-change="(s) => { pageSize = s; page = 1; load() }"
       />
     </div>
 

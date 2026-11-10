@@ -89,11 +89,17 @@
       <el-tabs v-if="currentLab" v-model="detailTab" class="detail-tabs">
         <el-tab-pane label="概览与成绩" name="overview">
           <div v-loading="detailLoading" class="tab-body">
+            <div class="overview-toolbar">
+              <el-button size="small" :loading="detailRefreshing" @click="refreshDetailData">
+                <el-icon style="margin-right: 4px"><Refresh /></el-icon>刷新数据
+              </el-button>
+              <span class="toolbar-note">统计、图表与成绩明细按当前排课班级实时汇总</span>
+            </div>
             <div class="d-grid">
               <div class="d-item"><span class="d-k">状态</span><el-tag :type="statusType(currentLab.status)" size="small">{{ statusText(currentLab.status) }}</el-tag></div>
               <div class="d-item"><span class="d-k">类型</span><span>{{ currentLab.page_source === 'custom' ? '自定义上传' : '平台预置' }}</span></div>
               <div class="d-item"><span class="d-k">课程</span><span>{{ currentLab.course_name }}</span></div>
-              <div class="d-item"><span class="d-k">模板</span><span>{{ currentLab.template_title || '—（自定义实验无模板）' }}</span></div>
+              <div class="d-item" v-if="currentLab.page_source !== 'custom'"><span class="d-k">模板</span><span>{{ currentLab.template_title || '—' }}</span></div>
               <div class="d-item"><span class="d-k">满分</span><span>{{ currentLab.total_score }} 分（及格 {{ currentLab.pass_score }}）</span></div>
               <div class="d-item"><span class="d-k">标准时长</span><span>{{ currentLab.standard_minutes_display }} 分钟</span></div>
             </div>
@@ -102,7 +108,6 @@
               <div class="stat-box ok"><div class="stat-num">{{ detailStats.submitted }}</div><div class="stat-label">已提交</div></div>
               <div class="stat-box ing"><div class="stat-num">{{ detailStats.ongoing }}</div><div class="stat-label">进行中</div></div>
               <div class="stat-box avg"><div class="stat-num">{{ detailStats.avgScore ?? '—' }}</div><div class="stat-label">提交均分</div></div>
-              <div class="stat-box avg"><div class="stat-num">{{ detailStats.avgSteps ?? '—' }}</div><div class="stat-label">平均步骤通过</div></div>
             </div>
 
             <!-- 成绩统计图表（纯 CSS/SVG，无图表库依赖；教师反馈：完成情况用饼图） -->
@@ -129,7 +134,7 @@
                 </div>
               </div>
               <div class="chart-card">
-                <div class="chart-title">分数段分布（已提交）</div>
+                <div class="chart-title">分数段分布（实验成绩）</div>
                 <div class="bar-chart">
                   <div v-for="b in scoreBuckets" :key="b.label" class="bar-col">
                     <div class="bar-count">{{ b.count || '' }}</div>
@@ -287,6 +292,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Refresh } from '@element-plus/icons-vue'
 import request from '@/api/request'
 import LabCreateDrawer from '@/components/lab/LabCreateDrawer.vue'
 import LabPageUploader from '@/components/lab/LabPageUploader.vue'
@@ -403,25 +409,14 @@ function computeStats(roster, subs) {
     })
     .filter((n) => n !== null && Number.isFinite(n))
   const avgScore = firstScores.length ? Math.round((firstScores.reduce((a, b) => a + b, 0) / firstScores.length) * 10) / 10 : null
-  // avgSteps 按每名学生「第一次提交」的步骤指标聚合（external 排除），与实验成绩口径一致。
-  const stepPairs = doneLists
-    .map((l) => {
-      const done = l.filter((s) => s.status === 'submitted')
-        .sort((a, b) => String(a.submitted_at || '').localeCompare(String(b.submitted_at || '')))
-      return done.length ? done[0] : null
-    })
-    .filter((s) => s && s.grading_source !== 'external' && s.total_steps > 0)
-  const avgSteps = stepPairs.length
-    ? Math.round((stepPairs.reduce((a, s) => a + s.passed_steps / s.total_steps, 0) / stepPairs.length) * 100)
-    : null
-  return { expected: (roster || []).length, submitted, ongoing, avgScore, avgSteps }
+  return { expected: (roster || []).length, submitted, ongoing, avgScore }
 }
 
 /** 与课程空间同口径的统计（C17：external 排除步骤指标）。 */
 async function fetchLabStats(lab) {
   const classroomIds = (lab.schedules || []).map((s) => s.classroom)
   if (!classroomIds.length) {
-    return { expected: 0, submitted: 0, ongoing: 0, avgScore: null, avgSteps: null, roster: [], subs: [] }
+    return { expected: 0, submitted: 0, ongoing: 0, avgScore: null, roster: [], subs: [] }
   }
   const [rosterRes, subRes] = await Promise.all([
     // classroom 多值用逗号分隔（服务端支持单值/逗号/重复参数）
@@ -469,6 +464,26 @@ async function openDetail(row, tab = 'overview') {
     detailSubs.value = st.subs
   } finally {
     detailLoading.value = false
+  }
+}
+
+// 详情数据手动刷新（教师反馈）：重拉实验详情 + 学籍/提交聚合，不打断当前 Tab
+const detailRefreshing = ref(false)
+async function refreshDetailData() {
+  if (!currentLab.value || detailRefreshing.value) return
+  detailRefreshing.value = true
+  try {
+    const labId = currentLab.value.id
+    try {
+      currentLab.value = await getLab(labId)
+    } catch { /* 详情回查失败保留原对象 */ }
+    const st = await fetchLabStats(currentLab.value)
+    labStatsCache.value = { ...labStatsCache.value, [labId]: st }
+    detailRoster.value = st.roster
+    detailSubs.value = st.subs
+    await loadClasses(currentLab.value)
+  } finally {
+    detailRefreshing.value = false
   }
 }
 
@@ -632,7 +647,8 @@ const pieGradient = computed(() => {
   return `conic-gradient(#10b981 0deg ${okDeg}deg, #f59e0b ${okDeg}deg ${okDeg + ingDeg}deg, #e2e8f0 ${okDeg + ingDeg}deg 360deg)`
 })
 
-// 分数段分布（纯 CSS 柱状）
+// 分数段分布（纯 CSS 柱状）：口径 = 实验成绩（每生第一次提交锁定），
+// 重做记录不重复计入——与成绩明细「实验成绩」列同源
 const scoreBuckets = computed(() => {
   const buckets = [
     { label: '0-59', min: 0, max: 59.99 },
@@ -641,8 +657,10 @@ const scoreBuckets = computed(() => {
     { label: '80-89', min: 80, max: 89.99 },
     { label: '90-100', min: 90, max: 1000 },
   ]
-  const subs = filteredSubs.value.filter((s) => s.status === 'submitted' && s.total_score != null)
-  const counts = buckets.map((b) => subs.filter((s) => Number(s.total_score) >= b.min && Number(s.total_score) <= b.max).length)
+  const scores = detailRows.value
+    .filter((r) => r.state === 'submitted' && r.total_score !== null && r.total_score !== undefined)
+    .map((r) => Number(r.total_score))
+  const counts = buckets.map((b) => scores.filter((n) => n >= b.min && n <= b.max).length)
   const max = Math.max(...counts, 1)
   return buckets.map((b, i) => ({ ...b, count: counts[i], ratio: counts[i] / max }))
 })
@@ -734,6 +752,8 @@ onMounted(load)
 .op-col :deep(.cell) { white-space: nowrap; }
 .op-col :deep(.el-button + .el-button) { margin-left: 8px; }
 .detail-tabs { padding: 0 6px; }
+.overview-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.toolbar-note { font-size: 12px; color: #94a3b8; }
 .tab-body { padding: 8px 4px 20px; }
 .page-alert { margin-bottom: 14px; }
 .d-grid {

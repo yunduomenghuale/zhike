@@ -10,6 +10,9 @@
 """
 
 
+from django.db.models import Q, Sum
+
+
 def is_platform_admin(user) -> bool:
     return bool(
         user
@@ -41,13 +44,22 @@ def teacher_teaches(user, course, classroom=None) -> bool:
 def courses_for_user(user):
     from apps.courses.models import Course
 
-    qs = Course.objects.order_by("id")
+    qs = Course.objects.order_by("-id")
     if not user or not user.is_authenticated:
         return qs.none()
     if is_platform_admin(user):
         return qs
     if user.is_teacher:
-        return qs.filter(teacher=user).order_by("id")
+        # 常用优先：按本人访问计数降序（没访问过的按创建时间倒序紧随其后）
+        return (
+            qs.filter(teacher=user)
+            .annotate(
+                visit_count=Sum(
+                    "visits__count", filter=Q(visits__user=user)
+                )
+            )
+            .order_by("-visit_count", "-id")
+        )
     if user.is_student:
         from apps.classroom.models import ClassRoom, ClassStudent
         from apps.users.models import User
@@ -55,7 +67,7 @@ def courses_for_user(user):
         # 休学即停学（方案 §5.4）：内容入口整体关闭，前端给「休学中」空状态。
         # 毕业生/退学生不在此列——他们仍要进历史课程看视频（决策 4）。
         if user.edu_status == User.EduStatus.SUSPENDED:
-            return qs.none().order_by("id")
+            return qs.none().order_by("-id")
         # 学生可见课程 = 自己所在班级所挂的、仍启用的课程。四个条件缺一不可：
         # - 关系是"占用"状态（转班/移出后旧课程入口消失，决策 6）
         # - 班级未归档（归档班整班停用；毕业班 graduated 保留，毕业生看历史）
@@ -68,10 +80,15 @@ def courses_for_user(user):
                 classes__status__in=[ClassRoom.Status.ACTIVE, ClassRoom.Status.GRADUATED],
                 status=Course.Status.ACTIVE,
             )
+            .annotate(
+                visit_count=Sum(
+                    "visits__count", filter=Q(visits__user=user)
+                )
+            )
             .distinct()
-            .order_by("id")
+            .order_by("-visit_count", "-id")
         )
-    return qs.none().order_by("id")
+    return qs.none().order_by("-id")
 
 
 def classrooms_for_user(user):

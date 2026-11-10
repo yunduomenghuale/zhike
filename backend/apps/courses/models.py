@@ -299,3 +299,30 @@ class CourseResource(BaseModel):
     def url(self) -> str:
         # 规范地址（唯一，按资源令牌）；实际访问需经 /sign/ 签发带时效的签名 URL
         return f"/api/course-resources/page/{self.access_token}/"
+
+
+class CourseVisit(BaseModel):
+    """教师/学生进入课程空间的访问计数——课程列表「常用优先」排序依据。
+
+    每次进入课程工作台 +1（幂等行，unique(user, course)）；不区分访问深度，
+    只反映"用得多不多"。学生暂不参与排序，但记录统一落这里便于将来开放。
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name="course_visits", verbose_name="访问者",
+    )
+    course = models.ForeignKey(
+        Course, on_delete=models.CASCADE, related_name="visits", verbose_name="课程",
+    )
+    count = models.PositiveIntegerField("访问次数", default=1)
+
+    class Meta:
+        verbose_name = "课程访问记录"
+        verbose_name_plural = verbose_name
+        constraints = [
+            models.UniqueConstraint(fields=["user", "course"], name="unique_course_visit_user"),
+        ]
+
+    def __str__(self):
+        return f"{self.user} - {self.course} x{self.count}"

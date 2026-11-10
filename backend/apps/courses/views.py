@@ -4,12 +4,12 @@ import time
 
 import django_filters
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from django.conf import settings
 from django.db import transaction
 from django.db.models.deletion import ProtectedError
-from django.db.models import Max
+from django.db.models import F, Max
 from django.http import HttpResponse
 from django.utils import timezone
 
@@ -133,6 +133,64 @@ class CourseViewSet(BaseModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(teacher=self.request.user)
+
+    # ---- 访问计数：课程列表「常用优先」排序依据 ----
+    @action(detail=True, methods=["post"], url_path="visit")
+    def visit(self, request, pk=None):
+        """进入课程空间时 +1（幂等行累加）。前端在课程工作台挂载时调用一次。"""
+        from apps.courses.models import CourseVisit
+
+        course = self.get_object()  # courses_for_user 已按可见性过滤
+        visit, _ = CourseVisit.objects.get_or_create(user=request.user, course=course)
+        CourseVisit.objects.filter(pk=visit.pk).update(count=F("count") + 1)
+        return api_response(None)
+
+    # ---- 班级关联（教师自助）：解除关联 ----
+    # 关联侧已有 GET classroom-options（全校班级选择器，含 linked 标记）与
+    # POST link-classrooms（幂等批量关联）；这里补齐闭环的解除能力。
+    @action(detail=True, methods=["delete"], url_path="classrooms")
+    def classrooms(self, request, pk=None):
+        """解除课程与班级的关联（课程教师）。
+
+        DELETE ?classroom=id&confirm=1：该班已有实验提交时先返回 require_confirm
+        （沿用 S8 静态扫描的二次确认模式）；解除只关闭学生的课程可见性与
+        排课资格，历史成绩与学籍全部保留。班级本体与学籍仍由管理员统一维护
+        （P0 分界不变），教师只管理教学关联。
+        """
+        from apps.classroom.models import ClassStudent
+        from apps.labs.models import LabSubmission
+
+        course = self.get_object()
+        self._assert_course_owner(request, course)
+        link = (
+            course.classroom_links.select_related("classroom")
+            .filter(classroom_id=request.query_params.get("classroom"))
+            .first()
+        )
+        if link is None:
+            raise ValidationError("该班级未关联本课程")
+        classroom = link.classroom
+        affected = LabSubmission.objects.filter(
+            lab__course=course,
+            student__in=ClassStudent.objects.filter(
+                classroom=classroom, learn_status="active"
+            ).values("student_id"),
+            status=LabSubmission.Status.SUBMITTED,
+        ).count()
+        truthy = lambda v: str(v).strip().lower() in ("1", "true", "yes", "on")
+        if affected and not truthy(request.query_params.get("confirm")):
+            return api_response(
+                {
+                    "require_confirm": True,
+                    "affected_submissions": affected,
+                    "message": f"该班级已有 {affected} 份实验提交，解除后学生将看不到本课程（历史成绩保留）",
+                },
+                message=f"该班级已有 {affected} 份实验提交，确认后才能解除关联",
+                code=400,
+                status=400,
+            )
+        link.delete()
+        return api_response(None, message="已解除关联")
 
     # ---- 课程复用（资产整份复制到新课程，异步任务） ----
     @staticmethod

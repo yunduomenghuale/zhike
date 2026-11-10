@@ -54,6 +54,7 @@ class AssetStats:
     resource_count: int = 0
     resource_document_count: int = 0
     question_count: int = 0
+    lab_count: int = 0
     media_bytes: int = 0
     question_media_bytes: int = 0
     sections: dict = field(default_factory=dict)
@@ -72,6 +73,7 @@ class AssetStats:
             "resource_count": self.resource_count,
             "resource_document_count": self.resource_document_count,
             "question_count": self.question_count,
+            "lab_count": self.lab_count,
             "media_bytes": self.media_bytes,
             "question_media_bytes": self.question_media_bytes,
             "media_human": human_size(self.media_bytes),
@@ -159,6 +161,16 @@ def course_asset_stats(course: Course) -> AssetStats:
     for question in questions:
         stats.question_media_bytes += _file_size(question.image.name if question.image else "")
 
+    # 实验定义（自定义页面文件计入复用体积）
+    from apps.labs.models import Lab
+
+    labs = list(Lab.objects.filter(course=course))
+    stats.lab_count = len(labs)
+    for lab in labs:
+        page = getattr(lab, "custom_page", None)
+        if page is not None and page.file:
+            stats.media_bytes += _file_size(page.file.name)
+
     stats.sections = {
         "catalog": stats.catalog_count,
         "ppt": stats.ppt_count,
@@ -167,6 +179,7 @@ def course_asset_stats(course: Course) -> AssetStats:
         "chunk": stats.chunk_count,
         "resource": stats.resource_count,
         "question": stats.question_count,
+        "lab": stats.lab_count,
     }
     return stats
 
@@ -240,6 +253,7 @@ class ReuseResult:
             "status": self.course.status,
             "copied": self.copied,
             "skipped_questions": self.skipped_questions,
+            "lab_count": self.stats.lab_count,
             "media_bytes": self.media_bytes,
             "media_human": human_size(self.media_bytes),
         }
@@ -311,6 +325,9 @@ def reuse_course(
                 )
             else:
                 copied["question"] = 0
+
+            report("lab", 0, stats.lab_count, "复制实验定义")
+            copied["lab"] = _copy_labs(source, new_course, catalog_map, ledger)
 
             report("done", 1, 1, "完成")
             return ReuseResult(
@@ -526,6 +543,51 @@ def _copy_questions(source, new_course, catalog_map, ledger, teacher) -> tuple[i
     return copied, skipped
 
 
+def _copy_labs(source: Course, new_course: Course, catalog_map: dict[int, Catalog], ledger: _FileLedger) -> int:
+    """复制实验定义：标题/说明/满分/及格/时长/重做策略/随机配置/自定义页面文件。
+
+    - 状态一律落 draft：复用产物默认停用，教师核对后再发布（对齐课程 inactive，P3-4）；
+    - 排课 / 提交 / 票据是教学过程数据，不复制；
+    - 模板 FK 共享（预置实验页由平台统一部署）；自定义页面文件逐份真复制（登记回滚）；
+    - 章节按 catalog_map 重指向新课程对应章节。
+    """
+    from apps.labs.models import Lab, LabPage
+
+    count = 0
+    for lab in Lab.objects.filter(course=source).order_by("id"):
+        new_lab = Lab._base_manager.create(
+            course=new_course,
+            catalog=catalog_map.get(lab.catalog_id),
+            title=lab.title,
+            description=lab.description,
+            template=lab.template,
+            page_source=lab.page_source,
+            total_score=lab.total_score,
+            pass_score=lab.pass_score,
+            standard_minutes=lab.standard_minutes,
+            allow_resubmit=lab.allow_resubmit,
+            random_config=lab.random_config,
+            time_limit_seconds=lab.time_limit_seconds,
+            order=lab.order,
+            status=Lab.Status.DRAFT,
+        )
+        page = getattr(lab, "custom_page", None)
+        if page is not None and page.file:
+            new_name = ledger.copy(page.file.name, "lab_pages")
+            if new_name:
+                LabPage._base_manager.create(
+                    lab=new_lab,
+                    kind=page.kind,
+                    original_name=page.original_name,
+                    size=page.size,
+                    sha256=page.sha256,
+                    uploaded_by=page.uploaded_by,
+                    file=new_name,
+                )
+        count += 1
+    return count
+
+
 # ---------------------------------------------------------------------------
 # 任务入口（由 apps/ai/tasks.py 分发）
 # ---------------------------------------------------------------------------
@@ -564,6 +626,8 @@ def run_course_reuse(task) -> None:
     payload = result.as_dict()
     payload["source_course_id"] = source.id
     payload["source_course_name"] = source.name
+    payload["new_course_id"] = result.course.id
+    payload["new_course_name"] = result.course.name
     AITask.objects.filter(id=task.id).update(
         result=payload,
         status=AITask.Status.SUCCESS,
@@ -575,4 +639,18 @@ def run_course_reuse(task) -> None:
             "total": 1,
             "message": "复用完成",
         },
+    )
+
+    # 站内通知：复用弹窗关闭后，教师靠通知感知完成（ntype=system，铃铛通知页展示）
+    from apps.users.models import Notification
+
+    Notification.objects.create(
+        user=task.triggered_by,
+        ntype=Notification.Type.SYSTEM,
+        title="课程复用完成",
+        content=(
+            f"「{source.name}」已复用为「{result.course.name}」"
+            f"（实验 {payload['lab_count']} 个，默认停用——核对无误后启用即可对学生可见）。"
+        ),
+        link="/teacher/courses",
     )

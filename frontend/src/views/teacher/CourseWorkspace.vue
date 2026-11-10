@@ -24,7 +24,7 @@ import {
   VideoCamera,
 } from '@element-plus/icons-vue'
 import CourseWorkspaceShell from '@/components/CourseWorkspaceShell.vue'
-import { listCourses } from '@/api/course'
+import { listCourses, visitCourse } from '@/api/course'
 
 const route = useRoute()
 const course = ref(null)
@@ -50,6 +50,10 @@ async function loadCourse() {
   course.value = list.find((item) => Number(item.id) === courseId.value) || null
 }
 
-onMounted(loadCourse)
+onMounted(() => {
+  loadCourse()
+  // 访问埋点：进入课程空间 +1（课程列表「常用优先」排序依据），失败静默
+  if (courseId.value) visitCourse(courseId.value).catch(() => {})
+})
 watch(courseId, loadCourse)
 </script>

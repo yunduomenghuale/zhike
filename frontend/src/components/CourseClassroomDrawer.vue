@@ -23,12 +23,16 @@
       />
       <div v-for="room in linkedRooms" :key="room.id" class="room-row is-linked">
         <div class="room-main">
-          <b>{{ room.name }}</b>
-          <span class="room-code">{{ room.code }}</span>
+          <div class="room-main-text">
+            <b>{{ room.name }}</b>
+            <span class="room-code">{{ room.code }}</span>
+          </div>
+          <div class="room-meta">
+            {{ room.student_count }} 人 · {{ room.status_display }}
+          </div>
         </div>
-        <div class="room-meta">
-          {{ room.student_count }} 人 · {{ room.status_display }}
-        </div>
+        <!-- 解除关联暂不开放：影响面是学生的全部学习数据（作业/考试/视频/错题/学情），
+             不止实验提交——待影响面提示模型明确后再开放（后端 DELETE /classrooms 已就绪） -->
       </div>
 
       <div class="section-head second">添加班级</div>
@@ -48,7 +52,7 @@
         />
       </el-select>
       <div class="drawer-tip">
-        只能添加，不能在这里移除（避免误操作影响在用班级）；需要移除请联系管理员在班级管理中调整。
+        关联后该班学生即可看到本课程；如需移除请联系管理员在班级管理中调整。
       </div>
     </div>
 
@@ -70,8 +74,8 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
-import { getClassroomOptions, linkClassrooms } from '@/api/course'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { getClassroomOptions, linkClassrooms, unlinkClassroom } from '@/api/course'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -119,6 +123,52 @@ async function save() {
     ElMessage.error(error?.message || '关联失败')
   } finally {
     saving.value = false
+  }
+}
+
+// 解除关联：该班已有实验提交时后端返回 require_confirm，弹确认框后二次带 confirm 重发
+// 解除关联（UI 暂隐藏）：影响面是学生的全部学习数据，不止实验提交——
+// 待影响面提示模型明确后再开放按钮；后端 DELETE /courses/{id}/classrooms/ 已就绪
+const unlinking = ref(null)
+async function unlink(room) {
+  if (unlinking.value) return
+  unlinking.value = room.id
+  const finish = () => {
+    unlinking.value = null
+    return load().then(() => emit('done'))
+  }
+  try {
+    await unlinkClassroom(props.courseId, room.id)
+    ElMessage.success(`已解除「${room.name}」的关联`)
+    await finish()
+    return
+  } catch (error) {
+    // 400 响应体是 { code, message, data: { require_confirm, ... } }——require_confirm 在 data 里
+    const respBody = error?.response?.data || error || {}
+    const payload = respBody?.data || respBody || {}
+    if (!payload.require_confirm) {
+      ElMessage.error(payload.message || respBody.message || error?.message || '解除失败')
+      unlinking.value = null
+      return
+    }
+    try {
+      await ElMessageBox.confirm(
+        `${payload.message || '该班级已有实验提交'}。确定解除关联吗？`,
+        '解除关联确认',
+        { type: 'warning', confirmButtonText: '仍要解除', cancelButtonText: '取消' },
+      )
+    } catch {
+      unlinking.value = null
+      return
+    }
+    try {
+      await unlinkClassroom(props.courseId, room.id, true)
+      ElMessage.success(`已解除「${room.name}」的关联`)
+      await finish()
+    } catch (e2) {
+      ElMessage.error(e2?.message || '解除失败')
+      unlinking.value = null
+    }
   }
 }
 
@@ -170,9 +220,12 @@ watch(
   border-color: #cfe3d6;
   background: #f6fbf7;
 }
-.room-main b {
+.room-main-text b {
   font-size: 14px;
   color: #1f2733;
+}
+.room-main-text {
+  margin-bottom: 2px;
 }
 .room-code {
   margin-left: 8px;

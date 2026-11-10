@@ -251,6 +251,16 @@ class ReuseTestBase(APITestCase):
 class AssetStatsTests(ReuseTestBase):
     def test_stats_count_every_asset(self):
         built = self.build_full_course()
+        # 自定义实验 + 页面文件：计入统计与复用
+        from apps.labs.models import Lab, LabPage
+
+        lab = Lab._base_manager.create(
+            course=self.course, title="统计测试实验", total_score=100,
+            page_source=Lab.PageSource.CUSTOM, status=Lab.Status.PUBLISHED,
+        )
+        lab_page = LabPage._base_manager.create(lab=lab, kind=LabPage.Kind.SINGLE_HTML, original_name="reuse.html")
+        reuse_html = b"<html>reuse-lab</html>"
+        lab_page.file.save("reuse.html", ContentFile(reuse_html), save=True)
         stats = course_asset_stats(self.course)
 
         self.assertEqual(stats.catalog_count, 3)
@@ -277,14 +287,31 @@ class AssetStatsTests(ReuseTestBase):
             + len(MATERIAL_BYTES)
             + len(DOC_BYTES)
             + len(COVER_BYTES)
+            + len(reuse_html)  # 自定义实验页面文件计入复用体积
         )  # 封面是 CharField，/media/ 形式时复用会真复制，故计入体积
         self.assertEqual(stats.media_bytes, expected)
         self.assertEqual(stats.question_media_bytes, len(IMAGE_BYTES))
         payload = stats.as_dict()
         self.assertEqual(payload["sections"], {
             "catalog": 3, "ppt": 1, "video": 1, "material": 1,
-            "chunk": 3, "resource": 2, "question": 1,
+            "chunk": 3, "resource": 2, "question": 1, "lab": 1,
         })
+        # 实验定义计入统计：自定义页面文件体积并入 media_bytes
+        self.assertEqual(payload["lab_count"], 1)
+
+        # 复用产物：实验定义复制、状态落 draft、页面文件真复制、提交/排课不带走
+        result = reuse_course(self.course, teacher=self.teacher, name="带实验的复用课")
+        new_labs = list(result.course.labs.order_by("id"))
+        self.assertEqual(len(new_labs), 1)
+        new_lab = new_labs[0]
+        self.assertEqual(new_lab.status, "draft")
+        self.assertEqual(new_lab.page_source, "custom")
+        self.assertIsNotNone(getattr(new_lab, "custom_page", None))
+        self.assertTrue(bool(new_lab.custom_page.file.name))
+        self.assertNotEqual(new_lab.custom_page.file.name, lab_page.file.name)
+        self.assertEqual(result.copied.get("lab"), 1)
+        self.assertFalse(new_lab.schedules.exists())
+        self.assertFalse(new_lab.submissions.exists())
         self.assertTrue(payload["media_human"].endswith("KB"))
         self.assertEqual(payload["media_human"], "32.8 KB")
 

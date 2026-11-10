@@ -196,10 +196,12 @@ async function uploadAfterCreate(labId, fileName) {
       })
       return
     } catch (e) {
-      const body = e?.response?.data
-      if (body?.require_confirm && !force) {
+      // 400 响应体是 { code, message, data: { require_confirm, hits, ... } }——确认数据在 data 里
+      const respBody = e?.response?.data || e || {}
+      const payload = respBody?.data || respBody || {}
+      if (payload?.require_confirm && !force) {
         const ok = await ElMessageBox.confirm(
-          `页面源码命中安全扫描规则：${(body.hits || []).join('、')}。确认源码无误并继续上传？`,
+          `页面源码命中安全扫描规则：${(payload.hits || []).join('、')}。确认源码无误并继续上传？`,
           '安全扫描提示',
           { type: 'warning' },
         ).then(() => true).catch(() => false)
@@ -210,7 +212,7 @@ async function uploadAfterCreate(labId, fileName) {
         force = true
         continue
       }
-      ElMessage.warning(`实验已创建，但页面「${fileName}」上传失败：${body?.message || e?.message || '未知错误'}`)
+      ElMessage.warning(`实验已创建，但页面「${fileName}」上传失败：${payload?.message || respBody?.message || e?.message || '未知错误'}`)
       return
     }
   }
