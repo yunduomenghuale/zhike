@@ -70,3 +70,11 @@ deploy/tls/certs/*.key
 deploy/tls/certs/*.crt
 deploy/tls/certs/*.csr
 backend/data/
+# 离线构建 wheel（torch 209MB，Dockerfile 优先消费但本体不入库）
+backend/wheels/
+# 运行时缓存（QA 在飞计数文件缓存）
+backend/inflight_cache/
+# 本地 dist 发布备份（mv 换 dist 前的快照，纯回滚用）
+frontend/dist_bak_*/
+# 教学课件原始资源（69M，非代码资产）
+docs/Java课件资源/

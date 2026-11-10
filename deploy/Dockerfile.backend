@@ -25,10 +25,17 @@ RUN sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.li
 # torch 必须先于 requirements 安装 CPU 版（PyPI 的 Linux torch 是数 GB 的 CUDA 版；
 # 先装好 CPU 版后，sentence-transformers 对 torch 的依赖即被满足，不会重复拉取）
 COPY requirements.txt .
+# 离线 wheel 优先：wheels/ 里有 torch wheel 时直接装（pytorch CDN 出网不稳定，
+# 2026-11-10 生产构建实测两次卡死在 torch 209MB 下载），否则回退在线下载。
+COPY wheels/ /tmp/wheels/
 # mysqlclient 编译完成后卸掉工具链（不加 --auto-remove，避免连 libmariadb3 一起删掉）
 # --default-timeout=1000：服务器出网带宽有限，大包（torch 209MB）慢速下载时
 # pip 默认 15s 超时会反复 ReadTimeout 中断构建（生产实测踩坑）
-RUN pip install --no-cache-dir --default-timeout=1000 torch --index-url https://download.pytorch.org/whl/cpu \
+RUN if ls /tmp/wheels/torch-*.whl >/dev/null 2>&1; then \
+        pip install --no-cache-dir /tmp/wheels/torch-*.whl && rm -rf /tmp/wheels; \
+    else \
+        pip install --no-cache-dir --default-timeout=1000 torch --index-url https://download.pytorch.org/whl/cpu; \
+    fi \
     && pip install --no-cache-dir --default-timeout=1000 -r requirements.txt gunicorn \
     -i https://pypi.tuna.tsinghua.edu.cn/simple \
     && apt-get purge -y build-essential pkg-config default-libmysqlclient-dev \
